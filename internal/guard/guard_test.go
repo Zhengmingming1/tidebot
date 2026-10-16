@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,9 @@ func TestDangerRules(t *testing.T) {
 }
 
 func TestWriteOutsideWorkspace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix path fixtures")
+	}
 	if v := Check(call("Write", map[string]any{"file_path": "/etc/passwd"}, "/w"), "/w", nil); !v.Deny {
 		t.Fatal("deny outside")
 	}
@@ -64,7 +68,8 @@ func TestScanAndHook(t *testing.T) {
 	t.Setenv("TIDEBOT_IPC", "")
 	t.Setenv("TIDEBOT_GUARD_WORKSPACE", d)
 	var out bytes.Buffer
-	HookMain(strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"rm -rf ~"},"cwd":"`+d+`"}`), &out)
+	in, _ := json.Marshal(map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf ~"}, "cwd": d})
+	HookMain(bytes.NewReader(in), &out)
 	if !strings.Contains(out.String(), `"permissionDecision":"deny"`) {
 		t.Fatal(out.String())
 	}

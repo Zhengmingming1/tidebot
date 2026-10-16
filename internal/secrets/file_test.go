@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,7 @@ func TestFileBackend(t *testing.T) {
 		t.Fatal("plaintext on disk")
 	}
 	st, _ := os.Stat(f.KeyPath)
-	if st.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Fatal(st.Mode())
 	}
 	if v, _ := NewFileBackend(d).Get("tg_token"); v != "123:abc-secret" {

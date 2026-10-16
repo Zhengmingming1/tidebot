@@ -10,7 +10,11 @@ func applyLimits(pid int, l Limits) {
 	if l.MemoryMB <= 0 {
 		return
 	}
-	// Go runtimes reserve lots of virtual memory; give 4x headroom over the resident target.
-	lim := uint64(l.MemoryMB) * 4 << 20
+	// Runtimes like Go and Node reserve far more address space than they use, so the cap is
+	// generous: 16x the resident target, at least 8 GiB. It stops runaway growth, not normal use.
+	lim := uint64(l.MemoryMB) * 16 << 20
+	if lim < 8<<30 {
+		lim = 8 << 30
+	}
 	_ = unix.Prlimit(pid, unix.RLIMIT_AS, &unix.Rlimit{Cur: lim, Max: lim}, nil)
 }
