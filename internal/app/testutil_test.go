@@ -26,7 +26,8 @@ func newTestApp(t *testing.T) *App {
 	cfg.ClaudeBin = mockClaude()
 	cfg.DefaultProvider = "kimi-coding"
 	cfg.DefaultTimeout = time.Minute
-	cfg.LogLevel = "error"; cfg.LogFormat = "text"
+	cfg.LogLevel = "error"
+	cfg.LogFormat = "text"
 	a, err := Open(cfg)
 	if err != nil {
 		t.Fatal(err)

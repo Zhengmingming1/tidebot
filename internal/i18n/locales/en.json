@@ -27,5 +27,8 @@
   "desktop.n.lan_on": "WebUI on LAN: %s",
   "desktop.n.lan_fail": "Could not enable LAN: %s",
   "desktop.n.still_running": "Tidebot keeps running in the tray",
-  "desktop.quick_task": "quick run"
+  "desktop.quick_task": "quick run",
+  "notify.breaker": "Paused after repeated failures: %s",
+  "notify.confirm": "Confirmation needed: %s",
+  "notify.test": "Tidebot test notification"
 }
