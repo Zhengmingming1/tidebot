@@ -474,5 +474,19 @@
   "up.pick_file": "Choose file",
   "up.pick_folder": "Choose folder",
   "up.reading": "Checking the package…",
-  "toast.skill_version": "Imported as a new version."
+  "toast.skill_version": "Imported as a new version.",
+  "t.undo": "Undo",
+  "cf.type_name": "Type {n} to confirm",
+  "cf.ok": "Confirm",
+  "st.loading": "Loading",
+  "err.retry": "Try again",
+  "td.del_title": "Delete task?",
+  "ver.rb_title": "Roll back to v{n}?",
+  "ver.rb_body": "This only moves the current pointer. No new version is created, and you can undo it.",
+  "bt.rm_title": "Remove “{n}”?",
+  "pv.del_title": "Delete provider?",
+  "pl.uninstall_title": "Uninstall plugin?",
+  "tr.del_title": "Remove trigger?",
+  "set.off_title": "Turn off the WebUI?",
+  "set.turn_off": "Turn off"
 }
