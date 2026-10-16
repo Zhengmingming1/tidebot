@@ -266,6 +266,16 @@
     wireTopbar();
   }
 
+  // Structured notifications (key + params) render in the viewer's language;
+  // legacy rows only have server-rendered text and fall back to it.
+  function notifText(n) {
+    if (!n.key) return { t: notifTitle(n), b: n.body || "" };
+    var p = {}, src = n.params || {};
+    Object.keys(src).forEach(function (k) { p[k] = src[k]; });
+    if (!p.name) p.name = T("ntf.quick_task");
+    var bk = "ntf." + n.key + ".b", b = T(bk, p);
+    return { t: T("ntf." + n.key + ".t", p), b: b === bk ? "" : b.trim() };
+  }
   function notifTitle(n) { var k = "notif." + n.event, v = T(k); return v === k ? cap(n.event.replace(/_/g, " ")) : v; }
   function markAllRead(list) {
     if (list && list[0]) { state.notifSeen = list[0].created_at; try { localStorage.setItem("tb_notif_seen", state.notifSeen); } catch (e) {} }
@@ -277,7 +287,7 @@
     items.forEach(function (n) { (groups[n.group] || groups.other).push(n); });
     var unread = function (n) { return n.created_at > state.notifSeen; };
     var it = function (n) {
-      return '<div class="item' + (unread(n) ? " unread" : "") + '"><strong>' + esc(notifTitle(n)) + "</strong><div>" + esc(n.body) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small></div>";
+      return '<div class="item' + (unread(n) ? " unread" : "") + '"><strong>' + esc(notifText(n).t) + "</strong><div>" + esc(notifText(n).b) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small></div>";
     };
     var sec = function (key, inner, count) {
       return '<div class="ngroup"><h5>' + esc(T("nc." + key)) + (count ? ' <span class="pill sm">' + esc(count) + "</span>" : "") + "</h5>" + (inner || '<div class="item muted">' + esc(T("nc.empty")) + "</div>") + "</div>";

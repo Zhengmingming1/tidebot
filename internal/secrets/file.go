@@ -130,3 +130,7 @@ func (f *FileBackend) Delete(name string) error {
 	delete(m, name)
 	return f.save(m)
 }
+
+// MasterKey returns the 32-byte store key (created on first use). Callers must
+// derive a purpose-specific subkey from it, never use it directly.
+func (f *FileBackend) MasterKey() ([]byte, error) { return f.key() }

@@ -29,6 +29,9 @@ type Message struct {
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 	Urgent bool   `json:"urgent"`
+	// Key + Params let clients render the message in their own language.
+	Key    string            `json:"key,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // Channel configuration (config_json). Secrets are referenced by name, never stored inline.
@@ -214,8 +217,14 @@ func (s *Service) Dispatch(ctx context.Context, m Message, quiet string) (status
 	if status == "delivered" {
 		delivered = nowUTC()
 	}
-	_, _ = s.DB.ExecContext(ctx, `INSERT INTO notifications(id, event, ref, body, status, created_at, delivered_at) VALUES(?,?,?,?,?,?,?)`,
-		id.New("ntf"), m.Event, m.TaskID, body, status, nowUTC(), delivered)
+	params := "{}"
+	if len(m.Params) > 0 {
+		if b, err := json.Marshal(m.Params); err == nil {
+			params = string(b)
+		}
+	}
+	_, _ = s.DB.ExecContext(ctx, `INSERT INTO notifications(id, event, ref, body, status, created_at, delivered_at, msg_key, msg_params) VALUES(?,?,?,?,?,?,?,?,?)`,
+		id.New("ntf"), m.Event, m.TaskID, body, status, nowUTC(), delivered, m.Key, params)
 	return status, err
 }
 

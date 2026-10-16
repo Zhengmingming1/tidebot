@@ -132,11 +132,21 @@ func Open(cfg config.Config) (*App, error) {
 	a.Cost = cost.New(sqlDB, log)
 	a.Cost.Loc = cfg.Location()
 	a.Auth = auth.New(sqlDB)
+	if mk, err := secrets.NewFileBackend(cfg.HomeDir).MasterKey(); err != nil {
+		log.Error("2fa key unavailable", "error", err)
+	} else if err := a.Auth.SetMasterKey(mk); err != nil {
+		log.Error("2fa key", "error", err)
+	}
 	if err := a.Cost.EnsureDefaults(context.Background()); err != nil {
 		log.Warn("cost defaults", "error", err)
 	}
 	if err := a.Auth.EnsureOwner(context.Background()); err != nil {
 		log.Warn("auth owner", "error", err)
+	}
+	if n, err := a.Auth.MigrateTOTP(context.Background()); err != nil {
+		log.Warn("2fa secret migration", "error", err)
+	} else if n > 0 {
+		log.Info("2fa secret encrypted at rest", "rows", n)
 	}
 	a.applyProviderSettings(context.Background())
 	// Restore webui.enabled from settings if present.

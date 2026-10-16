@@ -141,3 +141,29 @@ func TestClaudeStatusEndpoint(t *testing.T) {
 		t.Fatalf("delete %d", code)
 	}
 }
+
+func TestNotificationCenterStructured(t *testing.T) {
+	c := login(t)
+	db := c.s.deps.DB
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, _ = db.Exec(`INSERT INTO notifications(id,event,body,created_at,msg_key,msg_params) VALUES
+		('s1','run_failed','Run failed: x',?,'run_failed','{"name":"<b>x</b>","detail":"boom"}'),
+		('s2','run_failed','legacy body',?,'','{}'),
+		('s3','run_failed','broken params',?,'run_failed','not json')`, now, now, now)
+	_, _ = db.Exec(`INSERT INTO notifications(id,event,body,created_at) VALUES('s4','run_failed','pre-migration style',?)`, now)
+	_, out := c.json(http.MethodGet, "/api/notifications/center", nil)
+	got := map[string]map[string]any{}
+	for _, x := range out["items"].([]any) {
+		m := x.(map[string]any)
+		got[m["id"].(string)] = m
+	}
+	p, _ := got["s1"]["params"].(map[string]any)
+	if got["s1"]["key"] != "run_failed" || p["name"] != "<b>x</b>" || p["detail"] != "boom" {
+		t.Fatalf("structured %v", got["s1"])
+	}
+	for _, id := range []string{"s2", "s3", "s4"} {
+		if k, _ := got[id]["key"].(string); k != "" || got[id]["body"] == "" {
+			t.Fatalf("%s should fall back to body: %v", id, got[id])
+		}
+	}
+}

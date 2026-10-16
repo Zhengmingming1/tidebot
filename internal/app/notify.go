@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
@@ -13,37 +14,70 @@ import (
 
 var urgentEvents = map[string]bool{EventConfirmNeeded: true, EventBudgetBreached: true, EventBreakerTripped: true}
 
-// EventToMessage renders an event in the configured language.
+// NotificationKeys are the structured message keys stored with each notification.
+// The WebUI renders "ntf.<key>.t" / "ntf.<key>.b" from its own i18n files
+// (scripts/check-i18n.py checks every key here has both).
+var NotificationKeys = []string{"run_finished", "run_failed", "approval_needed", "budget_breached", "budget_warning",
+	"breaker_tripped", "confirm_needed", "update_available", "update_rolled_back", "plugin_notify", "generic", "test"}
+
+// EventToMessage renders an event in the configured language (channels, tray) and
+// also carries the message key + params so the WebUI can render it in the viewer's language.
 func (a *App) EventToMessage(e Event) (notify.Message, bool) {
+	a.syncLang(context.Background())
 	name := e.TaskName
-	if name == "" {
-		name = i18n.T("desktop.quick_task")
+	shown := name
+	if shown == "" {
+		shown = i18n.T("desktop.quick_task")
 	}
-	m := notify.Message{Event: e.Kind, TaskID: e.TaskID, Urgent: urgentEvents[e.Kind]}
+	m := notify.Message{Event: e.Kind, TaskID: e.TaskID, Urgent: urgentEvents[e.Kind], Key: e.Kind,
+		Params: map[string]string{"name": name, "detail": e.Detail}}
 	switch e.Kind {
 	case EventRunFinished:
 		if e.TaskID == "" || a.Policy == nil || !a.Policy.Get(context.Background(), e.TaskID).NotifySuccess {
 			return m, false // success is silent unless enabled per task
 		}
-		m.Title, m.Body = i18n.T("desktop.n.finished", name), i18n.T("desktop.n.finished_body", e.CostUSD)
+		m.Params["cost"] = strconv.FormatFloat(e.CostUSD, 'f', 4, 64)
+		m.Title, m.Body = i18n.T("desktop.n.finished", shown), i18n.T("desktop.n.finished_body", e.CostUSD)
 	case EventRunFailed:
-		m.Title, m.Body = i18n.T("desktop.n.failed", name), e.Detail
+		m.Title, m.Body = i18n.T("desktop.n.failed", shown), e.Detail
 	case EventApprovalNeeded:
-		m.Title, m.Body = i18n.T("desktop.n.approval", name), i18n.T("desktop.n.approval_body", e.Count)
+		m.Params["count"] = strconv.Itoa(e.Count)
+		m.Title, m.Body = i18n.T("desktop.n.approval", shown), i18n.T("desktop.n.approval_body", e.Count)
 	case EventBudgetBreached:
-		m.Title, m.Body = i18n.T("desktop.n.budget", name), e.Detail
+		m.Title, m.Body = i18n.T("desktop.n.budget", shown), e.Detail
 	case EventBudgetWarning:
 		m.Title, m.Body = i18n.T("desktop.n.budget_warn"), e.Detail
 	case EventBreakerTripped:
-		m.Title, m.Body = i18n.T("notify.breaker", name), e.Detail
+		m.Title, m.Body = i18n.T("notify.breaker", shown), e.Detail
 	case EventConfirmNeeded:
-		m.Title, m.Body = i18n.T("notify.confirm", name), e.Detail
+		m.Title, m.Body = i18n.T("notify.confirm", shown), e.Detail
 	case EventUpdateAvailable, EventUpdateRolledBack:
+		ver, rest, _ := strings.Cut(e.Detail, "\n")
+		m.Params["v"], m.Params["detail"] = ver, rest
 		m.Title, m.Body = updateMessage(e)
+	case EventPluginNotify:
+		m.Title, m.Body = e.Detail, ""
 	default:
-		m.Title, m.Body = e.Kind+": "+name, e.Detail
+		m.Key = "generic"
+		m.Params["kind"] = e.Kind
+		m.Title, m.Body = e.Kind+": "+shown, e.Detail
 	}
 	return m, true
+}
+
+// syncLang applies the "language" setting to server-rendered text (channels,
+// tray). The desktop app also sets it; agentd had no other place that did.
+func (a *App) syncLang(ctx context.Context) {
+	if a.Auth == nil {
+		return
+	}
+	lang, _ := a.settingString(ctx, "language")
+	if lang == "auto" {
+		lang = ""
+	}
+	if lang != "" {
+		i18n.SetLang(lang)
+	}
 }
 
 // runNotifier forwards bus events to channels and flushes the digest daily.
@@ -145,7 +179,7 @@ func (a *App) rpcNotifyTest(ctx context.Context, raw json.RawMessage) (any, erro
 	}
 	for _, c := range chs {
 		if c.ID == p.ChannelID {
-			return map[string]bool{"ok": true}, a.Notify.Send(ctx, c, notify.Message{Event: "test", Title: i18n.T("notify.test")})
+			return map[string]bool{"ok": true}, a.Notify.Send(ctx, c, notify.Message{Event: "test", Key: "test", Title: i18n.T("notify.test")})
 		}
 	}
 	return nil, errors.New("channel not found")

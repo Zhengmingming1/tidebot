@@ -1,16 +1,21 @@
 package webui
 
-import "net/http"
+import (
+	"encoding/json"
+	"net/http"
+)
 
 // handleNotifCenter groups recent notifications (failed / needs me / other)
 // and lists tasks with pending requirement amendments so the bell can link to them.
 func (s *Server) handleNotifCenter(w http.ResponseWriter, r *http.Request) {
 	type item struct {
-		ID        string `json:"id"`
-		Event     string `json:"event"`
-		Body      string `json:"body"`
-		CreatedAt string `json:"created_at"`
-		Group     string `json:"group"`
+		ID        string            `json:"id"`
+		Event     string            `json:"event"`
+		Body      string            `json:"body"` // server-rendered fallback (legacy rows)
+		Key       string            `json:"key,omitempty"`
+		Params    map[string]string `json:"params,omitempty"`
+		CreatedAt string            `json:"created_at"`
+		Group     string            `json:"group"`
 	}
 	type pend struct {
 		TaskID   string `json:"task_id"`
@@ -19,14 +24,18 @@ func (s *Server) handleNotifCenter(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	items := []item{}
-	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, event, body, created_at FROM notifications ORDER BY created_at DESC LIMIT 50`)
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, event, body, created_at, msg_key, msg_params FROM notifications ORDER BY created_at DESC LIMIT 50`)
 	if err != nil {
 		writeErr(w, 500, "query failed")
 		return
 	}
 	for rows.Next() {
 		var x item
-		if rows.Scan(&x.ID, &x.Event, &x.Body, &x.CreatedAt) == nil {
+		var params string
+		if rows.Scan(&x.ID, &x.Event, &x.Body, &x.CreatedAt, &x.Key, &params) == nil {
+			if x.Key != "" && json.Unmarshal([]byte(params), &x.Params) != nil {
+				x.Key = "" // unreadable params: show the stored text instead
+			}
 			switch x.Event {
 			case "run_failed", "budget_breached":
 				x.Group = "failed"
