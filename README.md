@@ -98,6 +98,15 @@ flowchart LR
   Runner -- 日志 / SSE --> Web
 ```
 
+## 下载
+
+[![macOS (Apple Silicon / Intel)](https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-black?logo=apple)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg) [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?logo=windows)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-Windows-x64-Setup.exe) [![Linux x64 (AppImage)](https://img.shields.io/badge/Linux-AppImage-FCC624?logo=linux&logoColor=black)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-Linux-x64.AppImage) [![Linux x64 (.deb)](https://img.shields.io/badge/Debian%2FUbuntu-.deb-A81D33?logo=debian)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-Linux-x64.deb)
+
+点你的系统就行。Mac 不分芯片，M 系列和 Intel 用同一个 .dmg。服务端、ARM 和 Docker 在 [Releases 页面](https://github.com/Zhengmingming1/tidebot/releases/latest)，页面最上面有一张"下载哪个？"的表。
+GitHub 的 README 没法自动识别你的系统，所以只能列出来让你挑。从 v0.1.1 起这些链接才有效，v0.1.0 请到 Releases 页面下载。
+
+目前没签名：macOS 第一次打开要右键 → 打开（或 `xattr -dr com.apple.quarantine /Applications/tidebot.app`），Windows 弹 SmartScreen 时点"更多信息 → 仍要运行"。
+
 ## 安装
 
 预编译的包在 [Releases](https://github.com/Zhengmingming1/tidebot/releases) 页面，每个文件的 sha256 都在 `checksums.txt` 里。

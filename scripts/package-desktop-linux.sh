@@ -27,7 +27,7 @@ Homepage: https://github.com/Zhengmingming1/tidebot
 Description: tidebot desktop app (tray + window, embeds the scheduler)
  Needs the claude CLI installed separately.
 CTL
-dpkg-deb --root-owner-group --build "$deb" "$OUT/tidebot-desktop_${VER}_${ARCH}.deb" >/dev/null
+dpkg-deb --root-owner-group --build "$deb" "$OUT/tidebot-desktop-${VER}-Linux-x64.deb" >/dev/null
 # AppImage
 app="$(mktemp -d)/tidebot.AppDir"
 install -Dm755 "$OUT/.tidebot-desktop" "$app/usr/bin/tidebot-desktop"
@@ -42,6 +42,6 @@ if [ -z "$TOOL" ]; then
   chmod +x "$TOOL"
 fi
 case "$ARCH" in amd64) A=x86_64;; arm64) A=aarch64;; esac
-ARCH=$A APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream "$app" "$OUT/tidebot-desktop_${VER}_${A}.AppImage"
+ARCH=$A APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream "$app" "$OUT/tidebot-desktop-${VER}-Linux-x64.AppImage"
 rm -f "$OUT/.tidebot-desktop"
 ls -l "$OUT"

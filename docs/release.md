@@ -23,10 +23,11 @@ To rebuild an existing tag (after fixing the workflow), run the workflow by hand
 |---|---|---|
 | `tidebot-server_<ver>_<os>_<arch>.tar.gz` / `.zip` | ubuntu | agentd + agentctl, pure Go (no cgo), linux/darwin/windows × amd64/arm64 |
 | `tidebot-server_<ver>_<arch>.deb` | ubuntu | installs `/usr/bin/agentd`, `/usr/bin/agentctl` and a systemd *user* unit |
-| `tidebot-desktop_<ver>_amd64.deb` | ubuntu-22.04 | depends on `libgtk-3-0`, `libwebkit2gtk-4.1-0` |
-| `tidebot-desktop_<ver>_x86_64.AppImage` | ubuntu-22.04 | does **not** bundle GTK/WebKitGTK; the host needs `libwebkit2gtk-4.1` |
-| `tidebot-desktop_<ver>_macos_universal.dmg` | macos | universal (arm64 + x86_64) `tidebot.app`, macOS 11+ |
-| `tidebot-desktop_<ver>_windows_amd64_setup.exe` | windows | NSIS per-user installer (no admin), needs WebView2 (built into Windows 10/11) |
+| `tidebot-desktop-<ver>-Linux-x64.deb` | ubuntu-22.04 | depends on `libgtk-3-0`, `libwebkit2gtk-4.1-0` |
+| `tidebot-desktop-<ver>-Linux-x64.AppImage` | ubuntu-22.04 | does **not** bundle GTK/WebKitGTK; the host needs `libwebkit2gtk-4.1` |
+| `tidebot-desktop-<ver>-macOS-AppleSilicon-Intel.dmg` | macos | universal (arm64 + x86_64) `tidebot.app`, macOS 11+ |
+| `tidebot-desktop-<ver>-Windows-x64-Setup.exe` | windows | NSIS per-user installer (no admin), needs WebView2 (built into Windows 10/11) |
+| `tidebot-desktop-<platform>.<ext>` (no version) | – | copies of the four desktop files so `releases/latest/download/...` links stay stable |
 | `checksums.txt` | – | sha256 of every asset; `agentctl call update.apply` refuses to update without it |
 | `ghcr.io/zhengmingming1/tidebot:<ver>` and `:latest` | ubuntu (buildx) | linux/amd64 + linux/arm64 |
 
@@ -78,3 +79,12 @@ scripts/package-server.sh 0.1.0 dist          # all server archives + .deb (need
 scripts/package-desktop-linux.sh 0.1.0 dist   # needs Go 1.25, libgtk-3-dev, libwebkit2gtk-4.1-dev, file
 scripts/package-desktop-macos.sh 0.1.0 dist   # macOS only
 ```
+
+## Release notes
+
+`scripts/release-notes.sh <tag> <owner/repo>` writes the "Which file do I download?" table
+followed by `docs/release-notes/<tag>.md`. The publish job uses it as the release body.
+v0.1.0 used the older file names (`... v010` mode).
+
+A GitHub Pages download page with OS detection was skipped: the repo is private, and Pages on
+private repos needs a paid plan.
