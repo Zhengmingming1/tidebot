@@ -308,6 +308,8 @@ type BudgetView struct {
 	MaxTokens int64   `json:"max_tokens"`
 	UsedUSD   float64 `json:"used_usd"`
 	UsedTok   int64   `json:"used_tokens"`
+	Action    string  `json:"action"`
+	WarnAtPct int     `json:"warn_at_pct"`
 }
 
 // Summary returns today's spend and budget usage.
@@ -340,21 +342,22 @@ SELECT bucket, COALESCE(SUM(usd),0), COALESCE(SUM(tokens),0) FROM cost_ledger WH
 		out.TotalTokens += t
 	}
 	brows, err := s.DB.QueryContext(ctx, `
-SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens,0) FROM budgets`)
+SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens,0), action, warn_at_pct FROM budgets`)
 	if err != nil {
 		return out, err
 	}
 	defer brows.Close()
 	var buds []BudgetView
 	type raw struct {
-		Scope, ScopeID, Period, Bucket string
-		MaxUSD                         float64
-		MaxTokens                      int64
+		Scope, ScopeID, Period, Bucket, Action string
+		MaxUSD                                 float64
+		MaxTokens                              int64
+		Warn                                   int
 	}
 	var list []raw
 	for brows.Next() {
 		var r raw
-		if err := brows.Scan(&r.Scope, &r.ScopeID, &r.Period, &r.Bucket, &r.MaxUSD, &r.MaxTokens); err != nil {
+		if err := brows.Scan(&r.Scope, &r.ScopeID, &r.Period, &r.Bucket, &r.MaxUSD, &r.MaxTokens, &r.Action, &r.Warn); err != nil {
 			return out, err
 		}
 		list = append(list, r)
@@ -364,7 +367,7 @@ SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens
 		usedUSD, usedTok, _ := s.sumDay(ctx, day, r.Scope, r.ScopeID, r.Bucket)
 		buds = append(buds, BudgetView{
 			Scope: r.Scope, ScopeID: r.ScopeID, Period: r.Period, Bucket: r.Bucket,
-			MaxUSD: r.MaxUSD, MaxTokens: r.MaxTokens, UsedUSD: usedUSD, UsedTok: usedTok,
+			MaxUSD: r.MaxUSD, MaxTokens: r.MaxTokens, UsedUSD: usedUSD, UsedTok: usedTok, Action: r.Action, WarnAtPct: r.Warn,
 		})
 	}
 	out.Budgets = buds

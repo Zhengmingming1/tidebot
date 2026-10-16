@@ -201,7 +201,8 @@ func (s *Store) SetCurrent(ctx context.Context, pluginID, versionID string) erro
 	if err != nil || v.Manifest.ID != pluginID {
 		return errors.New("version does not belong to plugin")
 	}
-	if len(NewPermissions(v.Approved, v.Requested)) > 0 || v.Approved == nil {
+	// A version must have been reviewed (Approve or Grant); declined/revoked items simply stay off.
+	if v.Approved == nil {
 		return errors.New("permissions of this version are not approved")
 	}
 	_, err = s.DB.ExecContext(ctx, `UPDATE plugins SET current_version_id=? WHERE id=?`, versionID, pluginID)
@@ -309,6 +310,13 @@ func (s *Store) Uninstall(ctx context.Context, pluginID string, keepData bool) e
 	for _, v := range in.Versions {
 		for _, sec := range v.Manifest.Permissions.Secrets {
 			_ = s.Secrets.Delete(secretKey(pluginID, sec))
+		}
+		if fields, err := ParseSchema(v.Manifest.ConfigSchema); err == nil {
+			for _, f := range fields {
+				if f.WriteOnly {
+					_ = s.Secrets.Delete(secretKey(pluginID, cfgSecretName(f.Key)))
+				}
+			}
 		}
 	}
 	if !keepData {

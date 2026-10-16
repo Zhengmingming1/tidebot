@@ -45,6 +45,10 @@ type TriggerBinding struct {
 	Config    map[string]any `json:"config"`
 	Enabled   bool           `json:"enabled"`
 	CreatedAt string         `json:"created_at"`
+	// LastFiredAt / LastResult / FireCount feed the trigger cards ("accepted", "rate limited", ...).
+	LastFiredAt string `json:"last_fired_at,omitempty"`
+	LastResult  string `json:"last_result,omitempty"`
+	FireCount   int    `json:"fire_count"`
 }
 
 // triggerMinInterval rate-limits each binding.
@@ -106,7 +110,14 @@ func (a *App) mcpArgs(ctx context.Context, bucket string) []string {
 }
 
 // fireTask starts a task for an external event with the payload wrapped as untrusted data.
-func (a *App) fireTask(bindingID, taskID, kind, source, payload string) error {
+func (a *App) fireTask(bindingID, taskID, kind, source, payload string) (err error) {
+	defer func() {
+		res := "accepted"
+		if err != nil {
+			res = err.Error()
+		}
+		_, _ = a.DB.Exec(`UPDATE trigger_bindings SET last_fired_at=?, last_result=?, fire_count=fire_count+1 WHERE id=?`, time.Now().UTC().Format(time.RFC3339), res, bindingID)
+	}()
 	a.trig.mu.Lock()
 	if t, ok := a.trig.lastFire[bindingID]; ok && time.Since(t) < triggerMinInterval {
 		a.trig.mu.Unlock()
@@ -144,7 +155,7 @@ func externalPrompt(ctx context.Context, prompt string) string {
 // --- triggers -------------------------------------------------------------
 
 func (a *App) listTriggers(ctx context.Context) ([]TriggerBinding, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT id, kind, COALESCE(plugin_id,''), COALESCE(task_id,''), config_json, enabled, created_at FROM trigger_bindings ORDER BY created_at`)
+	rows, err := a.DB.QueryContext(ctx, `SELECT id, kind, COALESCE(plugin_id,''), COALESCE(task_id,''), config_json, enabled, created_at, COALESCE(last_fired_at,''), last_result, fire_count FROM trigger_bindings ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +165,7 @@ func (a *App) listTriggers(ctx context.Context) ([]TriggerBinding, error) {
 		var b TriggerBinding
 		var cj string
 		var en int
-		if err := rows.Scan(&b.ID, &b.Kind, &b.PluginID, &b.TaskID, &cj, &en, &b.CreatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.Kind, &b.PluginID, &b.TaskID, &cj, &en, &b.CreatedAt, &b.LastFiredAt, &b.LastResult, &b.FireCount); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(cj), &b.Config)
