@@ -41,6 +41,12 @@ type Deps struct {
 	Reg      *provider.Registry
 	Log      *slog.Logger
 	OnToggle func(enabled bool) // optional: persist + apply
+
+	// Execution hooks provided by app; they start work asynchronously.
+	RunTask  func(taskID, bucket string) error
+	QuickRun func(prompt, providerName string) error
+	LogPath  func(runID string) string
+	Location *time.Location
 }
 
 // Server is a togglable HTTP listener.
@@ -213,23 +219,12 @@ func (s *Server) routes() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Security-Policy", csp)
 		_, _ = w.Write(b)
 	})
 
-	mux.HandleFunc("/api/login", s.handleLogin)
-	mux.HandleFunc("/api/logout", s.withAuthCSRF(s.handleLogout))
-	mux.HandleFunc("/api/me", s.withAuth(s.handleMe))
-	mux.HandleFunc("/api/tasks", s.withAuth(s.handleTasks))
-	mux.HandleFunc("/api/tasks/", s.withAuth(s.handleTaskSub))
-	mux.HandleFunc("/api/amendments/", s.withAuthCSRF(s.handleAmendAction))
-	mux.HandleFunc("/api/skills", s.withAuth(s.handleSkills))
-	mux.HandleFunc("/api/skills/import", s.withAuthCSRF(s.handleSkillsImport))
-	mux.HandleFunc("/api/runs", s.withAuth(s.handleRuns))
-	mux.HandleFunc("/api/runs/", s.withAuth(s.handleRunSub))
-	mux.HandleFunc("/api/spend", s.withAuth(s.handleSpend))
-	mux.HandleFunc("/api/settings", s.withAuth(s.handleSettings))
-	mux.HandleFunc("/api/webui", s.withAuthCSRF(s.handleWebUIToggle))
-	mux.HandleFunc("/api/budgets", s.withAuthCSRF(s.handleBudgets))
+	s.registerAPI(mux)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.touch()
@@ -238,6 +233,8 @@ func (s *Server) routes() http.Handler {
 		mux.ServeHTTP(w, r)
 	})
 }
+
+const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
 func (s *Server) touch() {
 	s.mu.Lock()
@@ -320,308 +317,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	totp, _ := s.deps.Auth.TOTPEnabled(r.Context())
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "csrf_token": sess.CSRFToken, "totp_enabled": totp, "user": "owner",
+		"timezone": s.loc().String(), "version": Version,
 	})
-}
-
-func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, 405, "method")
-		return
-	}
-	list, err := s.deps.Tasks.List(r.Context())
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, list)
-}
-
-func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
-	parts := strings.Split(path, "/")
-	if len(parts) == 0 || parts[0] == "" {
-		writeErr(w, 404, "not found")
-		return
-	}
-	id := parts[0]
-	if len(parts) == 1 {
-		if r.Method != http.MethodGet {
-			writeErr(w, 405, "method")
-			return
-		}
-		t, err := s.deps.Tasks.Get(r.Context(), id)
-		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
-		}
-		writeJSON(w, 200, t)
-		return
-	}
-	switch parts[1] {
-	case "amendments":
-		if r.Method == http.MethodGet {
-			list, err := s.deps.Amend.List(r.Context(), id, "")
-			if err != nil {
-				writeErr(w, 500, err.Error())
-				return
-			}
-			writeJSON(w, 200, list)
-			return
-		}
-		if r.Method == http.MethodPost {
-			auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var body struct {
-					Utterance string `json:"utterance"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Utterance == "" {
-					writeErr(w, 400, "utterance required")
-					return
-				}
-				a, err := s.deps.Amend.Propose(r.Context(), id, body.Utterance, "user")
-				if err != nil {
-					writeErr(w, 500, err.Error())
-					return
-				}
-				writeJSON(w, 200, a)
-			})).ServeHTTP(w, r)
-			return
-		}
-	case "versions":
-		vers, err := s.deps.Ver.ListVersions(r.Context(), version.EntityTask, id)
-		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-		cur, _ := s.deps.Ver.GetPointer(r.Context(), version.EntityTask, id, version.PointerCurrent)
-		writeJSON(w, 200, map[string]any{"versions": vers, "current": cur.String})
-		return
-	case "rollback":
-		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var body struct {
-				VersionID string `json:"version_id"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body.VersionID == "" {
-				writeErr(w, 400, "version_id required")
-				return
-			}
-			if err := s.deps.Tasks.Rollback(r.Context(), id, body.VersionID, "user", "webui rollback"); err != nil {
-				writeErr(w, 500, err.Error())
-				return
-			}
-			writeJSON(w, 200, map[string]any{"ok": true})
-		})).ServeHTTP(w, r)
-		return
-	}
-	writeErr(w, 404, "not found")
-}
-
-func (s *Server) handleAmendAction(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/amendments/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		writeErr(w, 404, "not found")
-		return
-	}
-	id, action := parts[0], parts[1]
-	switch action {
-	case "confirm":
-		a, err := s.deps.Amend.Confirm(r.Context(), id, "user")
-		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-		writeJSON(w, 200, a)
-	case "reject":
-		if err := s.deps.Amend.Reject(r.Context(), id); err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-		writeJSON(w, 200, map[string]any{"ok": true})
-	case "resolve":
-		var body struct {
-			Resolution string `json:"resolution"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if err := s.deps.Amend.ResolveConflict(r.Context(), id, body.Resolution); err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-		writeJSON(w, 200, map[string]any{"ok": true})
-	default:
-		writeErr(w, 404, "not found")
-	}
-}
-
-func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
-	list, err := s.deps.Skills.List(r.Context())
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, list)
-}
-
-func (s *Server) handleSkillsImport(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name string `json:"name"`
-		Dir  string `json:"dir"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Dir == "" {
-		writeErr(w, 400, "dir required")
-		return
-	}
-	sk, err := s.deps.Skills.ImportDir(r.Context(), body.Name, body.Dir, "user")
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, sk)
-}
-
-func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
-	list, err := s.deps.Store.ListRuns(r.Context(), "", 50)
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, list)
-}
-
-func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/runs/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 || parts[1] != "events" {
-		writeErr(w, 404, "not found")
-		return
-	}
-	runID := parts[0]
-	if !s.sseAllowed() {
-		writeErr(w, 429, "sse idle; interact with UI to resume")
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeErr(w, 500, "no flush")
-		return
-	}
-	fmt.Fprintf(w, "data: run %s stream (placeholder — attach live logs in later phase)\n\n", runID)
-	flusher.Flush()
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	ctx := r.Context()
-	n := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if !s.sseAllowed() {
-				fmt.Fprintf(w, "data: [idle stop]\n\n")
-				flusher.Flush()
-				return
-			}
-			n++
-			fmt.Fprintf(w, "data: heartbeat %d for %s\n\n", n, runID)
-			flusher.Flush()
-			if n >= 30 {
-				return
-			}
-		}
-	}
-}
-
-func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
-	sum, err := s.deps.Cost.Summary(r.Context(), "")
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, sum)
-}
-
-func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	type prow struct {
-		Name    string `json:"name"`
-		BaseURL string `json:"base_url"`
-		Model   string `json:"model"`
-		AuthEnv string `json:"auth_env"`
-	}
-	var providers []prow
-	if s.deps.Reg != nil {
-		for _, p := range s.deps.Reg.List() {
-			providers = append(providers, prow{Name: p.Name, BaseURL: p.BaseURL, Model: p.Model, AuthEnv: p.AuthEnv})
-		}
-	}
-	sum, _ := s.deps.Cost.Summary(r.Context(), "")
-	var globalUSD float64 = 5
-	var globalTok int64 = 2_000_000
-	for _, b := range sum.Budgets {
-		if b.Scope == "global" && b.Period == "day" {
-			globalUSD = b.MaxUSD
-			globalTok = b.MaxTokens
-		}
-	}
-	writeJSON(w, 200, map[string]any{
-		"webui_enabled":     s.Enabled(),
-		"providers":         providers,
-		"global_max_usd":    globalUSD,
-		"global_max_tokens": globalTok,
-		"addr":              s.deps.Cfg.WebUIAddr,
-	})
-}
-
-func (s *Server) handleWebUIToggle(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, 400, "bad json")
-		return
-	}
-	// Respond before stopping so client gets the reply.
-	writeJSON(w, 200, map[string]any{"ok": true, "enabled": body.Enabled})
-	if !body.Enabled {
-		go func() {
-			time.Sleep(200 * time.Millisecond)
-			_ = s.SetEnabled(context.Background(), false)
-		}()
-		return
-	}
-	_ = s.SetEnabled(r.Context(), true)
-}
-
-func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Scope     string  `json:"scope"`
-		ScopeID   string  `json:"scope_id"`
-		Period    string  `json:"period"`
-		Bucket    string  `json:"bucket"`
-		MaxUSD    float64 `json:"max_usd"`
-		MaxTokens int64   `json:"max_tokens"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, 400, "bad json")
-		return
-	}
-	if body.Scope == "" {
-		body.Scope = "global"
-	}
-	if body.Period == "" {
-		body.Period = "day"
-	}
-	b := cost.Budget{
-		Scope: body.Scope, ScopeID: body.ScopeID, Period: body.Period, Bucket: body.Bucket,
-		MaxUSD:    sql.NullFloat64{Float64: body.MaxUSD, Valid: body.MaxUSD > 0},
-		MaxTokens: sql.NullInt64{Int64: body.MaxTokens, Valid: body.MaxTokens > 0},
-		Action:    "pause_notify", WarnAtPct: 80,
-	}
-	if err := s.deps.Cost.UpsertBudget(r.Context(), b); err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true})
 }
