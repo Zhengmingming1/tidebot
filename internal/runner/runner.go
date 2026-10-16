@@ -36,7 +36,8 @@ type Options struct {
 	TaskID        string
 	TaskVersionID string
 	HasNextRunItems bool
-	Logger        *slog.Logger
+	CostBucket      string // production|canary|optimization|dry_run|assist
+	Logger          *slog.Logger
 }
 
 // Result is the outcome of one run.
