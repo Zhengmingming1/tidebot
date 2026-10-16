@@ -498,3 +498,51 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: none;
 .pv-test:empty { display: none; }
 .field > span .link { margin-left: 8px; font-weight: 500; font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
 @media (max-width: 900px) { .pv-split { grid-template-columns: 1fr; } .pv-detail { border-left: 0; padding-left: 0; } }
+
+/* I3: log view, runs toolbar, home dashboard */
+.lv-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: var(--s1); }
+.lv-f button { height: 28px; padding: 0 10px; font-size: 12px; }
+.lv-f .cnt { color: var(--text-3); font-weight: 500; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.search-in.sm { height: 28px; min-width: 180px; }
+.icon-btn { min-width: 32px; min-height: 32px; }
+.lv-wrap { position: relative; }
+.log { white-space: normal; }
+.log .ln { white-space: pre-wrap; word-break: break-word; padding: 0 4px; border-radius: 4px; }
+.log .ln .ts { margin-right: 10px; user-select: none; }
+.log .k-tool .tx { color: #7c4dcc; }
+.log .k-result .tx { color: var(--text-3); }
+.log .k-sys .tx { color: var(--text-3); }
+.log .k-err .tx { color: var(--danger); font-weight: 600; }
+.log .k-text .tx { color: var(--text); }
+.log .ln.fold { cursor: pointer; }
+.log .ln.fold .args { display: none; }
+.log .ln.fold::after { content: " ▸"; color: var(--text-3); }
+.log .ln.fold.open .args { display: inline; color: var(--text-2); margin-left: 8px; }
+.log .ln.fold.open::after { content: " ▾"; }
+.log mark { background: #ffe58a; color: inherit; border-radius: 2px; }
+.log .ln.cur { background: #fff4c2; }
+.lv-more { display: block; margin: 0 auto 8px; border: 1px dashed var(--border-strong); background: var(--surface); border-radius: var(--radius-pill); padding: 4px 12px; font: 12px var(--font); cursor: pointer; color: var(--text-2); }
+.lv-new { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #fff; border: 0; border-radius: var(--radius-pill); padding: 6px 14px; font: 600 13px var(--font); box-shadow: var(--shadow-hover); cursor: pointer; }
+section.log-full { position: fixed; inset: 0; z-index: 45; border-radius: 0; margin: 0; display: flex; flex-direction: column; }
+section.log-full #lv { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+section.log-full .lv-wrap { flex: 1; min-height: 0; }
+section.log-full .log { height: 100%; }
+.kpis .stat .progress { margin-top: 8px; }
+.qa-row { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.qa-row .qa { flex: 1 1 160px; max-width: 240px; }
+.qa-row .qa.add { flex: 0 0 96px; min-height: 112px; border-style: dashed; background: transparent; color: var(--text-3); box-shadow: none; }
+.qa-row .qa.tint { margin-left: auto; }
+.live-list { list-style: none; margin: 0; padding: 0; }
+.live-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.live-list li small { display: block; color: var(--text-3); font-size: 12px; }
+.spin { width: 14px; height: 14px; border: 2px solid var(--accent-100); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.beats { display: flex; flex-direction: column; gap: 10px; }
+.beat-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--s2); align-items: center; }
+.beat-row .bn { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 3px; max-width: 520px; }
+.hb { height: 22px; border-radius: 3px; background: var(--border); position: relative; display: block; }
+.hb.ok { background: #4cb27a; } .hb.bad { background: var(--danger); } .hb.run { background: var(--accent); } .hb.skip { background: var(--warn); } .hb.hb-none { background: var(--bg-sunk); }
+.hb[data-tip]:hover::after, .hb[data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%); background: var(--text); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 12px; white-space: nowrap; z-index: 5; pointer-events: none; }
+@media (max-width: 800px) { .beat-row { grid-template-columns: 1fr; gap: 4px; } }
+.kpis .stat { padding: var(--s2) var(--s3); gap: 4px; }
