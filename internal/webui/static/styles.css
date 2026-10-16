@@ -775,3 +775,50 @@ table.cmp th, table.cmp td { padding: 6px 8px; font-size: 13px; }
 @media (max-width: 1100px) { .home-mid { grid-template-columns: 1fr 1fr; } .home-mid > :last-child { grid-column: 1 / -1; } }
 @media (max-width: 760px) { .home-mid, .home-mid.two { grid-template-columns: 1fr; } .qa-row { flex-wrap: wrap; } .qa-row .qa { flex-basis: 40%; } }
 .home-recent .table td { white-space: nowrap; } .home-recent .table td small { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- sidebar: Claude Code status ---------- */
+.sidebar-status { padding: 8px 0 0; display: block; }
+.cc-card { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; font: inherit; text-align: left; cursor: pointer; color: var(--text); }
+.cc-card:hover { background: var(--bg-sunk); border-color: var(--border); }
+.cc-card:focus-visible { outline: none; box-shadow: var(--focus-ring, 0 0 0 3px var(--accent-100)); }
+.cc-card .cc-txt { min-width: 0; display: flex; flex-direction: column; }
+.cc-card strong { font-size: 13px; line-height: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.cc-card small { font-size: 12px; line-height: 16px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-card .dot, .cc-pop .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-50); }
+.cc-ready strong { color: var(--ok); }
+.cc-running .dot, .cc-pop .dot.cc-running { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-50); animation: ccpulse 1.6s ease-in-out infinite; }
+.cc-running strong { color: var(--accent); }
+.cc-warning .dot, .cc-pop .dot.cc-warning { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-50); }
+.cc-warning strong { color: var(--warn); }
+.cc-missing .dot, .cc-down .dot, .cc-pop .dot.cc-missing, .cc-pop .dot.cc-down { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-50); }
+.cc-missing strong, .cc-down strong { color: var(--danger); }
+@keyframes ccpulse { 0%, 100% { box-shadow: 0 0 0 3px var(--accent-50); } 50% { box-shadow: 0 0 0 5px var(--accent-100); } }
+@media (prefers-reduced-motion: reduce) { .cc-running .dot { animation: none; } }
+.cc-pop { position: fixed; top: auto; right: auto; width: 360px; max-width: calc(100vw - 32px); z-index: 45; padding: 16px; }
+.cc-pop-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; }
+.cc-kv { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 4px 8px; margin: 0 0 8px; font-size: 12px; }
+.cc-kv dt { color: var(--text-3); }
+.cc-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.cc-kv code { font-size: 11px; }
+.cc-kv .cc-err { color: var(--danger); }
+.cc-sub { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.cc-sess { list-style: none; margin: 0; padding: 0; }
+.cc-sess a { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto 56px; gap: 8px; align-items: center; min-height: 32px; padding: 0 4px; border-radius: 6px; color: var(--text); font-size: 13px; }
+.cc-sess a:hover { background: var(--accent-50); }
+.cc-sess .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-sess .num { text-align: right; font-size: 12px; }
+.cc-hint { margin: 0 0 8px; font-size: 13px; }
+.cc-cmd { display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--bg-sunk); border-radius: var(--radius-sm); margin-bottom: 8px; }
+.cc-cmd code { flex: 1; font-size: 12px; overflow-wrap: anywhere; }
+.cc-actions { display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.cc-pop .small { font-size: 12px; }
+
+/* collapsed sidebar (narrow windows): icons only; the status shrinks to its dot */
+@media (max-width: 960px) {
+  .shell { grid-template-columns: 72px 1fr; }
+  .sidebar { padding: 16px 8px; }
+  .sidebar .brand-text, #nav a span { display: none; }
+  #nav a { justify-content: center; }
+  .cc-card { justify-content: center; padding: 12px 0; }
+  .cc-card .cc-txt { display: none; }
+}

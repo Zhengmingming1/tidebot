@@ -297,6 +297,14 @@ var providerTestClient = &http.Client{Timeout: 20 * time.Second}
 
 // TestProvider sends a 1-token Messages request to the provider's Anthropic-compatible endpoint.
 func (pa providerAdmin) TestProvider(ctx context.Context, name, onlyModel string) (map[string]any, error) {
+	out, err := pa.testProvider(ctx, name, onlyModel)
+	if err == nil && out != nil {
+		pa.a.recordProviderTest(ctx, name, out)
+	}
+	return out, err
+}
+
+func (pa providerAdmin) testProvider(ctx context.Context, name, onlyModel string) (map[string]any, error) {
 	p, ok := pa.a.Registry.Get(name)
 	if !ok {
 		return nil, errors.New("provider not found")

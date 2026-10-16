@@ -53,6 +53,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/schedule/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
 	mux.HandleFunc("/api/spend/breakdown", s.withAuthCSRF(s.handleSpendBreakdown))
+	mux.HandleFunc("/api/claude/status", s.withAuthCSRF(s.handleClaudeStatus))
 	mux.HandleFunc("/api/notifications/center", s.withAuthCSRF(s.handleNotifCenter))
 	mux.HandleFunc("/api/auth/2fa/", s.withAuthCSRF(s.handle2FA))
 	mux.HandleFunc("/api/notifications", s.withAuthCSRF(s.handleNotifications))

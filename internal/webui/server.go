@@ -57,6 +57,8 @@ type Deps struct {
 	Public map[string]http.Handler
 	// Ext serves POST /api/rpc/<method> for the owner session (plugins, triggers, backup...).
 	Ext func(ctx context.Context, method string, raw json.RawMessage) (any, error)
+	// ClaudeStatus reports local Claude Code / provider health (cached; force re-checks).
+	ClaudeStatus func(ctx context.Context, force bool) any
 }
 
 // Server is a togglable HTTP listener.

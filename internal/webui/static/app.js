@@ -441,11 +441,95 @@
     }
   });
 
-  function renderStatus(o) {
-    var warn = o && o.spend && o.spend.max_usd && o.spend.used_usd >= o.spend.max_usd;
-    $("#sys-status").innerHTML = '<span class="dot' + (warn ? " warn" : "") + '"></span><div><strong class="' + (warn ? "warn" : "") + '">' + esc(warn ? T("sys.budget_reached") : T("sys.ok")) + "</strong><small>" +
-      esc(o && o.active_runs ? plural(o.active_runs, "sys.runs_one", "sys.runs_many") : T("sys.smooth")) + "</small></div>";
+  // ---------- sidebar: Claude Code status ----------
+  // GET /api/claude/status is cached server-side (30s) and never calls a model API.
+  // We refresh it on navigation (at most every 15s) and every 30s; "Recheck" forces it.
+  var cc = { st: null, at: 0, err: false, prevState: "", timer: null };
+  function renderStatus() { loadCC(false); }
+  function fmtMem(b) { return b ? (b >= 1073741824 ? (b / 1073741824).toFixed(1) + " GB" : Math.round(b / 1048576) + " MB") : "—"; }
+  function loadCC(force) {
+    if (!force && cc.st && Date.now() - cc.at < 15000) { paintCC(); return Promise.resolve(cc.st); }
+    var p = force ? api("/api/claude/status", { method: "POST", body: {} }) : api("/api/claude/status");
+    return p.then(function (st) { cc.st = st; cc.err = false; cc.at = Date.now(); paintCC(); return st; })
+      .catch(function (e) { if (e.auth) return; cc.err = true; cc.at = Date.now(); paintCC(); });
   }
+  function ccView() {
+    var st = cc.st;
+    if (cc.err || !st) return { state: cc.err ? "down" : "ready", head: T(cc.err ? "cc.h_down" : "cc.h_checking"), sub: cc.err ? T("cc.s_down") : "" };
+    var ver = st.version ? "Claude Code " + st.version : "Claude Code";
+    var prov = st.provider && st.provider.name ? st.provider.name + (st.provider.model ? " · " + st.provider.model : "") : T("cc.no_provider");
+    switch (st.state) {
+      case "missing": return { state: "missing", head: T("cc.h_missing"), sub: T("cc.s_missing") };
+      case "running": return { state: "running", head: T("cc.h_running", { n: st.sessions.length }), sub: prov };
+      case "warning": return { state: "warning", head: st.reasons.indexOf("provider_failing") >= 0 ? T("cc.h_provider") : T("cc.h_old", { v: st.version }), sub: prov };
+      default: return { state: "ready", head: T("cc.h_ready", { v: ver }), sub: prov };
+    }
+  }
+  function paintCC() {
+    var box = $("#sys-status");
+    if (!box) return;
+    var v = ccView();
+    box.innerHTML = '<button class="cc-card cc-' + v.state + '" id="cc-btn" aria-haspopup="dialog" aria-expanded="false" title="' + esc(v.head + (v.sub ? " · " + v.sub : "")) + '">' +
+      '<span class="dot" aria-hidden="true"></span><span class="cc-txt"><strong>' + esc(v.head) + "</strong>" + (v.sub ? "<small>" + esc(v.sub) + "</small>" : "") + "</span></button>" +
+      '<span class="sr-only" aria-live="polite" id="cc-live"></span>';
+    if (cc.prevState && cc.prevState !== v.state) $("#cc-live").textContent = v.head;
+    cc.prevState = v.state;
+    $("#cc-btn").addEventListener("click", function (e) { e.stopPropagation(); toggleCCPop(); });
+    if ($("#cc-pop")) fillCCPop();
+  }
+  function toggleCCPop() {
+    var old = $("#cc-pop");
+    if (old) { old.remove(); $("#cc-btn").setAttribute("aria-expanded", "false"); return; }
+    var pop = document.createElement("div");
+    pop.id = "cc-pop"; pop.className = "popover cc-pop"; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", T("cc.title"));
+    document.body.appendChild(pop);
+    $("#cc-btn").setAttribute("aria-expanded", "true");
+    fillCCPop();
+    var off = function (e) { if (!pop.contains(e.target) && !(e.target.closest && e.target.closest("#cc-btn"))) { pop.remove(); document.removeEventListener("click", off); document.removeEventListener("keydown", esc1); } };
+    var esc1 = function (e) { if (e.key === "Escape") { pop.remove(); document.removeEventListener("click", off); document.removeEventListener("keydown", esc1); var b = $("#cc-btn"); if (b) b.focus(); } };
+    setTimeout(function () { document.addEventListener("click", off); document.addEventListener("keydown", esc1); }, 0);
+    loadCC(false);
+  }
+  function fillCCPop() {
+    var pop = $("#cc-pop"), st = cc.st, v = ccView();
+    if (!pop) return;
+    var btn = $("#cc-btn"); if (btn) { var r = btn.getBoundingClientRect(); pop.style.left = Math.round(r.left) + "px"; pop.style.bottom = Math.round(window.innerHeight - r.top + 8) + "px"; }
+    var kv = function (k, val, cls) { return "<dt>" + esc(k) + '</dt><dd class="' + (cls || "") + '">' + val + "</dd>"; };
+    var h = '<div class="cc-pop-head"><span class="dot cc-' + v.state + '"></span><strong>' + esc(v.head) + "</strong></div>";
+    if (!st) { h += '<p class="muted">' + esc(T(cc.err ? "cc.s_down" : "cc.h_checking")) + "</p>"; }
+    else {
+      if (!st.found) {
+        var cmd = "npm i -g @anthropic-ai/claude-code";
+        h += '<p class="cc-hint">' + esc(T("cc.install_hint")) + '</p><div class="cc-cmd"><code>' + esc(cmd) + '</code><button class="btn sm" id="cc-copy">' + esc(T("tf.copy")) + "</button></div>" +
+          '<p class="muted small">' + esc(T("cc.install_after")) + "</p>";
+      }
+      var pv = st.provider || {};
+      var health = pv.health === "ok" ? '<span class="pill ok sm">' + esc(T("cc.p_ok")) + "</span>" : pv.health === "failing" ? '<span class="pill bad sm">' + esc(T("cc.p_failing")) + "</span>" : '<span class="pill plain sm">' + esc(T("cc.p_unknown")) + "</span>";
+      var checked = pv.checked_at ? esc(T(pv.source === "test" ? "cc.by_test" : "cc.by_run", { t: when(pv.checked_at) })) + (pv.latency_ms ? " · " + esc(pv.latency_ms) + " ms" : "") : esc(T("cc.never_checked"));
+      h += '<dl class="cc-kv">' +
+        (st.found ? kv(T("cc.path"), "<code>" + esc(st.path) + "</code>") : "") +
+        (st.found ? kv(T("cc.version"), esc(st.version || T("cc.unknown")) + (st.compatible ? "" : ' <span class="pill warn sm">' + esc(T("cc.too_old")) + "</span>")) : "") +
+        kv(T("cc.min"), esc(st.min_version)) +
+        kv(T("cc.provider"), esc(pv.name || "—") + (pv.model ? ' <span class="muted">· ' + esc(pv.model) + "</span>" : "") + " " + health) +
+        kv(T("cc.last_check"), checked) +
+        (pv.health === "failing" && pv.detail ? kv(T("cc.error"), esc(pv.detail), "cc-err") : "") +
+        kv(T("cc.core"), esc((st.core.version || "dev") + " · " + T("cc.uptime", { t: dur(Math.max(1, st.core.uptime_sec) * 1000) }))) + "</dl>";
+      h += '<h5 class="cc-sub">' + esc(T("cc.sessions", { n: st.sessions.length })) + (st.total_rss_bytes ? ' <span class="muted">· ' + esc(fmtMem(st.total_rss_bytes)) + "</span>" : "") + "</h5>";
+      h += st.sessions.length ? '<ul class="cc-sess">' + st.sessions.map(function (x) {
+        return '<li><a href="#/runs/' + enc(x.run_id) + '"><span class="spin" aria-hidden="true"></span><span class="nm">' + esc(x.task_name || T("run.adhoc")) + '</span><span class="num muted">' + esc(dur(x.duration_ms)) + '</span><span class="num muted">' + esc(fmtMem(x.rss_bytes)) + "</span></a></li>";
+      }).join("") + "</ul>" : '<p class="muted small">' + esc(T("cc.no_sessions")) + "</p>";
+    }
+    h += '<div class="cc-actions"><button class="btn sm" id="cc-recheck">' + ic("refresh", "sm") + esc(T("cc.recheck")) + '</button><a class="btn sm" href="#/settings/providers" id="cc-models">' + ic("key", "sm") + esc(T("cc.open_models")) + "</a></div>";
+    pop.innerHTML = h;
+    if ($("#cc-copy")) $("#cc-copy").addEventListener("click", function () { copyText("npm i -g @anthropic-ai/claude-code"); });
+    $("#cc-recheck").addEventListener("click", function (e) {
+      var b = e.currentTarget; b.disabled = true;
+      loadCC(true).then(function () { var b2 = $("#cc-recheck"); if (b2) b2.disabled = false; });
+    });
+    $("#cc-models").addEventListener("click", function () { pop.remove(); });
+    $$("a", pop).forEach(function (a) { if (a.getAttribute("href").indexOf("#/runs/") === 0) a.addEventListener("click", function () { pop.remove(); }); });
+  }
+  setInterval(function () { if (state.csrf && !document.hidden) loadCC(false); }, 30000);
 
   // ---------- idle / SSE ----------
   function stopStream() { if (state.es) { state.es.close(); state.es = null; } }
@@ -2288,7 +2372,7 @@
     p = Promise.resolve(p).then(function () { if (soft) { window.scrollTo(0, y); if (page()) page().scrollTop = sy; } }, function (e) {
       if (!e.auth) { renderTopbar([]); page().innerHTML = errorState(e.message); $("#err-retry").addEventListener("click", function () { lastHash = null; route(); }); }
     });
-    if (parts[0]) api("/api/overview").then(renderStatus).catch(function () {});
+    loadCC(false);
     return p;
   }
   window.addEventListener("hashchange", function () { route(); });

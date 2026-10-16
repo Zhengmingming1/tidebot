@@ -121,3 +121,23 @@ func TestSearchLengthLimit(t *testing.T) {
 		t.Fatalf("long query accepted: %d", code)
 	}
 }
+
+func TestClaudeStatusEndpoint(t *testing.T) {
+	c := login(t)
+	calls := []bool{}
+	c.s.deps.ClaudeStatus = func(_ context.Context, force bool) any {
+		calls = append(calls, force)
+		return map[string]any{"state": "ready"}
+	}
+	if code, out := c.json(http.MethodGet, "/api/claude/status", nil); code != 200 || out["state"] != "ready" {
+		t.Fatalf("get %d %v", code, out)
+	}
+	c.json(http.MethodPost, "/api/claude/status", nil)
+	c.json(http.MethodPost, "/api/claude/status", nil) // within 5s: served from cache
+	if len(calls) != 3 || calls[0] || !calls[1] || calls[2] {
+		t.Fatalf("force pattern %v", calls)
+	}
+	if code, _ := c.json(http.MethodDelete, "/api/claude/status", nil); code != 405 {
+		t.Fatalf("delete %d", code)
+	}
+}
