@@ -89,7 +89,7 @@
   };
   function ic(name, cls) { return '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[name] || P.circle) + "</svg>"; }
   var BUTTON_ICONS = ["doc", "sync", "pie", "trash", "bolt", "terminal", "calendar", "pulse", "shield", "globe"];
-  function btnIcon(b) { return BUTTON_ICONS.indexOf(b.icon) >= 0 ? b.icon : "bolt"; }
+  function btnIcon(b) { return P[b.icon] ? b.icon : "bolt"; }
 
   var markN = 0;
   function waveMark() {
@@ -168,7 +168,7 @@
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {
         if (res.status === 401 && path !== "/api/login") { showLogin(); var e1 = new Error(T("err.sign_in")); e1.auth = true; throw e1; }
-        if (!res.ok) { var e2 = new Error((data && data.error) || res.statusText); e2.status = res.status; throw e2; }
+        if (!res.ok) { var e2 = new Error((data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
         return data;
       });
     });
@@ -437,9 +437,10 @@
           return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + "</span><div><strong>" + esc(t.name) + "</strong><small>" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
             '<td class="nowrap">' + esc(cronHuman(t.cron)) + "</td><td>" + taskPill(t.status) + '</td><td><span class="tag">v' + esc(t.version_no) + "</span></td><td>" + (t.last_status ? statusPill(t.last_status) : '<span class="muted">' + esc(T("tasks.never")) + "</span>") + "</td><td>" + esc(t.runs_today) + '</td><td class="right"><span class="muted">' + ic("chev", "sm") + "</span></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"));
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many") + " · " + T("tasks.sub")) + "</p></div></div>" +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many") + " · " + T("tasks.sub")) + '</p></div><div class="actions"><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
         '<section class="card flush"><div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T("tasks.all")) + "</h2></div>" + rows + "</section>", "tasks", [[T("nav.tasks")]]);
       wireRows();
+      $("#t-new").addEventListener("click", function () { taskFormModal(null); });
     });
   }
   // ---------- TASK DETAIL ----------
@@ -556,7 +557,7 @@
         '<div class="chips"><span class="chip">' + ic("user", "sm") + esc(T("td.owned")) + "</span><span class=\"chip\">" + ic("clock", "sm") + esc(cronHuman(t.cron)) + "</span>" +
         '<span class="chip">' + ic("calendar", "sm") + esc(T("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }), u: ago(t.updated_at) })) + "</span>" + taskPill(t.status) + "</div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause">' + ic("pause", "sm") + esc(T("td.pause")) + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
-        '<button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
+        '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="btn danger" id="t-del">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
         taskTab(tab, t, items, vers) + "</section>" +
         '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
@@ -566,6 +567,8 @@
       wireRows();
       $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { renderTaskDetail(id, b.getAttribute("data-tab")); }); });
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); setTimeout(reload, 800); }).catch(fail); });
+      $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
+      $("#t-del").addEventListener("click", function () { if (!confirm(T("td.confirm_del", { n: t.name }))) return; api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); });
       var tg = $("#t-toggle");
       tg.addEventListener("click", function () { api(base + "/" + tg.getAttribute("data-act"), { method: "POST", body: {} }).then(reload).catch(fail); });
       var picked = function (bid) {
@@ -618,14 +621,7 @@
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
         '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
-      $("#sk-import").addEventListener("click", function () {
-        modal('<div class="card-head"><span class="ico">' + ic("upload") + '</span><h2>' + esc(T("sk.import")) + '</h2></div><form id="ski"><label class="field"><span>' + esc(T("sk.dir")) + '</span><input name="dir" required placeholder="' + esc(T("sk.dir_ph")) + '"></label><label class="field"><span>' + esc(T("sk.name")) + '</span><input name="name" maxlength="64"></label><p class="hint">' + esc(T("sk.reimport")) + '</p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("sk.import_btn")) + "</button></div></form>", function (root, close) {
-          $("#ski", root).addEventListener("submit", function (e) {
-            e.preventDefault();
-            api("/api/skills/import", { method: "POST", body: { dir: e.target.dir.value, name: e.target.name.value } }).then(function () { close(); toast(T("toast.skill_imported")); renderSkills(); }).catch(fail);
-          });
-        });
-      });
+      $("#sk-import").addEventListener("click", function () { skillImportModal(renderSkills); });
       $$("[data-versions]").forEach(function (b) {
         b.addEventListener("click", function () {
           var sid = b.getAttribute("data-versions");
@@ -642,37 +638,390 @@
   }
   // ---------- BUTTONS ----------
   function renderButtons() {
-    return Promise.all([api("/api/buttons"), api("/api/tasks")]).then(function (r) {
-      var list = r[0], tasks = r[1], tname = {};
+    return Promise.all([api("/api/buttons"), api("/api/tasks"), api("/api/skills")]).then(function (r) {
+      var list = r[0], tasks = r[1], skills = r[2] || [], tname = {}, sname = {};
       tasks.forEach(function (t) { tname[t.id] = t.name; });
+      skills.forEach(function (x) { sname[x.id] = x.name; });
       var cards = list.map(function (b, i) {
-        return '<div class="card qa fill" data-run="' + esc(b.id) + '"><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(b.task_id ? T("bt.runs_task", { name: tname[b.task_id] || b.task_id }) : T("bt.prompt", { p: b.prompt })) + '</small><div class="req-actions"><button class="btn sm" data-edit="' + i + '">' + esc(T("btn.edit")) + '</button><button class="btn sm danger" data-del="' + i + '">' + esc(T("btn.remove")) + '</button></div></div>';
+        var sub = b.description || (b.task_id ? T("bt.runs_task", { name: tname[b.task_id] || b.task_id }) : b.skill_id ? T("bt.runs_skill", { name: sname[b.skill_id] || b.skill_id }) : T("bt.prompt", { p: b.prompt }));
+        return '<div class="card qa fill' + (b.color ? " colored" : "") + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '"><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(sub) + '</small><div class="req-actions"><button class="btn sm" data-edit="' + i + '">' + esc(T("btn.edit")) + '</button><button class="btn sm danger" data-del="' + i + '">' + esc(T("btn.remove")) + '</button></div></div>';
       });
       cards.push('<button class="card qa tint" id="b-add"><span class="qa-ico">' + ic("plus", "lg") + "</span><strong>" + esc(T("bt.new")) + "</strong><small>" + esc(T("bt.new_sub")) + " " + ic("arrow", "sm") + "</small></button>");
       mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + '</p></div></div><div class="grid g4">' + cards.join("") + "</div>", "buttons", [[T("nav.buttons")]]);
+      applyColors(page());
       var save = function (nl) { return api("/api/buttons", { method: "PUT", body: nl }).then(function () { toast(T("toast.buttons_saved")); renderButtons(); }); };
-      var edit = function (idx) {
-        var b = idx == null ? { id: "", label: "", description: "", icon: "bolt", task_id: "", prompt: "" } : list[idx];
-        modal('<div class="card-head"><span class="ico">' + ic("buttons") + "</span><h2>" + esc(T(idx == null ? "bt.new" : "bt.edit")) + '</h2></div><form id="bf">' +
-          '<div class="form-row"><label class="field"><span>' + esc(T("bt.label")) + '</span><input name="label" required maxlength="40" value="' + esc(b.label) + '"></label><label class="field"><span>' + esc(T("bt.id")) + '</span><input name="bid" required pattern="[a-z0-9_\\-]{1,40}" value="' + esc(b.id) + '"' + (idx == null ? "" : " readonly") + "></label></div>" +
-          '<label class="field"><span>' + esc(T("bt.desc")) + '</span><input name="description" maxlength="60" value="' + esc(b.description) + '"></label>' +
-          '<div class="form-row"><label class="field"><span>' + esc(T("bt.icon")) + '</span><select name="icon">' + BUTTON_ICONS.map(function (x) { return '<option value="' + x + '"' + (x === b.icon ? " selected" : "") + ">" + x + "</option>"; }).join("") + '</select></label><label class="field"><span>' + esc(T("col.task")) + '</span><select name="task_id"><option value="">' + esc(T("bt.use_prompt")) + '</option>' +
-          tasks.map(function (t) { return '<option value="' + esc(t.id) + '"' + (t.id === b.task_id ? " selected" : "") + ">" + esc(t.name) + "</option>"; }).join("") + "</select></label></div>" +
-          '<label class="field"><span>' + esc(T("bt.prompt_label")) + '</span><textarea name="prompt" maxlength="8000">' + esc(b.prompt) + '</textarea></label><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
-          $("#bf", root).addEventListener("submit", function (e) {
-            e.preventDefault();
-            var f = e.target, nb = { id: f.bid.value, label: f.label.value, description: f.description.value, icon: f.icon.value, task_id: f.task_id.value, prompt: f.task_id.value ? "" : f.prompt.value };
-            var nl = list.slice();
-            if (idx == null) nl.push(nb); else nl[idx] = nb;
-            save(nl).then(close).catch(fail);
-          });
-        });
-      };
-      $("#b-add").addEventListener("click", function () { edit(null); });
-      $$("[data-edit]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); edit(+b.getAttribute("data-edit")); }); });
+      $("#b-add").addEventListener("click", function () { buttonModal(list, null, tasks, skills, save); });
+      $$("[data-edit]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); buttonModal(list, +b.getAttribute("data-edit"), tasks, skills, save); }); });
       $$("[data-del]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); if (!confirm(T("bt.confirm_rm"))) return; var nl = list.slice(); nl.splice(+b.getAttribute("data-del"), 1); save(nl).catch(fail); }); });
       $$("[data-run]").forEach(function (c) { c.addEventListener("click", function (e) { if (e.target.closest("button")) return; runButton(c.getAttribute("data-run"), c); }); });
     });
+  }
+
+  // ---------- v0.1.2 shared helpers ----------
+  function upload(path, fd) {
+    return fetch(path, { method: "POST", headers: { "Accept": "application/json", "X-CSRF-Token": state.csrf }, body: fd, credentials: "same-origin" }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (d) {
+        if (res.status === 401) { showLogin(); throw new Error(T("err.sign_in")); }
+        if (!res.ok) { var e = new Error(d.error || res.statusText); e.status = res.status; e.data = d; throw e; }
+        return d;
+      });
+    });
+  }
+  // Colors go through CSSOM (CSP blocks inline style attributes).
+  function applyColors(root) { $$("[data-color]", root).forEach(function (el) { var c = el.getAttribute("data-color"); if (/^#[0-9a-fA-F]{6}$/.test(c)) el.style.setProperty("--qa-color", c); }); }
+  var SWATCHES = ["", "#2f6fed", "#0f9d8a", "#7b5cd6", "#d9822b", "#d64545", "#3b8b3b", "#5a6b7d"];
+  function fieldHtml(label, inner, hint) { return '<label class="field"><span>' + esc(label) + "</span>" + inner + (hint ? '<small class="hint">' + esc(hint) + "</small>" : "") + "</label>"; }
+  function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (sel ? " selected" : "") + ">" + esc(label) + "</option>"; }
+  // Collect dropped files; folders are walked so the server sees relative paths.
+  function droppedFiles(dt) {
+    var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+    var entries = items.map(function (it) { return it.webkitGetAsEntry ? it.webkitGetAsEntry() : null; }).filter(Boolean);
+    if (!entries.length || (entries.length === 1 && entries[0].isFile)) return Promise.resolve({ single: dt.files[0] });
+    var out = [];
+    function walk(entry, prefix) {
+      if (entry.isFile) return new Promise(function (ok, bad) { entry.file(function (f) { out.push({ file: f, path: prefix + f.name }); ok(); }, bad); });
+      return new Promise(function (ok, bad) {
+        var rd = entry.createReader(), all = [];
+        (function more() { rd.readEntries(function (es) { if (!es.length) { Promise.all(all.map(function (e) { return walk(e, prefix + entry.name + "/"); })).then(ok, bad); } else { all = all.concat(Array.prototype.slice.call(es)); more(); } }, bad); })();
+      });
+    }
+    return Promise.all(entries.map(function (e) { return walk(e, ""); })).then(function () { return { many: out }; });
+  }
+  function dropZone(id, accept, folder) {
+    return '<div class="drop" id="' + id + '">' + ic("upload", "lg") + "<strong>" + esc(T("up.drop")) + "</strong><small>" + esc(T(folder ? "up.drop_sub_skill" : "up.drop_sub_plugin")) + '</small><div class="row-actions"><label class="btn sm">' + esc(T("up.pick_file")) + '<input type="file" class="hidden" data-pick="file" accept="' + accept + '"></label>' +
+      (folder ? '<label class="btn sm">' + esc(T("up.pick_folder")) + '<input type="file" class="hidden" data-pick="dir" webkitdirectory multiple></label>' : "") + "</div></div>";
+  }
+  function wireDrop(root, id, onForm) {
+    var z = $("#" + id, root);
+    var many = function (list) { var fd = new FormData(); list.forEach(function (x) { fd.append("files", x.file, x.file.name); fd.append("paths", x.path); }); onForm(fd); };
+    ["dragenter", "dragover"].forEach(function (ev) { z.addEventListener(ev, function (e) { e.preventDefault(); z.classList.add("over"); }); });
+    z.addEventListener("dragleave", function () { z.classList.remove("over"); });
+    z.addEventListener("drop", function (e) {
+      e.preventDefault(); z.classList.remove("over");
+      droppedFiles(e.dataTransfer).then(function (r) {
+        if (r.single) { var fd = new FormData(); fd.append("file", r.single, r.single.name); onForm(fd); } else many(r.many);
+      }).catch(fail);
+    });
+    $$("[data-pick]", z).forEach(function (inp) {
+      inp.addEventListener("change", function () {
+        if (!inp.files.length) return;
+        if (inp.getAttribute("data-pick") === "dir") many(Array.prototype.slice.call(inp.files).map(function (f) { return { file: f, path: f.webkitRelativePath || f.name }; }));
+        else { var fd = new FormData(); fd.append("file", inp.files[0], inp.files[0].name); onForm(fd); }
+        inp.value = "";
+      });
+    });
+  }
+
+  // ---------- skill import ----------
+  function skillImportModal(done) {
+    modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("sk.import")) + "</h2></div>" + dropZone("sk-drop", ".zip,.skill,.tar.gz,.tgz", true) + '<div id="sk-prev"></div><div class="actions" id="sk-foot"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
+      var prev = $("#sk-prev", root), foot = $("#sk-foot", root);
+      var doImport = function (p, name, mode, btn) {
+        btn.disabled = true;
+        api("/api/skills/import", { method: "POST", body: { stage_id: p.stage_id, name: name, mode: mode } }).then(function () {
+          close(); toast(T(mode === "version" ? "toast.skill_version" : "toast.skill_imported")); done();
+        }).catch(function (e) {
+          btn.disabled = false;
+          if (e.status === 409 && e.data && e.data.existing) { p.existing = e.data.existing; show(p, name); return; }
+          fail(e);
+        });
+      };
+      function show(p, name) {
+        var ex = p.existing;
+        prev.innerHTML = '<div class="preview"><form id="sk-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
+          '<div class="field"><span>' + esc(T("sk.desc")) + '</span><p class="desc-box">' + esc(p.description || T("sk.no_desc")) + "</p></div>" +
+          '<p class="muted">' + esc(T("sk.files_n", { n: p.files })) + "</p>" +
+          (ex ? '<p class="notice">' + ic("info", "sm") + esc(T("sk.exists", { n: ex.version_no, next: ex.version_no + 1 })) + "</p>" : "") + "</form></div>";
+        foot.innerHTML = '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button>" +
+          (ex ? '<button type="button" class="btn primary" id="sk-ver">' + ic("branch", "sm") + esc(T("sk.as_version")) + "</button>" : '<button type="button" class="btn primary" id="sk-go">' + esc(T("sk.import_btn")) + "</button>");
+        $$("[data-close]", foot).forEach(function (b) { b.addEventListener("click", close); });
+        var f = $("#sk-form", prev);
+        var nm = function () { return f.name.value.trim(); };
+        f.name.addEventListener("input", function () { if (p.existing && nm() !== name) { p.existing = null; show(p, nm()); f = $("#sk-form", prev); f.name.focus(); f.name.setSelectionRange(f.name.value.length, f.name.value.length); } });
+        f.addEventListener("submit", function (e) { e.preventDefault(); });
+        var go = $("#sk-go", foot), ver = $("#sk-ver", foot);
+        if (go) go.addEventListener("click", function () { if (f.reportValidity()) doImport(p, nm(), "", go); });
+        if (ver) ver.addEventListener("click", function () { doImport(p, nm(), "version", ver); });
+      }
+      wireDrop(root, "sk-drop", function (fd) {
+        prev.innerHTML = '<p class="muted">' + esc(T("up.reading")) + "</p>";
+        upload("/api/skills/upload", fd).then(function (p) { show(p, p.name); }).catch(function (e) { prev.innerHTML = '<p class="notice bad">' + ic("x", "sm") + esc(e.message) + "</p>"; });
+      });
+    });
+  }
+
+  // ---------- button editor ----------
+  function buttonModal(list, idx, tasks, skills, save) {
+    var b = idx == null ? { id: "", label: "", description: "", icon: "bolt", color: "", task_id: "", skill_id: "", skill_version_id: "", prompt: "", params: [] } : JSON.parse(JSON.stringify(list[idx]));
+    b.params = b.params || [];
+    var mode = b.task_id ? "task" : b.skill_id ? "skill" : "prompt";
+    var icons = Object.keys(P).filter(function (k) { return ["chev", "more", "x", "circle"].indexOf(k) < 0; });
+    modal('<div class="card-head"><span class="ico">' + ic("buttons") + "</span><h2>" + esc(T(idx == null ? "bt.new" : "bt.edit")) + '</h2></div><div class="bt-edit"><form id="bf">' +
+      '<div class="form-row">' + fieldHtml(T("bt.label"), '<input name="label" required maxlength="40" value="' + esc(b.label) + '">') + fieldHtml(T("bt.desc"), '<input name="description" maxlength="60" value="' + esc(b.description) + '">') + "</div>" +
+      '<div class="field"><span>' + esc(T("bt.icon")) + '</span><input id="ic-q" type="search" placeholder="' + esc(T("bt.icon_search")) + '"><div class="icon-grid" id="ic-grid">' + icons.map(function (k) { return '<button type="button" class="ic-cell' + (k === b.icon ? " on" : "") + '" data-ic="' + k + '" title="' + k + '">' + ic(k) + "</button>"; }).join("") + "</div></div>" +
+      '<div class="field"><span>' + esc(T("bt.color")) + '</span><div class="swatches">' + SWATCHES.map(function (c) { return '<button type="button" class="sw' + (c === (b.color || "") ? " on" : "") + (c ? "" : " none") + '" data-sw="' + c + '" data-color="' + c + '" aria-label="' + esc(c || T("bt.color_default")) + '"></button>'; }).join("") + "</div></div>" +
+      '<div class="field"><span>' + esc(T("bt.action")) + '</span><div class="seg" id="bt-mode">' + [["prompt", T("bt.m_prompt")], ["skill", T("bt.m_skill")], ["task", T("bt.m_task")]].map(function (m) { return '<button type="button" data-m="' + m[0] + '" class="' + (m[0] === mode ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + "</div></div>" +
+      '<div data-for="task">' + fieldHtml(T("col.task"), '<select name="task_id">' + tasks.map(function (t) { return opt(t.id, t.name, t.id === b.task_id); }).join("") + "</select>") + "</div>" +
+      '<div data-for="skill" class="form-row">' + fieldHtml(T("bt.skill"), '<select name="skill_id">' + skills.map(function (s) { return opt(s.id, s.name, s.id === b.skill_id); }).join("") + "</select>") + fieldHtml(T("bt.skill_ver"), '<select name="skill_version_id"><option value="">' + esc(T("bt.latest")) + "</option></select>") + "</div>" +
+      '<div data-for="prompt skill">' + fieldHtml(T("bt.prompt_label"), '<textarea name="prompt" maxlength="8000">' + esc(b.prompt) + "</textarea>", T("bt.params_hint")) +
+      '<div class="field"><span>' + esc(T("bt.params")) + '</span><div id="pl"></div><button type="button" class="btn sm" id="p-add">' + ic("plus", "sm") + esc(T("bt.param_add")) + "</button></div></div>" +
+      '</form><div class="bt-prev"><small class="muted">' + esc(T("bt.preview")) + '</small><div id="bt-card"></div></div></div>' +
+      '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" id="bt-save">' + esc(T("btn.save")) + "</button></div>", function (root, close) {
+      var f = $("#bf", root);
+      var drawParams = function () {
+        $("#pl", root).innerHTML = b.params.map(function (p, i) { return '<div class="param-row"><input data-pn="' + i + '" placeholder="' + esc(T("bt.param_name")) + '" maxlength="32" value="' + esc(p.name) + '"><input data-pd="' + i + '" placeholder="' + esc(T("bt.param_default")) + '" maxlength="200" value="' + esc(p.default) + '"><button type="button" class="btn sm ghost" data-px="' + i + '">' + ic("x", "sm") + "</button></div>"; }).join("");
+        $$("[data-pn]", root).forEach(function (x) { x.addEventListener("input", function () { b.params[+x.getAttribute("data-pn")].name = x.value; }); });
+        $$("[data-pd]", root).forEach(function (x) { x.addEventListener("input", function () { b.params[+x.getAttribute("data-pd")].default = x.value; }); });
+        $$("[data-px]", root).forEach(function (x) { x.addEventListener("click", function () { b.params.splice(+x.getAttribute("data-px"), 1); drawParams(); }); });
+      };
+      var preview = function () {
+        var sub = mode === "task" ? T("bt.runs_task", { name: (f.task_id.selectedOptions[0] || {}).text || "—" }) : mode === "skill" ? T("bt.runs_skill", { name: (f.skill_id.selectedOptions[0] || {}).text || "—" }) : T("bt.prompt", { p: f.prompt.value || "…" });
+        $("#bt-card", root).innerHTML = '<div class="card qa fill' + (b.color ? " colored" : "") + '" data-color="' + esc(b.color) + '"><span class="qa-ico">' + ic(b.icon, "lg") + "</span><strong>" + esc(f.label.value || T("bt.label")) + "</strong><small>" + esc(f.description.value || sub) + "</small></div>";
+        applyColors($("#bt-card", root));
+      };
+      var showMode = function () {
+        $$("[data-m]", root).forEach(function (x) { x.classList.toggle("active", x.getAttribute("data-m") === mode); });
+        $$("[data-for]", root).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-for").split(" ").indexOf(mode) < 0); });
+        preview();
+      };
+      var loadVers = function () {
+        var sel = f.skill_version_id;
+        if (!f.skill_id.value) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>"; return; }
+        api("/api/skills/" + enc(f.skill_id.value) + "/versions").then(function (v) {
+          sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>" + v.versions.slice().reverse().map(function (x) { return opt(x.id, T("bt.pin_v", { n: x.no }), x.id === b.skill_version_id); }).join("");
+        }).catch(fail);
+      };
+      applyColors(root);
+      drawParams(); loadVers(); showMode();
+      $("#ic-q", root).addEventListener("input", function (e) { var q = e.target.value.trim().toLowerCase(); $$("[data-ic]", root).forEach(function (x) { x.classList.toggle("hidden", q && x.getAttribute("data-ic").indexOf(q) < 0); }); });
+      $$("[data-ic]", root).forEach(function (x) { x.addEventListener("click", function () { b.icon = x.getAttribute("data-ic"); $$("[data-ic]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
+      $$("[data-sw]", root).forEach(function (x) { x.addEventListener("click", function () { b.color = x.getAttribute("data-sw"); $$("[data-sw]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
+      $$("[data-m]", root).forEach(function (x) { x.addEventListener("click", function () { mode = x.getAttribute("data-m"); showMode(); }); });
+      f.skill_id.addEventListener("change", function () { b.skill_version_id = ""; loadVers(); });
+      f.addEventListener("input", preview);
+      f.addEventListener("change", preview);
+      $("#p-add", root).addEventListener("click", function () { if (b.params.length < 10) { b.params.push({ name: "", default: "" }); drawParams(); } });
+      $("#bt-save", root).addEventListener("click", function () {
+        if (!f.reportValidity()) return;
+        if (mode === "task" && !f.task_id.value) { toast(T("bt.need_task"), true); return; }
+        if (mode === "skill" && !f.skill_id.value) { toast(T("bt.need_skill"), true); return; }
+        if (mode !== "task" && !f.prompt.value.trim()) { toast(T("bt.need_prompt"), true); return; }
+        var nb = { id: b.id, label: f.label.value.trim(), description: f.description.value.trim(), icon: b.icon, color: b.color || "",
+          task_id: mode === "task" ? f.task_id.value : "", skill_id: mode === "skill" ? f.skill_id.value : "", skill_version_id: mode === "skill" ? f.skill_version_id.value : "",
+          prompt: mode === "task" ? "" : f.prompt.value, params: mode === "task" ? [] : b.params.filter(function (p) { return p.name.trim(); }) };
+        var nl = list.slice();
+        if (idx == null) nl.push(nb); else nl[idx] = nb;
+        save(nl).then(close).catch(fail);
+      });
+    });
+  }
+
+  // ---------- providers (settings) ----------
+  function providerCards(box) {
+    return api("/api/providers").then(function (d) {
+      var ps = d.providers || [], presets = d.presets || [];
+      box.innerHTML = '<div class="pcards">' + ps.map(function (p) {
+        return '<div class="card pcard' + (p.default ? " def" : "") + '"><div class="pc-head"><strong>' + esc(p.name) + "</strong>" + (p.default ? '<span class="pill ok">' + esc(T("pv.default")) + "</span>" : "") + (p.builtin ? '<span class="pill plain">' + esc(T("pv.builtin")) + "</span>" : "") + "</div>" +
+          '<dl class="kv sm"><dt>Base URL</dt><dd><code>' + esc(p.base_url || T("td.default")) + "</code></dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(p.model || T("td.default")) + "</dd><dt>" + esc(T("pv.key")) + "</dt><dd>" +
+          (p.key_set ? '<span class="pill ok">' + esc(T("set.configured")) + "</span> " + (p.key_last4 ? '<code>••••' + esc(p.key_last4) + "</code>" : "") + (p.key_source === "env" ? ' <small class="muted">' + esc(T("pv.from_env")) + "</small>" : "") : '<span class="pill plain">' + esc(T("set.missing")) + "</span>") + "</dd>" +
+          (p.used_by ? "<dt>" + esc(T("col.used_by")) + "</dt><dd>" + esc(plural(p.used_by, "tasks.count_one", "tasks.count_many")) + "</dd>" : "") + "</dl>" +
+          '<div class="pc-test" data-tres="' + esc(p.name) + '"></div>' +
+          '<div class="req-actions wrap"><button class="btn sm" data-pv-test="' + esc(p.name) + '">' + ic("pulse", "sm") + esc(T("pv.test")) + '</button><button class="btn sm" data-pv-edit="' + esc(p.name) + '">' + esc(T("btn.edit")) + '</button><button class="btn sm" data-pv-dup="' + esc(p.name) + '">' + esc(T("pv.dup")) + "</button>" +
+          (p.default ? "" : '<button class="btn sm" data-pv-def="' + esc(p.name) + '">' + esc(T("pv.make_default")) + '</button><button class="btn sm danger" data-pv-del="' + esc(p.name) + '">' + esc(T("btn.remove")) + "</button>") + "</div></div>";
+      }).join("") + '<button class="card qa tint" id="pv-add"><span class="qa-ico">' + ic("plus", "lg") + "</span><strong>" + esc(T("pv.add")) + "</strong><small>" + esc(T("pv.add_sub")) + "</small></button></div>";
+      var byName = {}; ps.forEach(function (p) { byName[p.name] = p; });
+      var again = function () { providerCards(box); };
+      $("#pv-add", box).addEventListener("click", function () { presetPicker(presets, function (pr) { providerForm(null, pr, again); }); });
+      $$("[data-pv-edit]", box).forEach(function (b) { b.addEventListener("click", function () { providerForm(byName[b.getAttribute("data-pv-edit")], null, again); }); });
+      $$("[data-pv-dup]", box).forEach(function (b) { b.addEventListener("click", function () { var c = JSON.parse(JSON.stringify(byName[b.getAttribute("data-pv-dup")])); c.dup = true; providerForm(c, null, again); }); });
+      $$("[data-pv-def]", box).forEach(function (b) { b.addEventListener("click", function () { api("/api/providers/" + enc(b.getAttribute("data-pv-def")) + "/default", { method: "POST", body: {} }).then(function () { toast(T("pv.default_set")); again(); }).catch(fail); }); });
+      $$("[data-pv-del]", box).forEach(function (b) { b.addEventListener("click", function () { var n = b.getAttribute("data-pv-del"); if (!confirm(T("pv.confirm_del", { n: n }))) return; api("/api/providers/" + enc(n), { method: "DELETE" }).then(function () { toast(T("pv.deleted")); again(); }).catch(fail); }); });
+      $$("[data-pv-test]", box).forEach(function (b) { b.addEventListener("click", function () {
+        var n = b.getAttribute("data-pv-test"), out = $('[data-tres="' + n + '"]', box);
+        b.disabled = true; out.innerHTML = '<span class="muted">' + esc(T("pv.testing")) + "</span>";
+        api("/api/providers/" + enc(n) + "/test", { method: "POST", body: {} }).then(function (r) {
+          out.innerHTML = r.ok ? '<span class="pill ok">' + ic("check", "sm") + esc(T("pv.test_ok", { ms: r.latency_ms, m: r.model || "" })) + "</span>" : '<span class="pill bad">' + esc(T("pv.test_bad", { s: r.status || "—" })) + '</span><small class="err">' + esc(r.error || "") + "</small>";
+        }).catch(function (e) { out.innerHTML = '<span class="pill bad">' + esc(e.message) + "</span>"; }).then(function () { b.disabled = false; });
+      }); });
+    });
+  }
+  function presetPicker(presets, pick) {
+    modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T("pv.add")) + '</h2></div><p class="hint">' + esc(T("pv.pick")) + '</p><div class="grid g3 presets">' + presets.map(function (p, i) {
+      return '<button type="button" class="card preset" data-pr="' + i + '"><strong>' + esc(p.name) + "</strong><small><code>" + esc(p.base_url || (p.id === "custom" ? T("pv.custom_sub") : "api.anthropic.com")) + "</code></small>" + (p.model ? "<small>" + esc(p.model) + "</small>" : "") + "</button>";
+    }).join("") + '</div><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
+      $$("[data-pr]", root).forEach(function (b) { b.addEventListener("click", function () { close(); pick(presets[+b.getAttribute("data-pr")]); }); });
+    });
+  }
+  function providerForm(p, preset, done) {
+    var editing = p && !p.dup;
+    var v = p || { name: preset.id === "custom" ? "" : preset.id, preset: preset.id, base_url: preset.base_url || "", auth_env: preset.auth_env || "ANTHROPIC_AUTH_TOKEN", model: preset.model || "", small_fast_model: preset.small_fast_model || "", opus_model: preset.opus_model || "", sonnet_model: preset.sonnet_model || "", haiku_model: preset.haiku_model || "", extra_env: preset.extra_env || {} };
+    if (p && p.dup) v.name = p.name + "-copy";
+    var envText = Object.keys(v.extra_env || {}).map(function (k) { return k + "=" + v.extra_env[k]; }).join("\n");
+    var inp = function (n, val, extra) { return '<input name="' + n + '" value="' + esc(val || "") + '"' + (extra || "") + ">"; };
+    modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(editing ? T("pv.edit", { n: p.name }) : p ? T("pv.dup_title") : T("pv.add_named", { n: preset.name })) + '</h2></div><form id="pvf" autocomplete="off">' +
+      '<div class="form-row">' + fieldHtml(T("set.name"), inp("name", v.name, ' required maxlength="40" pattern="[a-z0-9][a-z0-9._\\-]{0,39}"'), T("pv.name_hint")) + fieldHtml(T("pv.auth"), '<select name="auth_env">' + opt("ANTHROPIC_AUTH_TOKEN", "Bearer (ANTHROPIC_AUTH_TOKEN)", v.auth_env !== "ANTHROPIC_API_KEY") + opt("ANTHROPIC_API_KEY", "x-api-key (ANTHROPIC_API_KEY)", v.auth_env === "ANTHROPIC_API_KEY") + "</select>") + "</div>" +
+      fieldHtml("Base URL", inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"'), T("pv.url_hint")) +
+      fieldHtml(T("pv.api_key"), '<input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(editing && p.key_set && p.key_source === "store" ? T("pv.key_keep", { l: p.key_last4 || "" }) : T("pv.key_new")) + '">', T("pv.key_hint")) +
+      (editing && p.key_source === "store" ? '<label class="check"><input type="checkbox" name="clear_key"> ' + esc(T("pv.clear_key")) + "</label>" : "") +
+      '<div class="form-row">' + fieldHtml(T("pv.m_main"), inp("model", v.model)) + fieldHtml(T("pv.m_fast"), inp("small_fast_model", v.small_fast_model)) + "</div>" +
+      '<div class="form-row three">' + fieldHtml("Opus", inp("opus_model", v.opus_model)) + fieldHtml("Sonnet", inp("sonnet_model", v.sonnet_model)) + fieldHtml("Haiku", inp("haiku_model", v.haiku_model)) + "</div>" +
+      fieldHtml(T("pv.extra_env"), '<textarea name="extra_env" rows="3" placeholder="API_TIMEOUT_MS=600000">' + esc(envText) + "</textarea>", T("pv.extra_hint")) +
+      '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
+      $("#pvf", root).addEventListener("submit", function (e) {
+        e.preventDefault();
+        var f = e.target, env = {}, bad = "";
+        f.extra_env.value.split("\n").forEach(function (l) { l = l.trim(); if (!l) return; var i = l.indexOf("="); if (i < 1) { bad = l; return; } env[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
+        if (bad) { toast(T("pv.env_bad", { l: bad }), true); return; }
+        var body = { original_name: editing ? p.name : "", name: f.name.value.trim(), preset: v.preset || "", base_url: f.base_url.value.trim(), auth_env: f.auth_env.value, model: f.model.value.trim(), small_fast_model: f.small_fast_model.value.trim(),
+          opus_model: f.opus_model.value.trim(), sonnet_model: f.sonnet_model.value.trim(), haiku_model: f.haiku_model.value.trim(), extra_env: env, clear_key: !!(f.clear_key && f.clear_key.checked) };
+        if (f.api_key.value) body.api_key = f.api_key.value;
+        f.api_key.value = "";
+        api("/api/providers", { method: "POST", body: body }).then(function () { close(); toast(T("pv.saved")); done(); }).catch(fail);
+      });
+    });
+  }
+
+  // ---------- task form ----------
+  var DOW = [0, 1, 2, 3, 4, 5, 6];
+  function parseSched(c) {
+    var s = { kind: "manual", time: "09:00", minute: 0, dow: 1, cron: c || "" };
+    if (!c) return s;
+    var p = c.trim().split(/\s+/), hm = function () { return ("0" + p[1]).slice(-2) + ":" + ("0" + p[0]).slice(-2); };
+    if (p.length === 5 && /^\d+$/.test(p[0]) && p[1] === "*" && p[2] === "*" && p[3] === "*" && p[4] === "*") { s.kind = "hourly"; s.minute = +p[0]; return s; }
+    if (p.length === 5 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1]) && p[2] === "*" && p[3] === "*") {
+      s.time = hm();
+      if (p[4] === "*") { s.kind = "daily"; return s; }
+      if (p[4] === "1-5") { s.kind = "weekdays"; return s; }
+      if (/^[0-6]$/.test(p[4])) { s.kind = "weekly"; s.dow = +p[4]; return s; }
+    }
+    s.kind = "custom"; return s;
+  }
+  function buildCron(f) {
+    var k = f.sched.value, t = (f.at.value || "09:00").split(":"), m = +t[1] || 0, h = +t[0] || 0;
+    if (k === "manual") return "";
+    if (k === "hourly") return (Math.min(59, Math.max(0, parseInt(f.minute.value, 10) || 0))) + " * * * *";
+    if (k === "daily") return m + " " + h + " * * *";
+    if (k === "weekdays") return m + " " + h + " * * 1-5";
+    if (k === "weekly") return m + " " + h + " * * " + f.dow.value;
+    return f.cron.value.trim();
+  }
+  function taskFormModal(taskId) {
+    var reqs = [api("/api/skills"), api("/api/settings")];
+    if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
+    Promise.all(reqs).then(function (r) {
+      var skills = r[0] || [], st = r[1], tf = taskId ? r[2].form : { name: "", prompt: "", skill_id: "", skill_version_id: "", provider: st.default_provider, cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var sc = parseSched(tf.cron);
+      var dowName = function (d) { return new Intl.DateTimeFormat(state.lang, { weekday: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2023, 0, 1 + d))); };
+      modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
+        fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T("tf.name_ph")) + '">') +
+        fieldHtml(T("tf.prompt"), '<textarea name="prompt" required maxlength="32000" rows="5" placeholder="' + esc(T("tf.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>") +
+        '<div class="form-row">' + fieldHtml(T("bt.skill"), '<select name="skill_id"><option value="">' + esc(T("tf.no_skill")) + "</option>" + skills.map(function (s) { return opt(s.id, s.name, s.id === tf.skill_id); }).join("") + "</select>") +
+        fieldHtml(T("bt.skill_ver"), '<select name="skill_version_id"><option value="">' + esc(T("bt.latest")) + "</option></select>") + "</div>" +
+        fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
+        '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div class="form-row sched"><select name="sched">' + ["manual", "hourly", "daily", "weekdays", "weekly", "custom"].map(function (k) { return opt(k, T("tf.s_" + k), k === sc.kind); }).join("") + "</select>" +
+        '<input name="minute" type="number" min="0" max="59" value="' + sc.minute + '" data-s="hourly" aria-label="' + esc(T("tf.minute")) + '">' +
+        '<select name="dow" data-s="weekly">' + DOW.map(function (d) { return opt(d, dowName(d), d === sc.dow); }).join("") + "</select>" +
+        '<input name="at" type="time" value="' + esc(sc.time) + '" data-s="daily weekdays weekly">' +
+        '<input name="cron" class="mono" value="' + esc(sc.cron) + '" placeholder="*/30 * * * *" data-s="custom"></div>' +
+        '<div class="sched-prev" id="sp"></div></div>' +
+        '<div class="form-row">' + fieldHtml(T("tf.budget"), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint")) +
+        fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
+        '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.enabled")) + "</label>" +
+        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
+        var f = $("#tf", root), sp = $("#sp", root), timer;
+        var loadVers = function () {
+          var sel = f.skill_version_id;
+          if (!f.skill_id.value) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>"; sel.disabled = true; return; }
+          sel.disabled = false;
+          api("/api/skills/" + enc(f.skill_id.value) + "/versions").then(function (v) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>" + v.versions.slice().reverse().map(function (x) { return opt(x.id, T("bt.pin_v", { n: x.no }), x.id === tf.skill_version_id); }).join(""); }).catch(fail);
+        };
+        var preview = function () {
+          var k = f.sched.value;
+          $$("[data-s]", f).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-s").split(" ").indexOf(k) < 0); });
+          var c = buildCron(f);
+          if (!c) { sp.innerHTML = '<p class="muted">' + esc(T("tf.manual_hint")) + "</p>"; return; }
+          clearTimeout(timer);
+          timer = setTimeout(function () {
+            api("/api/schedule/preview?cron=" + enc(c)).then(function (d) {
+              sp.innerHTML = "<p><strong>" + esc(cronHuman(c)) + '</strong> <code class="muted">' + esc(c) + "</code></p><small class=\"muted\">" + esc(T("tf.next_runs", { tz: d.timezone || tzLabel() })) + "</small><ul class=\"next\">" + (d.times || []).map(function (t) { return "<li>" + esc(fmtTime(t, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</li>"; }).join("") + "</ul>";
+            }).catch(function (e) { sp.innerHTML = '<p class="err">' + esc(e.message) + "</p>"; });
+          }, 200);
+        };
+        loadVers(); preview();
+        f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
+        ["sched", "minute", "dow", "at", "cron"].forEach(function (n) { f[n].addEventListener("input", preview); f[n].addEventListener("change", preview); });
+        f.addEventListener("submit", function (e) {
+          e.preventDefault();
+          var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, provider: f.provider.value, cron: buildCron(f),
+            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30 };
+          var btn = f.querySelector(".btn.primary"); btn.disabled = true;
+          api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
+            close(); toast(T(taskId ? "tf.saved" : "tf.created"));
+            if (taskId) route(); else location.hash = "#/tasks/" + enc(t.id);
+          }).catch(function (err) { btn.disabled = false; fail(err); });
+        });
+      });
+    }).catch(fail);
+  }
+
+  // ---------- plugin install & triggers ----------
+  function pluginInstallModal() {
+    modal('<div class="card-head"><span class="ico">' + ic("plugins") + "</span><h2>" + esc(T("pl.install")) + "</h2></div>" + dropZone("pl-drop", ".zip,.tar.gz,.tgz", false) + '<div id="pl-prev"></div><div class="actions" id="pl-foot"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
+      var prev = $("#pl-prev", root), foot = $("#pl-foot", root);
+      wireDrop(root, "pl-drop", function (fd) {
+        prev.innerHTML = '<p class="muted">' + esc(T("up.reading")) + "</p>";
+        upload("/api/plugins/upload", fd).then(function (r) {
+          var v = r.result || r, ver = v.version || {}, m = ver.manifest || {}, fresh = v.new_permissions || [], req = ver.requested_permissions || [];
+          var trig = ((m.contributes || {}).triggers || []);
+          prev.innerHTML = '<div class="preview"><p><strong>' + esc(m.name || m.id) + '</strong> <span class="tag">' + esc(m.version || "") + '</span> <code class="muted">' + esc(m.id || "") + "</code></p>" +
+            '<p class="muted">' + esc(T("pl.hash", { h: String(ver.content_hash || "").slice(0, 16) })) + "</p>" +
+            "<h4>" + esc(T("pl.perms")) + "</h4>" + (req.length ? '<ul class="perms">' + req.map(function (p) { return "<li>" + ic("shield", "sm") + "<code>" + esc(p) + "</code>" + (fresh.indexOf(p) >= 0 ? ' <span class="pill warn">' + esc(T("pl.new_perm")) + "</span>" : "") + "</li>"; }).join("") + "</ul>" : '<p class="muted">' + esc(T("pl.no_perms")) + "</p>") +
+            (trig.length ? "<h4>" + esc(T("pl.contrib_triggers")) + "</h4><p>" + trig.map(function (t) { return '<span class="pill plain">' + esc(t.kind + ": " + (t.title || t.id)) + "</span>"; }).join(" ") + "</p>" : "") +
+            '<p class="hint">' + esc(T("pl.approve_hint")) + "</p></div>";
+          foot.innerHTML = '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="pl-ok">' + ic("shield", "sm") + esc(T("pl.approve")) + "</button>";
+          $$("[data-close]", foot).forEach(function (b) { b.addEventListener("click", close); });
+          $("#pl-ok", foot).addEventListener("click", function (e) {
+            e.target.disabled = true;
+            rpc("plugins.approve", { version_id: ver.id, permissions: req }).then(function () { close(); toast(T("pl.installed_ok", { n: m.name || m.id })); route(); }).catch(function (err) { e.target.disabled = false; fail(err); });
+          });
+        }).catch(function (e) { prev.innerHTML = '<p class="notice bad">' + ic("x", "sm") + esc(e.message) + "</p>"; });
+      });
+    });
+  }
+  function triggerModal(plugins) {
+    api("/api/tasks").then(function (tasks) {
+      var ptrig = [];
+      plugins.forEach(function (p) { ((((p.current || {}).manifest || {}).contributes || {}).triggers || []).forEach(function (t) { if (t.kind === "email" || t.kind === "im") ptrig.push({ plugin: p.id, pname: p.name, t: t }); }); });
+      modal('<div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("tr.new")) + '</h2></div><form id="trf">' +
+        fieldHtml(T("tr.kind"), '<select name="kind">' + opt("webhook", T("tr.k_webhook"), true) + opt("file_change", T("tr.k_file")) + (ptrig.length ? opt("plugin", T("tr.k_plugin")) : "") + "</select>") +
+        fieldHtml(T("col.task"), '<select name="task_id" required>' + tasks.map(function (t) { return opt(t.id, t.name); }).join("") + "</select>", tasks.length ? "" : T("tr.no_tasks")) +
+        '<div data-k="file_change" class="hidden">' + fieldHtml(T("tr.path"), '<input name="path" class="mono" placeholder="/home/me/inbox">', T("tr.path_hint")) + "</div>" +
+        '<div data-k="plugin" class="hidden">' + fieldHtml(T("tr.ptrig"), '<select name="ptrig">' + ptrig.map(function (x, i) { return opt(i, x.pname + " · " + (x.t.title || x.t.id) + " (" + x.t.kind + ")"); }).join("") + "</select>") + "</div>" +
+        '<p class="hint" data-k="webhook">' + esc(T("tr.webhook_hint")) + "</p>" +
+        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("tr.create")) + "</button></div></form>", function (root, close) {
+        var f = $("#trf", root);
+        var sync = function () { $$("[data-k]", f).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-k") !== f.kind.value); }); };
+        f.kind.addEventListener("change", sync); sync();
+        f.addEventListener("submit", function (e) {
+          e.preventDefault();
+          var k = f.kind.value, body = { kind: k, task_id: f.task_id.value, config: {} };
+          if (k === "file_change") body.config.path = f.path.value.trim();
+          if (k === "plugin") { var x = ptrig[+f.ptrig.value]; body.kind = x.t.kind; body.plugin_id = x.plugin; body.config.trigger_id = x.t.id; }
+          rpc("triggers.create", body).then(function (r) {
+            close();
+            if (r && r.token) {
+              var url = location.origin + r.url_path;
+              modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T("tr.token_title")) + '</h2></div><p class="notice">' + ic("info", "sm") + esc(T("tr.token_once")) + "</p>" +
+                fieldHtml("URL", '<input readonly class="mono" value="' + esc(url) + '">') + fieldHtml(T("tr.token"), '<input readonly class="mono" id="tok" value="' + esc(r.token) + '">') +
+                '<p class="hint">' + esc(T("tr.curl_hint")) + '</p><pre class="code">' + esc("curl -X POST -H 'Authorization: Bearer <token>' " + url) + '</pre><div class="actions"><button class="btn" id="tok-copy">' + esc(T("tr.copy")) + '</button><button class="btn primary" data-close>' + esc(T("tr.saved_it")) + "</button></div>", function (r2) {
+                $$("[data-close]", r2).forEach(function (b) { b.addEventListener("click", function () { route(); }); });
+                $("#tok-copy", r2).addEventListener("click", function () { var t = $("#tok", r2); t.select(); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.resolve(document.execCommand("copy"))).then(function () { toast(T("tr.copied")); }); });
+              });
+            } else { toast(T("tr.created")); route(); }
+          }).catch(fail);
+        });
+      });
+    }).catch(fail);
   }
 
   // ---------- PLUGINS ----------
@@ -698,17 +1047,20 @@
         return "<tr><td><span class=\"pill plain\">" + esc(t.kind) + "</span></td><td>" + esc(t.kind === "webhook" ? "/hooks/" + t.id : (t.config && (t.config.path || t.config.trigger_id)) || "") + '</td><td><a href="#/tasks/' + esc(t.task_id) + '">' + esc(T("nav.tasks")) + '</a></td><td class="right"><button class="btn sm" data-trg-del="' + esc(t.id) + '">' + esc(T("pl.remove")) + "</button></td></tr>";
       }).join("") + "</tbody></table>" : '<p class="muted">' + esc(T("pl.no_triggers")) + "</p>";
       var brow = '<p class="muted">' + esc(baks.length ? T("pl.backups_n", { n: baks.length }) : T("pl.no_backups")) + "</p>";
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn" id="bk-now">' + esc(T("pl.backup_now")) + "</button></div></div>" + health +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("plugins") + "</span><h2>" + esc(T("pl.installed")) + "</h2></div>" + prow + '<p class="muted pad">' + esc(T("pl.install_hint")) + "</p></section>" +
-        '<div class="grid g2"><section class="card"><div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("pl.triggers")) + "</h2></div>" + trow + "</section>" +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn" id="bk-now">' + esc(T("pl.backup_now")) + '</button><button class="btn primary" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + "</button></div></div>" + health +
+        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("plugins") + "</span><h2>" + esc(T("pl.installed")) + "</h2></div>" + prow + "</section>" +
+        '<div class="grid g2"><section class="card"><div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("pl.triggers")) + '</h2><button class="btn sm link" id="tr-add">' + ic("plus", "sm") + esc(T("tr.new")) + "</button></div>" + trow + "</section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section></div>", "plugins", [[T("nav.plugins")]]);
       $$("[data-pl-uninstall]").forEach(function (b) { b.addEventListener("click", function () {
         if (!confirm(T("pl.uninstall_confirm"))) return;
         rpc("plugins.uninstall", { id: b.getAttribute("data-pl-uninstall") }).then(route).catch(function (e) { toast(e.message, true); });
       }); });
       $$("[data-trg-del]").forEach(function (b) { b.addEventListener("click", function () {
+        if (!confirm(T("tr.confirm_del"))) return;
         rpc("triggers.delete", { id: b.getAttribute("data-trg-del") }).then(route).catch(function (e) { toast(e.message, true); });
       }); });
+      $("#pl-add").addEventListener("click", pluginInstallModal);
+      $("#tr-add").addEventListener("click", function () { triggerModal(plugins); });
       $("#bk-now").addEventListener("click", function () {
         rpc("backup.create", {}).then(function (r) { toast(T("pl.backup_done", { path: r.path })); route(); }).catch(function (e) { toast(e.message, true); });
       });
@@ -821,10 +1173,10 @@
         '<label class="field"><span>' + esc(T("set.g_tok")) + "</span>" + '<input name="g_tok" type="number" step="1000" min="0" value="' + esc(g.max_tokens || "") + '"></label>' +
         buckets.map(function (b) { return '<label class="field"><span>' + esc(T("set.b_usd", { b: bucketName(b) })) + '</span><input name="b_' + esc(b.scope_id) + '" type="number" step="0.01" min="0" value="' + esc(b.max_usd || "") + '"></label>'; }).join("") +
         '<div class="field"><span>&nbsp;</span><button class="btn primary">' + esc(T("set.save_bud")) + '</button></div></form></section>' +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("key") + '</span><h2>' + esc(T("set.providers")) + '</h2><span class="link muted">' + esc(T("set.default_p", { p: st.default_provider })) + '</span></div><table class="table"><thead><tr><th>' + esc(T("set.name")) + "</th><th>Base URL</th><th>" + esc(T("f.model")) + "</th><th>" + esc(T("set.cred")) + "</th></tr></thead><tbody>" +
-        st.providers.map(function (p) { return "<tr><td><strong>" + esc(p.name) + "</strong></td><td><code>" + esc(p.base_url || T("td.default")) + "</code></td><td>" + esc(p.model || T("td.default")) + '</td><td><span class="pill ' + (p.key_set ? "ok" : "plain") + '">' + esc(T(p.key_set ? "set.configured" : "set.missing")) + "</span><small>" + esc(T("set.env_hidden", { e: p.auth_env || "—" })) + "</small></td></tr>"; }).join("") + "</tbody></table></section>",
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("key") + '</span><h2>' + esc(T("set.providers")) + '</h2><span class="link muted">' + esc(T("pv.sub")) + '</span></div><div id="pv-box"><p class="muted">…</p></div></section>',
         "settings", [[T("nav.settings")]]);
       $("#set-lang").addEventListener("change", function (e) { setLanguage(e.target.value); });
+      providerCards($("#pv-box")).catch(fail);
       $("#btn-logout").addEventListener("click", function () {
         api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; showLogin(); });
       });

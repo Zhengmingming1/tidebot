@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -156,7 +157,27 @@ func stringsHasSuffixFold(s, suf string) bool {
 
 // Registry merges built-in presets with user file overrides (file wins on same name).
 type Registry struct {
+	mu     sync.RWMutex
 	byName map[string]Profile
+}
+
+// Put adds or replaces a profile (resolved against its preset).
+func (r *Registry) Put(p Profile) (Profile, error) {
+	res, err := p.Resolve()
+	if err != nil {
+		return Profile{}, err
+	}
+	r.mu.Lock()
+	r.byName[res.Name] = res
+	r.mu.Unlock()
+	return res, nil
+}
+
+// Delete removes a profile.
+func (r *Registry) Delete(name string) {
+	r.mu.Lock()
+	delete(r.byName, name)
+	r.mu.Unlock()
 }
 
 // NewRegistry builds a registry from presets + optional file profiles.
@@ -182,12 +203,16 @@ func NewRegistry(fileProfiles []Profile) (*Registry, error) {
 
 // Get returns a profile by name.
 func (r *Registry) Get(name string) (Profile, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	p, ok := r.byName[name]
 	return p, ok
 }
 
 // List returns all profiles sorted by name.
 func (r *Registry) List() []Profile {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]Profile, 0, len(r.byName))
 	for _, p := range r.byName {
 		out = append(out, p)

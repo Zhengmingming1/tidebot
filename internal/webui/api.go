@@ -37,6 +37,10 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/amendments/", s.withAuthCSRF(s.handleAmendAction))
 	mux.HandleFunc("/api/skills", s.withAuthCSRF(s.handleSkills))
 	mux.HandleFunc("/api/skills/import", s.withAuthCSRF(s.handleSkillsImport))
+	mux.HandleFunc("/api/skills/upload", s.withAuthCSRF(s.handleSkillUpload))
+	mux.HandleFunc("/api/providers", s.withAuthCSRF(s.handleProviders))
+	mux.HandleFunc("/api/plugins/upload", s.withAuthCSRF(s.handlePluginUpload))
+	mux.HandleFunc("/api/providers/", s.withAuthCSRF(s.handleProviderSub))
 	mux.HandleFunc("/api/skills/", s.withAuthCSRF(s.handleSkillSub))
 	mux.HandleFunc("/api/runs", s.withAuthCSRF(s.handleRuns))
 	mux.HandleFunc("/api/runs/quick", s.withAuthCSRF(s.handleQuickRun))
@@ -44,6 +48,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/buttons", s.withAuthCSRF(s.handleButtons))
 	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
 	mux.HandleFunc("/api/schedule", s.withAuthCSRF(s.handleSchedule))
+	mux.HandleFunc("/api/schedule/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
 	mux.HandleFunc("/api/notifications", s.withAuthCSRF(s.handleNotifications))
 	mux.HandleFunc("/api/search", s.withAuthCSRF(s.handleSearch))
@@ -179,13 +184,33 @@ func limitParam(r *http.Request, def, max int) int {
 // ---------- buttons ----------
 
 type buttonDTO struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
-	Icon        string `json:"icon"`
-	TaskID      string `json:"task_id,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
-	Provider    string `json:"provider,omitempty"`
+	ID          string        `json:"id"`
+	Label       string        `json:"label"`
+	Description string        `json:"description"`
+	Icon        string        `json:"icon"`
+	TaskID      string        `json:"task_id,omitempty"`
+	Prompt      string        `json:"prompt,omitempty"`
+	Provider    string        `json:"provider,omitempty"`
+	Color       string        `json:"color,omitempty"`
+	SkillID     string        `json:"skill_id,omitempty"`
+	SkillVerID  string        `json:"skill_version_id,omitempty"`
+	Params      []buttonParam `json:"params,omitempty"`
+}
+
+type buttonParam struct {
+	Name    string `json:"name"`
+	Default string `json:"default"`
+}
+
+var buttonColorRe = regexp.MustCompile(`^(|#[0-9a-fA-F]{6})$`)
+var paramNameRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,31}$`)
+
+// expandParams replaces {{name}} with the param default.
+func expandParams(prompt string, ps []buttonParam) string {
+	for _, p := range ps {
+		prompt = strings.ReplaceAll(prompt, "{{"+p.Name+"}}", p.Default)
+	}
+	return prompt
 }
 
 var buttonIDRe = regexp.MustCompile(`^[a-z0-9_-]{1,40}$`)
@@ -210,10 +235,35 @@ func (s *Server) handleButtons(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 400, "bad json")
 				return
 			}
+			taken := map[string]bool{}
 			for _, b := range list {
-				if !buttonIDRe.MatchString(b.ID) || b.Label == "" || (b.TaskID == "" && b.Prompt == "") {
-					writeErr(w, 400, "each button needs id [a-z0-9_-], label and task_id or prompt")
+				if b.ID != "" {
+					if taken[b.ID] {
+						writeErr(w, 400, "duplicate button id "+b.ID)
+						return
+					}
+					taken[b.ID] = true
+				}
+			}
+			for i := range list {
+				b := &list[i]
+				if b.ID == "" {
+					b.ID = NewButtonID(b.Label, taken)
+					taken[b.ID] = true
+				}
+				if !buttonIDRe.MatchString(b.ID) || strings.TrimSpace(b.Label) == "" || (b.TaskID == "" && b.Prompt == "") {
+					writeErr(w, 400, "each button needs a label and a task or a prompt")
 					return
+				}
+				if !buttonColorRe.MatchString(b.Color) || len(b.Params) > 10 {
+					writeErr(w, 400, "bad color or too many params")
+					return
+				}
+				for _, p := range b.Params {
+					if !paramNameRe.MatchString(p.Name) || len(p.Default) > 500 {
+						writeErr(w, 400, "param names: letters, digits, _")
+						return
+					}
 				}
 			}
 			bs, _ := json.Marshal(list)
@@ -363,6 +413,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 // ---------- tasks ----------
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.createTask(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "method")
 		return
@@ -374,6 +428,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []taskDTO{}
 	for _, v := range list {
+		if v.Task.Status == "archived" {
+			continue
+		}
 		out = append(out, toTaskDTO(v))
 	}
 	// enrich with last status / runs today
@@ -402,6 +459,33 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	ctx := r.Context()
+	if len(parts) == 1 && r.Method == http.MethodPut {
+		s.updateTask(w, r, id)
+		return
+	}
+	if len(parts) == 1 && r.Method == http.MethodDelete {
+		if _, err := s.deps.Tasks.Get(ctx, id); err != nil {
+			writeErr(w, 404, "task not found")
+			return
+		}
+		// soft delete: history, versions and spend stay for the audit trail
+		if err := s.deps.Tasks.SetStatus(ctx, id, "archived", "deleted in WebUI"); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		_ = s.deps.Tasks.SetSchedule(ctx, id, "")
+		writeJSON(w, 200, map[string]any{"ok": true})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "form" {
+		f, err := s.taskFormOf(ctx, id)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeJSON(w, 200, f)
+		return
+	}
 	if len(parts) == 1 {
 		v, err := s.deps.Tasks.Get(ctx, id)
 		if err != nil {
@@ -651,11 +735,17 @@ func (s *Server) handleSkillSub(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSkillsImport(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
-		Dir  string `json:"dir"`
+		Name    string `json:"name"`
+		Dir     string `json:"dir"`
+		StageID string `json:"stage_id"`
+		Mode    string `json:"mode"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || body.Dir == "" {
-		writeErr(w, 400, "dir required")
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || (body.Dir == "" && body.StageID == "") {
+		writeErr(w, 400, "stage_id or dir required")
+		return
+	}
+	if body.StageID != "" {
+		s.importStaged(w, r, body.StageID, body.Name, body.Mode)
 		return
 	}
 	if st, err := os.Stat(body.Dir); err != nil || !st.IsDir() {
@@ -984,7 +1074,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		KeySet  bool   `json:"key_set"`
 	}
 	providers := []prow{}
-	if s.deps.Reg != nil {
+	if s.deps.Providers != nil {
+		for _, v := range s.deps.Providers.ListProviders(r.Context()) {
+			providers = append(providers, prow{Name: v.Name, BaseURL: v.BaseURL, Model: v.Model, AuthEnv: v.AuthEnv, KeySet: v.KeySet})
+		}
+	} else if s.deps.Reg != nil {
 		for _, p := range s.deps.Reg.List() {
 			providers = append(providers, prow{Name: p.Name, BaseURL: p.BaseURL, Model: p.Model, AuthEnv: p.AuthEnv,
 				KeySet: p.AuthEnv != "" && os.Getenv(p.AuthEnv) != ""})

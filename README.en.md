@@ -150,6 +150,10 @@ To turn on the WebUI for your own instance:
 
 ## Providers
 
+The easy way is Settings → Providers in the WebUI: pick a preset (Anthropic, Kimi, DeepSeek, Zhipu, Qwen, ...), paste the key, hit Test. The key is encrypted on this machine; the page only shows that it is set and its last 4 characters, and never sends it back.
+
+Environment variables still work:
+
 Keys live in environment variables, never in config files. The variable is `TIDEBOT_API_KEY_<PROVIDER_ID>`; Kimi Coding Plan also accepts `KIMI_API_KEY`.
 
 ```bash
@@ -178,6 +182,8 @@ max_concurrency: 2
 timezone: Asia/Shanghai      # used for displayed times and the daily budget reset; empty = system
 webui_addr: 127.0.0.1:7420
 ```
+
+Tasks, skills, buttons, plugins and triggers can all be created in the WebUI now. Drop a skill zip or folder on the import dialog; schedules come with presets (daily, weekdays, weekly) and show the next few runs in your timezone. The CLI below still works.
 
 ## CLI examples
 

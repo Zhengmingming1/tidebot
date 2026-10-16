@@ -135,6 +135,7 @@ func Open(cfg config.Config) (*App, error) {
 	if err := a.Auth.EnsureOwner(context.Background()); err != nil {
 		log.Warn("auth owner", "error", err)
 	}
+	a.applyProviderSettings(context.Background())
 	// Restore webui.enabled from settings if present.
 	if v, err := a.Auth.GetSetting(context.Background(), "webui.enabled"); err == nil && v != "" {
 		a.Cfg.WebUIEnabled = v == "true" || v == "1"
@@ -144,8 +145,10 @@ func Open(cfg config.Config) (*App, error) {
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Ver: ver, Reg: reg, Log: log,
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
 		LogPath: a.Runner.LogPath, Location: cfg.Location(),
-		Ext:    a.CallExt,
-		Public: map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
+		Ext:           a.CallExt,
+		QuickRunSkill: a.startQuickRunSkill,
+		Providers:     providerAdmin{a},
+		Public:        map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
 	})
 	return a, nil
 }
@@ -406,6 +409,33 @@ func (a *App) startQuickRunAsync(prompt, providerName string) error {
 		}, providerName, 0)
 		if err != nil {
 			a.Log.Warn("quick run", "error", err)
+		}
+	}()
+	return nil
+}
+
+// startQuickRunSkill runs an ad-hoc prompt in a scratch workspace with one skill materialized.
+func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string) error {
+	if _, err := a.ResolveProfile(providerName); err != nil {
+		return err
+	}
+	mode := "follow"
+	if versionID != "" {
+		mode = "pinned"
+	}
+	ws, err := os.MkdirTemp(a.Cfg.DataDir, "button-")
+	if err != nil {
+		return err
+	}
+	if err := a.Skills.Materialize(context.Background(), ws, []tasksvc.SkillBinding{{SkillID: skillID, Mode: mode, VersionID: versionID}}); err != nil {
+		os.RemoveAll(ws)
+		return fmt.Errorf("skill: %w", err)
+	}
+	go func() {
+		defer os.RemoveAll(ws)
+		_, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: prompt, WorkspaceDir: ws, TriggerKind: "quick", CostBucket: cost.BucketProduction}, providerName, 0)
+		if err != nil {
+			a.Log.Warn("button run", "error", err)
 		}
 	}()
 	return nil

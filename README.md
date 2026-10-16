@@ -150,7 +150,9 @@ scripts/demo-webui.sh          # 打开 http://127.0.0.1:17421，密码 demo-pas
 
 ## 配置服务商
 
-密钥放在环境变量里，不要写进配置文件。变量名是 `TIDEBOT_API_KEY_<服务商 ID>`，Kimi Coding Plan 也认 `KIMI_API_KEY`。
+最省事的是在 WebUI 的「设置 → 服务商」里加：选一个预设（Anthropic、Kimi、DeepSeek、智谱、Qwen 等），填 Key，点「测试连接」。Key 加密存在本机，页面上只显示「已配置」和后 4 位，保存后就读不回来了。
+
+也可以用环境变量，不要把密钥写进配置文件。变量名是 `TIDEBOT_API_KEY_<服务商 ID>`，Kimi Coding Plan 也认 `KIMI_API_KEY`。
 
 ```bash
 export TIDEBOT_API_KEY_DEEPSEEK=...      # 你自己的 key
@@ -178,6 +180,8 @@ max_concurrency: 2
 timezone: Asia/Shanghai      # 显示时间和每日预算重置都用它，不填就跟随系统
 webui_addr: 127.0.0.1:7420
 ```
+
+任务、技能、按钮、插件和触发器现在都能在 WebUI 里建：技能直接拖 zip 或文件夹进去，任务的定时可以选「每天 / 工作日 / 每周」，会列出接下来几次在本地时区的运行时间。下面的命令行照样能用。
 
 ## 命令行示例
 
