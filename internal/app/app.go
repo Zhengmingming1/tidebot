@@ -45,6 +45,7 @@ type App struct {
 	Cost     *cost.Service
 	Auth     *auth.Service
 	WebUI    *webui.Server
+	Events   *Bus
 }
 
 // Open loads config, opens DB, and builds subsystems.
@@ -89,6 +90,10 @@ func Open(cfg config.Config) (*App, error) {
 		structurer = &ClaudeStructurer{App: a}
 	}
 	a.Amend = amend.New(sqlDB, a.Tasks, ver, structurer)
+	a.Events = &Bus{}
+	a.Amend.OnProposed = func(taskID string, items []amend.Item) {
+		a.Events.Emit(Event{Kind: EventApprovalNeeded, TaskID: taskID, TaskName: a.taskName(taskID), Count: len(items)})
+	}
 	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
 	a.Cost = cost.New(sqlDB, log)
 	a.Cost.Loc = cfg.Location()
@@ -190,6 +195,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		}
 		if !chk.OK {
 			_ = a.Cost.LogBreach(ctx, chk.BreachScope, opts.TaskID, bucket, "cap", chk.Reason, chk.BreachAction)
+			a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), Detail: chk.Reason})
 			if opts.TaskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
 				_ = a.Cost.PauseTask(ctx, opts.TaskID, chk.Reason)
 			}
@@ -216,6 +222,11 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	if err == nil && a.Cost != nil {
 		_ = a.Cost.Record(ctx, res.RunID, opts.TaskID, bucket, res.TotalCostUSD, res.InputTokens, res.OutputTokens)
 	}
+	ev := Event{Kind: EventRunFinished, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), RunID: res.RunID, CostUSD: res.TotalCostUSD}
+	if err != nil {
+		ev.Kind, ev.Detail = EventRunFailed, err.Error()
+	}
+	a.Events.Emit(ev)
 	return res, err
 }
 

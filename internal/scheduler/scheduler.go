@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/db"
@@ -24,7 +25,18 @@ type Scheduler struct {
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
+	paused  atomic.Bool
+
+	// Gate, when set, may defer a due task (e.g. on battery / about to sleep).
+	// A deferred task is left due and retried on the next tick; its schedule is not advanced.
+	Gate func(task db.Task) (deferRun bool, reason string)
 }
+
+// SetPaused pauses or resumes firing of due tasks (manual runs are unaffected).
+func (s *Scheduler) SetPaused(p bool) { s.paused.Store(p) }
+
+// Paused reports whether the scheduler is paused.
+func (s *Scheduler) Paused() bool { return s.paused.Load() }
 
 // New creates a scheduler. tick defaults to 15s.
 func New(store *db.Store, log *slog.Logger, tick time.Duration, run RunnerFunc) *Scheduler {
@@ -82,12 +94,21 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) poll(ctx context.Context) {
+	if s.paused.Load() {
+		return
+	}
 	due, err := s.store.ListDueTasks(ctx, time.Now())
 	if err != nil {
 		s.log.Error("list due tasks", "error", err)
 		return
 	}
 	for _, task := range due {
+		if s.Gate != nil {
+			if d, why := s.Gate(task); d {
+				s.log.Info("defer due task", "task_id", task.ID, "reason", why)
+				continue
+			}
+		}
 		if err := s.handleDue(ctx, task); err != nil {
 			s.log.Error("handle due task", "task_id", task.ID, "error", err)
 		}

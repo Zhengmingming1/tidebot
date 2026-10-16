@@ -254,3 +254,12 @@ ON CONFLICT(user_id, key) DO UPDATE SET value_json=excluded.value_json, updated_
 		key, valueJSON, nowUTC())
 	return err
 }
+
+// CreateLocalSession issues a session without a password for a trusted in-process client
+// (the desktop shell's native window). It must never be reachable from the network.
+func (s *Service) CreateLocalSession(ctx context.Context, origin string) (*Session, error) {
+	if err := s.EnsureOwner(ctx); err != nil {
+		return nil, err
+	}
+	return s.createSession(ctx, origin)
+}
