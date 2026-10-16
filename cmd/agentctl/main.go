@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/Zhengmingming1/tidebot/internal/config"
@@ -202,11 +203,16 @@ func main() {
 			printJSON(out)
 		case "confirm":
 			var out any
-			must(cli.Call("amendments.confirm", map[string]string{"id": needFlag(args[1:], "--id")}, &out))
+			must(cli.Call("amendments.confirm", amendTarget(args[1:]), &out))
 			printJSON(out)
 		case "reject":
-			must(cli.Call("amendments.reject", map[string]string{"id": needFlag(args[1:], "--id")}, nil))
-			fmt.Println("ok")
+			var out any
+			must(cli.Call("amendments.reject", amendTarget(args[1:]), &out))
+			if out != nil {
+				printJSON(out)
+			} else {
+				fmt.Println("ok")
+			}
 		case "resolve":
 			must(cli.Call("amendments.resolve", map[string]string{
 				"id": needFlag(args[1:], "--id"), "resolution": needFlag(args[1:], "--resolution"),
@@ -338,6 +344,7 @@ func usage() {
   agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag
   agentctl runs [--task ID]
   agentctl amend propose|list|confirm|reject|resolve
+  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   (one version for the whole batch)
   agentctl skills import|list|rollback|pin
   agentctl spend summary|set-budget
   agentctl webui [on|off|status]
@@ -363,6 +370,18 @@ func printJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
+}
+
+// amendTarget parses --batch <amendment_id> [--only id1,id2] or --id <id[,id...]>.
+func amendTarget(args []string) map[string]any {
+	if b := flagOpt(args, "--batch", ""); b != "" {
+		m := map[string]any{"batch": b}
+		if o := flagOpt(args, "--only", ""); o != "" {
+			m["only"] = strings.Split(o, ",")
+		}
+		return m
+	}
+	return map[string]any{"id": needFlag(args, "--id")}
 }
 
 func needFlag(args []string, name string) string {

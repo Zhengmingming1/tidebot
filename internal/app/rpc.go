@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"database/sql"
@@ -214,20 +215,35 @@ func (a *App) rpcAmendList(ctx context.Context, params json.RawMessage) (any, er
 
 func (a *App) rpcAmendConfirm(ctx context.Context, params json.RawMessage) (any, error) {
 	var p struct {
-		ID string `json:"id"`
+		ID    string   `json:"id"`
+		Batch string   `json:"batch"`
+		Only  []string `json:"only"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-		return nil, fmt.Errorf("id required")
+	if err := json.Unmarshal(params, &p); err != nil || (p.ID == "" && p.Batch == "") {
+		return nil, fmt.Errorf("id or batch required")
+	}
+	if p.Batch != "" {
+		return a.Amend.ConfirmBatch(ctx, p.Batch, p.Only, "user")
+	}
+	ids := strings.Split(p.ID, ",")
+	if len(ids) > 1 {
+		return a.Amend.ConfirmItems(ctx, ids, "user")
 	}
 	return a.Amend.Confirm(ctx, p.ID, "user")
 }
 
 func (a *App) rpcAmendReject(ctx context.Context, params json.RawMessage) (any, error) {
 	var p struct {
-		ID string `json:"id"`
+		ID    string   `json:"id"`
+		Batch string   `json:"batch"`
+		Only  []string `json:"only"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-		return nil, fmt.Errorf("id required")
+	if err := json.Unmarshal(params, &p); err != nil || (p.ID == "" && p.Batch == "") {
+		return nil, fmt.Errorf("id or batch required")
+	}
+	if p.Batch != "" {
+		n, err := a.Amend.RejectBatch(ctx, p.Batch, p.Only)
+		return map[string]int{"rejected": n}, err
 	}
 	return nil, a.Amend.Reject(ctx, p.ID)
 }
