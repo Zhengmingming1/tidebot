@@ -48,6 +48,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/buttons", s.withAuthCSRF(s.handleButtons))
 	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
 	mux.HandleFunc("/api/schedule", s.withAuthCSRF(s.handleSchedule))
+	mux.HandleFunc("/api/dashboard", s.withAuthCSRF(s.handleDashboard))
 	mux.HandleFunc("/api/scheduler/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/schedule/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
@@ -779,7 +780,23 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		where += " AND r.task_id=?"
 		args = append(args, tid)
 	}
-	where += " ORDER BY r.created_at DESC LIMIT ?"
+	if qs := strings.TrimSpace(q.Get("q")); qs != "" {
+		if len(qs) > 100 {
+			writeErr(w, 400, "search text too long")
+			return
+		}
+		like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(qs) + "%"
+		where += ` AND (r.prompt LIKE ? ESCAPE '\' OR t.name LIKE ? ESCAPE '\' OR r.id LIKE ? ESCAPE '\' OR r.error_message LIKE ? ESCAPE '\')`
+		args = append(args, like, like, like, like)
+	}
+	order := map[string]string{"": "r.created_at DESC", "new": "r.created_at DESC", "old": "r.created_at ASC",
+		"cost": "COALESCE(r.total_cost_usd,0) DESC, r.created_at DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC",
+		"duration": "COALESCE(r.duration_ms,0) DESC, r.created_at DESC"}[q.Get("sort")]
+	if order == "" {
+		writeErr(w, 400, "sort must be new, old, cost, tokens or duration")
+		return
+	}
+	where += " ORDER BY " + order + " LIMIT ?"
 	args = append(args, limitParam(r, 50, 200))
 	runs, err := s.queryRuns(r.Context(), where, args...)
 	if err != nil {
@@ -811,6 +828,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, runs[0])
+		return
+	}
+	if parts[1] == "rerun" && r.Method == http.MethodPost {
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.rerun(w, r, id) })).ServeHTTP(w, r)
 		return
 	}
 	if parts[1] != "events" {
@@ -849,10 +870,15 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID stri
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
+	// Each log line carries its end offset as the SSE id, so a reconnect (Last-Event-ID or ?from=)
+	// continues where the client left off instead of replaying the whole log.
+	var offset int64
 	send := func(event, data string) {
 		for _, line := range strings.Split(data, "\n") {
 			if event != "" {
 				fmt.Fprintf(w, "event: %s\n", event)
+			} else {
+				fmt.Fprintf(w, "id: %d\n", offset)
 			}
 			fmt.Fprintf(w, "data: %s\n\n", line)
 		}
@@ -862,7 +888,16 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID stri
 	if s.deps.LogPath != nil {
 		path = s.deps.LogPath(runID)
 	}
-	var offset int64
+	if from := r.Header.Get("Last-Event-ID"); from != "" || r.URL.Query().Get("from") != "" {
+		if from == "" {
+			from = r.URL.Query().Get("from")
+		}
+		if n, err := strconv.ParseInt(from, 10, 64); err == nil && n > 0 {
+			if fi, err := os.Stat(path); err == nil && n <= fi.Size() {
+				offset = n
+			}
+		}
+	}
 	readMore := func() bool {
 		if path == "" {
 			return false

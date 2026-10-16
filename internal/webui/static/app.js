@@ -409,7 +409,7 @@
   }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 
-  function runsTable(runs) {
+  function runsTable(runs, rerun) {
     if (!runs.length) return emptyState("runs", T("runs.none"), T("runs.none_sub"));
     return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.agent_task")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + "</th><th>" + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th></th></tr></thead><tbody>' +
       runs.map(function (r) {
@@ -417,7 +417,7 @@
         return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div><strong>" + esc(runTitle(r)) + "</strong><small>" + esc(triggerText(r.trigger)) + "</small></div></div></td>" +
           "<td><strong>" + esc(r.task_name || T("run.adhoc")) + "</strong><small>" + esc(r.provider || "—") + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small></td>" +
           "<td>" + statusPill(r.status) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
-          '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right"><a class="icon-btn" href="#/runs/' + enc(r.id) + '" aria-label="' + esc(T("run.open")) + '">' + ic("more", "sm") + "</a></td></tr>";
+          '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="btn sm" data-rerun="' + esc(r.id) + '">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button> " : "") + '<a class="icon-btn" href="#/runs/' + enc(r.id) + '" aria-label="' + esc(T("run.open")) + '">' + ic("more", "sm") + "</a></td></tr>";
       }).join("") + "</tbody></table>";
   }
   // ---------- HOME ----------
@@ -428,42 +428,87 @@
       .catch(fail)
       .then(function () { if (el) el.classList.remove("busy"); });
   }
+  // ---------- live polling: pauses while the tab is hidden, catches up when it returns ----------
+  var poller = { t: null, fn: null, ms: 0, hash: "" };
+  function livePoll(fn, ms) {
+    stopPoll();
+    poller.fn = fn; poller.ms = ms; poller.hash = location.hash || "#/";
+    var tick = function () {
+      poller.t = null;
+      if ((location.hash || "#/") !== poller.hash || !poller.fn) { stopPoll(); return; }
+      if (document.hidden) return; // resumed by visibilitychange
+      Promise.resolve(poller.fn()).catch(function () {}).then(function () { if (poller.fn && !poller.t && !document.hidden) poller.t = setTimeout(tick, poller.ms); });
+    };
+    poller.tick = tick;
+    poller.t = setTimeout(tick, ms);
+  }
+  function stopPoll() { clearTimeout(poller.t); poller.t = null; poller.fn = null; }
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden && poller.fn && !poller.t) poller.tick();
+    if (!document.hidden && state.esPaused) { state.esPaused = false; if (state.esResume) state.esResume(); }
+  });
+
+  // ---------- HOME ----------
+  function beatsBar(beats) {
+    var cells = [];
+    for (var i = 0; i < 20 - beats.length; i++) cells.push('<span class="hb hb-none"></span>');
+    beats.forEach(function (b) {
+      var cls = b.status === "succeeded" ? "ok" : (b.status === "running" || b.status === "queued") ? "run" : b.status === "skipped" ? "skip" : "bad";
+      var tip = when(b.at) + " · " + T("st." + b.status) + " · " + dur(b.duration_ms) + " · " + usd(b.cost_usd, 3);
+      cells.push('<a class="hb ' + cls + '" href="#/runs/' + enc(b.id) + '" data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '"></a>');
+    });
+    return '<div class="hbar">' + cells.join("") + "</div>";
+  }
   function renderHome() {
-    return api("/api/overview").then(function (o) {
+    return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r) {
+      var o = r[0], d = r[1];
       renderStatus(o);
-      var qa = (o.buttons || []).slice(0, 4).map(function (b) {
-        return '<button class="card qa" data-btn="' + esc(b.id) + '"><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(b.description || "") + "</small></button>";
+      var qa = (o.buttons || []).slice(0, 5).map(function (b) {
+        return '<button class="card qa' + (b.color ? " colored" : "") + '" data-color="' + esc(b.color || "") + '" data-btn="' + esc(b.id) + '"><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(b.description || "") + "</small></button>";
       });
-      while (qa.length < 4) qa.push('<a class="card qa" href="#/buttons"><span class="qa-ico">' + ic("plus", "lg") + "</span><strong>" + esc(T("home.add_button")) + "</strong><small>" + esc(T("home.add_button_sub")) + "</small></a>");
+      qa.push('<a class="card qa add" href="#/buttons" aria-label="' + esc(T("home.add_button")) + '"><span class="qa-ico">' + ic("plus", "lg") + "</span><small>" + esc(T("home.add_button")) + "</small></a>");
       qa.push('<button class="card qa tint" id="qa-new"><span class="qa-ico">' + ic("sparkle", "lg") + "</span><strong>" + esc(T("home.quick")) + "</strong><small>" + esc(T("home.quick_sub")) + " " + ic("arrow", "sm") + "</small></button>");
-
-      var sched = o.schedule || [];
-      var schedHtml = sched.length ? '<ul class="timeline">' + sched.map(function (s) {
-        return '<li><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(cronHuman(s.cron)) + '</small></div><span class="tag">' + esc(relDay(s.at)) + "</span></li>";
-      }).join("") + "</ul>" : emptyState("calendar", T("home.no_sched"), T("home.no_sched_sub"));
-
-      var sp = o.spend || {}, max = sp.max_usd || 0, pct = max ? Math.min(100, sp.used_usd / max * 100) : 0;
-      var resetMs = new Date(sp.resets_at).getTime() - Date.now();
-      var resetTxt = resetMs > 0 ? T("time.hm", { h: Math.floor(resetMs / 3600e3), m: Math.floor(resetMs % 3600e3 / 60e3) }) : T("time.soon");
-
-      mount(
-        '<div class="grid g5">' + qa.join("") + "</div>" +
-        '<div class="grid g2">' +
-        '<section class="card fill"><div class="card-head"><span class="ico">' + ic("calendar") + "</span><h2>" + esc(T("home.schedule")) + '</h2><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("arrow", "sm") + "</a></div>" +
-        '<div class="grow">' + schedHtml + "</div>" +
-        '<div class="card-foot">' + ic("info", "sm") + "<span>" + esc(T("home.times_in", { tz: tzLabel() })) + '</span><a class="link" href="#/tasks">' + esc(T("home.manage")) + " " + ic("arrow", "sm") + "</a></div></section>" +
-        '<section class="card spend-card">' + waveArt() + '<div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("home.spend")) + '</h2><a class="link" href="#/spend">' + esc(T("home.view_spend")) + " " + ic("arrow", "sm") + "</a></div>" +
-        '<div class="spend-big">' + esc(usd(sp.used_usd)) + " <span>/ " + esc(max ? usd(max) : T("spend.no_cap")) + "</span></div>" +
-        '<div class="meta">' + esc((max ? T("home.pct_budget", { p: Math.round(pct) }) : T("home.no_budget")) + " · " + T("home.tokens", { n: num(sp.tokens) })) + "</div>" +
-        '<div class="progress' + (pct >= 100 ? " bad" : pct >= 80 ? " warn" : "") + '"><span data-w="' + pct + '"></span></div>' +
-        '<div class="meta">' + esc(T("home.resets", { t: resetTxt, tz: sp.timezone || state.tz })) + "</div></section>" +
-        "</div>" +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("arrow", "sm") + "</a></div>" + runsTable(o.runs || []) + "</section>",
-        "home", []);
-      wireRows();
+      var noTasks = !d.tasks.length;
+      mount('<div class="grid g4 kpis" id="kpis"></div>' +
+        '<div class="qa-row">' + qa.join("") + "</div>" +
+        (noTasks ? '<section class="card">' + '<div class="empty">' + ic("tasks") + "<strong>" + esc(T("home.empty_title")) + "</strong>" + esc(T("home.empty_sub")) + '<div class="mt"><button class="btn primary" id="home-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div></section>" : "") +
+        '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("home.running")) + '</h2><span class="link muted" id="run-n"></span></div><div id="running" class="grow"></div></section>' +
+        '<section class="card fill"><div class="card-head"><span class="ico">' + ic("calendar") + "</span><h2>" + esc(T("home.next24")) + '</h2><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("arrow", "sm") + '</a></div><div id="next24" class="grow"></div><div class="card-foot">' + ic("info", "sm") + "<span>" + esc(T("home.times_in", { tz: tzLabel() })) + "</span></div></section></div>" +
+        (noTasks ? "" : '<section class="card"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.health")) + '</h2><span class="link muted">' + esc(T("home.health_sub")) + '</span></div><div id="beats"></div></section>') +
+        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("arrow", "sm") + '</a></div><div id="recent"></div></section>', "home", []);
+      applyColors(page());
+      var paint = function (o, d) {
+        var k = d.kpi, rate = k.runs_today ? Math.round(k.succeeded_today / k.runs_today * 100) + "%" : "—", left = k.budget_usd ? Math.max(0, k.budget_usd - k.spent_today) : null;
+        var bp = k.budget_usd ? Math.min(100, k.spent_today / k.budget_usd * 100) : 0;
+        $("#kpis").innerHTML = [[T("home.k_runs"), num(k.runs_today), T("home.k_runs_sub", { n: k.succeeded_today })], [T("home.k_rate"), rate, T("time.today")], [T("home.k_spent"), usd(k.spent_today, 2), k.budget_usd ? T("home.pct_budget", { p: Math.round(bp) }) : T("home.no_budget")], [T("home.k_left"), left == null ? "∞" : usd(left, 2), T("sp.global_daily")]].map(function (x, i) {
+          return '<div class="card stat"><small>' + esc(x[0]) + '</small><strong class="num">' + esc(x[1]) + "</strong><span>" + esc(x[2]) + "</span>" + (i === 3 && k.budget_usd ? '<div class="progress' + (bp >= 100 ? " bad" : bp >= 80 ? " warn" : "") + '"><span data-w="' + bp + '"></span></div>' : "") + "</div>";
+        }).join("");
+        $("#run-n").textContent = d.running.length ? T("home.n_running", { n: d.running.length }) : "";
+        $("#running").innerHTML = d.running.length ? '<ul class="live-list">' + d.running.map(function (x) {
+          return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + esc(x.status === "queued" ? T("st.queued") : T("home.started_ago", { t: ago(x.started_at || x.created_at) })) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
+        }).join("") + "</ul>" : emptyState("checkc", T("home.idle"), T("home.idle_sub"));
+        $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.map(function (s) {
+          return '<li><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
+        }).join("") + "</ul>" : emptyState("calendar", T("home.no_sched"), T("home.no_sched_sub"));
+        if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.map(function (t) {
+          return '<div class="beat-row"><a href="#/tasks/' + enc(t.id) + '" class="bn">' + esc(t.name) + (t.status === "paused" ? ' <span class="pill warn sm">' + esc(T("task.paused")) + "</span>" : "") + "</a>" + beatsBar(t.beats) + "</div>";
+        }).join("") + "</div>";
+        $("#recent").innerHTML = runsTable((o.runs || []).slice(0, 6));
+        applySizes(page()); wireRows(page());
+      };
+      paint(o, d);
       $$("[data-btn]").forEach(function (b) { b.addEventListener("click", function () { runButton(b.getAttribute("data-btn"), b); }); });
       $("#qa-new").addEventListener("click", quickRunModal);
-      if ((o.runs || []).some(function (r) { return r.status === "running" || r.status === "queued"; })) scheduleRefresh("#/", 2500);
+      if ($("#home-new")) $("#home-new").addEventListener("click", function () { taskFormModal(null); });
+      var ticks = 0;
+      livePoll(function () {
+        ticks++;
+        // live elapsed counters every tick; data every tick while something runs, else every 5s
+        $$("[data-since]").forEach(function (el) { var t = el.getAttribute("data-since"); if (t) el.textContent = dur(Date.now() - new Date(t).getTime()); });
+        if ($("#running .spin") || ticks % 5 === 0) {
+          return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r2) { if ((location.hash || "#/") === "#/") paint(r2[0], r2[1]); });
+        }
+      }, 1000);
     });
   }
   function scheduleRefresh(hash, ms) {
@@ -1342,24 +1387,167 @@
   }
 
   // ---------- RUNS ----------
+  var runsView = { q: "", sort: "new", seq: 0 };
   function renderRuns(params) {
-    var st = params.get("status") || "", task = params.get("task") || "";
-    var qs = "?limit=100" + (st ? "&status=" + enc(st) : "") + (task ? "&task_id=" + enc(task) : "");
-    return api("/api/runs" + qs).then(function (runs) {
+    var st = params.get("status") || "", task = params.get("task") || "", v = runsView;
+    var url = function () { return "/api/runs?limit=200&sort=" + enc(v.sort) + (st ? "&status=" + enc(st) : "") + (task ? "&task_id=" + enc(task) : "") + (v.q ? "&q=" + enc(v.q) : ""); };
+    return api(url()).then(function (runs) {
       var f = [["", T("runs.all_f")], ["running", T("st.running")], ["succeeded", T("st.succeeded")], ["failed", T("st.failed")]];
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + esc(T("runs.sub")) + '</p></div><div class="actions filters">' + f.map(function (x) { return '<button data-f="' + x[0] + '" class="' + (x[0] === st ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + "</div></div>" +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(task && runs[0] ? T("runs.for", { name: runs[0].task_name }) : T("runs.all")) + '</h2><span class="link muted">' + esc(T("runs.times_in", { tz: tzLabel() })) + "</span></div>" + runsTable(runs) + "</section>", "runs", [[T("nav.runs")]]);
-      wireRows();
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + esc(T("runs.sub")) + "</p></div></div>" +
+        '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="rq" type="search" maxlength="100" placeholder="' + esc(T("runs.search")) + '" value="' + esc(v.q) + '"></label>' +
+        '<div class="filters">' + f.map(function (x) { return '<button data-f="' + x[0] + '" class="' + (x[0] === st ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" +
+        '<label class="inl">' + esc(T("runs.sort")) + ' <select id="rsort">' + [["new", T("runs.s_new")], ["old", T("runs.s_old")], ["cost", T("runs.s_cost")], ["tokens", T("runs.s_tokens")], ["duration", T("runs.s_duration")]].map(function (x) { return opt(x[0], x[1], x[0] === v.sort); }).join("") + "</select></label>" +
+        '<span class="grow"></span><span class="muted">' + esc(task && runs[0] ? T("runs.for", { name: runs[0].task_name }) + " · " : "") + esc(T("runs.times_in", { tz: tzLabel() })) + '</span></div><div id="rtable"></div></section>', "runs", [[T("nav.runs")]]);
+      var paint = function (list) {
+        $("#rtable").innerHTML = list.length || !v.q ? runsTable(list, true) : emptyState("search", T("runs.no_match"), "");
+        wireRows($("#rtable"));
+        $$("[data-rerun]").forEach(function (b) { b.addEventListener("click", function (e) {
+          e.stopPropagation(); b.disabled = true;
+          api("/api/runs/" + enc(b.getAttribute("data-rerun")) + "/rerun", { method: "POST", body: {} }).then(function () { toast(T("runs.rerun_started")); setTimeout(reload, 600); }).catch(function (err) { b.disabled = false; fail(err); });
+        }); });
+      };
+      // a newer request always wins; slow responses for old search text are dropped
+      var reload = function () { var my = ++v.seq; return api(url()).then(function (list) { if (my === v.seq) { paint(list); live(list); } }); };
+      var live = function (list) { if (list.some(function (r) { return r.status === "running" || r.status === "queued"; })) livePoll(reload, 2000); else stopPoll(); };
+      paint(runs); live(runs);
+      var qt;
+      $("#rq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value.trim(); reload().catch(fail); }, 250); });
+      $("#rsort").addEventListener("change", function (e) { v.sort = e.target.value; reload().catch(fail); });
       $$("[data-f]").forEach(function (b) { b.addEventListener("click", function () { location.hash = "#/runs" + (b.getAttribute("data-f") ? "?status=" + b.getAttribute("data-f") : ""); }); });
-      if (runs.some(function (r) { return r.status === "running" || r.status === "queued"; })) scheduleRefresh(location.hash, 3000);
     });
   }
 
-  function logLine(text) {
+  // ---------- LogView: categories, filters, search, windowed rendering, SSE resume ----------
+  var LOG_WINDOW = 1500;
+  function classifyLog(text) {
     var m = /^\[(\d\d:\d\d:\d\d)\]\s(.*)$/.exec(text), ts = "", body = text;
     if (m) { ts = m[1]; body = m[2]; }
-    var cls = /^result error|run finished: (failed|timeout|canceled)/.test(body) ? "ln-err" : /^result:|run finished: succeeded/.test(body) ? "ln-res" : /tool /.test(body) ? "ln-tool" : /^(init|run )/.test(body) ? "ln-sys" : "";
-    return (ts ? '<span class="ts">' + esc(ts) + "</span>  " : "") + '<span class="' + cls + '">' + esc(body) + "</span>\n";
+    var kind = "sys";
+    if (/^result error|run finished: (failed|timeout|canceled)|^error/i.test(body)) kind = "err";
+    else if (/^user: tool result/.test(body)) kind = "result";
+    else if (/^assistant: tool /.test(body)) kind = "tool";
+    else if (/^assistant: /.test(body)) kind = "text";
+    return { ts: ts, kind: kind, text: body };
+  }
+  function hlText(s, q) {
+    if (!q) return esc(s);
+    var low = s.toLowerCase(), out = "", i = 0, j;
+    while ((j = low.indexOf(q, i)) >= 0) { out += esc(s.slice(i, j)) + "<mark>" + esc(s.slice(j, j + q.length)) + "</mark>"; i = j + q.length; }
+    return out + esc(s.slice(i));
+  }
+  function logView(host, runId, live, onEnd) {
+    var KINDS = ["all", "text", "tool", "result", "sys", "err"];
+    var lines = [], view = [], filter = "all", q = "", matches = [], cur = -1, start = 0, unseen = 0, pending = false, lastId = "", ended = false, retry = 0;
+    host.innerHTML = '<div class="lv-bar"><div class="filters lv-f">' + KINDS.map(function (k) { return '<button data-k="' + k + '" class="' + (k === "all" ? "active" : "") + '">' + esc(T("lv.k_" + k)) + ' <span class="cnt" data-c="' + k + '">0</span></button>'; }).join("") + "</div>" +
+      '<span class="grow"></span><label class="search-in sm">' + ic("search", "sm") + '<input id="lv-q" type="search" maxlength="200" placeholder="' + esc(T("lv.search")) + '" aria-label="' + esc(T("lv.search")) + '"></label><span class="muted num" id="lv-pos"></span>' +
+      '<button class="icon-btn" id="lv-prev" aria-label="' + esc(T("lv.prev")) + '" title="' + esc(T("lv.prev")) + ' (N)">↑</button><button class="icon-btn" id="lv-next" aria-label="' + esc(T("lv.next")) + '" title="' + esc(T("lv.next")) + ' (n)">↓</button>' +
+      '<button class="btn sm" id="lv-copy">' + esc(T("lv.copy")) + '</button><button class="btn sm" id="lv-dl">' + esc(T("lv.download")) + '</button><button class="icon-btn" id="lv-full" aria-label="' + esc(T("lv.full")) + '" title="' + esc(T("lv.full")) + '">⤢</button></div>' +
+      '<div class="lv-wrap"><div class="log" id="log" aria-live="off" tabindex="0"><button class="lv-more hidden" id="lv-more"></button><div id="lv-rows"></div></div><button class="lv-new hidden" id="lv-new"></button></div>';
+    var log = $("#log", host), rows = $("#lv-rows", host), more = $("#lv-more", host), newBtn = $("#lv-new", host);
+    var atBottom = function () { return log.scrollTop + log.clientHeight >= log.scrollHeight - 24; };
+    var rowHtml = function (l, idx) {
+      var body = l.text, extra = "";
+      if (l.kind === "tool") {
+        var mm = /^assistant: tool (\S+)\s?(.*)$/.exec(body) || [null, "", body];
+        body = "tool " + mm[1]; extra = mm[2];
+      }
+      return '<div class="ln k-' + l.kind + (idx === matches[cur] ? " cur" : "") + (extra ? " fold" : "") + '" data-i="' + idx + '">' + (l.ts ? '<span class="ts">' + esc(l.ts) + "</span>" : "") +
+        '<span class="tx">' + hlText(body, q) + (extra ? '<span class="args">' + hlText(extra, q) + "</span>" : "") + "</span></div>";
+    };
+    var counts = function () {
+      var c = { all: lines.length, text: 0, tool: 0, result: 0, sys: 0, err: 0 };
+      lines.forEach(function (l) { c[l.kind]++; });
+      KINDS.forEach(function (k) { var el = $('[data-c="' + k + '"]', host); if (el) el.textContent = c[k]; });
+    };
+    var keep = function (l) { return filter === "all" || l.kind === filter; };
+    var computeMatches = function () {
+      matches = [];
+      if (q) view.forEach(function (li, vi) { var l = lines[li]; if (l.text.toLowerCase().indexOf(q) >= 0) matches.push(li); });
+      $("#lv-pos", host).textContent = q ? (matches.length ? (cur + 1) + "/" + matches.length : T("lv.none")) : "";
+    };
+    var paint = function (keepScroll) {
+      view = []; lines.forEach(function (l, i) { if (keep(l)) view.push(i); });
+      computeMatches();
+      if (start > Math.max(0, view.length - LOG_WINDOW)) start = Math.max(0, view.length - LOG_WINDOW);
+      var end = Math.min(view.length, start + LOG_WINDOW);
+      rows.innerHTML = view.slice(start, end).map(function (li) { return rowHtml(lines[li], li); }).join("") || '<div class="muted ln">' + esc(T(lines.length ? "lv.empty_filter" : "lv.waiting")) + "</div>";
+      more.classList.toggle("hidden", start === 0);
+      more.textContent = T("lv.earlier", { n: Math.min(start, LOG_WINDOW) });
+      if (!keepScroll) log.scrollTop = log.scrollHeight;
+    };
+    var flush = function () {
+      pending = false;
+      var stick = atBottom(), added = [];
+      for (var i = flush.from; i < lines.length; i++) if (keep(lines[i])) { view.push(i); added.push(i); }
+      flush.from = lines.length;
+      counts();
+      if (!added.length) return;
+      if (q) computeMatches();
+      if (stick) {
+        if (rows.firstChild && rows.firstChild.classList && rows.firstChild.classList.contains("muted")) rows.innerHTML = "";
+        rows.insertAdjacentHTML("beforeend", added.map(function (li) { return rowHtml(lines[li], li); }).join(""));
+        var extra = rows.childElementCount - LOG_WINDOW;
+        if (extra > 200) { for (var k = 0; k < extra; k++) rows.firstChild.remove(); start += extra; more.classList.remove("hidden"); more.textContent = T("lv.earlier", { n: Math.min(start, LOG_WINDOW) }); }
+        log.scrollTop = log.scrollHeight;
+      } else {
+        unseen += added.length;
+        newBtn.textContent = "↓ " + T("lv.new_n", { n: unseen });
+        newBtn.classList.remove("hidden");
+      }
+    };
+    flush.from = 0;
+    var push = function (text) { lines.push(classifyLog(text)); if (!pending) { pending = true; requestAnimationFrame(flush); } };
+    var toBottom = function () { unseen = 0; newBtn.classList.add("hidden"); start = Math.max(0, view.length - LOG_WINDOW); paint(false); };
+    newBtn.addEventListener("click", toBottom);
+    log.addEventListener("scroll", function () { if (atBottom() && unseen) { unseen = 0; newBtn.classList.add("hidden"); if (start + rows.childElementCount < view.length) toBottom(); } });
+    more.addEventListener("click", function () { var h = log.scrollHeight; start = Math.max(0, start - LOG_WINDOW); paint(true); log.scrollTop += log.scrollHeight - h; });
+    rows.addEventListener("click", function (e) { var ln = e.target.closest(".ln.fold"); if (ln) ln.classList.toggle("open"); });
+    $$("[data-k]", host).forEach(function (b) { b.addEventListener("click", function () { filter = b.getAttribute("data-k"); $$("[data-k]", host).forEach(function (x) { x.classList.toggle("active", x === b); }); start = Infinity; cur = -1; paint(false); }); });
+    var jump = function (d) {
+      if (!matches.length) return;
+      cur = (cur + d + matches.length) % matches.length;
+      var vi = view.indexOf(matches[cur]);
+      if (vi < start || vi >= start + LOG_WINDOW) start = Math.max(0, vi - Math.floor(LOG_WINDOW / 2));
+      paint(true);
+      var el = $('[data-i="' + matches[cur] + '"]', rows);
+      if (el) el.scrollIntoView({ block: "center" });
+    };
+    var qt;
+    $("#lv-q", host).addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { q = e.target.value.trim().toLowerCase(); cur = -1; paint(true); if (q) jump(1); }, 150); });
+    $("#lv-q", host).addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); jump(e.shiftKey ? -1 : 1); } });
+    $("#lv-next", host).addEventListener("click", function () { jump(1); });
+    $("#lv-prev", host).addEventListener("click", function () { jump(-1); });
+    host.addEventListener("keydown", function (e) {
+      if (e.target.tagName === "INPUT") return;
+      if (e.key === "n") { e.preventDefault(); jump(1); } else if (e.key === "N") { e.preventDefault(); jump(-1); }
+      else if (e.key === "/") { e.preventDefault(); $("#lv-q", host).focus(); }
+    });
+    var jsonl = function () { return lines.map(function (l) { return JSON.stringify({ time: l.ts, kind: l.kind, text: l.text }); }).join("\n") + "\n"; };
+    $("#lv-copy", host).addEventListener("click", function () { navigator.clipboard.writeText(jsonl()).then(function () { toast(T("lv.copied", { n: lines.length })); }, fail); });
+    $("#lv-dl", host).addEventListener("click", function () {
+      var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([jsonl()], { type: "application/x-ndjson" })); a.download = runId + ".jsonl";
+      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    });
+    var sec = host.closest("section");
+    $("#lv-full", host).addEventListener("click", function () { sec.classList.toggle("log-full"); log.focus(); });
+    document.addEventListener("keydown", function esc1(e) { if (!document.contains(host)) { document.removeEventListener("keydown", esc1); return; } if (e.key === "Escape" && sec.classList.contains("log-full")) sec.classList.remove("log-full"); });
+    paint(false);
+    // SSE with resume: the browser resends Last-Event-ID on its own reconnects; if it gives up we reconnect with ?from=.
+    function connect() {
+      stopStream();
+      var es = new EventSource("/api/runs/" + enc(runId) + "/events" + (lastId ? "?from=" + enc(lastId) : ""));
+      state.es = es;
+      es.onmessage = function (ev) { if (ev.lastEventId) lastId = ev.lastEventId; retry = 0; push(ev.data); };
+      es.addEventListener("end", function () { ended = true; es.close(); state.es = null; if (onEnd) onEnd(); });
+      es.addEventListener("idle", function () { es.close(); state.es = null; state.esPaused = true; if (onEnd) onEnd("idle"); });
+      es.onerror = function () {
+        if (ended) return;
+        if (es.readyState === 2 && document.contains(host)) { retry++; setTimeout(function () { if (!ended && document.contains(host)) connect(); }, Math.min(10000, 1000 * retry)); }
+      };
+    }
+    state.esResume = function () { if (!ended && document.contains(host)) connect(); };
+    connect();
+    return { push: push, lines: lines };
   }
   function renderRunDetail(id) {
     return api("/api/runs/" + enc(id)).then(function (r) {
@@ -1369,23 +1557,15 @@
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(live ? T("rd.running") : dur(r.duration_ms)) + "</strong><span>" + esc(T("rd.started", { t: when(r.started_at || r.created_at) })) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.cost")) + "</small><strong>" + esc(usd(r.cost_usd, 4)) + "</strong><span>" + esc(T("rd.bucket", { b: r.bucket })) + "</span></div>" +
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(r.input_tokens + r.output_tokens)) + "</strong><span>" + esc(T("rd.in_out", { i: num(r.input_tokens), o: num(r.output_tokens) })) + "</span></div></div>" +
-        '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div class="log" id="log" aria-live="polite"></div></section>' +
+        '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + '</h3></div><dl class="kv"><dt>' + esc(T("col.run")) + "</dt><dd><code>" + esc(r.id) + "</code></dd><dt>" + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
         "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(r.error) + "</dd>" : "") + "</dl></section></div>",
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
-      var log = $("#log");
-      stopStream();
       bumpIdle();
-      var es = new EventSource("/api/runs/" + enc(id) + "/events");
-      state.es = es;
-      es.onmessage = function (ev) {
-        var atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
-        log.insertAdjacentHTML("beforeend", logLine(ev.data));
-        if (atBottom) log.scrollTop = log.scrollHeight;
-      };
-      es.addEventListener("end", function () { es.close(); state.es = null; if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) renderRunDetail(id); }, 300); });
-      es.addEventListener("idle", function () { es.close(); $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; });
-      es.onerror = function () { es.close(); };
+      logView($("#lv"), id, live, function (why) {
+        if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
+        if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);
+      });
     });
   }
   // ---------- SPEND ----------
@@ -1472,7 +1652,7 @@
   function refresh() { return route(true); }
   function route(soft) {
     soft = soft === true;
-    stopStream();
+    stopStream(); stopPoll();
     clearTimeout(scheduleRefresh._t);
     if (!soft) $("#modal-root").innerHTML = "";
     var y = window.scrollY, pg = page(), sy = pg ? pg.scrollTop : 0;

@@ -1,0 +1,120 @@
+package webui
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/cost"
+)
+
+// rerun: POST /api/runs/<id>/rerun — a task run reruns the task; an ad-hoc run reruns its prompt.
+func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
+	runs, err := s.queryRuns(r.Context(), "WHERE r.id=?", id)
+	if err != nil || len(runs) == 0 {
+		writeErr(w, 404, "run not found")
+		return
+	}
+	run := runs[0]
+	if run.TaskID != "" {
+		if s.deps.RunTask == nil {
+			writeErr(w, 503, "runner not available")
+			return
+		}
+		if err := s.deps.RunTask(run.TaskID, cost.BucketProduction); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	} else {
+		if s.deps.QuickRun == nil {
+			writeErr(w, 503, "runner not available")
+			return
+		}
+		if err := s.deps.QuickRun(run.Prompt, run.Provider); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	writeJSON(w, 202, map[string]any{"ok": true})
+}
+
+type beat struct {
+	ID         string  `json:"id"`
+	Status     string  `json:"status"`
+	At         string  `json:"at"`
+	DurationMS int64   `json:"duration_ms"`
+	CostUSD    float64 `json:"cost_usd"`
+}
+
+// heartbeats returns the last n runs per active/paused task, oldest first.
+func (s *Server) heartbeats(ctx context.Context, n int) (map[string][]beat, error) {
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT task_id, id, status, created_at, COALESCE(duration_ms,0), COALESCE(total_cost_usd,0) FROM (
+		SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.task_id ORDER BY r.created_at DESC) AS rn
+		FROM runs r JOIN tasks t ON t.id = r.task_id WHERE t.status IN ('active','paused')) WHERE rn <= ? ORDER BY created_at ASC`, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]beat{}
+	for rows.Next() {
+		var tid string
+		var b beat
+		if err := rows.Scan(&tid, &b.ID, &b.Status, &b.At, &b.DurationMS, &b.CostUSD); err != nil {
+			return nil, err
+		}
+		out[tid] = append(out[tid], b)
+	}
+	return out, rows.Err()
+}
+
+// handleDashboard: GET /api/dashboard — running now, next 24h, KPIs, heartbeat bars.
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	running, err := s.queryRuns(ctx, "WHERE r.status IN ('queued','running') ORDER BY r.created_at DESC LIMIT 20")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	next, _ := s.upcoming(ctx, 24*time.Hour, 12)
+	beats, err := s.heartbeats(ctx, 20)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	type trow struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		Beats  []beat `json:"beats"`
+	}
+	tasks := []trow{}
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, name, status FROM tasks WHERE status IN ('active','paused') ORDER BY name`)
+	if err == nil {
+		for rows.Next() {
+			var t trow
+			if rows.Scan(&t.ID, &t.Name, &t.Status) == nil {
+				t.Beats = beats[t.ID]
+				if t.Beats == nil {
+					t.Beats = []beat{}
+				}
+				tasks = append(tasks, t)
+			}
+		}
+		rows.Close()
+	}
+	start := time.Now().In(s.loc())
+	day := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, s.loc()).UTC().Format(time.RFC3339)
+	var total, ok int
+	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1), COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0) FROM runs WHERE created_at >= ?`, day).Scan(&total, &ok)
+	sum, _ := s.deps.Cost.Summary(ctx, "")
+	var maxUSD float64
+	for _, b := range sum.Budgets {
+		if b.Scope == "global" && b.Period == "day" {
+			maxUSD = b.MaxUSD
+		}
+	}
+	writeJSON(w, 200, map[string]any{
+		"running": running, "next": next, "tasks": tasks,
+		"kpi": map[string]any{"runs_today": total, "succeeded_today": ok, "spent_today": sum.TotalUSD, "budget_usd": maxUSD},
+	})
+}
