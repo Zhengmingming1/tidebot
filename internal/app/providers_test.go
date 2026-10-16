@@ -69,7 +69,7 @@ func TestProviderCRUDAndSecretNonDisclosure(t *testing.T) {
 		t.Fatal("key not in secret store")
 	}
 
-	res, err := pa.TestProvider(ctx, "mygw")
+	res, err := pa.TestProvider(ctx, "mygw", "")
 	if err != nil || res["ok"] != true || gotAuth != "Bearer "+secret {
 		t.Fatalf("test %v %v", res, err)
 	}
@@ -92,7 +92,7 @@ func TestProviderCRUDAndSecretNonDisclosure(t *testing.T) {
 	if _, err := pa.SaveProvider(ctx, webui.ProviderInput{OriginalName: "mygw2", Name: "mygw2", BaseURL: srv.URL, APIKey: strp("sk-wrong-OTHERSECRET-1234")}); err != nil {
 		t.Fatal(err)
 	}
-	res, _ = pa.TestProvider(ctx, "mygw2")
+	res, _ = pa.TestProvider(ctx, "mygw2", "")
 	b, _ := json.Marshal(res)
 	if res["ok"] == true || strings.Contains(string(b), "OTHERSECRET") {
 		t.Fatalf("test result leaks or passes: %s", b)
@@ -125,5 +125,46 @@ func TestProviderCRUDAndSecretNonDisclosure(t *testing.T) {
 
 	if strings.Contains(logs.String(), "SECRET") {
 		t.Fatalf("secret in logs: %s", logs.String())
+	}
+}
+
+func TestProviderOrderAndModelCheck(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	pa := providerAdmin{a}
+	var seenModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b struct{ Model string }
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		seenModel = b.Model
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	if _, err := pa.SaveProvider(ctx, webui.ProviderInput{Name: "gw", BaseURL: srv.URL, Model: "main-m", APIKey: strp("sk-abcdefgh1234")}); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := pa.TestProvider(ctx, "gw", "haiku-x"); r["ok"] != true || seenModel != "haiku-x" {
+		t.Fatalf("model check %v %s", r, seenModel)
+	}
+	if err := pa.SetProviderOrder(ctx, []string{"gw", "deepseek", "ghost"}); err != nil {
+		t.Fatal(err)
+	}
+	l := pa.ListProviders(ctx)
+	if l[0].Name != "gw" || l[1].Name != "deepseek" {
+		t.Fatalf("order %s %s", l[0].Name, l[1].Name)
+	}
+}
+
+func TestPresetsSaveAsIs(t *testing.T) {
+	a := newTestApp(t)
+	pa := providerAdmin{a}
+	for _, p := range pa.Presets() {
+		env, _ := p["extra_env"].(map[string]string)
+		if err := webui.ValidateExtraEnv(env); err != nil {
+			t.Errorf("preset %v: %v", p["id"], err)
+		}
+		if u, _ := p["base_url"].(string); webui.ValidateBaseURL(u) != nil {
+			t.Errorf("preset %v base url %s rejected", p["id"], u)
+		}
 	}
 }
