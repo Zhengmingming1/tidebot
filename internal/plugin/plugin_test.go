@@ -169,7 +169,7 @@ func (f *fakeAPI) RunsStart(context.Context, string, string, map[string]string) 
 	return "run1", nil
 }
 func (f *fakeAPI) NotifySend(context.Context, string, string, string) error { return nil }
-func (f *fakeAPI) TasksRead(context.Context, string) (any, error)          { return nil, nil }
+func (f *fakeAPI) TasksRead(context.Context, string) (any, error)           { return nil, nil }
 func (f *fakeAPI) PluginEvent(id, kind, detail string) {
 	f.mu.Lock()
 	f.events = append(f.events, kind)
