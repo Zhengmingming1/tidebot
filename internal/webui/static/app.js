@@ -353,7 +353,7 @@
         '<div class="spend-big">' + esc(usd(sp.used_usd)) + " <span>/ " + (max ? esc(usd(max)) : "no cap") + "</span></div>" +
         '<div class="meta">' + (max ? esc(Math.round(pct)) + "% of daily budget" : "No global daily budget set") + " · " + esc(num(sp.tokens)) + " tokens</div>" +
         '<div class="progress' + (pct >= 100 ? " bad" : pct >= 80 ? " warn" : "") + '"><span data-w="' + pct + '"></span></div>' +
-        '<div class="meta">Resets in ' + esc(resetTxt) + " (UTC midnight)</div></section>" +
+        '<div class="meta">Resets in ' + esc(resetTxt) + " (local midnight · " + esc(sp.timezone || state.tz) + ")</div></section>" +
         "</div>" +
         '<section class="card flush"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>Recent Runs</h2>" + '<a class="link" href="#/runs">View all runs ' + ic("arrow", "sm") + "</a></div>" + runsTable(o.runs || []) + "</section>",
         "home", []);
@@ -446,7 +446,7 @@
     var groups = [], idx = {};
     items.forEach(function (it) {
       var k = it.message_id || it.id;
-      if (!(k in idx)) { idx[k] = groups.length; groups.push({ utter: it.utterance, at: it.created_at, items: [] }); }
+      if (!(k in idx)) { idx[k] = groups.length; groups.push({ key: k, utter: it.utterance, at: it.created_at, items: [] }); }
       groups[idx[k]].items.push(it);
     });
     return groups.map(function (g) {
@@ -457,7 +457,9 @@
         : g.items.some(function (i) { return i.status === "needs_decision"; }) ? "This conflicts with an existing requirement — choose how to resolve it."
         : all(function (i) { return i.status === "rejected"; }) ? "Discarded — nothing changed."
         : scope === "next" ? "Scheduled for the next run." : "Done. The task spec has a new version.";
-      var ids = esc(pending.map(function (i) { return i.id; }).join(","));
+      var conflict = g.items.some(function (i) { return i.status === "needs_decision"; });
+      var multi = pending.length + g.items.filter(function (i) { return i.status === "needs_decision"; }).length > 1;
+      var bid = esc(g.key);
       return '<div class="msg"><span class="avatar">ME</span><div><div class="msg-meta"><strong>You</strong><small>' + esc(ago(g.at)) + '</small></div><div class="msg-body">' + esc(g.utter || "(amendment)") + "</div></div></div>" +
         '<div class="msg"><span class="avatar bot">' + waveMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + esc(ago(g.at)) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
         '<div class="req-card"><div class="req-card-head">' + (scope === "next" ? "Additional requirements" : "Updated requirements") +
@@ -465,12 +467,14 @@
         g.items.map(function (i) {
           var sl = REQ_ST[i.status] || ["", i.status];
           var ck = i.status === "rejected" ? ic("x", "sm") : (i.status === "pending" || i.status === "needs_decision") ? ic("circle", "sm") : ic("checkc", "sm");
-          return '<div class="req-item"><span class="ck ' + (i.status === "rejected" ? "no" : i.status === "pending" ? "pending" : "") + '">' + ck + '</span><span class="op">' + esc(i.op) + '</span><span class="txt">' + esc(i.content || i.target_spec_item) +
+          var sel = multi && i.status === "pending" ? '<input type="checkbox" class="req-sel" data-sel="' + bid + '" value="' + esc(i.id) + '" checked aria-label="Include">' : "";
+          return '<div class="req-item">' + sel + '<span class="ck ' + (i.status === "rejected" ? "no" : i.status === "pending" ? "pending" : "") + '">' + ck + '</span><span class="op">' + esc(i.op) + '</span><span class="txt">' + esc(i.content || i.target_spec_item) +
             (scope === "mixed" ? ' <span class="tag ' + (i.scope === "next_run" ? "next" : "perm") + '">' + (i.scope === "next_run" ? "next run" : "permanent") + "</span>" : "") +
             '</span><span class="st"><span class="pill ' + sl[0] + '">' + esc(sl[1]) + "</span></span></div>" +
             (i.status === "needs_decision" ? '<div class="req-actions"><button class="btn sm" data-resolve="' + esc(i.id) + '" data-res="replace">Replace existing</button><button class="btn sm" data-resolve="' + esc(i.id) + '" data-res="coexist">Keep both</button></div>' : "");
         }).join("") +
-        (pending.length ? '<div class="req-actions"><button class="btn ok" data-confirm="' + ids + '">' + ic("check", "sm") + 'Confirm</button><button class="btn danger" data-reject="' + ids + '">' + ic("x", "sm") + "Reject</button></div>" : "") +
+        (pending.length || conflict ? (conflict ? '<p class="hint req-hint">' + ic("info", "sm") + "Resolve the conflict above before confirming.</p>" : "") +
+          '<div class="req-actions"><button class="btn ok" data-confirm="' + bid + '"' + (conflict ? " disabled" : "") + ">" + ic("check", "sm") + (multi ? "Confirm all" : "Confirm") + '</button><button class="btn danger" data-reject="' + bid + '">' + ic("x", "sm") + (multi ? "Reject all" : "Reject") + "</button></div>" : "") +
         "</div></div></div>";
     }).join("");
   }
@@ -523,9 +527,25 @@
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function () { toast("Run started"); setTimeout(reload, 800); }).catch(fail); });
       var tg = $("#t-toggle");
       tg.addEventListener("click", function () { api(base + "/" + tg.getAttribute("data-act"), { method: "POST", body: {} }).then(reload).catch(fail); });
-      var each = function (ids, fn) { return ids.split(",").reduce(function (p, x) { return p.then(function () { return fn(x); }); }, Promise.resolve()); };
-      $$("[data-confirm]").forEach(function (b) { b.addEventListener("click", function () { b.disabled = true; each(b.getAttribute("data-confirm"), function (x) { return api("/api/amendments/" + enc(x) + "/confirm", { method: "POST", body: {} }); }).then(function () { toast("Requirements confirmed"); reload(); }).catch(fail); }); });
-      $$("[data-reject]").forEach(function (b) { b.addEventListener("click", function () { b.disabled = true; each(b.getAttribute("data-reject"), function (x) { return api("/api/amendments/" + enc(x) + "/reject", { method: "POST", body: {} }); }).then(function () { toast("Rejected"); reload(); }).catch(fail); }); });
+      var picked = function (bid) {
+        var boxes = $$('[data-sel="' + bid + '"]');
+        return boxes.length ? boxes.filter(function (c) { return c.checked; }).map(function (c) { return c.value; }) : null;
+      };
+      $$(".req-sel").forEach(function (c) { c.addEventListener("change", function () {
+        var bid = c.getAttribute("data-sel"), n = picked(bid).length, btn = $('[data-confirm="' + bid + '"]');
+        if (btn && !btn.hasAttribute("data-blocked")) btn.disabled = n === 0;
+      }); });
+      $$("[data-confirm][disabled]").forEach(function (b) { b.setAttribute("data-blocked", "1"); });
+      var batch = function (b, attr, act, msg) {
+        b.addEventListener("click", function () {
+          var bid = b.getAttribute(attr), only = picked(bid);
+          if (only && !only.length) return;
+          b.disabled = true;
+          api("/api/amendments/" + enc(bid) + "/" + act, { method: "POST", body: { only: only || [] } }).then(function () { toast(msg); reload(); }).catch(function (e) { b.disabled = false; fail(e); });
+        });
+      };
+      $$("[data-confirm]").forEach(function (b) { batch(b, "data-confirm", "confirm-batch", "Requirements confirmed"); });
+      $$("[data-reject]").forEach(function (b) { batch(b, "data-reject", "reject-batch", "Rejected"); });
       $$("[data-resolve]").forEach(function (b) { b.addEventListener("click", function () { api("/api/amendments/" + enc(b.getAttribute("data-resolve")) + "/resolve", { method: "POST", body: { resolution: b.getAttribute("data-res") } }).then(reload).catch(fail); }); });
       var rollback = function (vid, no) {
         if (vid === vers.current) return;
@@ -686,7 +706,7 @@
       var pct = function (u, m) { return m ? Math.min(100, u / m * 100) : 0; };
       var cls = function (p) { return p >= 100 ? " bad" : p >= 80 ? " warn" : ""; };
       var gp = pct(s.total_usd, global.max_usd);
-      mount('<div class="page-head"><div><h1>Spend</h1><p>Enforced before every run and via --max-budget-usd · ledger day is UTC.</p></div></div>' +
+      mount('<div class="page-head"><div><h1>Spend</h1><p>Enforced before every run and via --max-budget-usd · resets at local midnight.</p></div></div>' +
         '<div class="grid g4">' +
         '<div class="card stat"><small>Today</small><strong>' + esc(usd(s.total_usd, 4)) + "</strong><span>" + (global.max_usd ? esc(Math.round(gp)) + "% of " + esc(usd(global.max_usd)) : "No cap") + "</span></div>" +
         '<div class="card stat"><small>Remaining</small><strong>' + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd)) : "∞") + "</strong><span>Global daily budget</span></div>" +
