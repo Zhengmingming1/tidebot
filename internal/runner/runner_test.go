@@ -72,7 +72,7 @@ func TestConcurrencyLimit(t *testing.T) {
 	defer sqlDB.Close()
 	r := New(db.NewStore(sqlDB), nil, 1)
 
-	// Use --sleep via ExtraArgs: mock supports --sleep N before other parsing... 
+	// Use --sleep via ExtraArgs: mock supports --sleep N before other parsing...
 	// Our mock parses --sleep. Spawn two; second should wait on semaphore.
 	started := make(chan struct{}, 2)
 	done := make(chan error, 2)

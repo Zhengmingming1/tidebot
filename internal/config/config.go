@@ -33,6 +33,7 @@ type Config struct {
 	WebUITLSKey      string        `json:"webui_tls_key" yaml:"webui_tls_key"`
 	WebUIAllowHTTP   bool          `json:"webui_allow_http" yaml:"webui_allow_http"` // explicit: LAN without TLS
 	WebUIIdleMinutes int           `json:"webui_idle_minutes" yaml:"webui_idle_minutes"`
+	Timezone         string        `json:"timezone" yaml:"timezone"` // IANA name for UI display; empty = system
 	SchedulerTick    time.Duration `json:"scheduler_tick" yaml:"scheduler_tick"`
 	IPCPath          string        `json:"ipc_path" yaml:"ipc_path"`
 }
@@ -182,6 +183,31 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("TIDEBOT_IPC"); v != "" {
 		cfg.IPCPath = v
 	}
+	if v := os.Getenv("TIDEBOT_TIMEZONE"); v != "" {
+		cfg.Timezone = v
+	}
+}
+
+// Location resolves the display timezone: config, $TZ, /etc/timezone, /etc/localtime link, else Local.
+func (c Config) Location() *time.Location {
+	cands := []string{c.Timezone, os.Getenv("TZ")}
+	if b, err := os.ReadFile("/etc/timezone"); err == nil {
+		cands = append(cands, strings.TrimSpace(string(b)))
+	}
+	if l, err := os.Readlink("/etc/localtime"); err == nil {
+		if i := strings.Index(l, "zoneinfo/"); i >= 0 {
+			cands = append(cands, l[i+len("zoneinfo/"):])
+		}
+	}
+	for _, n := range cands {
+		if n == "" {
+			continue
+		}
+		if loc, err := time.LoadLocation(n); err == nil {
+			return loc
+		}
+	}
+	return time.Local
 }
 
 func parseBool(s string) bool {

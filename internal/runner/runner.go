@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,18 +24,18 @@ import (
 
 // Options configure a single Claude Code invocation.
 type Options struct {
-	ClaudeBin    string
-	Prompt       string
-	WorkspaceDir string
-	Timeout      time.Duration
-	Bare         bool
-	ExtraArgs    []string
-	Profile      provider.Profile
-	APIKey       string // injected into child env only; never logged
-	EnvBase      []string
-	TriggerKind  string
-	TaskID        string
-	TaskVersionID string
+	ClaudeBin       string
+	Prompt          string
+	WorkspaceDir    string
+	Timeout         time.Duration
+	Bare            bool
+	ExtraArgs       []string
+	Profile         provider.Profile
+	APIKey          string // injected into child env only; never logged
+	EnvBase         []string
+	TriggerKind     string
+	TaskID          string
+	TaskVersionID   string
 	HasNextRunItems bool
 	CostBucket      string // production|canary|optimization|dry_run|assist
 	Logger          *slog.Logger
@@ -62,6 +63,17 @@ type Runner struct {
 	sem     chan struct{}
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
+	// LogDir, when set, receives a human-readable log per run (<LogDir>/<run_id>.log)
+	// that the WebUI tails for live SSE output. Secrets are masked before writing.
+	LogDir string
+}
+
+// LogPath returns the log file path for a run ("" if logging disabled).
+func (r *Runner) LogPath(runID string) string {
+	if r.LogDir == "" {
+		return ""
+	}
+	return filepath.Join(r.LogDir, runID+".log")
 }
 
 // New creates a Runner with a concurrency limit (default 2).
@@ -111,6 +123,9 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	if err := r.store.InsertRun(ctx, row); err != nil {
 		return Result{}, fmt.Errorf("insert run: %w", err)
 	}
+	if opts.CostBucket != "" {
+		_, _ = r.store.DB.ExecContext(ctx, `UPDATE runs SET cost_bucket=? WHERE id=?`, opts.CostBucket, runID)
+	}
 
 	runCtx := ctx
 	var cancel context.CancelFunc
@@ -145,7 +160,17 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		"claude_bin", opts.ClaudeBin,
 	)
 
-	res, err := execute(runCtx, opts)
+	var logW io.Writer = io.Discard
+	if lp := r.LogPath(runID); lp != "" {
+		if err := os.MkdirAll(r.LogDir, 0o700); err == nil {
+			if f, ferr := os.OpenFile(lp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); ferr == nil {
+				defer f.Close()
+				logW = f
+			}
+		}
+	}
+	fmt.Fprintf(logW, "[%s] run %s started (provider=%s)\n", started.Local().Format("15:04:05"), runID, opts.Profile.Name)
+	res, err := execute(runCtx, opts, logW)
 	res.RunID = runID
 	finished := time.Now().UTC()
 	res.DurationMS = finished.Sub(started).Milliseconds()
@@ -183,6 +208,7 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
 	}
 
+	fmt.Fprintf(logW, "[%s] run finished: %s (cost $%.4f, %d ms)\n[[end]]\n", time.Now().Format("15:04:05"), status, res.TotalCostUSD, res.DurationMS)
 	log.Info("run finished",
 		"run_id", runID,
 		"status", status,
@@ -226,7 +252,10 @@ func nullStr(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
-func execute(ctx context.Context, opts Options) (Result, error) {
+func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) {
+	if logW == nil {
+		logW = io.Discard
+	}
 	bin := opts.ClaudeBin
 	if bin == "" {
 		bin = "claude"
@@ -287,6 +316,9 @@ func execute(ctx context.Context, opts Options) (Result, error) {
 			ev, err := ParseEvent(line)
 			if err != nil {
 				continue // skip malformed lines; mock/tests still pass on valid ones
+			}
+			if s := FormatEvent(ev); s != "" {
+				fmt.Fprintf(logW, "[%s] %s\n", time.Now().Format("15:04:05"), provider.MaskSecret(s, opts.APIKey))
 			}
 			mu.Lock()
 			events = append(events, ev)
