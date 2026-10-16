@@ -618,9 +618,11 @@
   });
 
   // ---------- HOME ----------
+  var HOME_BEATS = 10;
   function beatsBar(beats) {
     var cells = [];
-    for (var i = 0; i < 20 - beats.length; i++) cells.push('<span class="hb hb-none"></span>');
+    beats = beats.slice(-HOME_BEATS);
+    for (var i = 0; i < HOME_BEATS - beats.length; i++) cells.push('<span class="hb hb-none"></span>');
     beats.forEach(function (b) {
       var cls = b.status === "succeeded" ? "ok" : (b.status === "running" || b.status === "queued") ? "run" : b.status === "skipped" ? "skip" : "bad";
       var tip = when(b.at) + " · " + T("st." + b.status) + " · " + dur(b.duration_ms) + " · " + usd(b.cost_usd, 3);
@@ -633,36 +635,36 @@
       var o = r[0], d = r[1];
       renderStatus(o);
       var qa = (o.buttons || []).slice(0, 5).map(function (b) {
-        return '<button class="card qa' + (b.color ? " colored" : "") + '" data-color="' + esc(b.color || "") + '" data-btn="' + esc(b.id) + '"><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(b.description || "") + "</small></button>";
+        return '<button class="card qa' + (b.color ? " colored" : "") + '" data-color="' + esc(b.color || "") + '" data-btn="' + esc(b.id) + '" title="' + esc(b.description || b.label) + '"><span class="qa-ico">' + ic(btnIcon(b)) + '</span><span class="qa-txt"><strong>' + esc(b.label) + "</strong><small>" + esc(b.description || "") + "</small></span></button>";
       });
-      qa.push('<a class="card qa add" href="#/buttons" aria-label="' + esc(T("home.add_button")) + '"><span class="qa-ico">' + ic("plus", "lg") + "</span><small>" + esc(T("home.add_button")) + "</small></a>");
-      qa.push('<button class="card qa tint" id="qa-new"><span class="qa-ico">' + ic("sparkle", "lg") + "</span><strong>" + esc(T("home.quick")) + "</strong><small>" + esc(T("home.quick_sub")) + " " + ic("arrow", "sm") + "</small></button>");
+      qa.push('<button class="card qa tint" id="qa-new"><span class="qa-ico">' + ic("sparkle") + '</span><span class="qa-txt"><strong>' + esc(T("home.quick")) + "</strong><small>" + esc(T("home.quick_sub")) + "</small></span></button>");
+      qa.push('<a class="card qa add" href="#/buttons" title="' + esc(T("home.add_button")) + '" aria-label="' + esc(T("home.add_button")) + '">' + ic("plus") + "</a>");
       var noTasks = !d.tasks.length;
-      mount('<div class="grid g4 kpis" id="kpis"></div>' +
+      mount('<div class="home"><div class="grid g4 kpis" id="kpis"></div>' +
         '<div class="qa-row">' + qa.join("") + "</div>" +
         (noTasks ? '<section class="card">' + '<div class="empty">' + ic("tasks") + "<strong>" + esc(T("home.empty_title")) + "</strong>" + esc(T("home.empty_sub")) + '<div class="mt"><button class="btn primary" id="home-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div></section>" : "") +
-        '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("home.running")) + '</h2><span class="link muted" id="run-n"></span></div><div id="running" class="grow"></div></section>' +
-        '<section class="card fill"><div class="card-head"><span class="ico">' + ic("calendar") + "</span><h2>" + esc(T("home.next24")) + '</h2><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("arrow", "sm") + '</a></div><div id="next24" class="grow"></div><div class="card-foot">' + ic("info", "sm") + "<span>" + esc(T("home.times_in", { tz: tzLabel() })) + "</span></div></section></div>" +
-        (noTasks ? "" : '<section class="card"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.health")) + '</h2><span class="link muted">' + esc(T("home.health_sub")) + '</span></div><div id="beats"></div></section>') +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("arrow", "sm") + '</a></div><div id="recent"></div></section>', "home", []);
+        '<div class="home-mid' + (noTasks ? " two" : "") + '"><section class="card hc"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("home.running")) + '</h2><span class="link muted" id="run-n"></span></div><div id="running"></div></section>' +
+        '<section class="card hc"><div class="card-head"><span class="ico">' + ic("calendar") + "</span><h2>" + esc(T("home.next24")) + '</h2><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("arrow", "sm") + '</a></div><div id="next24"></div><div class="hc-foot">' + ic("info", "sm") + "<span>" + esc(T("home.times_in", { tz: tzLabel() })) + "</span></div></section>" +
+        (noTasks ? "" : '<section class="card hc"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.health")) + '</h2><span class="link muted">' + esc(T("home.health_sub")) + '</span></div><div id="beats"></div></section>') + "</div>" +
+        '<section class="card flush home-recent"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("arrow", "sm") + '</a></div><div id="recent"></div></section></div>', "home", []);
       applyColors(page());
       var paint = function (o, d) {
         var k = d.kpi, rate = k.runs_today ? Math.round(k.succeeded_today / k.runs_today * 100) + "%" : "—", left = k.budget_usd ? Math.max(0, k.budget_usd - k.spent_today) : null;
         var bp = k.budget_usd ? Math.min(100, k.spent_today / k.budget_usd * 100) : 0;
         $("#kpis").innerHTML = [[T("home.k_runs"), num(k.runs_today), T("home.k_runs_sub", { n: k.succeeded_today })], [T("home.k_rate"), rate, T("time.today")], [T("home.k_spent"), usd(k.spent_today, 2), k.budget_usd ? T("home.pct_budget", { p: Math.round(bp) }) : T("home.no_budget")], [T("home.k_left"), left == null ? "∞" : usd(left, 2), T("sp.global_daily")]].map(function (x, i) {
-          return '<div class="card stat"><small>' + esc(x[0]) + '</small><strong class="num">' + esc(x[1]) + "</strong><span>" + esc(x[2]) + "</span>" + (i === 3 && k.budget_usd ? '<div class="progress' + (bp >= 100 ? " bad" : bp >= 80 ? " warn" : "") + '"><span data-w="' + bp + '"></span></div>' : "") + "</div>";
+          return '<div class="card stat"><small>' + esc(x[0]) + '</small><div class="stat-v"><strong class="num">' + esc(x[1]) + "</strong><span>" + esc(x[2]) + "</span></div>" + (i === 3 && k.budget_usd ? '<div class="progress' + (bp >= 100 ? " bad" : bp >= 80 ? " warn" : "") + '"><span data-w="' + bp + '"></span></div>' : "") + "</div>";
         }).join("");
         $("#run-n").textContent = d.running.length ? T("home.n_running", { n: d.running.length }) : "";
         $("#running").innerHTML = d.running.length ? '<ul class="live-list">' + d.running.map(function (x) {
           return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + esc(x.status === "queued" ? T("st.queued") : T("home.started_ago", { t: ago(x.started_at || x.created_at) })) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
-        }).join("") + "</ul>" : emptyState("checkc", T("home.idle"), T("home.idle_sub"));
-        $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.map(function (s) {
+        }).join("") + "</ul>" : '<p class="hc-empty">' + ic("checkc", "sm") + "<span><strong>" + esc(T("home.idle")) + "</strong> · " + esc(T("home.idle_sub")) + "</span></p>";
+        $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.slice(0, 4).map(function (s) {
           return '<li><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
-        }).join("") + "</ul>" : emptyState("calendar", T("home.no_sched"), T("home.no_sched_sub"));
-        if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.map(function (t) {
+        }).join("") + "</ul>" : '<p class="hc-empty">' + ic("calendar", "sm") + "<span><strong>" + esc(T("home.no_sched")) + "</strong> · " + esc(T("home.no_sched_sub")) + "</span></p>";
+        if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.slice(0, 5).map(function (t) {
           return '<div class="beat-row"><a href="#/tasks/' + enc(t.id) + '" class="bn">' + esc(t.name) + (t.status === "paused" ? ' <span class="pill warn sm">' + esc(T("task.paused")) + "</span>" : "") + "</a>" + beatsBar(t.beats) + "</div>";
         }).join("") + "</div>";
-        $("#recent").innerHTML = runsTable((o.runs || []).slice(0, 6));
+        $("#recent").innerHTML = runsTable((o.runs || []).slice(0, 5));
         applySizes(page()); wireRows(page());
       };
       paint(o, d);

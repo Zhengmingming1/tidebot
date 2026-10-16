@@ -111,7 +111,7 @@
   "home.add_button_sub": "固定一个任务或提示词",
   "home.empty_sub": "建一个任务并选好时间,运行情况会显示在这里。",
   "home.empty_title": "还没有任务",
-  "home.health": "各任务最近 20 次",
+  "home.health": "各任务最近 10 次",
   "home.health_sub": "悬停查看详情",
   "home.idle": "当前没有运行",
   "home.idle_sub": "定时任务一开始就会出现在这里。",

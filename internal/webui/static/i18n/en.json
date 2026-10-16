@@ -111,7 +111,7 @@
   "home.add_button_sub": "Pin a task or prompt",
   "home.empty_sub": "Create one and pick a schedule; it shows up here with its run history.",
   "home.empty_title": "No tasks yet",
-  "home.health": "Last 20 runs per task",
+  "home.health": "Last 10 runs per task",
   "home.health_sub": "hover for details",
   "home.idle": "Nothing running",
   "home.idle_sub": "Scheduled runs show up here the moment they start.",
