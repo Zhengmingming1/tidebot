@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/amend"
 	"github.com/Zhengmingming1/tidebot/internal/config"
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
@@ -18,6 +19,9 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/scheduler"
 	"github.com/Zhengmingming1/tidebot/internal/secrets"
+	"github.com/Zhengmingming1/tidebot/internal/skillstore"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
+	"github.com/Zhengmingming1/tidebot/internal/version"
 )
 
 // App is the core runtime shared by daemon and CLI.
@@ -30,6 +34,10 @@ type App struct {
 	Secrets  secrets.Backend
 	Runner   *runner.Runner
 	Sched    *scheduler.Scheduler
+	Ver      *version.Service
+	Tasks    *tasksvc.Service
+	Amend    *amend.Service
+	Skills   *skillstore.Service
 }
 
 // Open loads config, opens DB, and builds subsystems.
@@ -55,6 +63,7 @@ func Open(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 
+	ver := version.New(sqlDB)
 	a := &App{
 		Cfg:      cfg,
 		Log:      log,
@@ -63,8 +72,16 @@ func Open(cfg config.Config) (*App, error) {
 		Registry: reg,
 		Secrets:  secrets.Chain{secrets.EnvBackend{}},
 		Runner:   runner.New(store, log, cfg.MaxConcurrency),
+		Ver:      ver,
 	}
 	a.Sched = scheduler.New(store, log, cfg.SchedulerTick, a.runTask)
+	a.Tasks = tasksvc.New(store, ver, a.Sched)
+	structurer := amend.Structurer(amend.MockStructurer{})
+	if os.Getenv("TIDEBOT_AMEND_AI") == "1" {
+		structurer = &ClaudeStructurer{App: a}
+	}
+	a.Amend = amend.New(sqlDB, a.Tasks, ver, structurer)
+	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
 	return a, nil
 }
 
@@ -81,7 +98,6 @@ func (a *App) Close() error {
 
 // ResolveAPIKey loads the key for a profile (env / secret backend). Never log the return value.
 func (a *App) ResolveAPIKey(p provider.Profile) (string, error) {
-	// Prefer dedicated secret name, then provider.EnvFromOS fallbacks.
 	if key, err := a.Secrets.Get("provider:" + p.Name); err == nil && key != "" {
 		return key, nil
 	}
@@ -102,13 +118,19 @@ func (a *App) ResolveProfile(name string) (provider.Profile, error) {
 
 // RunPrompt executes an ad-hoc or task-bound prompt once.
 func (a *App) RunPrompt(ctx context.Context, prompt, workspace, providerName, taskID, trigger string, timeout time.Duration) (runner.Result, error) {
+	return a.RunPromptEx(ctx, runner.Options{
+		Prompt: prompt, WorkspaceDir: workspace, TriggerKind: trigger, TaskID: taskID,
+	}, providerName, timeout)
+}
+
+// RunPromptEx is the full run entry used by task execution.
+func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName string, timeout time.Duration) (runner.Result, error) {
 	prof, err := a.ResolveProfile(providerName)
 	if err != nil {
 		return runner.Result{}, err
 	}
 	key, err := a.ResolveAPIKey(prof)
 	if err != nil {
-		// Allow mock runs without a key when Claude bin is the mock.
 		if !isMockBin(a.Cfg.ClaudeBin) {
 			return runner.Result{}, fmt.Errorf("resolve api key for %s: %w", prof.Name, err)
 		}
@@ -117,29 +139,25 @@ func (a *App) RunPrompt(ctx context.Context, prompt, workspace, providerName, ta
 	if timeout <= 0 {
 		timeout = a.Cfg.DefaultTimeout
 	}
-	if workspace == "" {
-		workspace = a.Cfg.DataDir
+	if opts.WorkspaceDir == "" {
+		opts.WorkspaceDir = a.Cfg.DataDir
 	}
-	extra := []string{
-		"--permission-mode", "dontAsk",
-		"--permission-prompts", "none",
-		"--restricted",
-		"--max-budget-usd", "0.05",
-		"--effort", "low",
+	opts.ClaudeBin = a.Cfg.ClaudeBin
+	opts.Timeout = timeout
+	opts.Bare = true
+	opts.Profile = prof
+	opts.APIKey = key
+	opts.Logger = a.Log
+	if len(opts.ExtraArgs) == 0 {
+		opts.ExtraArgs = []string{
+			"--permission-mode", "dontAsk",
+			"--permission-prompts", "none",
+			"--restricted",
+			"--max-budget-usd", "0.05",
+			"--effort", "low",
+		}
 	}
-	return a.Runner.RunOnce(ctx, runner.Options{
-		ClaudeBin:    a.Cfg.ClaudeBin,
-		Prompt:       prompt,
-		WorkspaceDir: workspace,
-		Timeout:      timeout,
-		Bare:         true,
-		ExtraArgs:    extra,
-		Profile:      prof,
-		APIKey:       key,
-		TriggerKind:  trigger,
-		TaskID:       taskID,
-		Logger:       a.Log,
-	})
+	return a.Runner.RunOnce(ctx, opts)
 }
 
 func isMockBin(bin string) bool {
@@ -148,71 +166,58 @@ func isMockBin(bin string) bool {
 
 func (a *App) runTask(ctx context.Context, task db.Task) error {
 	providerName := a.Cfg.DefaultProvider
-	if task.ProviderID.Valid && task.ProviderID.String != "" {
+	view, err := a.Tasks.Get(ctx, task.ID)
+	if err == nil && view.Spec != nil && view.Spec.Provider != "" {
+		providerName = view.Spec.Provider
+	} else if task.ProviderID.Valid && task.ProviderID.String != "" {
 		if prow, err := a.Store.GetProviderByID(ctx, task.ProviderID.String); err == nil {
 			providerName = prow.Name
 		}
 	}
+	prompt, versionID, nextIDs, err := a.Tasks.CompilePrompt(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	if prompt == "" {
+		prompt = task.Prompt
+	}
+	ws := task.WorkspaceDir
+	if view.Spec != nil && view.Spec.WorkspaceDir != "" {
+		ws = view.Spec.WorkspaceDir
+	}
+	if view.Spec != nil && len(view.Spec.SkillBindings) > 0 {
+		if err := a.Skills.Materialize(ctx, ws, view.Spec.SkillBindings); err != nil {
+			a.Log.Warn("materialize skills", "error", err)
+		}
+	}
 	timeout := time.Duration(task.TimeoutMinutes) * time.Minute
+	if view.Spec != nil && view.Spec.TimeoutMinutes > 0 {
+		timeout = time.Duration(view.Spec.TimeoutMinutes) * time.Minute
+	}
 	if timeout <= 0 {
 		timeout = a.Cfg.DefaultTimeout
 	}
-	_, err := a.RunPrompt(ctx, task.Prompt, task.WorkspaceDir, providerName, task.ID, "cron", timeout)
+	res, err := a.RunPromptEx(ctx, runner.Options{
+		Prompt: prompt, WorkspaceDir: ws, TriggerKind: "cron", TaskID: task.ID,
+		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0,
+	}, providerName, timeout)
+	if err == nil && len(nextIDs) > 0 {
+		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
+	}
 	return err
 }
 
-// EnsureTask creates a simple Phase-0 task with cron (overlap=skip).
+// EnsureTask creates a versioned task (Phase 1) with optional cron.
 func (a *App) EnsureTask(ctx context.Context, name, prompt, cronExpr, providerName, workspace string) (db.Task, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	var providerID sql.NullString
-	if providerName != "" {
-		if p, err := a.Store.GetProviderByName(ctx, providerName); err == nil {
-			providerID = sql.NullString{String: p.ID, Valid: true}
-		} else {
-			// seed from registry into DB
-			prof, err := a.ResolveProfile(providerName)
-			if err != nil {
-				return db.Task{}, err
-			}
-			row := db.ProviderRow{
-				ID: id.New("prov"), Name: prof.Name, Preset: sql.NullString{String: prof.Preset, Valid: prof.Preset != ""},
-				BaseURL: prof.BaseURL, AuthEnv: prof.AuthEnv, Model: prof.Model,
-				OpusModel: prof.OpusModel, SonnetModel: prof.SonnetModel, HaikuModel: prof.HaikuModel,
-				FableModel: prof.FableModel, SmallFastModel: prof.SmallFastModel, SubagentModel: prof.SubagentModel,
-				ExtraEnvJSON: "{}", Enabled: true, CreatedAt: now, UpdatedAt: now,
-			}
-			if err := a.Store.UpsertProvider(ctx, row); err != nil {
-				return db.Task{}, err
-			}
-			// Upsert on name conflict keeps old id — re-read
-			if p2, err := a.Store.GetProviderByName(ctx, prof.Name); err == nil {
-				providerID = sql.NullString{String: p2.ID, Valid: true}
-			} else {
-				providerID = sql.NullString{String: row.ID, Valid: true}
-			}
-		}
-	}
-	next, err := a.Sched.ComputeInitialNext(cronExpr)
+	tv, err := a.Tasks.Create(ctx, tasksvc.CreateInput{
+		Name: name, Prompt: prompt, WorkspaceDir: workspace, ProviderName: providerName,
+		CronExpr: cronExpr, OverlapPolicy: "skip",
+		TimeoutMinutes: int(a.Cfg.DefaultTimeout / time.Minute), Actor: "user",
+	})
 	if err != nil {
-		return db.Task{}, fmt.Errorf("cron %q: %w", cronExpr, err)
-	}
-	if workspace == "" {
-		workspace = a.Cfg.DataDir
-	}
-	task := db.Task{
-		ID: id.New("task"), Name: name, Status: "active", Prompt: prompt,
-		WorkspaceDir: workspace, ProviderID: providerID, CronExpr: cronExpr,
-		OverlapPolicy: "skip", TimeoutMinutes: int(a.Cfg.DefaultTimeout / time.Minute),
-		NextRunAt: sql.NullString{String: next.UTC().Format(time.RFC3339), Valid: true},
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if task.TimeoutMinutes <= 0 {
-		task.TimeoutMinutes = 30
-	}
-	if err := a.Store.InsertTask(ctx, task); err != nil {
 		return db.Task{}, err
 	}
-	return task, nil
+	return tv.Task, nil
 }
 
 // SeedBuiltinProviders writes built-in presets into SQLite (idempotent by name).
@@ -235,12 +240,4 @@ func (a *App) SeedBuiltinProviders(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-// HomeFromEnv helps tests override config home quickly.
-func HomeFromEnv() string {
-	if v := os.Getenv("TIDEBOT_HOME"); v != "" {
-		return v
-	}
-	return ""
 }

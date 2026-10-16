@@ -2,7 +2,7 @@
 
 轻量级本地常驻 Agent 编排器：以 Claude Code（`claude -p` + stream-json）为执行引擎，支持长期定时任务、Skill 管理、版本指针回退、按钮与插件扩展。
 
-当前进度：**阶段 0（技术验证）** — Go 核心骨架、Claude Runner（含 mock）、多模型 Provider 抽象、最小 cron 调度、`agentctl` CLI。
+当前进度：**阶段 1（MVP 核心进行中）** — 本地 IPC、任务不可变版本/回滚、需求修订、Skill 导入与钉扎；阶段 0 Runner/Provider 仍可用。
 
 ## 文档
 
@@ -23,6 +23,30 @@ make build          # 产出 bin/agentd、bin/agentctl
 make test           # go vet 由 make ci 覆盖；测试使用 testdata/mock-claude
 make measure        # 实测空闲 RSS 与二进制体积 → measure-out/ + 更新 docs/phase0-results.md 前先看脚本输出
 ```
+
+
+## 阶段 1 CLI（需先启动 agentd）
+
+```bash
+export TIDEBOT_HOME=/tmp/tidebot-dev
+export TIDEBOT_CLAUDE_BIN="$PWD/testdata/mock-claude/claude"   # 或真实 claude
+./bin/agentd --no-webui &
+
+./bin/agentctl status
+./bin/agentctl tasks create --name demo --prompt "write a report" --workspace /tmp/ws
+./bin/agentctl tasks ls
+./bin/agentctl amend propose --task <id> --text "always include a summary"
+./bin/agentctl amend confirm --id <req_id>
+./bin/agentctl tasks versions --id <id>
+./bin/agentctl tasks rollback --id <id> --version <ver_id>
+./bin/agentctl skills import --name hello --dir ./path/with/SKILL.md
+./bin/agentctl skills pin --task <id> --skill <skill_id> --version <ver_id>
+./bin/agentctl tasks run --id <id>
+```
+
+IPC：`$TIDEBOT_HOME/agentd.sock`（权限 0600）。`agentctl` 只通过 socket 与守护进程通信。
+
+可选：`TIDEBOT_AMEND_AI=1` 时用配置的 Provider（如 `kimi-coding`）结构化修订；默认用本地 mock structurer，零费用。
 
 ## 快速试用（mock，无需 API Key）
 

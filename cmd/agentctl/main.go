@@ -1,19 +1,14 @@
-// Command agentctl is the Phase-0 CLI: run once, list runs, list providers.
+// Command agentctl talks to a running agentd over local IPC (JSON-RPC).
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
-	"regexp"
 	"text/tabwriter"
 
-	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
-	"github.com/Zhengmingming1/tidebot/internal/provider"
-	"github.com/Zhengmingming1/tidebot/internal/runner"
+	"github.com/Zhengmingming1/tidebot/internal/ipc"
 )
 
 func main() {
@@ -24,118 +19,164 @@ func main() {
 	cmd := os.Args[1]
 	args := os.Args[2:]
 
+	if cmd == "version" {
+		fmt.Println("tidebot agentctl phase1")
+		return
+	}
+
 	cfg, err := config.Load(os.Getenv("TIDEBOT_CONFIG"))
 	if err != nil {
 		fatal(err)
 	}
-	a, err := app.Open(cfg)
+	cli, err := ipc.DialClient(cfg.IPCPath)
 	if err != nil {
-		fatal(err)
+		fatal(fmt.Errorf("connect agentd at %s: %w (is agentd running?)", cfg.IPCPath, err))
 	}
-	defer a.Close()
+	defer cli.Close()
 
-	ctx := context.Background()
 	switch cmd {
-	case "run":
-		fs := flag.NewFlagSet("run", flag.ExitOnError)
-		prompt := fs.String("prompt", "", "prompt to send to Claude Code")
-		providerName := fs.String("provider", cfg.DefaultProvider, "provider profile name")
-		workspace := fs.String("workspace", "", "working directory")
-		timeout := fs.Duration("timeout", cfg.DefaultTimeout, "run timeout")
-		saveEvents := fs.String("save-events", "", "optional path to write sanitized stream-json events")
-		_ = fs.Parse(args)
-		if *prompt == "" {
-			fatal(fmt.Errorf("--prompt is required"))
+	case "status":
+		var out map[string]any
+		must(cli.Call("status", nil, &out))
+		printJSON(out)
+
+	case "providers":
+		var out any
+		must(cli.Call("providers.list", nil, &out))
+		printJSON(out)
+
+	case "tasks":
+		if len(args) == 0 {
+			fatal(fmt.Errorf("usage: agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag"))
 		}
-		res, err := a.RunPrompt(ctx, *prompt, *workspace, *providerName, "", "manual", *timeout)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "run finished with error: %v (status=%s run_id=%s)\n", err, res.Status, res.RunID)
-			if *saveEvents != "" {
-				_ = writeSanitizedEvents(*saveEvents, res)
+		sub := args[0]
+		rest := args[1:]
+		switch sub {
+		case "ls", "list":
+			var out any
+			must(cli.Call("tasks.list", nil, &out))
+			printJSON(out)
+		case "get":
+			id := flagVal(rest, "--id", 0)
+			var out any
+			must(cli.Call("tasks.get", map[string]string{"id": id}, &out))
+			printJSON(out)
+		case "create":
+			p := map[string]any{
+				"name":          needFlag(rest, "--name"),
+				"prompt":        needFlag(rest, "--prompt"),
+				"cron_expr":     flagOpt(rest, "--cron", ""),
+				"provider_name": flagOpt(rest, "--provider", cfg.DefaultProvider),
+				"workspace_dir": flagOpt(rest, "--workspace", ""),
 			}
-			os.Exit(1)
-		}
-		fmt.Printf("run_id=%s status=%s session=%s cost_usd=%.6f tokens_in=%d tokens_out=%d duration_ms=%d\n",
-			res.RunID, res.Status, res.SessionID, res.TotalCostUSD, res.InputTokens, res.OutputTokens, res.DurationMS)
-		if res.ResultText != "" {
-			fmt.Println(res.ResultText)
-		}
-		if *saveEvents != "" {
-			if err := writeSanitizedEvents(*saveEvents, res); err != nil {
-				fatal(err)
-			}
-			fmt.Fprintf(os.Stderr, "wrote sanitized events to %s\n", *saveEvents)
+			var out any
+			must(cli.Call("tasks.create", p, &out))
+			printJSON(out)
+		case "pause":
+			must(cli.Call("tasks.pause", map[string]string{"id": needFlag(rest, "--id")}, nil))
+			fmt.Println("ok")
+		case "resume":
+			must(cli.Call("tasks.resume", map[string]string{"id": needFlag(rest, "--id")}, nil))
+			fmt.Println("ok")
+		case "run":
+			must(cli.Call("tasks.run", map[string]string{"id": needFlag(rest, "--id")}, nil))
+			fmt.Println("ok")
+		case "versions":
+			var out any
+			must(cli.Call("tasks.versions", map[string]string{"id": needFlag(rest, "--id")}, &out))
+			printJSON(out)
+		case "rollback":
+			must(cli.Call("tasks.rollback", map[string]string{
+				"id": needFlag(rest, "--id"), "version_id": needFlag(rest, "--version"), "reason": flagOpt(rest, "--reason", "rollback"),
+			}, nil))
+			fmt.Println("ok")
+		case "tag":
+			must(cli.Call("tasks.tag", map[string]string{
+				"id": needFlag(rest, "--id"), "tag": needFlag(rest, "--tag"), "version_id": needFlag(rest, "--version"),
+			}, nil))
+			fmt.Println("ok")
+		default:
+			fatal(fmt.Errorf("unknown tasks subcommand %q", sub))
 		}
 
 	case "runs":
-		fs := flag.NewFlagSet("runs", flag.ExitOnError)
-		taskID := fs.String("task", "", "filter by task id")
-		limit := fs.Int("limit", 20, "max rows")
-		_ = fs.Parse(args)
-		list, err := a.Store.ListRuns(ctx, *taskID, *limit)
-		if err != nil {
-			fatal(err)
-		}
+		p := map[string]any{"task_id": flagOpt(args, "--task", ""), "limit": 20}
+		var out []map[string]any
+		must(cli.Call("runs.list", p, &out))
 		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "ID\tSTATUS\tPROVIDER\tMODEL\tCOST\tCREATED")
-		for _, r := range list {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%.4f\t%s\n",
-				r.ID, r.Status, r.ProviderName.String, r.Model.String, r.TotalCostUSD.Float64, r.CreatedAt)
+		fmt.Fprintln(tw, "ID\tSTATUS\tPROVIDER\tCREATED")
+		for _, r := range out {
+			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\n", r["ID"], r["Status"], r["ProviderName"], r["CreatedAt"])
 		}
 		_ = tw.Flush()
 
-	case "providers":
-		sub := "list"
-		if len(args) > 0 {
-			sub = args[0]
-			args = args[1:]
-		}
-		switch sub {
-		case "list", "ls":
-			_ = a.SeedBuiltinProviders(ctx)
-			fmt.Println("Built-in / configured providers:")
-			for _, p := range a.Registry.List() {
-				base := p.BaseURL
-				if base == "" {
-					base = "(anthropic default)"
-				}
-				fmt.Printf("- %-18s  base=%s  model=%s  auth=%s\n", p.Name, base, p.Model, p.AuthEnv)
-			}
-			fmt.Println("\nVerified preset sources:")
-			for _, preset := range provider.BuiltIn() {
-				fmt.Printf("- %-18s  %s\n", preset.ID, preset.SourceURL)
-			}
-		default:
-			fatal(fmt.Errorf("unknown providers subcommand %q", sub))
-		}
-
-	case "task":
+	case "amend":
 		if len(args) == 0 {
-			fatal(fmt.Errorf("usage: agentctl task create ..."))
+			fatal(fmt.Errorf("usage: agentctl amend propose|list|confirm|reject|resolve"))
 		}
 		switch args[0] {
-		case "create":
-			fs := flag.NewFlagSet("task create", flag.ExitOnError)
-			name := fs.String("name", "", "task name")
-			prompt := fs.String("prompt", "", "prompt")
-			cronExpr := fs.String("cron", "", "cron expression (5-field)")
-			prov := fs.String("provider", cfg.DefaultProvider, "provider")
-			ws := fs.String("workspace", "", "workspace")
-			_ = fs.Parse(args[1:])
-			if *name == "" || *prompt == "" || *cronExpr == "" {
-				fatal(fmt.Errorf("--name --prompt --cron required"))
-			}
-			task, err := a.EnsureTask(ctx, *name, *prompt, *cronExpr, *prov, *ws)
-			if err != nil {
-				fatal(err)
-			}
-			fmt.Printf("created task id=%s next_run_at=%s\n", task.ID, task.NextRunAt.String)
+		case "propose":
+			var out any
+			must(cli.Call("amendments.propose", map[string]string{
+				"task_id": needFlag(args[1:], "--task"), "utterance": needFlag(args[1:], "--text"),
+			}, &out))
+			printJSON(out)
+		case "list":
+			var out any
+			must(cli.Call("amendments.list", map[string]string{
+				"task_id": needFlag(args[1:], "--task"), "status": flagOpt(args[1:], "--status", ""),
+			}, &out))
+			printJSON(out)
+		case "confirm":
+			var out any
+			must(cli.Call("amendments.confirm", map[string]string{"id": needFlag(args[1:], "--id")}, &out))
+			printJSON(out)
+		case "reject":
+			must(cli.Call("amendments.reject", map[string]string{"id": needFlag(args[1:], "--id")}, nil))
+			fmt.Println("ok")
+		case "resolve":
+			must(cli.Call("amendments.resolve", map[string]string{
+				"id": needFlag(args[1:], "--id"), "resolution": needFlag(args[1:], "--resolution"),
+			}, nil))
+			fmt.Println("ok")
 		default:
-			fatal(fmt.Errorf("unknown task subcommand"))
+			fatal(fmt.Errorf("unknown amend subcommand"))
 		}
 
-	case "version":
-		fmt.Println("tidebot agentctl phase0")
+	case "skills":
+		if len(args) == 0 {
+			fatal(fmt.Errorf("usage: agentctl skills import|list|rollback|pin"))
+		}
+		switch args[0] {
+		case "import":
+			var out any
+			must(cli.Call("skills.import", map[string]string{
+				"name": flagOpt(args[1:], "--name", ""), "dir": needFlag(args[1:], "--dir"),
+			}, &out))
+			printJSON(out)
+		case "list", "ls":
+			var out any
+			must(cli.Call("skills.list", nil, &out))
+			printJSON(out)
+		case "rollback":
+			must(cli.Call("skills.rollback", map[string]string{
+				"id": needFlag(args[1:], "--id"), "version_id": needFlag(args[1:], "--version"),
+			}, nil))
+			fmt.Println("ok")
+		case "pin":
+			must(cli.Call("skills.pin", map[string]string{
+				"task_id": needFlag(args[1:], "--task"), "skill_id": needFlag(args[1:], "--skill"),
+				"skill_version_id": needFlag(args[1:], "--version"),
+			}, nil))
+			fmt.Println("ok")
+		default:
+			fatal(fmt.Errorf("unknown skills subcommand"))
+		}
+
+	case "run":
+		// Ad-hoc run still goes through daemon via a one-shot task create+run is heavy;
+		// expose as tasks.create then tasks.run, or keep a thin status-only CLI.
+		fatal(fmt.Errorf("use: agentctl tasks create ... && agentctl tasks run --id <id>"))
 
 	default:
 		usage()
@@ -144,14 +185,17 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `agentctl — tidebot CLI (phase 0)
+	fmt.Fprintf(os.Stderr, `agentctl — talks to agentd over local Unix socket
 
-Usage:
-  agentctl run --prompt "..." [--provider NAME] [--workspace DIR] [--timeout 30m]
-  agentctl runs [--task ID] [--limit 20]
-  agentctl providers list
-  agentctl task create --name N --prompt P --cron "*/5 * * * *" [--provider NAME]
+  agentctl status
+  agentctl providers
+  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag
+  agentctl runs [--task ID]
+  agentctl amend propose|list|confirm|reject|resolve
+  agentctl skills import|list|rollback|pin
   agentctl version
+
+IPC path: $TIDEBOT_HOME/agentd.sock (or config ipc_path / TIDEBOT_IPC)
 `)
 }
 
@@ -160,31 +204,45 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
-
-func writeSanitizedEvents(path string, res runner.Result) error {
-	reUUID := regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	reSess := regexp.MustCompile(`sess_[A-Za-z0-9_-]+`)
-	reKeyish := regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._\-]+)`)
-	f, err := os.Create(path)
+func must(err error) {
 	if err != nil {
-		return err
+		fatal(err)
 	}
-	defer f.Close()
-	for _, ev := range res.Events {
-		raw := string(ev.Raw)
-		if raw == "" {
-			b, mErr := json.Marshal(ev)
-			if mErr != nil {
-				continue
-			}
-			raw = string(b)
+}
+
+func printJSON(v any) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
+}
+
+func needFlag(args []string, name string) string {
+	v := flagOpt(args, name, "")
+	if v == "" {
+		fatal(fmt.Errorf("%s required", name))
+	}
+	return v
+}
+
+func flagOpt(args []string, name, def string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == name && i+1 < len(args) {
+			return args[i+1]
 		}
-		raw = reUUID.ReplaceAllString(raw, "00000000-0000-0000-0000-000000000000")
-		raw = reSess.ReplaceAllString(raw, "sess_REDACTED")
-		raw = reKeyish.ReplaceAllString(raw, "***")
-		if _, err := f.WriteString(raw + "\n"); err != nil {
-			return err
+		if len(args[i]) > len(name)+1 && args[i][:len(name)+1] == name+"=" {
+			return args[i][len(name)+1:]
 		}
 	}
-	return nil
+	return def
+}
+
+func flagVal(args []string, name string, pos int) string {
+	if v := flagOpt(args, name, ""); v != "" {
+		return v
+	}
+	if pos >= 0 && pos < len(args) && args[pos] != "" && args[pos][0] != '-' {
+		return args[pos]
+	}
+	fatal(fmt.Errorf("%s required", name))
+	return ""
 }
