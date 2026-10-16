@@ -293,3 +293,32 @@ ORDER BY created_at`, taskID)
 	}
 	return b.String(), versionID, nextRunItemIDs, nil
 }
+
+// SetSchedule changes the cron expression ("" = manual only) and recomputes next_run_at.
+func (s *Service) SetSchedule(ctx context.Context, taskID, cronExpr string) error {
+	var next sql.NullString
+	if cronExpr != "" {
+		if s.Sched == nil {
+			return fmt.Errorf("scheduler unavailable")
+		}
+		t, err := s.Sched.ComputeInitialNext(cronExpr)
+		if err != nil {
+			return fmt.Errorf("cron: %w", err)
+		}
+		next = sql.NullString{String: t.UTC().Format(time.RFC3339), Valid: true}
+	}
+	res, err := s.Store.DB.ExecContext(ctx, `UPDATE tasks SET cron_expr=?, next_run_at=?, updated_at=? WHERE id=?`, cronExpr, next, nowUTC(), taskID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("task not found")
+	}
+	return nil
+}
+
+// Rename changes the display name.
+func (s *Service) Rename(ctx context.Context, taskID, name string) error {
+	_, err := s.Store.DB.ExecContext(ctx, `UPDATE tasks SET name=?, updated_at=? WHERE id=?`, name, nowUTC(), taskID)
+	return err
+}

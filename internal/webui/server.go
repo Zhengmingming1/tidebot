@@ -47,6 +47,9 @@ type Deps struct {
 	QuickRun func(prompt, providerName string) error
 	LogPath  func(runID string) string
 	Location *time.Location
+	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
+	QuickRunSkill func(prompt, providerName, skillID, versionID string) error
+	Providers     ProviderAdmin
 
 	// Public handlers mounted without session auth (they authenticate themselves),
 	// e.g. /hooks/ (webhook token/HMAC) and /metrics (bearer token).

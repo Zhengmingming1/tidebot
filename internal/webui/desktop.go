@@ -50,8 +50,10 @@ func (s *Server) RunButton(ctx context.Context, id string) (string, error) {
 		switch {
 		case b.TaskID != "" && s.deps.RunTask != nil:
 			return b.Label, s.deps.RunTask(b.TaskID, cost.BucketProduction)
+		case b.Prompt != "" && b.SkillID != "" && s.deps.QuickRunSkill != nil:
+			return b.Label, s.deps.QuickRunSkill(expandParams(b.Prompt, b.Params), b.Provider, b.SkillID, b.SkillVerID)
 		case b.Prompt != "" && s.deps.QuickRun != nil:
-			return b.Label, s.deps.QuickRun(b.Prompt, b.Provider)
+			return b.Label, s.deps.QuickRun(expandParams(b.Prompt, b.Params), b.Provider)
 		default:
 			return b.Label, errors.New("execution not available")
 		}
