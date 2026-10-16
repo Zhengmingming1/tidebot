@@ -51,6 +51,8 @@ type App struct {
 	Policy   *policy.Store
 
 	retryScale float64
+	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
+	HookExe string
 }
 
 // Open loads config, opens DB, and builds subsystems.
@@ -227,6 +229,9 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			"--max-budget-usd", fmt.Sprintf("%.4f", runMax),
 			"--effort", "low",
 		}
+	}
+	if err := a.applyGuard(ctx, &opts); err != nil {
+		return runner.Result{}, err
 	}
 	res, err := a.Runner.RunOnce(ctx, opts)
 	if err == nil && a.Cost != nil {
