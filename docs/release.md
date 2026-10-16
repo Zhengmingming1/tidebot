@@ -65,12 +65,24 @@ and never echoed.
 
 ## Self-update
 
-`agentctl call update.check` looks at the latest GitHub release; `update.apply` downloads the
-server archive for this OS/arch, checks it against `checksums.txt`, swaps `agentd`/`agentctl` in
-place and keeps the old ones as `*.prev`. Restart agentd afterwards. It is disabled when
-`TIDEBOT_MANAGED=1` (the .deb unit and the Docker image set it; use apt / docker pull there).
-While the repository is private, unauthenticated update checks get a 404, so self-update only
-works once the repo is public.
+Source stays private. The `publish` job also mirrors each release to the public
+[tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases) repo with `SHA256SUMS`
+and a signed `latest.json` (+ `latest.json.sig`, ed25519, built by `tools/relsign`).
+
+Secrets in this repo:
+
+- `UPDATE_SIGNING_KEY`: base64 ed25519 private key. Its public half is `updater.PublicKey`
+  in `internal/updater/manifest.go`; `relsign` refuses to sign if they don't match.
+- `RELEASES_TOKEN`: fine-grained PAT, only `tidebot-releases`, Contents read/write.
+  Without it the mirror step is skipped with a warning.
+
+On the client, agentd / the desktop app check `latest.json` once a day (Settings → About →
+Updates, can be turned off). `agentctl update check|apply` does the same by hand. Apply =
+download, verify signature + sha256, rename the current files to `*.prev` (one backup), move
+the new ones in, restart. The new build has to answer on IPC within 90s or it gets rolled back
+(under systemd, after two failed starts). Docker, `.deb`, Homebrew/Nix and `TIDEBOT_MANAGED=1`
+installs only get a notification. `TIDEBOT_UPDATE_URL` points the check at a mirror.
+Plain GETs only, honours `HTTPS_PROXY`, nothing else is sent.
 
 ## Local builds
 

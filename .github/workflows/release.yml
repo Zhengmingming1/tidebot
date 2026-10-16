@@ -139,6 +139,11 @@ jobs:
           $st = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
           & $st.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:WINDOWS_CERT_PASSWORD" /fd sha256 /tr http://timestamp.digicert.com /td sha256 (Get-ChildItem dist\*.exe).FullName
           Remove-Item "$env:RUNNER_TEMP\cert.pfx"
+      - name: portable zip (used by the in-app updater)
+        shell: pwsh
+        run: |
+          $V = "$env:TAG".TrimStart("v")
+          Compress-Archive -Path stage\tidebot-desktop.exe, stage\agentctl.exe -DestinationPath "dist\tidebot-desktop-$V-Windows-x64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows
@@ -215,3 +220,34 @@ jobs:
           else
             gh release create "$TAG" dist/* --title "tidebot $TAG" --notes-file notes.md
           fi
+
+      # Public mirror: Zhengmingming1/tidebot-releases gets the same files plus
+      # SHA256SUMS and a signed latest.json for the in-app updater. Source stays here.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: signed update manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        if: env.UPDATE_SIGNING_KEY != ''
+        run: |
+          bash scripts/release-notes.sh "$TAG" Zhengmingming1/tidebot-releases > public-notes.md
+          go run ./tools/relsign manifest "$TAG" dist public-notes.md
+      - name: publish to tidebot-releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        if: env.GH_TOKEN != ''
+        run: |
+          R=Zhengmingming1/tidebot-releases
+          test -f dist/latest.json || { echo "latest.json missing (UPDATE_SIGNING_KEY not set?)"; exit 1; }
+          if gh release view "$TAG" -R "$R" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* -R "$R" --clobber
+            gh release edit "$TAG" -R "$R" --notes-file public-notes.md
+          else
+            gh release create "$TAG" dist/* -R "$R" --title "tidebot $TAG" --notes-file public-notes.md --latest
+          fi
+      - name: note when the public mirror is skipped
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        if: env.GH_TOKEN == ''
+        run: echo "::warning::RELEASES_TOKEN not set; skipped publishing to tidebot-releases"

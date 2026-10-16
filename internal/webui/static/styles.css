@@ -822,3 +822,8 @@ table.cmp th, table.cmp td { padding: 6px 8px; font-size: 13px; }
   .cc-card { justify-content: center; padding: 12px 0; }
   .cc-card .cc-txt { display: none; }
 }
+
+/* settings → about → updates */
+#set-update h3 { margin: 12px 0 4px; font-size: 15px; }
+#set-update .changelog { white-space: pre-wrap; max-height: 220px; overflow: auto; background: var(--bg-soft, rgba(127,127,127,.08)); padding: 10px 12px; border-radius: 8px; font-size: 13px; }
+#set-update .err { color: var(--danger, #c0392b); }

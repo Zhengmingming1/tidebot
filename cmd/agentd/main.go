@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
+	"github.com/Zhengmingming1/tidebot/internal/updater"
 
 	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
@@ -41,6 +43,13 @@ func main() {
 	}
 	cfg.NoWebUI = *noWebUI
 
+	// A previous self-update may be waiting for this build to prove itself.
+	// After MaxAttempts failed starts Boot restores the backup; re-exec it.
+	if bs := updater.Boot(cfg.HomeDir); bs.RolledBack {
+		fmt.Fprintln(os.Stderr, "update: new version failed to start; rolled back")
+		reexec()
+	}
+
 	a, err := app.Open(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open: %v\n", err)
@@ -54,11 +63,32 @@ func main() {
 	d, err := a.StartDaemon(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start: %v\n", err)
+		if updater.RollbackNow(cfg.HomeDir, "start: "+err.Error()) == nil {
+			a.Close()
+			reexec()
+		}
 		os.Exit(1)
 	}
+	restart := make(chan struct{}, 1)
+	a.SetRestartFunc(func() { restart <- struct{}{} })
+	go confirmWhenHealthy(cfg, a)
 	select {
 	case <-ctx.Done():
 		a.Log.Info("agentd shutting down")
+	case <-restart:
+		a.Log.Info("agentd restarting into the new version")
+		d.Stop()
+		a.Close()
+		if updater.UnderServiceManager() {
+			os.Exit(app.ExitCodeRestart)
+		}
+		exe := updater.Executable()
+		healthy := func() bool { return pingStatus(cfg.IPCPath) && !updater.IsPending(cfg.HomeDir) }
+		if err := updater.Handover(exe, os.Args[1:], cfg.HomeDir, healthy, 90*time.Second); err != nil {
+			fmt.Fprintf(os.Stderr, "update handover: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	case err := <-d.Errs:
 		if err != nil {
 			a.Log.Error("ipc server", "error", err)
@@ -94,4 +124,47 @@ func restoreMain(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("restored backup from %s (app %s, secrets included: %v)\n", m.CreatedAt, m.AppVersion, m.IncludesSecrets)
+}
+
+// confirmWhenHealthy pings our own IPC socket; success clears the update marker.
+// If the new build can't answer within a minute, roll back and restart.
+func confirmWhenHealthy(cfg config.Config, a *app.App) {
+	deadline := time.Now().Add(time.Minute)
+	for time.Now().Before(deadline) {
+		if pingStatus(cfg.IPCPath) {
+			if r := updater.Confirm(cfg.HomeDir); r != nil {
+				a.Log.Info("update confirmed", "from", r.From, "to", r.To)
+			}
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if updater.RollbackNow(cfg.HomeDir, "health check timed out") == nil {
+		a.Log.Error("update health check failed; rolled back")
+		reexec()
+	}
+}
+
+// reexec hands over to whatever binary is now at our path. Under systemd we
+// just exit and let Restart=on-failure start it; otherwise we spawn it detached.
+func reexec() {
+	if updater.UnderServiceManager() {
+		os.Exit(app.ExitCodeRestart)
+	}
+	err := updater.Relaunch(updater.Executable(), os.Args[1:])
+	if err == nil {
+		os.Exit(0)
+	}
+	fmt.Fprintf(os.Stderr, "restart failed: %v; start agentd again\n", err)
+	os.Exit(1)
+}
+
+func pingStatus(path string) bool {
+	c, err := ipc.DialClient(path)
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	var out map[string]any
+	return c.Call("status", nil, &out) == nil
 }

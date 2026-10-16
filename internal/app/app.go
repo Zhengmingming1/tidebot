@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/guard"
@@ -41,6 +42,8 @@ type App struct {
 	Cfg        config.Config
 	Log        *slog.Logger
 	DB         *sql.DB
+	suOnce     sync.Once
+	suState    *selfUpdate
 	Store      *db.Store
 	Registry   *provider.Registry
 	Secrets    secrets.Backend

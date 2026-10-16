@@ -58,6 +58,35 @@ func main() {
 		must(cli.Call("status", nil, &out))
 		printJSON(out)
 
+	case "update":
+		sub := ""
+		if len(args) > 0 {
+			sub = args[0]
+		}
+		var out map[string]any
+		switch sub {
+		case "check":
+			must(cli.Call("update.check", nil, &out))
+			last, _ := out["last"].(map[string]any)
+			if last != nil && last["available"] == true {
+				fmt.Println(i18n.T("cli.update_available", last["current"], last["latest"]))
+				if n, _ := last["notes"].(string); n != "" {
+					fmt.Println(n)
+				}
+				if last["can_apply"] != true {
+					inst, _ := last["install"].(map[string]any)
+					fmt.Println(i18n.T("cli.update_notify_only", inst["kind"]))
+				}
+			} else {
+				fmt.Println(i18n.T("cli.update_none", out["current"]))
+			}
+		case "apply":
+			must(cli.Call("update.apply", nil, &out))
+			printJSON(out)
+		default:
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl update check|apply")))
+		}
+
 	case "providers":
 		var out any
 		must(cli.Call("providers.list", nil, &out))

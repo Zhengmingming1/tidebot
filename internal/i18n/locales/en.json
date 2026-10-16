@@ -5,7 +5,7 @@
   "cli.required": "%s required",
   "cli.unknown_cmd": "unknown command %q",
   "cli.unknown_sub": "unknown %s subcommand %q",
-  "cli.usage": "agentctl — talks to agentd over local Unix socket\n\n  agentctl status\n  agentctl providers\n  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag\n  agentctl runs [--task ID]\n  agentctl amend propose|list|confirm|reject|resolve\n  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   (one version for the whole batch)\n  agentctl skills import|list|rollback|pin\n  agentctl spend summary|set-budget\n  agentctl webui [on|off|status]\n  agentctl auth set-password|totp-setup|totp-disable\n  agentctl version\n\nIPC path: $TIDEBOT_HOME/agentd.sock (or config ipc_path / TIDEBOT_IPC)\nLanguage: TIDEBOT_LANG=en|zh-CN (default: system locale)\n",
+  "cli.usage": "agentctl — talks to agentd over local Unix socket\n\n  agentctl status\n  agentctl providers\n  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag\n  agentctl runs [--task ID]\n  agentctl amend propose|list|confirm|reject|resolve\n  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   (one version for the whole batch)\n  agentctl skills import|list|rollback|pin\n  agentctl spend summary|set-budget\n  agentctl webui [on|off|status]\n  agentctl auth set-password|totp-setup|totp-disable\n  agentctl version\n\nIPC path: $TIDEBOT_HOME/agentd.sock (or config ipc_path / TIDEBOT_IPC)\nLanguage: TIDEBOT_LANG=en|zh-CN (default: system locale)\n  agentctl update check|apply\n",
   "cli.usage_line": "usage: %s",
   "cli.use_tasks": "use: agentctl tasks create ... && agentctl tasks run --id <id>",
   "desktop.idle": "Nothing running right now",
@@ -39,5 +39,10 @@
   "desktop.tooltip_problem": "Tidebot (needs attention)",
   "notify.breaker": "Paused after repeated failures: %s",
   "notify.confirm": "Confirmation needed: %s",
-  "notify.test": "Tidebot test notification"
+  "notify.test": "Tidebot test notification",
+  "update.n.available": "tidebot %s is available",
+  "update.n.rolled_back": "Update to %s failed and was rolled back",
+  "cli.update_available": "Update available: %v → %v",
+  "cli.update_notify_only": "This install (%v) is updated by its package manager / image; not applying.",
+  "cli.update_none": "Up to date (%v)."
 }

@@ -5,7 +5,7 @@
   "cli.required": "缺少 %s",
   "cli.unknown_cmd": "未知命令 %q",
   "cli.unknown_sub": "未知的 %s 子命令 %q",
-  "cli.usage": "agentctl — 通过本地 Unix socket 与 agentd 通信\n\n  agentctl status\n  agentctl providers\n  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag\n  agentctl runs [--task ID]\n  agentctl amend propose|list|confirm|reject|resolve\n  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   （整批只生成一个版本）\n  agentctl skills import|list|rollback|pin\n  agentctl spend summary|set-budget\n  agentctl webui [on|off|status]\n  agentctl auth set-password|totp-setup|totp-disable\n  agentctl version\n\nIPC 路径：$TIDEBOT_HOME/agentd.sock（或配置 ipc_path / TIDEBOT_IPC）\n语言：TIDEBOT_LANG=en|zh-CN（默认跟随系统）\n",
+  "cli.usage": "agentctl — 通过本地 Unix socket 与 agentd 通信\n\n  agentctl status\n  agentctl providers\n  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag\n  agentctl runs [--task ID]\n  agentctl amend propose|list|confirm|reject|resolve\n  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   （整批只生成一个版本）\n  agentctl skills import|list|rollback|pin\n  agentctl spend summary|set-budget\n  agentctl webui [on|off|status]\n  agentctl auth set-password|totp-setup|totp-disable\n  agentctl version\n\nIPC 路径：$TIDEBOT_HOME/agentd.sock（或配置 ipc_path / TIDEBOT_IPC）\n语言：TIDEBOT_LANG=en|zh-CN（默认跟随系统）\n  agentctl update check|apply\n",
   "cli.usage_line": "用法：%s",
   "cli.use_tasks": "请使用：agentctl tasks create ... && agentctl tasks run --id <id>",
   "desktop.idle": "现在没有任务在运行",
@@ -39,5 +39,10 @@
   "desktop.tooltip_problem": "Tidebot（有问题需要处理）",
   "notify.breaker": "连续失败已暂停：%s",
   "notify.confirm": "危险操作待确认：%s",
-  "notify.test": "Tidebot 测试通知"
+  "notify.test": "Tidebot 测试通知",
+  "update.n.available": "tidebot %s 可以更新了",
+  "update.n.rolled_back": "更新到 %s 失败，已回滚",
+  "cli.update_available": "有新版本：%v → %v",
+  "cli.update_notify_only": "当前安装方式（%v）由包管理器或镜像负责更新，这里不会自动替换。",
+  "cli.update_none": "已是最新（%v）。"
 }

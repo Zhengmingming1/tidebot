@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -391,13 +390,15 @@ func (a *App) systemRPC() map[string]rpcFunc {
 			v := a.claudeVersion()
 			return map[string]any{"version": v, "min_supported": MinClaudeVersion, "compatible": ClaudeCompatible(v)}, nil
 		},
-		"update.check": func(ctx context.Context, _ json.RawMessage) (any, error) { return CheckUpdate(ctx, http.DefaultClient) },
-		"update.apply": func(ctx context.Context, _ json.RawMessage) (any, error) {
-			if os.Getenv("TIDEBOT_MANAGED") == "1" {
-				return nil, errors.New("updates are managed by the package manager / container here")
+		"update.check": func(ctx context.Context, _ json.RawMessage) (any, error) {
+			if _, err := a.CheckForUpdate(ctx); err != nil {
+				return nil, err
 			}
-			return ApplyUpdate(ctx, http.DefaultClient, "")
+			return a.UpdateStatus(ctx), nil
 		},
+		"update.status":   func(ctx context.Context, _ json.RawMessage) (any, error) { return a.UpdateStatus(ctx), nil },
+		"update.settings": a.rpcUpdateSettings,
+		"update.apply":    func(ctx context.Context, _ json.RawMessage) (any, error) { return a.ApplyUpdateNow(ctx) },
 		"sandbox.run": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			p, _ := decode[struct {
 				TaskID string `json:"task_id"`
