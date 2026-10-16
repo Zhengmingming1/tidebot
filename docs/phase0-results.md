@@ -150,6 +150,6 @@ Wails v3 有托盘、单实例、通知和 `AssetOptions.Handler`（进程内桥
 验证过（Linux）：托盘菜单（打开 / 暂停-恢复 / 按钮预设 / 局域网开关 / 退出）、关窗隐藏到托盘且调度继续、
 第二次启动聚焦已有窗口且不抢 IPC socket、运行完成 / 失败 / 超预算通知、局域网开关在未配 TLS 时拒绝并通知、
 托盘与 WebUI 跟随系统语言（zh_CN）、XDG autostart 写入/删除（单测）。
-未测：Windows、macOS（构建脚本和 docs/ci/desktop.yml 已写）、loopback 桥在 WebView2 上的表现、
+未测：Windows、macOS（CI 里能编译打包，见 .github/workflows）、loopback 桥在 WebView2 上的表现、
 睡眠前延后（只留了钩子，Linux 只读电池 sysfs）。
 Linux 托盘子菜单在 beta.30 的 DBus 菜单里显示为空，所以 Linux 上预设平铺在菜单里。

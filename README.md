@@ -98,6 +98,20 @@ flowchart LR
   Runner -- 日志 / SSE --> Web
 ```
 
+## 安装
+
+预编译的包在 [Releases](https://github.com/Zhengmingming1/tidebot/releases) 页面，每个文件的 sha256 都在 `checksums.txt` 里。
+不管装哪种，真跑任务都需要你自己装好 `claude` CLI。
+
+- **服务端（agentd + agentctl）**：下载 `tidebot-server_<版本>_<系统>_<架构>.tar.gz`（Windows 是 `.zip`），解压后放进 PATH。
+  Debian/Ubuntu 可以直接装 `.deb`：`sudo apt install ./tidebot-server_0.1.0_amd64.deb`，然后 `systemctl --user enable --now tidebot`。
+- **桌面版**：macOS 用 `.dmg`（通用包，Intel 和 Apple 芯片都行），Windows 用 `_setup.exe`（装到当前用户，不要管理员权限），
+  Linux 用 `.deb` 或 `.AppImage`（AppImage 没打包 WebKitGTK，系统里得有 `libwebkit2gtk-4.1`）。
+  没签名的话 macOS 第一次打开要右键 → 打开，Windows 会弹 SmartScreen。
+- **Docker**：`docker pull ghcr.io/zhengmingming1/tidebot:0.1.0`。镜像里没有 `claude` CLI，怎么加见 [docs/release.md](docs/release.md)。
+
+装好后 `agentctl call update.check` 能查新版本，`update.apply` 会校验 sha256 后原地替换（旧文件留成 `.prev`）。
+
 ## 快速开始
 
 需要 Go 1.22 以上。真跑任务需要本机装好 `claude` CLI；只想看看的话，仓库里带了一个假的 `claude`，不花钱。
@@ -197,7 +211,7 @@ scripts/build-desktop.sh linux        # 需要 Go 1.25、libgtk-3-dev、libwebki
 bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏在托盘
 ```
 
-老实说：只在 Linux 上跑过。Windows 和 macOS 的构建脚本写好了但没验证。
+老实说：只在 Linux 上真正用过。macOS 和 Windows 版能在 CI 里编出来、打成安装包，但我没在真机上点过。
 它用的是 Wails v3 beta，还会变。内存也不小，WebKit 加起来四五百 MB（核心本身十几 MB），数字在 docs/phase0-results.md。
 
 ## 现状
@@ -206,23 +220,29 @@ bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏�
 
 已经能用的：
 
-- 定时调度、手动运行、并发上限、超时
+- 定时调度、手动运行、并发上限、超时；失败重试（退避）、连续失败 3 次熔断、停机后补跑、重叠策略
 - 任务的不可变版本和回滚，版本树
-- 自然语言修改需求：拆成结构化条目、冲突检测、整批确认
-- Skill 导入、版本、钉住、回滚
+- 自然语言修改需求：拆成结构化条目、冲突检测、整批确认；条目攒多了会提议合并
+- Skill 导入、版本、钉住、回滚；自动优化（关 / 只建议 / 灰度三种模式），灰度变差会自动撤回
 - 全局 / 任务 / 预算桶三级每日花费上限，按本地时区零点重置
-- WebUI：首页、任务、实时日志、花费、设置，支持中英文
-- 多家模型服务商，密钥只进子进程
+- 执行防护：每个任务独立工作目录、工具白名单、危险命令拦下来等你确认、外部输入按数据包裹
+- 插件：独立进程，JSON-RPC 走 stdio，按版本安装，权限逐项批准，崩 3 次熔断；能提供 MCP 工具和触发器
+- 触发器：webhook（token 或 HMAC 签名）、文件变动、邮件和 IM（通过插件）；工作流包导入导出
+- 通知：邮件、webhook、飞书、钉钉、企业微信、Telegram，带免打扰时段和每日汇总
+- 备份（`.agentbak`，带口令才会包含密钥）和恢复（`agentd restore`）、日志清理、运行概况和 Prometheus `/metrics`
+- 沙箱试跑：拷一份工作目录跑，记到 dry_run 预算桶，告诉你改了哪些文件
+- WebUI 中英文；桌面版（托盘 + 窗口）
+- Linux、macOS、Windows 上 CI 都在跑测试；Windows 用命名管道做本地 IPC
 
 还没做好的：
 
 - 需求拆分默认用本地的规则（按分号拆），要用模型来拆需要设 `TIDEBOT_AMEND_AI=1`，效果还在调
-- Skill 自动优化和灰度对比还没实现
-- 插件只有占位页，MCP 服务和触发器的安装管理还没做
-- 通知只有日志一个渠道
-- 密钥只支持环境变量，系统钥匙串还没接
-- 主要在 Linux 和 macOS 上用，Windows 没测过
-- CI 配置写好了（`docs/ci/`），但还没在仓库里启用
+- 插件的 CPU 限制没做；内存只在 Linux 上用 rlimit 粗略限制
+- 密钥存在本地加密文件里，系统钥匙串还没接
+- 防护规则里的路径判断按 Unix 路径写的，Windows 上写文件越界检查不可靠
+- 只有 Linux 的包我自己装过跑过；macOS 的 .dmg 和 Windows 安装包是 CI 打出来的，还没人点开试过
+- 默认不签名
+- 仓库还是私有的，所以自更新现在查不到新版本
 
 ## 关于 Anthropic
 
@@ -233,4 +253,5 @@ tidebot 调用的是你本机安装的 Claude Code CLI，用的是你自己的 A
 - [方案设计](docs/final-plan.md)
 - [调研报告](docs/report.md)
 - [模型服务商说明](docs/providers.md)
+- [发布和打包](docs/release.md)
 - [阶段 0 实测](docs/phase0-results.md)
