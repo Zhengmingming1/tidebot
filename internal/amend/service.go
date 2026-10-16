@@ -18,7 +18,7 @@ import (
 type Item struct {
 	ID                 string   `json:"id"`
 	TaskID             string   `json:"task_id"`
-	Op                 string   `json:"op"` // add|modify|delete
+	Op                 string   `json:"op"`    // add|modify|delete
 	Scope              string   `json:"scope"` // permanent|next_run
 	TargetSpecItem     string   `json:"target_spec_item,omitempty"`
 	Content            string   `json:"content"`
@@ -26,6 +26,8 @@ type Item struct {
 	ConflictWith       []string `json:"conflict_with,omitempty"`
 	ConflictResolution string   `json:"conflict_resolution,omitempty"` // replace|coexist
 	CreatedAt          string   `json:"created_at"`
+	MessageID          string   `json:"message_id,omitempty"`
+	Utterance          string   `json:"utterance,omitempty"`
 }
 
 // StructuredProposal is AI (or mock) output.
@@ -48,10 +50,10 @@ type Structurer interface {
 
 // Service stores and confirms amendments.
 type Service struct {
-	DB     *sql.DB
-	Tasks  *tasksvc.Service
-	Ver    *version.Service
-	AI     Structurer
+	DB    *sql.DB
+	Tasks *tasksvc.Service
+	Ver   *version.Service
+	AI    Structurer
 }
 
 func New(db *sql.DB, tasks *tasksvc.Service, ver *version.Service, ai Structurer) *Service {
@@ -73,6 +75,11 @@ func (s *Service) Propose(ctx context.Context, taskID, utterance, actor string) 
 	if err != nil {
 		return nil, err
 	}
+	msgID := id.New("msg")
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO amendment_messages(id, task_id, utterance, created_at) VALUES(?,?,?,?)`,
+		msgID, taskID, utterance, nowUTC()); err != nil {
+		return nil, err
+	}
 	var out []Item
 	for _, p := range prop.Items {
 		if err := validateProposed(p); err != nil {
@@ -85,13 +92,13 @@ func (s *Service) Propose(ctx context.Context, taskID, utterance, actor string) 
 		it := Item{
 			ID: id.New("req"), TaskID: taskID, Op: p.Op, Scope: p.Scope,
 			TargetSpecItem: p.TargetSpecItem, Content: p.Content, Status: status,
-			ConflictWith: p.ConflictWith, CreatedAt: nowUTC(),
+			ConflictWith: p.ConflictWith, CreatedAt: nowUTC(), MessageID: msgID, Utterance: utterance,
 		}
 		cw, _ := json.Marshal(p.ConflictWith)
 		_, err := s.DB.ExecContext(ctx, `
-INSERT INTO requirement_items(id, task_id, op, scope, target_spec_item, content, status, conflict_with, created_at)
-VALUES(?,?,?,?,?,?,?,?,?)`,
-			it.ID, it.TaskID, it.Op, it.Scope, nullEmpty(it.TargetSpecItem), it.Content, it.Status, string(cw), it.CreatedAt)
+INSERT INTO requirement_items(id, task_id, message_id, op, scope, target_spec_item, content, status, conflict_with, created_at)
+VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			it.ID, it.TaskID, msgID, it.Op, it.Scope, nullEmpty(it.TargetSpecItem), it.Content, it.Status, string(cw), it.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -127,15 +134,16 @@ func nullEmpty(s string) any {
 
 // List returns items for a task, optionally filtered by status.
 func (s *Service) List(ctx context.Context, taskID, status string) ([]Item, error) {
-	q := `SELECT id, task_id, op, scope, COALESCE(target_spec_item,''), content, status,
-		COALESCE(conflict_with,'[]'), COALESCE(conflict_resolution,''), created_at
-		FROM requirement_items WHERE task_id=?`
+	q := `SELECT r.id, r.task_id, r.op, r.scope, COALESCE(r.target_spec_item,''), r.content, r.status,
+		COALESCE(r.conflict_with,'[]'), COALESCE(r.conflict_resolution,''), r.created_at,
+		COALESCE(r.message_id,''), COALESCE(m.utterance,'')
+		FROM requirement_items r LEFT JOIN amendment_messages m ON m.id = r.message_id WHERE r.task_id=?`
 	args := []any{taskID}
 	if status != "" {
-		q += ` AND status=?`
+		q += ` AND r.status=?`
 		args = append(args, status)
 	}
-	q += ` ORDER BY created_at`
+	q += ` ORDER BY r.created_at, r.id`
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -145,7 +153,7 @@ func (s *Service) List(ctx context.Context, taskID, status string) ([]Item, erro
 	for rows.Next() {
 		var it Item
 		var cw string
-		if err := rows.Scan(&it.ID, &it.TaskID, &it.Op, &it.Scope, &it.TargetSpecItem, &it.Content, &it.Status, &cw, &it.ConflictResolution, &it.CreatedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.TaskID, &it.Op, &it.Scope, &it.TargetSpecItem, &it.Content, &it.Status, &cw, &it.ConflictResolution, &it.CreatedAt, &it.MessageID, &it.Utterance); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(cw), &it.ConflictWith)

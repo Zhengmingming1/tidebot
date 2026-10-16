@@ -33,7 +33,26 @@ func (MockStructurer) Structure(_ context.Context, _ string, spec *tasksvc.Spec,
 			target = spec.Constraints[0].ID
 		}
 	}
-	return StructuredProposal{Items: []ProposedItem{{
-		Op: op, Scope: scope, TargetSpecItem: target, Content: u, ConflictWith: conflicts,
-	}}}, nil
+	// Split compound requests ("A; B; C") into separate items so each can be
+	// confirmed on its own, roughly like the real structurer does.
+	var out StructuredProposal
+	for _, part := range splitClauses(u) {
+		out.Items = append(out.Items, ProposedItem{Op: op, Scope: scope, TargetSpecItem: target, Content: part, ConflictWith: conflicts})
+	}
+	return out, nil
+}
+
+func splitClauses(u string) []string {
+	var parts []string
+	for _, a := range strings.Split(u, ";") {
+		b := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(a), "."))
+		if b == "" {
+			continue
+		}
+		parts = append(parts, strings.ToUpper(b[:1])+b[1:])
+	}
+	if len(parts) == 0 {
+		return []string{u}
+	}
+	return parts
 }
