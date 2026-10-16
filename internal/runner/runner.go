@@ -33,8 +33,10 @@ type Options struct {
 	APIKey       string // injected into child env only; never logged
 	EnvBase      []string
 	TriggerKind  string
-	TaskID       string
-	Logger       *slog.Logger
+	TaskID        string
+	TaskVersionID string
+	HasNextRunItems bool
+	Logger        *slog.Logger
 }
 
 // Result is the outcome of one run.
@@ -101,6 +103,10 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	if opts.TaskID != "" {
 		row.TaskID = sql.NullString{String: opts.TaskID, Valid: true}
 	}
+	if opts.TaskVersionID != "" {
+		row.TaskVersionID = sql.NullString{String: opts.TaskVersionID, Valid: true}
+	}
+	row.HasNextRunItems = opts.HasNextRunItems
 	if err := r.store.InsertRun(ctx, row); err != nil {
 		return Result{}, fmt.Errorf("insert run: %w", err)
 	}
