@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -30,6 +31,7 @@ func HashPassword(password string) (string, error) {
 		return "", err
 	}
 	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	releaseArgonMemory()
 	b64Salt := base64.RawStdEncoding.EncodeToString(salt)
 	b64Hash := base64.RawStdEncoding.EncodeToString(hash)
 	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", argonMemory, argonTime, argonThreads, b64Salt, b64Hash), nil
@@ -63,5 +65,10 @@ func VerifyPassword(encoded, password string) (bool, error) {
 		return false, err
 	}
 	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	releaseArgonMemory()
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
+
+// releaseArgonMemory hands argon2id's 64 MiB scratch buffer back to the OS right away,
+// so a login doesn't leave agentd's RSS inflated. Logins are rate-limited, so the forced GC is cheap.
+func releaseArgonMemory() { debug.FreeOSMemory() }
