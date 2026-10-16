@@ -28,9 +28,9 @@ type Manifest struct {
 
 // Service manages skill entities.
 type Service struct {
-	DB    *sql.DB
-	Ver   *version.Service
-	Tasks *tasksvc.Service
+	DB      *sql.DB
+	Ver     *version.Service
+	Tasks   *tasksvc.Service
 	BlobDir string // optional file storage; empty = inline blobs table
 }
 

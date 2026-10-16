@@ -60,24 +60,24 @@ type Run struct {
 
 // ProviderRow is a persisted provider profile.
 type ProviderRow struct {
-	ID              string
-	UserID          string
-	Name            string
-	Preset          sql.NullString
-	BaseURL         string
-	AuthEnv         string
-	SecretRefID     sql.NullString
-	Model           string
-	OpusModel       string
-	SonnetModel     string
-	HaikuModel      string
-	FableModel      string
-	SmallFastModel  string
-	SubagentModel   string
-	ExtraEnvJSON    string
-	Enabled         bool
-	CreatedAt       string
-	UpdatedAt       string
+	ID             string
+	UserID         string
+	Name           string
+	Preset         sql.NullString
+	BaseURL        string
+	AuthEnv        string
+	SecretRefID    sql.NullString
+	Model          string
+	OpusModel      string
+	SonnetModel    string
+	HaikuModel     string
+	FableModel     string
+	SmallFastModel string
+	SubagentModel  string
+	ExtraEnvJSON   string
+	Enabled        bool
+	CreatedAt      string
+	UpdatedAt      string
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

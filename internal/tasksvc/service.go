@@ -41,9 +41,9 @@ type CreateInput struct {
 
 // TaskView is task row + current version summary.
 type TaskView struct {
-	Task           db.Task     `json:"task"`
+	Task           db.Task          `json:"task"`
 	CurrentVersion *version.Version `json:"current_version,omitempty"`
-	Spec           *Spec       `json:"spec,omitempty"`
+	Spec           *Spec            `json:"spec,omitempty"`
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

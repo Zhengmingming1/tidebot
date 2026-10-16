@@ -45,18 +45,18 @@ type Version struct {
 
 // OpLogEntry is one append-only operation_log row.
 type OpLogEntry struct {
-	ID             int64
-	At             string
-	BatchID        sql.NullString
-	EntityType     string
-	EntityID       string
-	Action         string
-	Pointer        sql.NullString
-	FromVersionID  sql.NullString
-	ToVersionID    sql.NullString
-	Actor          string
-	Reason         sql.NullString
-	DetailJSON     sql.NullString
+	ID            int64
+	At            string
+	BatchID       sql.NullString
+	EntityType    string
+	EntityID      string
+	Action        string
+	Pointer       sql.NullString
+	FromVersionID sql.NullString
+	ToVersionID   sql.NullString
+	Actor         string
+	Reason        sql.NullString
+	DetailJSON    sql.NullString
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
