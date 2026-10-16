@@ -180,57 +180,203 @@ WHERE id=? AND status='needs_decision'`, resolution, nowUTC(), itemID)
 	return nil
 }
 
-// Confirm applies a pending item (permanent → new version; next_run → scheduled).
+// Confirm applies a single pending item (permanent → new version; next_run → scheduled).
 func (s *Service) Confirm(ctx context.Context, itemID, actor string) (Item, error) {
-	it, err := s.get(ctx, itemID)
+	res, err := s.ConfirmItems(ctx, []string{itemID}, actor)
 	if err != nil {
 		return Item{}, err
 	}
-	if it.Status == "needs_decision" {
-		return Item{}, fmt.Errorf("resolve conflict first (replace|coexist)")
+	return res.Items[0], nil
+}
+
+// BatchResult is the outcome of confirming several items together.
+type BatchResult struct {
+	Items     []Item `json:"items"`
+	VersionID string `json:"version_id,omitempty"` // empty when no permanent item was included
+	Excluded  []Item `json:"excluded,omitempty"`
+}
+
+// ConfirmBatch confirms the items of one amendment message together. amendmentID may be
+// the message id or the id of any item in it. include (optional) limits the batch to those
+// item ids; unselected items stay pending. Conflicts among selected items must be resolved
+// first. All permanent items produce exactly ONE new task version.
+func (s *Service) ConfirmBatch(ctx context.Context, amendmentID string, include []string, actor string) (BatchResult, error) {
+	msgID := amendmentID
+	var tmp string
+	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(message_id,'') FROM requirement_items WHERE id=?`, amendmentID).Scan(&tmp); err == nil && tmp != "" {
+		msgID = tmp
 	}
-	if it.Status != "pending" {
-		return Item{}, fmt.Errorf("item status %s cannot confirm", it.Status)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM requirement_items WHERE message_id=? AND status IN ('pending','needs_decision') ORDER BY created_at, id`, msgID)
+	if err != nil {
+		return BatchResult{}, err
 	}
+	var all []string
+	for rows.Next() {
+		var x string
+		if err := rows.Scan(&x); err != nil {
+			rows.Close()
+			return BatchResult{}, err
+		}
+		all = append(all, x)
+	}
+	rows.Close()
+	if len(all) == 0 {
+		return BatchResult{}, fmt.Errorf("no pending items for amendment %s", amendmentID)
+	}
+	want := map[string]bool{}
+	for _, x := range include {
+		want[x] = true
+	}
+	var sel, excl []string
+	for _, x := range all {
+		if len(include) == 0 || want[x] {
+			sel = append(sel, x)
+		} else {
+			excl = append(excl, x)
+		}
+	}
+	for x := range want {
+		found := false
+		for _, y := range all {
+			if y == x {
+				found = true
+			}
+		}
+		if !found {
+			return BatchResult{}, fmt.Errorf("item %s is not pending in amendment %s", x, amendmentID)
+		}
+	}
+	if len(sel) == 0 {
+		return BatchResult{}, fmt.Errorf("no items selected")
+	}
+	res, err := s.ConfirmItems(ctx, sel, actor)
+	if err != nil {
+		return res, err
+	}
+	for _, x := range excl {
+		if it, err := s.get(ctx, x); err == nil {
+			res.Excluded = append(res.Excluded, it)
+		}
+	}
+	return res, nil
+}
+
+// ConfirmItems confirms several pending items of one task atomically: all permanent items
+// are merged into the spec as a single new version (one pointer move, one oplog entry);
+// next_run items are scheduled and never create a version.
+func (s *Service) ConfirmItems(ctx context.Context, itemIDs []string, actor string) (BatchResult, error) {
 	if actor == "" {
 		actor = "user"
 	}
-	if it.Scope == "next_run" {
-		exp := time.Now().UTC().Add(7 * 24 * time.Hour).Format(time.RFC3339)
-		_, err := s.DB.ExecContext(ctx, `
-UPDATE requirement_items SET status='scheduled', decided_at=?, expires_at=? WHERE id=?`,
-			nowUTC(), exp, itemID)
+	var items []Item
+	for _, iid := range itemIDs {
+		it, err := s.get(ctx, iid)
 		if err != nil {
-			return Item{}, err
+			return BatchResult{}, fmt.Errorf("item %s: %w", iid, err)
 		}
-		it.Status = "scheduled"
-		return it, nil
+		if it.Status == "needs_decision" {
+			return BatchResult{}, fmt.Errorf("item %s has an unresolved conflict; resolve it first (replace|coexist)", iid)
+		}
+		if it.Status != "pending" {
+			return BatchResult{}, fmt.Errorf("item %s status %s cannot confirm", iid, it.Status)
+		}
+		if len(items) > 0 && it.TaskID != items[0].TaskID {
+			return BatchResult{}, fmt.Errorf("items belong to different tasks")
+		}
+		items = append(items, it)
 	}
-	// permanent: merge into spec
-	view, err := s.Tasks.Get(ctx, it.TaskID)
+	if len(items) == 0 {
+		return BatchResult{}, fmt.Errorf("no items")
+	}
+	var perm []int
+	for i, it := range items {
+		if it.Scope == "permanent" {
+			perm = append(perm, i)
+		}
+	}
+	var out BatchResult
+	if len(perm) > 0 {
+		view, err := s.Tasks.Get(ctx, items[0].TaskID)
+		if err != nil {
+			return BatchResult{}, err
+		}
+		spec := tasksvc.Spec{Prompt: view.Task.Prompt, Goal: view.Task.Prompt}
+		if view.Spec != nil {
+			spec = *view.Spec
+		}
+		ids := make([]string, 0, len(perm))
+		for _, i := range perm {
+			spec, err = applyItem(spec, items[i])
+			if err != nil {
+				return BatchResult{}, err
+			}
+			ids = append(ids, items[i].ID)
+		}
+		msg := "confirm amendment " + strings.Join(ids, ",")
+		tv, err := s.Tasks.UpdateSpec(ctx, items[0].TaskID, spec, actor, msg)
+		if err != nil {
+			return BatchResult{}, err
+		}
+		out.VersionID = tv.CurrentVersion.ID
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return Item{}, err
+		return out, err
 	}
-	spec := tasksvc.Spec{Prompt: view.Task.Prompt, Goal: view.Task.Prompt}
-	if view.Spec != nil {
-		spec = *view.Spec
+	defer tx.Rollback()
+	now := nowUTC()
+	exp := time.Now().UTC().Add(7 * 24 * time.Hour).Format(time.RFC3339)
+	for i := range items {
+		if items[i].Scope == "next_run" {
+			_, err = tx.ExecContext(ctx, `UPDATE requirement_items SET status='scheduled', decided_at=?, expires_at=? WHERE id=?`, now, exp, items[i].ID)
+			items[i].Status = "scheduled"
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE requirement_items SET status='applied', decided_at=?, applied_version_id=? WHERE id=?`, now, out.VersionID, items[i].ID)
+			items[i].Status = "applied"
+		}
+		if err != nil {
+			return out, err
+		}
 	}
-	spec, err = applyItem(spec, it)
+	if err := tx.Commit(); err != nil {
+		return out, err
+	}
+	out.Items = items
+	return out, nil
+}
+
+// RejectBatch rejects all open items of an amendment message (or the given subset).
+func (s *Service) RejectBatch(ctx context.Context, amendmentID string, include []string) (int, error) {
+	msgID := amendmentID
+	var tmp string
+	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(message_id,'') FROM requirement_items WHERE id=?`, amendmentID).Scan(&tmp); err == nil && tmp != "" {
+		msgID = tmp
+	}
+	want := map[string]bool{}
+	for _, x := range include {
+		want[x] = true
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM requirement_items WHERE message_id=? AND status IN ('pending','needs_decision')`, msgID)
 	if err != nil {
-		return Item{}, err
+		return 0, err
 	}
-	tv, err := s.Tasks.UpdateSpec(ctx, it.TaskID, spec, actor, "confirm amendment "+itemID)
-	if err != nil {
-		return Item{}, err
+	var ids []string
+	for rows.Next() {
+		var x string
+		if rows.Scan(&x) == nil && (len(include) == 0 || want[x]) {
+			ids = append(ids, x)
+		}
 	}
-	_, err = s.DB.ExecContext(ctx, `
-UPDATE requirement_items SET status='applied', decided_at=?, applied_version_id=? WHERE id=?`,
-		nowUTC(), tv.CurrentVersion.ID, itemID)
-	if err != nil {
-		return Item{}, err
+	rows.Close()
+	for _, x := range ids {
+		if err := s.Reject(ctx, x); err != nil {
+			return 0, err
+		}
 	}
-	it.Status = "applied"
-	return it, nil
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("nothing to reject")
+	}
+	return len(ids), nil
 }
 
 // Reject marks item rejected.
