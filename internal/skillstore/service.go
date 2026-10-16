@@ -70,30 +70,66 @@ func (s *Service) ImportDir(ctx context.Context, name, dir, actor string) (Skill
 	if err != nil {
 		return SkillView{}, err
 	}
+	ver, man, err := s.CommitFiles(ctx, skillID, name, files, "import", actor, false)
+	if err != nil {
+		return SkillView{}, err
+	}
+	return SkillView{ID: skillID, Name: name, CurrentVersion: ver, Manifest: &man}, nil
+}
+
+// CommitFiles stores files as a skill version. noMove leaves `current` alone (proposals).
+func (s *Service) CommitFiles(ctx context.Context, skillID, name string, files map[string][]byte, source, actor string, noMove bool) (*version.Version, Manifest, error) {
 	hashes := map[string]string{}
 	for path, data := range files {
 		sum := sha256.Sum256(data)
 		h := hex.EncodeToString(sum[:])
 		hashes[path] = h
 		if err := s.putBlob(ctx, h, data); err != nil {
-			return SkillView{}, err
+			return nil, Manifest{}, err
 		}
 	}
 	man := Manifest{Name: name, Files: hashes}
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
-		EntityType: version.EntitySkill, EntityID: skillID,
-		Content: man, Source: "import", Actor: actor, Reason: "import skill", Message: "import " + name,
+		EntityType: version.EntitySkill, EntityID: skillID, NoMove: noMove,
+		Content: man, Source: source, Actor: actor, Reason: source + " skill", Message: source + " " + name,
 	})
 	if err != nil {
-		return SkillView{}, err
+		return nil, Manifest{}, err
 	}
-	// attach version_files
 	for path, h := range hashes {
 		_, _ = s.DB.ExecContext(ctx, `
 INSERT OR IGNORE INTO version_files(version_id, path, sha256, mode) VALUES(?,?,?,420)`,
 			res.Version.ID, path, h)
 	}
-	return SkillView{ID: skillID, Name: name, CurrentVersion: res.Version, Manifest: &man}, nil
+	return res.Version, man, nil
+}
+
+// Files returns the files of a skill version.
+func (s *Service) Files(ctx context.Context, versionID string) (map[string][]byte, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT path, sha256 FROM version_files WHERE version_id=?`, versionID)
+	if err != nil {
+		return nil, err
+	}
+	type vf struct{ p, h string }
+	var list []vf
+	for rows.Next() {
+		var f vf
+		if err := rows.Scan(&f.p, &f.h); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		list = append(list, f)
+	}
+	rows.Close()
+	out := map[string][]byte{}
+	for _, f := range list {
+		b, err := s.getBlob(ctx, f.h)
+		if err != nil {
+			return nil, err
+		}
+		out[f.p] = b
+	}
+	return out, nil
 }
 
 func (s *Service) ensureSkill(ctx context.Context, name string) (string, error) {

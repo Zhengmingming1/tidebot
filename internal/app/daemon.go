@@ -37,6 +37,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	}
 	a.Sched.Start(ctx)
 	go a.runNotifier(ctx)
+	go a.runOptimizer(ctx)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ctx, ln) }()
 	return &Daemon{a: a, Errs: errCh, close: func() {
