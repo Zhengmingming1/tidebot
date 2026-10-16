@@ -276,7 +276,9 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			"--effort", "low",
 		}
 	}
-	opts.ExtraArgs = append(opts.ExtraArgs, a.mcpArgs(ctx, bucket)...)
+	if !opts.NoPluginMCP {
+		opts.ExtraArgs = append(opts.ExtraArgs, a.mcpArgs(ctx, bucket)...)
+	}
 	if err := a.applyGuard(ctx, &opts); err != nil {
 		return runner.Result{}, err
 	}

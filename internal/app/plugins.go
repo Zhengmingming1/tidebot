@@ -64,6 +64,11 @@ func (a *App) initPlugins() {
 	a.Plugins = &plugin.Store{DB: a.DB, Root: filepath.Join(a.Cfg.HomeDir, "plugins"), Secrets: a.Secrets}
 	a.Plugins.OnUninstall = a.pauseDependents
 	a.PluginHost = plugin.NewHost(a.Plugins, pluginAPI{a}, a.Log)
+	if plugin.BuiltinExe == "" {
+		if exe, err := os.Executable(); err == nil {
+			plugin.BuiltinExe = exe
+		}
+	}
 	a.trig = &triggerState{lastFire: map[string]time.Time{}, snaps: map[string]map[string]string{}}
 }
 
@@ -203,9 +208,9 @@ func (a *App) createTrigger(ctx context.Context, in TriggerBinding) (map[string]
 		if p == "" || !filepath.IsAbs(p) {
 			return nil, errors.New("file_change needs an absolute config.path")
 		}
-	case "email", "im":
+	case "email", "im", "rss", "web_monitor", "poll":
 		if in.PluginID == "" {
-			return nil, errors.New("email/im triggers come from a plugin; set plugin_id")
+			return nil, errors.New(in.Kind + " triggers come from a plugin; set plugin_id")
 		}
 		pi, err := a.Plugins.Get(ctx, in.PluginID)
 		if err != nil || pi.Current == nil {
@@ -216,13 +221,34 @@ func (a *App) createTrigger(ctx context.Context, in TriggerBinding) (map[string]
 		for _, t := range pi.Current.Manifest.Contributes.Triggers {
 			if t.ID == tid && t.Kind == in.Kind {
 				ok = true
+				if t.ConfigSchema != nil {
+					fields, err := plugin.ParseSchema(t.ConfigSchema)
+					if err != nil {
+						return nil, err
+					}
+					vals := map[string]any{}
+					for k, v := range in.Config {
+						if k != "trigger_id" {
+							vals[k] = v
+						}
+					}
+					plain, sec, err := plugin.ValidateConfig(fields, vals)
+					if err != nil {
+						return nil, err
+					}
+					if len(sec) > 0 {
+						return nil, errors.New("trigger settings cannot hold secrets; put them in the plugin settings")
+					}
+					plain["trigger_id"] = tid
+					in.Config = plain
+				}
 			}
 		}
 		if !ok {
 			return nil, fmt.Errorf("plugin %s has no %s trigger %q", in.PluginID, in.Kind, tid)
 		}
 	default:
-		return nil, errors.New("kind must be webhook, file_change, email or im")
+		return nil, errors.New("kind must be webhook, file_change, email, im, rss, web_monitor or poll")
 	}
 	in.ID = id.New("trg")
 	res := map[string]any{"id": in.ID}
@@ -256,6 +282,9 @@ func (a *App) createTrigger(ctx context.Context, in TriggerBinding) (map[string]
 }
 
 func (a *App) deleteTrigger(ctx context.Context, bid string) error {
+	if b, err := a.getTrigger(ctx, bid); err == nil && b.PluginID != "" && a.PluginHost.Running(b.PluginID) {
+		_, _ = a.PluginHost.Call(b.PluginID, "trigger.unsubscribe", map[string]any{"binding_id": bid})
+	}
 	_ = a.Secrets.Delete("trigger." + bid)
 	_, err := a.DB.ExecContext(ctx, `DELETE FROM trigger_bindings WHERE id=?`, bid)
 	return err

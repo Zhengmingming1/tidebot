@@ -1,0 +1,19 @@
+id: dingtalk
+name: DingTalk
+version: 1.0.0
+runtime:
+  builtin: dingtalk
+  lifecycle: lazy
+contributes:
+  connectors:
+    - id: dingtalk
+      side_effects: true
+      mcp: {builtin: dingtalk}
+permissions:
+  network: [oapi.dingtalk.com]
+config_schema:
+  type: object
+  required: [webhook_url]
+  properties:
+    webhook_url: {type: string, title: Robot webhook URL, writeOnly: true, maxLength: 500, x-order: 1}
+    sign_secret: {type: string, title: Signing secret (SEC...), writeOnly: true, maxLength: 128, x-order: 2}

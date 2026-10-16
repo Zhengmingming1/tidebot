@@ -1,0 +1,15 @@
+id: daily-digest
+name: Daily news digest
+version: 1.0.0
+contributes:
+  workflow_packs:
+    - path: pack
+permissions: {}
+config_schema:
+  type: object
+  required: [feeds, notify_via]
+  properties:
+    feeds: {type: string, title: "Feed URLs (one per line)", maxLength: 4000, x-order: 1}
+    topics: {type: string, title: Topics to focus on, maxLength: 300, x-order: 2}
+    notify_via: {type: string, title: Send digest via, enum: [wecom, dingtalk, email], default: wecom, x-order: 3}
+    hour: {type: integer, title: Send at hour (0-23), minimum: 0, maximum: 23, default: 8, x-order: 4}

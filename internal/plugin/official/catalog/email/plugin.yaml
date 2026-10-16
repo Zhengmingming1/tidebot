@@ -1,0 +1,41 @@
+id: email
+name: Email (SMTP / IMAP)
+version: 1.0.0
+runtime:
+  builtin: email
+  lifecycle: keepalive
+  limits: {memory_mb: 128, cpu_percent: 20}
+contributes:
+  triggers:
+    - id: new_mail
+      kind: email
+      title: New matching email
+      config_schema:
+        type: object
+        properties:
+          folder: {type: string, title: Folder, default: INBOX, maxLength: 100, x-order: 1}
+          from_contains: {type: string, title: Sender contains, maxLength: 200, x-order: 2}
+          subject_contains: {type: string, title: Subject contains, maxLength: 200, x-order: 3}
+          keyword: {type: string, title: Body keyword, maxLength: 200, x-order: 4}
+          interval_minutes: {type: integer, title: Check every (minutes), minimum: 1, maximum: 1440, default: 5, x-order: 5}
+  connectors:
+    - id: email
+      side_effects: true
+      mcp: {builtin: email}
+permissions:
+  network: ["*"]
+  host_api: [log.write]
+config_schema:
+  type: object
+  required: [smtp_host, from]
+  properties:
+    smtp_host: {type: string, title: SMTP host, maxLength: 200, x-order: 1}
+    smtp_port: {type: integer, title: SMTP port (465 TLS / 587 STARTTLS), minimum: 1, maximum: 65535, default: 465, x-order: 2}
+    smtp_username: {type: string, title: SMTP username, maxLength: 200, x-order: 3}
+    smtp_password: {type: string, title: SMTP password, writeOnly: true, maxLength: 200, x-order: 4}
+    from: {type: string, title: From address, maxLength: 200, x-order: 5}
+    default_to: {type: string, title: Default recipients (comma separated), maxLength: 1000, x-order: 6}
+    imap_host: {type: string, title: IMAP host (for the trigger), maxLength: 200, x-order: 7}
+    imap_port: {type: integer, title: IMAP port (TLS), minimum: 1, maximum: 65535, default: 993, x-order: 8}
+    imap_username: {type: string, title: IMAP username, maxLength: 200, x-order: 9}
+    imap_password: {type: string, title: IMAP password, writeOnly: true, maxLength: 200, x-order: 10}

@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/plugin"
+	"github.com/Zhengmingming1/tidebot/internal/plugin/official"
 	"net/http"
 	"os"
 	"runtime"
@@ -63,6 +65,9 @@ func main() {
 	if guard.IsHookInvocation(os.Args[1:]) {
 		guard.HookMain(os.Stdin, os.Stdout)
 		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == plugin.BuiltinArg {
+		os.Exit(official.Main(os.Args[2:]))
 	}
 	configPath := flag.String("config", "", "path to config.yaml/json")
 	hidden := flag.Bool("hidden", false, "start minimized to tray (used by autostart)")

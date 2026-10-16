@@ -40,6 +40,10 @@ type Options struct {
 	Logger          *slog.Logger
 	// RunID is filled in by RunOnce (used to label the live process list).
 	RunID string
+	// OnStart, if set, receives the run id as soon as the run row exists (live progress).
+	OnStart func(runID string)
+	// NoPluginMCP keeps the owner's plugin connectors out of this run (AI plugin builder).
+	NoPluginMCP bool
 }
 
 // Result is the outcome of one run.
@@ -126,6 +130,9 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	}
 	if opts.CostBucket != "" {
 		_, _ = r.store.DB.ExecContext(ctx, `UPDATE runs SET cost_bucket=? WHERE id=?`, opts.CostBucket, runID)
+	}
+	if opts.OnStart != nil {
+		opts.OnStart(runID)
 	}
 
 	runCtx := ctx

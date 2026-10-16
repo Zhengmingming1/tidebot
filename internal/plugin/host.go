@@ -19,6 +19,13 @@ import (
 // Protocol: JSON-RPC 2.0, one JSON object per line on the plugin's stdin/stdout.
 // stderr is captured into the host log (truncated).
 
+// BuiltinExe is the tidebot executable that hosts official plugin runtimes
+// (run as: BuiltinExe BuiltinArg <name> plugin|mcp). Empty disables builtin runtimes.
+var BuiltinExe string
+
+// BuiltinArg is the hidden sub-command that starts an official runtime.
+const BuiltinArg = "__plugin"
+
 // HostAPI is what plugins may call back into (each method is permission-checked).
 type HostAPI interface {
 	TriggerFire(ctx context.Context, pluginID, triggerID string, payload json.RawMessage) error
@@ -90,7 +97,7 @@ func (h *Host) Run(ctx context.Context) {
 	h.mu.Unlock()
 	if list, err := h.Store.List(ctx); err == nil {
 		for _, p := range list {
-			if p.Enabled && p.Current != nil && p.Current.Manifest.Runtime.Lifecycle == "keepalive" && p.Current.Manifest.Runtime.Command != "" {
+			if p.Enabled && p.Current != nil && p.Current.Manifest.Runtime.Lifecycle == "keepalive" && (p.Current.Manifest.Runtime.Command != "" || p.Current.Manifest.Runtime.Builtin != "") {
 				if _, err := h.ensure(p.ID); err != nil {
 					h.Log.Warn("plugin start", "plugin", p.ID, "error", err)
 				}
@@ -142,12 +149,20 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 	}
 	// Only granted permissions count: revoked host APIs are refused, revoked secrets not passed.
 	m := in.Current.Manifest.Restrict(in.Current.Approved)
-	if m.Runtime.Command == "" {
+	if m.Runtime.Command == "" && m.Runtime.Builtin == "" {
 		return nil, errors.New("plugin has no runtime")
 	}
 	dataDir := filepath.Join(h.Store.Root, pluginID, "data")
 	_ = os.MkdirAll(dataDir, 0o700)
-	cmd := exec.Command(filepath.Join(in.Current.Dir, m.Runtime.Command), m.Runtime.Args...)
+	var cmd *exec.Cmd
+	if m.Runtime.Builtin != "" {
+		if in.Source != SourceOfficial || BuiltinExe == "" {
+			return nil, errors.New("builtin runtime unavailable")
+		}
+		cmd = exec.Command(BuiltinExe, append([]string{BuiltinArg, m.Runtime.Builtin, "plugin"}, m.Runtime.Args...)...)
+	} else {
+		cmd = exec.Command(filepath.Join(in.Current.Dir, m.Runtime.Command), m.Runtime.Args...)
+	}
 	cmd.Dir = in.Current.Dir
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dataDir, "TIDEBOT_PLUGIN_ID=" + pluginID, "TIDEBOT_PLUGIN_DATA=" + dataDir}
 	if v := os.Getenv("TIDEBOT_TEST_PLUGIN"); v != "" {
@@ -187,6 +202,23 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 	cfg := h.Store.ActivationConfig(h.ctx, pluginID)
 	if _, err := h.call(p, "plugin.activate", map[string]any{"config": cfg, "data_dir": dataDir}, 10*time.Second); err != nil {
 		h.Log.Warn("plugin activate", "plugin", pluginID, "error", err)
+	}
+	// Re-subscribe existing trigger bindings so polling triggers survive restarts.
+	if rows, err := h.Store.DB.QueryContext(h.ctx, `SELECT id, config_json FROM trigger_bindings WHERE plugin_id=? AND enabled=1`, pluginID); err == nil {
+		type sub struct{ id, cfg string }
+		var subs []sub
+		for rows.Next() {
+			var x sub
+			if rows.Scan(&x.id, &x.cfg) == nil {
+				subs = append(subs, x)
+			}
+		}
+		rows.Close()
+		for _, x := range subs {
+			var c map[string]any
+			_ = json.Unmarshal([]byte(x.cfg), &c)
+			_, _ = h.call(p, "trigger.subscribe", map[string]any{"binding_id": x.id, "trigger_id": c["trigger_id"], "config": c}, 10*time.Second)
+		}
 	}
 	return p, nil
 }
