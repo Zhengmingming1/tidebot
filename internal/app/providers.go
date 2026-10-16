@@ -27,6 +27,7 @@ const (
 	setProvidersUser    = "providers.user"
 	setProvidersHidden  = "providers.hidden"
 	setProvidersDefault = "providers.default"
+	setProvidersOrder   = "providers.order"
 )
 
 var providerNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,39}$`)
@@ -112,8 +113,36 @@ func (pa providerAdmin) ListProviders(ctx context.Context) []webui.ProviderView 
 	for _, p := range pa.a.Registry.List() {
 		out = append(out, pa.view(p, used))
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Default && !out[j].Default })
+	var order []string
+	pa.a.loadJSONSetting(ctx, setProvidersOrder, &order)
+	rank := map[string]int{}
+	for i, n := range order {
+		rank[n] = i + 1
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := rank[out[i].Name], rank[out[j].Name]
+		if ri == 0 {
+			ri = 1 << 20
+		}
+		if rj == 0 {
+			rj = 1 << 20
+		}
+		return ri < rj
+	})
 	return out
+}
+
+// SetProviderOrder stores the display order (unknown names are dropped).
+func (pa providerAdmin) SetProviderOrder(ctx context.Context, names []string) error {
+	keep := []string{}
+	seen := map[string]bool{}
+	for _, n := range names {
+		if _, ok := pa.a.Registry.Get(n); ok && !seen[n] {
+			keep = append(keep, n)
+			seen[n] = true
+		}
+	}
+	return pa.a.saveJSONSetting(ctx, setProvidersOrder, keep)
 }
 
 func (pa providerAdmin) Presets() []map[string]any {
@@ -267,7 +296,7 @@ func (pa providerAdmin) SetDefaultProvider(ctx context.Context, name string) err
 var providerTestClient = &http.Client{Timeout: 20 * time.Second}
 
 // TestProvider sends a 1-token Messages request to the provider's Anthropic-compatible endpoint.
-func (pa providerAdmin) TestProvider(ctx context.Context, name string) (map[string]any, error) {
+func (pa providerAdmin) TestProvider(ctx context.Context, name, onlyModel string) (map[string]any, error) {
 	p, ok := pa.a.Registry.Get(name)
 	if !ok {
 		return nil, errors.New("provider not found")
@@ -277,6 +306,9 @@ func (pa providerAdmin) TestProvider(ctx context.Context, name string) (map[stri
 		return map[string]any{"ok": false, "error": "no API key set"}, nil
 	}
 	model := p.Model
+	if onlyModel != "" {
+		model = onlyModel
+	}
 	if model == "" {
 		model = p.SmallFastModel
 	}

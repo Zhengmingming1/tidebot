@@ -48,6 +48,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/buttons", s.withAuthCSRF(s.handleButtons))
 	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
 	mux.HandleFunc("/api/schedule", s.withAuthCSRF(s.handleSchedule))
+	mux.HandleFunc("/api/scheduler/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/schedule/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
 	mux.HandleFunc("/api/notifications", s.withAuthCSRF(s.handleNotifications))
@@ -459,6 +460,10 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	ctx := r.Context()
+	if id == "batch" && len(parts) == 1 && r.Method == http.MethodPost {
+		s.handleTaskBatch(w, r)
+		return
+	}
 	if len(parts) == 1 && r.Method == http.MethodPut {
 		s.updateTask(w, r, id)
 		return

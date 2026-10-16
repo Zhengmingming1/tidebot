@@ -89,7 +89,7 @@ func TestValidateBaseURLAndEnv(t *testing.T) {
 			t.Errorf("%s accepted", bad)
 		}
 	}
-	if ValidateExtraEnv(map[string]string{"API_TIMEOUT_MS": "1"}) != nil {
+	if ValidateExtraEnv(map[string]string{"API_TIMEOUT_MS": "1", "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000", "MAX_THINKING_TOKENS": "1"}) != nil {
 		t.Error("plain env rejected")
 	}
 	for _, k := range []string{"MY_API_KEY", "ANTHROPIC_AUTH_TOKEN", "lower", "ANTHROPIC_BASE_URL"} {

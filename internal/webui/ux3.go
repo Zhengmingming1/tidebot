@@ -293,7 +293,8 @@ type ProviderAdmin interface {
 	SaveProvider(ctx context.Context, in ProviderInput) (ProviderView, error)
 	DeleteProvider(ctx context.Context, name string) error
 	SetDefaultProvider(ctx context.Context, name string) error
-	TestProvider(ctx context.Context, name string) (map[string]any, error)
+	TestProvider(ctx context.Context, name, model string) (map[string]any, error)
+	SetProviderOrder(ctx context.Context, names []string) error
 }
 
 // ValidateBaseURL: empty (provider default) or https; plain http only for localhost.
@@ -317,14 +318,25 @@ func ValidateBaseURL(raw string) error {
 
 var envKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
+// secretLikeEnv: any underscore-separated word is KEY/TOKEN/SECRET/PASSWORD/APIKEY/AUTH
+// (so MY_API_KEY is refused but CLAUDE_CODE_MAX_CONTEXT_TOKENS is fine).
+func secretLikeEnv(k string) bool {
+	for _, w := range strings.Split(strings.ToUpper(k), "_") {
+		switch w {
+		case "KEY", "KEYS", "TOKEN", "SECRET", "SECRETS", "PASSWORD", "PASSWD", "APIKEY", "AUTH", "CREDENTIALS":
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateExtraEnv refuses secrets-looking or auth/base-url keys in extra env.
 func ValidateExtraEnv(m map[string]string) error {
 	for k, v := range m {
 		if !envKeyRe.MatchString(k) {
 			return fmt.Errorf("extra env name %q: use UPPER_CASE", k)
 		}
-		uk := strings.ToUpper(k)
-		if strings.Contains(uk, "KEY") || strings.Contains(uk, "TOKEN") || strings.Contains(uk, "SECRET") || strings.Contains(uk, "PASSWORD") || uk == "ANTHROPIC_BASE_URL" {
+		if secretLikeEnv(k) || strings.ToUpper(k) == "ANTHROPIC_BASE_URL" {
 			return fmt.Errorf("%s can't go in extra env; use the API key field / base URL", k)
 		}
 		if len(v) > 512 {
@@ -376,7 +388,24 @@ func (s *Server) handleProviderSub(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && parts[1] == "default" && r.Method == http.MethodPost:
 		err = pa.SetDefaultProvider(r.Context(), name)
 	case len(parts) == 2 && parts[1] == "test" && r.Method == http.MethodPost:
-		out, err = pa.TestProvider(r.Context(), name)
+		var b struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b)
+		if len(b.Model) > 128 {
+			writeErr(w, 400, "model name too long")
+			return
+		}
+		out, err = pa.TestProvider(r.Context(), name, strings.TrimSpace(b.Model))
+	case len(parts) == 1 && name == "order" && r.Method == http.MethodPost:
+		var b struct {
+			Names []string `json:"names"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&b) != nil || len(b.Names) > 100 {
+			writeErr(w, 400, "names required")
+			return
+		}
+		err = pa.SetProviderOrder(r.Context(), b.Names)
 	default:
 		writeErr(w, 404, "not found")
 		return

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -204,23 +205,96 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 	return map[string]any{"form": f}, nil
 }
 
-// handleCronPreview: GET /api/schedule/preview?cron=...  → next 5 times in the WebUI timezone.
+// handleCronPreview: GET /api/scheduler/preview?cron=...&tz=...&n=5 → next run times.
+// The scheduler always fires in the server timezone; tz only changes how the times are shown.
 func (s *Server) handleCronPreview(w http.ResponseWriter, r *http.Request) {
-	expr := strings.TrimSpace(r.URL.Query().Get("cron"))
-	if expr == "" || s.deps.Tasks.Sched == nil {
-		writeJSON(w, 200, map[string]any{"times": []string{}})
+	q := r.URL.Query()
+	expr := strings.TrimSpace(q.Get("cron"))
+	if len(expr) > 200 {
+		writeErr(w, 400, "cron expression too long")
 		return
 	}
-	t := time.Now()
-	out := []string{}
-	for i := 0; i < 5; i++ {
-		n, err := s.deps.Tasks.Sched.NextRun(expr, t)
-		if err != nil {
-			writeErr(w, 400, "not a valid 5-field cron expression")
+	show := s.loc()
+	if tz := q.Get("tz"); tz != "" {
+		l, err := time.LoadLocation(tz)
+		if len(tz) > 64 || err != nil {
+			writeErr(w, 400, "unknown timezone")
 			return
 		}
-		out = append(out, n.In(s.loc()).Format(time.RFC3339))
-		t = n
+		show = l
 	}
-	writeJSON(w, 200, map[string]any{"times": out, "timezone": s.loc().String()})
+	n, _ := strconv.Atoi(q.Get("n"))
+	if n <= 0 || n > 20 {
+		n = 5
+	}
+	if expr == "" || s.deps.Tasks.Sched == nil {
+		writeJSON(w, 200, map[string]any{"times": []string{}, "timezone": show.String(), "scheduler_timezone": s.loc().String()})
+		return
+	}
+	times, err := PreviewRuns(s.deps.Tasks.Sched.NextRun, expr, time.Now(), n)
+	if err != nil {
+		writeErr(w, 400, "not a valid 5-field cron expression")
+		return
+	}
+	out := make([]string, len(times))
+	for i, t := range times {
+		out[i] = t.In(show).Format(time.RFC3339)
+	}
+	writeJSON(w, 200, map[string]any{"times": out, "timezone": show.String(), "scheduler_timezone": s.loc().String()})
+}
+
+// PreviewRuns returns the next n fire times using the scheduler's own NextRun, so the
+// preview cannot drift from what actually runs.
+func PreviewRuns(next func(string, time.Time) (time.Time, error), expr string, from time.Time, n int) ([]time.Time, error) {
+	out := make([]time.Time, 0, n)
+	t := from
+	for i := 0; i < n; i++ {
+		nt, err := next(expr, t)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, nt)
+		t = nt
+	}
+	return out, nil
+}
+
+// handleTaskBatch: POST /api/tasks/batch {ids, action: pause|resume|delete}.
+func (s *Server) handleTaskBatch(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		IDs    []string `json:"ids"`
+		Action string   `json:"action"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&b); err != nil || len(b.IDs) == 0 || len(b.IDs) > 200 {
+		writeErr(w, 400, "ids (1-200) and action required")
+		return
+	}
+	ctx := r.Context()
+	done, failed := 0, []string{}
+	for _, id := range b.IDs {
+		v, err := s.deps.Tasks.Get(ctx, id)
+		if err != nil || v.Task.Status == "archived" {
+			failed = append(failed, id)
+			continue
+		}
+		switch b.Action {
+		case "pause":
+			err = s.deps.Tasks.SetStatus(ctx, id, "paused", "webui batch")
+		case "resume":
+			err = s.deps.Tasks.SetStatus(ctx, id, "active", "webui batch")
+		case "delete":
+			if err = s.deps.Tasks.SetStatus(ctx, id, "archived", "deleted in WebUI (batch)"); err == nil {
+				_ = s.deps.Tasks.SetSchedule(ctx, id, "")
+			}
+		default:
+			writeErr(w, 400, "action must be pause, resume or delete")
+			return
+		}
+		if err != nil {
+			failed = append(failed, id)
+			continue
+		}
+		done++
+	}
+	writeJSON(w, 200, map[string]any{"ok": len(failed) == 0, "done": done, "failed": failed})
 }

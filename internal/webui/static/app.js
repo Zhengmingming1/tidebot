@@ -229,6 +229,10 @@
   function cronHuman(c) {
     if (!c) return T("cron.manual");
     var p = c.split(/\s+/);
+    var mm;
+    if (p.length === 5 && (mm = /^\*\/(\d+)$/.exec(p[0])) && p.slice(1).join(" ") === "* * * *") return T("cron.every_min", { n: mm[1] });
+    if (p.length === 5 && /^\d+$/.test(p[0]) && p.slice(1).join(" ") === "* * * *") return T("cron.hourly", { m: p[0] });
+    if (p.length === 5 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1]) && /^\d+$/.test(p[2]) && p[3] === "*" && p[4] === "*") return T("cron.monthly", { d: p[2], t: ("0" + p[1]).slice(-2) + ":" + ("0" + p[0]).slice(-2) });
     if (p.length === 5 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1])) {
       var tm = new Intl.DateTimeFormat(state.lang, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(new Date(Date.UTC(2000, 0, 1, +p[1], +p[0])));
       if (p[2] === "*" && p[3] === "*" && p[4] === "*") return T("cron.daily", { t: tm });
@@ -488,17 +492,69 @@
   }
 
   // ---------- TASKS ----------
+  var taskView = { q: "", status: "", skill: "", sort: "name", dir: 1, sel: {} };
   function renderTasks() {
     return api("/api/tasks").then(function (tasks) {
-      var rows = tasks.length ? '<table class="table"><thead><tr><th>' + esc(T("col.task")) + "</th><th>" + esc(T("col.schedule")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.version")) + "</th><th>" + esc(T("col.last_run")) + "</th><th>" + esc(T("col.runs_today")) + '</th><th></th></tr></thead><tbody>' +
-        tasks.map(function (t) {
-          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + "</span><div><strong>" + esc(t.name) + "</strong><small>" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
-            '<td class="nowrap">' + esc(cronHuman(t.cron)) + "</td><td>" + taskPill(t.status) + '</td><td><span class="tag">v' + esc(t.version_no) + "</span></td><td>" + (t.last_status ? statusPill(t.last_status) : '<span class="muted">' + esc(T("tasks.never")) + "</span>") + "</td><td>" + esc(t.runs_today) + '</td><td class="right"><span class="muted">' + ic("chev", "sm") + "</span></td></tr>";
-        }).join("") + "</tbody></table>" : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"));
+      var v = taskView, skills = {};
+      tasks.forEach(function (t) { (t.skills || []).forEach(function (k) { skills[k] = 1; }); });
+      v.sel = {};
+      var sorters = {
+        name: function (t) { return t.name.toLowerCase(); }, schedule: function (t) { return t.next_run_at || "~"; }, status: function (t) { return t.status; },
+        version: function (t) { return t.version_no; }, last: function (t) { return t.last_status || ""; }, today: function (t) { return t.runs_today; }
+      };
+      var th = function (k, label) { return '<th><button class="th-sort' + (v.sort === k ? " on" : "") + '" data-sort="' + k + '" aria-sort="' + (v.sort === k ? (v.dir > 0 ? "ascending" : "descending") : "none") + '">' + esc(label) + (v.sort === k ? '<span class="arr">' + (v.dir > 0 ? "↑" : "↓") + "</span>" : "") + "</button></th>"; };
       mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many") + " · " + T("tasks.sub")) + '</p></div><div class="actions"><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T("tasks.all")) + "</h2></div>" + rows + "</section>", "tasks", [[T("nav.tasks")]]);
-      wireRows();
+        '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '"></label>' +
+        '<div class="filters" role="group">' + [["", T("runs.all_f")], ["active", T("task.active")], ["paused", T("task.paused")]].map(function (x) { return '<button data-st="' + x[0] + '" class="' + (x[0] === v.status ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" +
+        '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
+        '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
+        '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
+        '<table class="table"><thead><tr><th class="ck"><input type="checkbox" id="tall" aria-label="' + esc(T("tl.select_all")) + '"></th>' + th("name", T("col.task")) + th("schedule", T("col.schedule")) + th("status", T("col.status")) + th("version", T("col.version")) + th("last", T("col.last_run")) + th("today", T("col.runs_today")) + '<th></th></tr></thead><tbody id="tbody"></tbody></table></section>', "tasks", [[T("nav.tasks")]]);
+      var body = $("#tbody");
+      function rows() {
+        var q = v.q.trim().toLowerCase(), key = sorters[v.sort];
+        var list = tasks.filter(function (t) {
+          return (!v.status || t.status === v.status) && (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt).toLowerCase().indexOf(q) >= 0);
+        }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
+        $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
+        body.innerHTML = list.length ? list.map(function (t) {
+          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + "</span><div><strong>" + esc(t.name) + "</strong><small>" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
+            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + esc(T("tl.next", { t: when(t.next_run_at) })) + "</small>" : "") + "</td><td>" + taskPill(t.status) + '</td><td><span class="tag">v' + esc(t.version_no) + "</span></td><td>" + (t.last_status ? statusPill(t.last_status) : '<span class="muted">' + esc(T("tasks.never")) + "</span>") + '</td><td class="num">' + esc(t.runs_today) + '</td><td class="right"><span class="muted">' + ic("chev", "sm") + "</span></td></tr>";
+        }).join("") : '<tr><td colspan="8">' + (tasks.length ? emptyState("search", T("tl.no_match"), T("tl.no_match_sub")) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
+        wireRows(body);
+        $$("[data-pick]", body).forEach(function (c) {
+          c.addEventListener("click", function (e) { e.stopPropagation(); });
+          c.addEventListener("change", function () { if (c.checked) v.sel[c.getAttribute("data-pick")] = 1; else delete v.sel[c.getAttribute("data-pick")]; batch(); });
+        });
+        batch();
+      }
+      function batch() {
+        var n = Object.keys(v.sel).length;
+        $("#tbatch").classList.toggle("hidden", !n);
+        $("#tbn").textContent = T("tl.selected", { n: n });
+        var boxes = $$("[data-pick]", body);
+        $("#tall").checked = boxes.length > 0 && boxes.every(function (c) { return c.checked; });
+      }
+      var qt;
+      $("#tq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value; rows(); }, 120); });
+      $$("[data-st]").forEach(function (b) { b.addEventListener("click", function () { v.status = b.getAttribute("data-st"); $$("[data-st]").forEach(function (x) { x.classList.toggle("active", x === b); }); rows(); }); });
+      $("#tsk").addEventListener("change", function (e) { v.skill = e.target.value; rows(); });
+      $$("[data-sort]").forEach(function (b) { b.addEventListener("click", function () { var k = b.getAttribute("data-sort"); if (v.sort === k) v.dir = -v.dir; else { v.sort = k; v.dir = 1; } renderTasks(); }); });
+      $("#tall").addEventListener("change", function (e) { $$("[data-pick]", body).forEach(function (c) { c.checked = e.target.checked; if (c.checked) v.sel[c.getAttribute("data-pick")] = 1; else delete v.sel[c.getAttribute("data-pick")]; }); batch(); });
+      $("#tclear").addEventListener("click", function () { v.sel = {}; rows(); });
+      $$("[data-batch]").forEach(function (b) { b.addEventListener("click", function () {
+        var act = b.getAttribute("data-batch"), ids = Object.keys(v.sel);
+        var go = function () {
+          api("/api/tasks/batch", { method: "POST", body: { ids: ids, action: act } }).then(function (r) {
+            if (r.failed && r.failed.length) toast(T("tl.batch_partial", { n: r.done, f: r.failed.length }), true); else toast(T("tl.batch_done_" + act, { n: r.done }));
+            v.sel = {}; refresh();
+          }).catch(fail);
+        };
+        if (act === "delete") confirmDialog({ title: T("tl.del_title", { n: ids.length }), body: T("tl.del_body"), ok: T("td.delete"), danger: true }).then(function (y) { if (y) go(); });
+        else go();
+      }); });
       $("#t-new").addEventListener("click", function () { taskFormModal(null); });
+      rows();
     });
   }
   // ---------- TASK DETAIL ----------
@@ -579,20 +635,23 @@
     }).join("");
   }
 
-  function taskTab(tab, tk, items, vers) {
+  function taskTab(tab, tk, items, vers, extra) {
     if (tab === "thread") {
       return '<div class="thread scroll" id="thread">' + threadHtml(items) + "</div>" +
         '<form class="composer" id="composer"><input name="u" placeholder="' + esc(T("thread.composer")) + '" autocomplete="off" maxlength="2000" aria-label="' + esc(T("thread.amendment")) + '"><button class="btn primary sm" type="submit" aria-label="' + esc(T("thread.send")) + '">' + ic("send", "sm") + "</button></form>";
     }
-    if (tab === "requirements") {
-      return '<div class="thread"><dl class="kv"><dt>' + esc(T("td.goal")) + "</dt><dd>" + esc(tk.goal || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(tk.prompt) + "</dd><dt>" + esc(T("td.requirements")) + "</dt><dd>" +
-        (tk.constraints.length ? '<ul class="list-plain">' + tk.constraints.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" : '<span class="muted">' + esc(T("td.none_yet")) + "</span>") +
-        "</dd><dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd></dl></div>";
+    if (tab === "overview") {
+      return '<div class="thread"><dl class="kv ov">' +
+        "<dt>" + esc(T("f.prompt")) + '</dt><dd><div class="inline-edit" id="ie-prompt" tabindex="0" role="button" aria-label="' + esc(T("ie.edit_prompt")) + '" title="' + esc(T("ie.hint")) + '">' + esc(tk.prompt) + "</div></dd>" +
+        (tk.goal && tk.goal !== tk.prompt ? "<dt>" + esc(T("td.goal")) + "</dt><dd>" + esc(tk.goal) + "</dd>" : "") +
+        "<dt>" + esc(T("td.requirements")) + "</dt><dd>" + (tk.constraints.length ? '<ul class="list-plain">' + tk.constraints.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" : '<span class="muted">' + esc(T("td.none_yet")) + "</span>") + "</dd>" +
+        "<dt>" + esc(T("col.schedule")) + "</dt><dd>" + esc(cronHuman(tk.cron)) + (tk.cron ? " <code>" + esc(tk.cron) + '</code><ul class="next" id="ov-next"></ul>' : "") + "</dd>" +
+        "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(tk.provider || T("td.default")) + "</dd>" +
+        "<dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd>" +
+        "<dt>" + esc(T("td.workspace")) + "</dt><dd><code>" + esc(tk.workspace || "—") + "</code></dd>" +
+        "<dt>" + esc(T("td.task_id")) + "</dt><dd><code>" + esc(tk.id) + "</code></dd></dl></div>";
     }
-    if (tab === "settings") {
-      return '<div class="thread"><dl class="kv"><dt>' + esc(T("col.schedule")) + "</dt><dd>" + esc(cronHuman(tk.cron)) + (tk.cron ? " <code>" + esc(tk.cron) + "</code>" : "") + "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(tk.provider || T("td.default")) +
-        "</dd><dt>" + esc(T("td.workspace")) + "</dt><dd><code>" + esc(tk.workspace || "—") + "</code></dd><dt>" + esc(T("col.status")) + "</dt><dd>" + taskPill(tk.status) + "</dd><dt>" + esc(T("td.task_id")) + "</dt><dd><code>" + esc(tk.id) + "</code></dd></dl></div>";
-    }
+    if (tab === "runs") return '<div class="thread flush-t">' + (extra && extra.length ? runsTable(extra) : emptyState("runs", T("runs.none"), "")) + "</div>";
     return '<div class="thread"><table class="table"><thead><tr><th>' + esc(T("col.version")) + "</th><th>" + esc(T("col.source")) + "</th><th>" + esc(T("col.note")) + "</th><th>" + esc(T("col.created")) + '</th><th></th></tr></thead><tbody>' +
       vers.versions.slice().reverse().map(function (v) {
         var cur = v.id === vers.current;
@@ -600,30 +659,64 @@
           '</td><td class="right">' + (cur ? "" : '<button class="btn sm" data-rollback="' + esc(v.id) + '" data-no="' + esc(v.no) + '">' + ic("rollback", "sm") + esc(T("ver.rollback")) + "</button>") + "</td></tr>";
       }).join("") + "</tbody></table></div>";
   }
+  // inlineEdit: click/Enter turns el into an input; Enter (Ctrl+Enter for multi-line) saves, Esc cancels.
+  function inlineEdit(el, multi, save) {
+    var start = function () {
+      if (el.classList.contains("editing")) return;
+      var old = el.textContent;
+      el.classList.add("editing");
+      el.innerHTML = multi ? '<textarea rows="4" maxlength="32000"></textarea><small class="hint">' + esc(T("ie.keys_multi")) + "</small>" : '<input maxlength="80">';
+      var inp = $(multi ? "textarea" : "input", el);
+      inp.value = old; inp.focus(); inp.select();
+      var done = false;
+      var end = function (commit) {
+        if (done) return; done = true;
+        var nv = inp.value.trim();
+        el.classList.remove("editing"); el.textContent = commit && nv ? nv : old;
+        if (commit && nv && nv !== old) save(nv).catch(function (e) { el.textContent = old; fail(e); });
+        el.focus();
+      };
+      inp.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(false); }
+        else if (e.key === "Enter" && (!multi || e.ctrlKey || e.metaKey)) { e.preventDefault(); end(true); }
+      });
+      inp.addEventListener("blur", function () { end(true); });
+    };
+    el.addEventListener("click", start);
+    el.addEventListener("keydown", function (e) { if (e.key === "Enter" && !el.classList.contains("editing")) { e.preventDefault(); start(); } });
+  }
   function renderTaskDetail(id, tab) {
-    tab = tab || "thread";
+    tab = tab || "overview";
     var base = "/api/tasks/" + enc(id);
-    return Promise.all([api(base), api(base + "/amendments"), api(base + "/versions"), api(base + "/runs?limit=6")]).then(function (r) {
+    return Promise.all([api(base), api(base + "/amendments"), api(base + "/versions"), api(base + "/runs?limit=" + (tab === "runs" ? 50 : 6))]).then(function (r) {
       var t = r[0], items = r[1] || [], vers = r[2], runs = r[3] || [];
       var mini = runs.length ? '<ul class="mini-runs">' + runs.map(function (x) {
         var d = x.status === "succeeded" ? "" : (x.status === "running" || x.status === "queued") ? "run" : "bad";
         return '<li data-href="#/runs/' + enc(x.id) + '"><span class="d ' + d + '"></span><div><strong>' + (x.version_no ? "v" + esc(x.version_no) : "#" + esc(shortId(x.id))) + "</strong><small>" + esc(when(x.created_at)) + '</small></div><span class="muted">' + esc(dur(x.duration_ms)) + "</span><strong>" + esc(usd(x.cost_usd, 3)) + "</strong></li>";
       }).join("") + "</ul>" : emptyState("runs", T("runs.none"), "");
-      var tabs = [["thread", T("td.tab_thread")], ["requirements", T("td.requirements")], ["settings", T("nav.settings")], ["history", T("td.tab_history")]];
+      var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><h1>' + esc(t.name) + "</h1><p>" + esc(t.goal || t.prompt) + "</p>" +
+        '<section class="card"><div class="task-head"><div class="grow-col"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" title="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1><p>" + esc(t.goal || t.prompt) + "</p>" +
         '<div class="chips"><span class="chip">' + ic("user", "sm") + esc(T("td.owned")) + "</span><span class=\"chip\">" + ic("clock", "sm") + esc(cronHuman(t.cron)) + "</span>" +
         '<span class="chip">' + ic("calendar", "sm") + esc(T("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }), u: ago(t.updated_at) })) + "</span>" + taskPill(t.status) + "</div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause">' + ic("pause", "sm") + esc(T("td.pause")) + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="btn danger" id="t-del">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
-        taskTab(tab, t, items, vers) + "</section>" +
+        taskTab(tab, t, items, vers, runs) + "</section>" +
         '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("runs") + '</span><h3>' + esc(T("home.recent")) + '</h3><a class="link" href="#/runs?task=' + enc(t.id) + '">' + esc(T("td.view_all")) + "</a></div>" + mini + "</section></div></div>",
         "tasks", [[T("nav.tasks"), "#/tasks"], [t.name]]);
       var reload = function () { renderTaskDetail(id, tab); };
+      var patch = function (field) {
+        return function (val) {
+          return api(base + "/form").then(function (d) { var f = d.form; f[field] = val; return api(base, { method: "PUT", body: f }); }).then(function () { toast(T("ie.saved")); reload(); });
+        };
+      };
+      inlineEdit($("#ie-name"), false, patch("name"));
+      if ($("#ie-prompt")) inlineEdit($("#ie-prompt"), true, patch("prompt"));
+      if ($("#ov-next")) api("/api/scheduler/preview?cron=" + enc(t.cron) + "&n=3").then(function (d) { $("#ov-next").innerHTML = (d.times || []).map(function (x) { return "<li>" + esc(when(x)) + "</li>"; }).join(""); }).catch(function () {});
       wireRows();
-      $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { renderTaskDetail(id, b.getAttribute("data-tab")); }); });
+      $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { var tb = b.getAttribute("data-tab"); history.replaceState(null, "", "#/tasks/" + enc(id) + "/" + tb); lastHash = location.hash; renderTaskDetail(id, tb); }); });
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); setTimeout(reload, 800); }).catch(fail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
       $("#t-del").addEventListener("click", function () { confirmDialog({ title: T("td.del_title"), body: T("td.confirm_del", { n: t.name }), ok: T("td.delete"), danger: true, typeName: t.name }).then(function (y) { if (y) api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); }); });
@@ -880,143 +973,257 @@
     });
   }
 
-  // ---------- providers (settings) ----------
+  // ---------- providers: list on the left, details on the right ----------
+  var provSel = null;
   function providerCards(box) {
     return api("/api/providers").then(function (d) {
-      var ps = d.providers || [], presets = d.presets || [];
-      box.innerHTML = '<div class="pcards">' + ps.map(function (p) {
-        return '<div class="card pcard' + (p.default ? " def" : "") + '"><div class="pc-head"><strong>' + esc(p.name) + "</strong>" + (p.default ? '<span class="pill ok">' + esc(T("pv.default")) + "</span>" : "") + (p.builtin ? '<span class="pill plain">' + esc(T("pv.builtin")) + "</span>" : "") + "</div>" +
-          '<dl class="kv sm"><dt>Base URL</dt><dd><code>' + esc(p.base_url || T("td.default")) + "</code></dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(p.model || T("td.default")) + "</dd><dt>" + esc(T("pv.key")) + "</dt><dd>" +
-          (p.key_set ? '<span class="pill ok">' + esc(T("set.configured")) + "</span> " + (p.key_last4 ? '<code>••••' + esc(p.key_last4) + "</code>" : "") + (p.key_source === "env" ? ' <small class="muted">' + esc(T("pv.from_env")) + "</small>" : "") : '<span class="pill plain">' + esc(T("set.missing")) + "</span>") + "</dd>" +
-          (p.used_by ? "<dt>" + esc(T("col.used_by")) + "</dt><dd>" + esc(plural(p.used_by, "tasks.count_one", "tasks.count_many")) + "</dd>" : "") + "</dl>" +
-          '<div class="pc-test" data-tres="' + esc(p.name) + '"></div>' +
-          '<div class="req-actions wrap"><button class="btn sm" data-pv-test="' + esc(p.name) + '">' + ic("pulse", "sm") + esc(T("pv.test")) + '</button><button class="btn sm" data-pv-edit="' + esc(p.name) + '">' + esc(T("btn.edit")) + '</button><button class="btn sm" data-pv-dup="' + esc(p.name) + '">' + esc(T("pv.dup")) + "</button>" +
-          (p.default ? "" : '<button class="btn sm" data-pv-def="' + esc(p.name) + '">' + esc(T("pv.make_default")) + '</button><button class="btn sm danger" data-pv-del="' + esc(p.name) + '">' + esc(T("btn.remove")) + "</button>") + "</div></div>";
-      }).join("") + '<button class="card qa tint" id="pv-add"><span class="qa-ico">' + ic("plus", "lg") + "</span><strong>" + esc(T("pv.add")) + "</strong><small>" + esc(T("pv.add_sub")) + "</small></button></div>";
-      var byName = {}; ps.forEach(function (p) { byName[p.name] = p; });
-      var again = function () { providerCards(box); };
-      $("#pv-add", box).addEventListener("click", function () { presetPicker(presets, function (pr) { providerForm(null, pr, again); }); });
-      $$("[data-pv-edit]", box).forEach(function (b) { b.addEventListener("click", function () { providerForm(byName[b.getAttribute("data-pv-edit")], null, again); }); });
-      $$("[data-pv-dup]", box).forEach(function (b) { b.addEventListener("click", function () { var c = JSON.parse(JSON.stringify(byName[b.getAttribute("data-pv-dup")])); c.dup = true; providerForm(c, null, again); }); });
-      $$("[data-pv-def]", box).forEach(function (b) { b.addEventListener("click", function () { api("/api/providers/" + enc(b.getAttribute("data-pv-def")) + "/default", { method: "POST", body: {} }).then(function () { toast(T("pv.default_set")); again(); }).catch(fail); }); });
-      $$("[data-pv-del]", box).forEach(function (b) { b.addEventListener("click", function () { var n = b.getAttribute("data-pv-del"); confirmDialog({ title: T("pv.del_title"), body: T("pv.confirm_del", { n: n }), ok: T("btn.remove"), danger: true }).then(function (y) { if (y) api("/api/providers/" + enc(n), { method: "DELETE" }).then(function () { toast(T("pv.deleted")); again(); }).catch(fail); }); }); });
-      $$("[data-pv-test]", box).forEach(function (b) { b.addEventListener("click", function () {
-        var n = b.getAttribute("data-pv-test"), out = $('[data-tres="' + n + '"]', box);
-        b.disabled = true; out.innerHTML = '<span class="muted">' + esc(T("pv.testing")) + "</span>";
-        api("/api/providers/" + enc(n) + "/test", { method: "POST", body: {} }).then(function (r) {
-          out.innerHTML = r.ok ? '<span class="pill ok">' + ic("check", "sm") + esc(T("pv.test_ok", { ms: r.latency_ms, m: r.model || "" })) + "</span>" : '<span class="pill bad">' + esc(T("pv.test_bad", { s: r.status || "—" })) + '</span><small class="err">' + esc(r.error || "") + "</small>";
-        }).catch(function (e) { out.innerHTML = '<span class="pill bad">' + esc(e.message) + "</span>"; }).then(function () { b.disabled = false; });
-      }); });
+      var ps = d.providers || [], presets = d.presets || [], byName = {}, presetById = {};
+      ps.forEach(function (p) { byName[p.name] = p; });
+      presets.forEach(function (p) { presetById[p.id] = p; });
+      if (!provSel || (!byName[provSel] && provSel !== "+new")) provSel = (ps[0] || {}).name;
+      box.innerHTML = '<div class="pv-split"><div class="pv-list"><ul id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + ps.map(function (p) {
+        return '<li draggable="true" data-pv="' + esc(p.name) + '" tabindex="0" class="' + (p.name === provSel ? "on" : "") + '" aria-current="' + (p.name === provSel) + '"><span class="grip" aria-hidden="true">⋮⋮</span><span class="pv-n">' + esc(p.name) + "</span>" +
+          (p.default ? '<span class="pill ok sm">' + esc(T("pv.default")) + "</span>" : "") + '<span class="dot ' + (p.key_set ? "ok" : "") + '" title="' + esc(T(p.key_set ? "set.configured" : "set.missing")) + '"></span></li>';
+      }).join("") + '</ul><button class="btn sm wide" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + '</button><small class="hint">' + esc(T("pv.sort_hint")) + '</small></div><div class="pv-detail" id="pv-detail"></div></div>';
+      var again = function (sel) { if (sel) provSel = sel; return providerCards(box); };
+      var pick = function (n) { provSel = n; $$("#pv-ul li", box).forEach(function (li) { var on = li.getAttribute("data-pv") === n; li.classList.toggle("on", on); li.setAttribute("aria-current", on); }); providerDetail($("#pv-detail", box), byName[n], null, presetById, again); };
+      $$("#pv-ul li", box).forEach(function (li) {
+        li.addEventListener("click", function () { pick(li.getAttribute("data-pv")); });
+        li.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(li.getAttribute("data-pv")); }
+          if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+            e.preventDefault();
+            var sib = e.key === "ArrowUp" ? li.previousElementSibling : li.nextElementSibling;
+            if (!sib) return;
+            li.parentNode.insertBefore(li, e.key === "ArrowUp" ? sib : sib.nextSibling); li.focus(); saveOrder();
+          }
+        });
+        li.addEventListener("dragstart", function (e) { li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", li.getAttribute("data-pv")); });
+        li.addEventListener("dragend", function () { li.classList.remove("dragging"); saveOrder(); });
+      });
+      var ul = $("#pv-ul", box);
+      ul.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        var drag = $(".dragging", ul); if (!drag) return;
+        var after = $$("li:not(.dragging)", ul).filter(function (x) { var r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; })[0];
+        if (after) ul.insertBefore(drag, after); else ul.appendChild(drag);
+      });
+      function saveOrder() {
+        var names = $$("#pv-ul li", box).map(function (x) { return x.getAttribute("data-pv"); });
+        api("/api/providers/order", { method: "POST", body: { names: names } }).then(function () { toast(T("pv.order_saved")); }).catch(fail);
+      }
+      $("#pv-add", box).addEventListener("click", function () { presetPicker(presets, function (pr) { provSel = "+new"; $$("#pv-ul li", box).forEach(function (li) { li.classList.remove("on"); }); providerDetail($("#pv-detail", box), null, pr, presetById, again); }); });
+      if (provSel && byName[provSel]) providerDetail($("#pv-detail", box), byName[provSel], null, presetById, again);
     });
   }
   function presetPicker(presets, pick) {
-    modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T("pv.add")) + '</h2></div><p class="hint">' + esc(T("pv.pick")) + '</p><div class="grid g3 presets">' + presets.map(function (p, i) {
-      return '<button type="button" class="card preset" data-pr="' + i + '"><strong>' + esc(p.name) + "</strong><small><code>" + esc(p.base_url || (p.id === "custom" ? T("pv.custom_sub") : "api.anthropic.com")) + "</code></small>" + (p.model ? "<small>" + esc(p.model) + "</small>" : "") + "</button>";
+    modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T("pv.add")) + '</h2></div><p class="hint">' + esc(T("pv.pick")) + '</p><input type="search" id="pr-q" placeholder="' + esc(T("pv.pick_search")) + '"><div class="grid g3 presets mt">' + presets.map(function (p, i) {
+      return '<button type="button" class="card preset" data-pr="' + i + '" data-q="' + esc((p.name + " " + p.id).toLowerCase()) + '"><strong>' + esc(p.name) + "</strong><small><code>" + esc(p.base_url || (p.id === "custom" ? T("pv.custom_sub") : "api.anthropic.com")) + "</code></small>" + (p.model ? "<small>" + esc(p.model) + "</small>" : "") + "</button>";
     }).join("") + '</div><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
+      $("#pr-q", root).addEventListener("input", function (e) { var q = e.target.value.trim().toLowerCase(); $$("[data-pr]", root).forEach(function (b) { b.classList.toggle("hidden", q && b.getAttribute("data-q").indexOf(q) < 0); }); });
       $$("[data-pr]", root).forEach(function (b) { b.addEventListener("click", function () { close(); pick(presets[+b.getAttribute("data-pr")]); }); });
     });
   }
-  function providerForm(p, preset, done) {
-    var editing = p && !p.dup;
+  function providerDetail(host, p, preset, presetById, done) {
+    var creating = !p || p.dup;
+    var base = p ? (presetById[p.preset] || null) : preset;
     var v = p || { name: preset.id === "custom" ? "" : preset.id, preset: preset.id, base_url: preset.base_url || "", auth_env: preset.auth_env || "ANTHROPIC_AUTH_TOKEN", model: preset.model || "", small_fast_model: preset.small_fast_model || "", opus_model: preset.opus_model || "", sonnet_model: preset.sonnet_model || "", haiku_model: preset.haiku_model || "", extra_env: preset.extra_env || {} };
-    if (p && p.dup) v.name = p.name + "-copy";
+    if (p && p.dup) v = Object.assign({}, p, { name: p.name + "-copy", key_set: false, key_source: "" });
     var envText = Object.keys(v.extra_env || {}).map(function (k) { return k + "=" + v.extra_env[k]; }).join("\n");
     var inp = function (n, val, extra) { return '<input name="' + n + '" value="' + esc(val || "") + '"' + (extra || "") + ">"; };
-    modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(editing ? T("pv.edit", { n: p.name }) : p ? T("pv.dup_title") : T("pv.add_named", { n: preset.name })) + '</h2></div><form id="pvf" autocomplete="off">' +
+    var models = [["model", T("pv.m_main")], ["small_fast_model", T("pv.m_fast")], ["opus_model", "Opus"], ["sonnet_model", "Sonnet"], ["haiku_model", "Haiku"]];
+    var link = base && base.source_url ? '<a class="link" href="' + esc(base.source_url) + '" target="_blank" rel="noopener noreferrer">' + ic("globe", "sm") + esc(T("pv.get_key")) + "</a>" : "";
+    host.innerHTML = '<div class="pv-head"><div><h3>' + esc(creating ? (p ? T("pv.dup_title") : T("pv.add_named", { n: preset.name })) : v.name) + "</h3>" +
+      (!creating ? '<small class="muted">' + (v.default ? esc(T("pv.default")) + " · " : "") + (v.used_by ? esc(plural(v.used_by, "tasks.count_one", "tasks.count_many")) : esc(T("pv.unused"))) + "</small>" : "") + "</div>" +
+      (!creating ? '<div class="row-actions">' + (v.default ? "" : '<button class="btn sm" id="pd-def">' + esc(T("pv.make_default")) + "</button>") + '<button class="btn sm" id="pd-dup">' + esc(T("pv.dup")) + "</button>" + (v.default ? "" : '<button class="btn sm danger" id="pd-del">' + ic("trash", "sm") + esc(T("btn.remove")) + "</button>") + "</div>" : "") + "</div>" +
+      '<form id="pvf" autocomplete="off">' +
       '<div class="form-row">' + fieldHtml(T("set.name"), inp("name", v.name, ' required maxlength="40" pattern="[a-z0-9][a-z0-9._\\-]{0,39}"'), T("pv.name_hint")) + fieldHtml(T("pv.auth"), '<select name="auth_env">' + opt("ANTHROPIC_AUTH_TOKEN", "Bearer (ANTHROPIC_AUTH_TOKEN)", v.auth_env !== "ANTHROPIC_API_KEY") + opt("ANTHROPIC_API_KEY", "x-api-key (ANTHROPIC_API_KEY)", v.auth_env === "ANTHROPIC_API_KEY") + "</select>") + "</div>" +
-      fieldHtml("Base URL", inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"'), T("pv.url_hint")) +
-      fieldHtml(T("pv.api_key"), '<input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(editing && p.key_set && p.key_source === "store" ? T("pv.key_keep", { l: p.key_last4 || "" }) : T("pv.key_new")) + '">', T("pv.key_hint")) +
-      (editing && p.key_source === "store" ? '<label class="check"><input type="checkbox" name="clear_key"> ' + esc(T("pv.clear_key")) + "</label>" : "") +
-      '<div class="form-row">' + fieldHtml(T("pv.m_main"), inp("model", v.model)) + fieldHtml(T("pv.m_fast"), inp("small_fast_model", v.small_fast_model)) + "</div>" +
-      '<div class="form-row three">' + fieldHtml("Opus", inp("opus_model", v.opus_model)) + fieldHtml("Sonnet", inp("sonnet_model", v.sonnet_model)) + fieldHtml("Haiku", inp("haiku_model", v.haiku_model)) + "</div>" +
-      fieldHtml(T("pv.extra_env"), '<textarea name="extra_env" rows="3" placeholder="API_TIMEOUT_MS=600000">' + esc(envText) + "</textarea>", T("pv.extra_hint")) +
-      '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
-      $("#pvf", root).addEventListener("submit", function (e) {
-        e.preventDefault();
-        var f = e.target, env = {}, bad = "";
-        f.extra_env.value.split("\n").forEach(function (l) { l = l.trim(); if (!l) return; var i = l.indexOf("="); if (i < 1) { bad = l; return; } env[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
-        if (bad) { toast(T("pv.env_bad", { l: bad }), true); return; }
-        var body = { original_name: editing ? p.name : "", name: f.name.value.trim(), preset: v.preset || "", base_url: f.base_url.value.trim(), auth_env: f.auth_env.value, model: f.model.value.trim(), small_fast_model: f.small_fast_model.value.trim(),
-          opus_model: f.opus_model.value.trim(), sonnet_model: f.sonnet_model.value.trim(), haiku_model: f.haiku_model.value.trim(), extra_env: env, clear_key: !!(f.clear_key && f.clear_key.checked) };
-        if (f.api_key.value) body.api_key = f.api_key.value;
+      '<label class="field"><span>Base URL</span><div class="in-group">' + inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"') + (base && base.base_url !== undefined ? '<button type="button" class="btn sm ghost" id="pd-reset" title="' + esc(base.base_url || "https://api.anthropic.com") + '">' + ic("rollback", "sm") + esc(T("pv.reset_url")) + "</button>" : "") + '</div><small class="hint">' + esc(T("pv.url_hint")) + "</small></label>" +
+      '<label class="field"><span>' + esc(T("pv.api_key")) + " " + link + '</span><div class="in-group"><input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(!creating && v.key_set && v.key_source === "store" ? T("pv.key_keep", { l: v.key_last4 || "" }) : !creating && v.key_source === "env" ? T("pv.key_env") : T("pv.key_new")) + '"><button type="button" class="btn sm ghost" id="pd-eye" aria-pressed="false" aria-label="' + esc(T("pv.show_key")) + '">' + esc(T("pv.show")) + '</button></div><small class="hint">' + esc(T("pv.key_hint")) + "</small></label>" +
+      (!creating && v.key_source === "store" ? '<label class="check"><input type="checkbox" name="clear_key"> ' + esc(T("pv.clear_key")) + "</label>" : "") +
+      '<div class="field"><span>' + esc(T("pv.models")) + '</span><div class="model-list">' + models.map(function (m) { return '<div class="model-row"><label>' + esc(m[1]) + "</label>" + inp(m[0], v[m[0]], ' maxlength="128"') + '<button type="button" class="btn sm" data-check="' + m[0] + '"' + (creating ? " disabled" : "") + ">" + esc(T("pv.check")) + '</button><span class="mres" data-res="' + m[0] + '"></span></div>'; }).join("") + "</div>" + (creating ? '<small class="hint">' + esc(T("pv.check_after_save")) + "</small>" : "") + "</div>" +
+      fieldHtml(T("pv.extra_env"), '<textarea name="extra_env" rows="2" placeholder="API_TIMEOUT_MS=600000">' + esc(envText) + "</textarea>", T("pv.extra_hint")) +
+      '<div class="pv-test" id="pd-test"></div>' +
+      '<div class="actions">' + (creating ? "" : '<button type="button" class="btn" id="pd-test-btn">' + ic("pulse", "sm") + esc(T("pv.test")) + "</button>") + '<button type="submit" class="btn" data-mode="save">' + esc(T("btn.save")) + '</button><button type="submit" class="btn primary" data-mode="test">' + ic("check", "sm") + esc(T("pv.save_test")) + "</button></div></form>";
+    var f = $("#pvf", host), out = $("#pd-test", host), mode = "save";
+    var runTest = function (name, model, el) {
+      el.innerHTML = '<span class="muted">' + esc(T("pv.testing")) + "</span>";
+      return api("/api/providers/" + enc(name) + "/test", { method: "POST", body: { model: model || "" } }).then(function (r) {
+        el.innerHTML = r.ok ? '<span class="pill ok">' + ic("check", "sm") + esc(T("pv.test_ok", { ms: r.latency_ms, m: r.model || "" })) + "</span>" : '<span class="pill bad">' + esc(T("pv.test_bad", { s: r.status || "—" })) + '</span> <small class="err">' + esc(r.error || "") + "</small>";
+      }).catch(function (e) { el.innerHTML = '<span class="pill bad">' + esc(e.message) + "</span>"; });
+    };
+    $("#pd-eye", host).addEventListener("click", function (e) { var k = f.api_key, on = k.type === "password"; k.type = on ? "text" : "password"; e.currentTarget.setAttribute("aria-pressed", on); e.currentTarget.textContent = T(on ? "pv.hide" : "pv.show"); });
+    var rs = $("#pd-reset", host); if (rs) rs.addEventListener("click", function () { f.base_url.value = base.base_url || ""; f.base_url.focus(); });
+    $$("[data-check]", host).forEach(function (b) { b.addEventListener("click", function () { var k = b.getAttribute("data-check"); if (!f[k].value.trim()) { toast(T("pv.model_empty"), true); return; } runTest(v.name, f[k].value.trim(), $('[data-res="' + k + '"]', host)); }); });
+    var tb = $("#pd-test-btn", host); if (tb) tb.addEventListener("click", function () { runTest(v.name, "", out); });
+    $$("[data-mode]", f).forEach(function (b) { b.addEventListener("click", function () { mode = b.getAttribute("data-mode"); }); });
+    var dd = $("#pd-def", host); if (dd) dd.addEventListener("click", function () { api("/api/providers/" + enc(v.name) + "/default", { method: "POST", body: {} }).then(function () { toast(T("pv.default_set")); done(v.name); }).catch(fail); });
+    var dp = $("#pd-dup", host); if (dp) dp.addEventListener("click", function () { var c = JSON.parse(JSON.stringify(p)); c.dup = true; providerDetail(host, c, null, presetById, done); });
+    var dl = $("#pd-del", host); if (dl) dl.addEventListener("click", function () { confirmDialog({ title: T("pv.del_title"), body: T("pv.confirm_del", { n: v.name }), ok: T("btn.remove"), danger: true }).then(function (y) { if (y) api("/api/providers/" + enc(v.name), { method: "DELETE" }).then(function () { toast(T("pv.deleted")); provSel = null; done(); }).catch(fail); }); });
+    f.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var env = {}, bad = "";
+      f.extra_env.value.split("\n").forEach(function (l) { l = l.trim(); if (!l) return; var i = l.indexOf("="); if (i < 1) { bad = l; return; } env[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
+      if (bad) { toast(T("pv.env_bad", { l: bad }), true); return; }
+      var body = { original_name: creating ? "" : v.name, name: f.name.value.trim(), preset: v.preset || "", base_url: f.base_url.value.trim(), auth_env: f.auth_env.value, model: f.model.value.trim(), small_fast_model: f.small_fast_model.value.trim(),
+        opus_model: f.opus_model.value.trim(), sonnet_model: f.sonnet_model.value.trim(), haiku_model: f.haiku_model.value.trim(), extra_env: env, clear_key: !!(f.clear_key && f.clear_key.checked) };
+      if (f.api_key.value) body.api_key = f.api_key.value;
+      var testAfter = mode === "test";
+      api("/api/providers", { method: "POST", body: body }).then(function (saved) {
         f.api_key.value = "";
-        api("/api/providers", { method: "POST", body: body }).then(function () { close(); toast(T("pv.saved")); done(); }).catch(fail);
-      });
+        toast(T("pv.saved"));
+        return done(saved.name).then(function () { if (testAfter) { var el = $("#pd-test"); if (el) runTest(saved.name, "", el); } });
+      }).catch(fail);
     });
   }
 
   // ---------- task form ----------
-  var DOW = [0, 1, 2, 3, 4, 5, 6];
+  // ---------- schedule editor (simple / cron / manual) ----------
+  var DOW = [1, 2, 3, 4, 5, 6, 0];
   function parseSched(c) {
-    var s = { kind: "manual", time: "09:00", minute: 0, dow: 1, cron: c || "" };
-    if (!c) return s;
-    var p = c.trim().split(/\s+/), hm = function () { return ("0" + p[1]).slice(-2) + ":" + ("0" + p[0]).slice(-2); };
-    if (p.length === 5 && /^\d+$/.test(p[0]) && p[1] === "*" && p[2] === "*" && p[3] === "*" && p[4] === "*") { s.kind = "hourly"; s.minute = +p[0]; return s; }
-    if (p.length === 5 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1]) && p[2] === "*" && p[3] === "*") {
+    var s = { mode: "simple", kind: "daily", time: "09:00", every: 15, minute: 0, dow: 1, dom: 1, cron: c || "" };
+    if (!c) { s.mode = "manual"; return s; }
+    var p = c.trim().split(/\s+/), num = function (x) { return /^\d+$/.test(x); };
+    var hm = function () { return ("0" + p[1]).slice(-2) + ":" + ("0" + p[0]).slice(-2); };
+    if (p.length !== 5) { s.mode = "cron"; return s; }
+    var m;
+    if ((m = /^\*\/(\d+)$/.exec(p[0])) && p[1] === "*" && p[2] === "*" && p[3] === "*" && p[4] === "*") { s.kind = "minutes"; s.every = +m[1]; return s; }
+    if (num(p[0]) && p[1] === "*" && p[2] === "*" && p[3] === "*" && p[4] === "*") { s.kind = "hourly"; s.minute = +p[0]; return s; }
+    if (num(p[0]) && num(p[1]) && p[3] === "*") {
       s.time = hm();
-      if (p[4] === "*") { s.kind = "daily"; return s; }
-      if (p[4] === "1-5") { s.kind = "weekdays"; return s; }
-      if (/^[0-6]$/.test(p[4])) { s.kind = "weekly"; s.dow = +p[4]; return s; }
+      if (p[2] === "*" && p[4] === "*") { s.kind = "daily"; return s; }
+      if (p[2] === "*" && p[4] === "1-5") { s.kind = "weekdays"; return s; }
+      if (p[2] === "*" && /^[0-6]$/.test(p[4])) { s.kind = "weekly"; s.dow = +p[4]; return s; }
+      if (num(p[2]) && p[4] === "*") { s.kind = "monthly"; s.dom = +p[2]; return s; }
     }
-    s.kind = "custom"; return s;
+    s.mode = "cron"; s.unconvertible = true; return s;
   }
-  function buildCron(f) {
-    var k = f.sched.value, t = (f.at.value || "09:00").split(":"), m = +t[1] || 0, h = +t[0] || 0;
-    if (k === "manual") return "";
-    if (k === "hourly") return (Math.min(59, Math.max(0, parseInt(f.minute.value, 10) || 0))) + " * * * *";
-    if (k === "daily") return m + " " + h + " * * *";
-    if (k === "weekdays") return m + " " + h + " * * 1-5";
-    if (k === "weekly") return m + " " + h + " * * " + f.dow.value;
-    return f.cron.value.trim();
+  function simpleCron(s) {
+    var t = (s.time || "09:00").split(":"), h = +t[0] || 0, m = +t[1] || 0;
+    switch (s.kind) {
+      case "minutes": return "*/" + Math.min(59, Math.max(1, +s.every || 15)) + " * * * *";
+      case "hourly": return Math.min(59, Math.max(0, +s.minute || 0)) + " * * * *";
+      case "weekdays": return m + " " + h + " * * 1-5";
+      case "weekly": return m + " " + h + " * * " + s.dow;
+      case "monthly": return m + " " + h + " " + Math.min(28, Math.max(1, +s.dom || 1)) + " * *";
+      default: return m + " " + h + " * * *";
+    }
+  }
+  // Quick local syntax check so obvious mistakes show up while typing; the server has the final say.
+  function cronSyntaxError(c) {
+    var p = c.trim().split(/\s+/);
+    if (p.length !== 5) return T("se.need5");
+    var lim = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+    for (var i = 0; i < 5; i++) {
+      var ok = p[i].split(",").every(function (part) {
+        var m = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(part);
+        if (!m) return /^[A-Za-z]{3}(-[A-Za-z]{3})?$/.test(part) && (i === 3 || i === 4);
+        var a = m[2] == null ? null : +m[2], b = m[3] == null ? null : +m[3];
+        return (a == null || (a >= lim[i][0] && a <= lim[i][1])) && (b == null || (b >= lim[i][0] && b <= lim[i][1] && b >= a)) && (m[4] == null || +m[4] > 0);
+      });
+      if (!ok) return T("se.bad_field", { f: T("se.f_" + i), v: p[i] });
+    }
+    return "";
+  }
+  var previewCache = {};
+  function scheduleEditor(host, cron, serverTz) {
+    var s = parseSched(cron), tz = serverTz || state.tz || "", timer = null, seq = 0;
+    var dowName = function (d) { return new Intl.DateTimeFormat(state.lang, { weekday: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2023, 0, 1 + d))); };
+    var browserTz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || "";
+    var tzs = [serverTz, browserTz, "UTC", "Asia/Shanghai", "America/Los_Angeles", "America/New_York", "Europe/London", "Europe/Berlin", "Asia/Tokyo"].filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+    host.innerHTML = '<div class="sched-ed"><div class="seg" role="tablist">' + [["simple", T("se.simple")], ["cron", "Cron"], ["manual", T("se.manual")]].map(function (m) { return '<button type="button" role="tab" data-mode="' + m[0] + '">' + esc(m[1]) + "</button>"; }).join("") + "</div>" +
+      '<div class="se-pane" data-pane="simple"><div class="form-row sched"><select data-k="kind" aria-label="' + esc(T("tf.schedule")) + '">' + ["minutes", "hourly", "daily", "weekdays", "weekly", "monthly"].map(function (k) { return opt(k, T("se.k_" + k), k === s.kind); }).join("") + "</select>" +
+      '<label class="inl" data-show="minutes">' + esc(T("se.every")) + ' <input type="number" min="1" max="59" data-k="every" value="' + esc(s.every) + '"> ' + esc(T("se.minutes")) + "</label>" +
+      '<label class="inl" data-show="hourly">' + esc(T("se.at_minute")) + ' <input type="number" min="0" max="59" data-k="minute" value="' + esc(s.minute) + '"></label>' +
+      '<select data-k="dow" data-show="weekly" aria-label="' + esc(T("se.weekday")) + '">' + DOW.map(function (d) { return opt(d, dowName(d), d === s.dow); }).join("") + "</select>" +
+      '<label class="inl" data-show="monthly">' + esc(T("se.day")) + ' <input type="number" min="1" max="28" data-k="dom" value="' + esc(s.dom) + '"></label>' +
+      '<input type="time" data-k="time" value="' + esc(s.time) + '" data-show="daily weekdays weekly monthly" aria-label="' + esc(T("se.time")) + '"></div></div>' +
+      '<div class="se-pane" data-pane="cron"><input class="mono" data-k="cron" maxlength="200" spellcheck="false" placeholder="*/30 9-18 * * 1-5" value="' + esc(s.cron) + '" aria-describedby="se-err"><small class="hint">' + esc(T("se.cron_hint")) + '</small></div>' +
+      '<div class="se-pane" data-pane="manual"><p class="muted">' + esc(T("tf.manual_hint")) + "</p></div>" +
+      '<p class="field-err" id="se-err" role="alert"></p><p class="se-note muted"></p>' +
+      '<div class="sched-prev"><div class="sp-head"><span class="sp-human"></span><label class="inl">' + esc(T("se.show_in")) + ' <select data-k="tz">' + tzs.map(function (z) { return opt(z, z + (z === serverTz ? " · " + T("se.server") : ""), z === tz); }).join("") + '</select></label></div><ul class="next"></ul></div></div>';
+    var $k = function (k) { return $('[data-k="' + k + '"]', host); };
+    var err = $("#se-err", host), note = $(".se-note", host), list = $(".next", host), human = $(".sp-human", host);
+    function value() {
+      if (s.mode === "manual") return "";
+      if (s.mode === "cron") return $k("cron").value.trim();
+      return simpleCron({ kind: $k("kind").value, every: $k("every").value, minute: $k("minute").value, dow: $k("dow").value, dom: $k("dom").value, time: $k("time").value });
+    }
+    function show(times, zone) {
+      list.innerHTML = times.map(function (t) { return "<li>" + esc(new Intl.DateTimeFormat(state.lang, { timeZone: zone, weekday: "short", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t))) + "</li>"; }).join("");
+    }
+    function preview() {
+      var c = value();
+      err.textContent = ""; note.textContent = "";
+      $$("[data-mode]", host).forEach(function (b) { var on = b.getAttribute("data-mode") === s.mode; b.classList.toggle("active", on); b.setAttribute("aria-selected", on); });
+      $$("[data-pane]", host).forEach(function (p) { p.classList.toggle("hidden", p.getAttribute("data-pane") !== s.mode); });
+      var kind = $k("kind").value;
+      $$("[data-show]", host).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-show").split(" ").indexOf(kind) < 0); });
+      $(".sched-prev", host).classList.toggle("hidden", !c);
+      if (s.mode === "cron" && s.unconvertible) note.textContent = T("se.cron_only");
+      if (!c) { host.dispatchEvent(new CustomEvent("sched", { detail: { cron: "", ok: true } })); return; }
+      var bad = cronSyntaxError(c);
+      if (bad) { err.textContent = bad; list.innerHTML = ""; human.textContent = ""; host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); return; }
+      human.innerHTML = "<strong>" + esc(cronHuman(c)) + '</strong> <code class="muted">' + esc(c) + "</code>";
+      var zone = $k("tz").value, key = c + "|" + zone;
+      host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: true } }));
+      if (previewCache[key]) { show(previewCache[key], zone); return; }
+      clearTimeout(timer);
+      var my = ++seq;
+      timer = setTimeout(function () {
+        api("/api/scheduler/preview?cron=" + enc(c) + "&tz=" + enc(zone)).then(function (d) {
+          previewCache[key] = d.times || [];
+          if (my === seq) show(previewCache[key], zone);
+        }).catch(function (e) { if (my === seq) { err.textContent = e.message; list.innerHTML = ""; host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); } });
+      }, 300);
+    }
+    $$("[data-mode]", host).forEach(function (b) { b.addEventListener("click", function () {
+      var to = b.getAttribute("data-mode");
+      if (to === s.mode) return;
+      if (to === "simple") {
+        var cur = s.mode === "cron" ? parseSched($k("cron").value.trim()) : null;
+        if (cur && cur.mode !== "simple") { s.mode = "cron"; preview(); note.textContent = T("se.cron_only"); return; }
+        if (cur) { $k("kind").value = cur.kind; $k("every").value = cur.every; $k("minute").value = cur.minute; $k("dow").value = cur.dow; $k("dom").value = cur.dom; $k("time").value = cur.time; }
+        s.unconvertible = false;
+      }
+      if (to === "cron" && s.mode === "simple") $k("cron").value = value();
+      s.mode = to; preview();
+    }); });
+    ["kind", "every", "minute", "dow", "dom", "time", "tz"].forEach(function (k) { $k(k).addEventListener("input", preview); $k(k).addEventListener("change", preview); });
+    $k("cron").addEventListener("input", function () { s.unconvertible = parseSched($k("cron").value).mode === "cron"; preview(); });
+    preview();
+    return { value: value, valid: function () { return !err.textContent; } };
   }
   function taskFormModal(taskId) {
     var reqs = [api("/api/skills"), api("/api/settings")];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
     Promise.all(reqs).then(function (r) {
       var skills = r[0] || [], st = r[1], tf = taskId ? r[2].form : { name: "", prompt: "", skill_id: "", skill_version_id: "", provider: st.default_provider, cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
-      var sc = parseSched(tf.cron);
-      var dowName = function (d) { return new Intl.DateTimeFormat(state.lang, { weekday: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2023, 0, 1 + d))); };
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
         fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T("tf.name_ph")) + '">') +
         fieldHtml(T("tf.prompt"), '<textarea name="prompt" required maxlength="32000" rows="5" placeholder="' + esc(T("tf.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>") +
         '<div class="form-row">' + fieldHtml(T("bt.skill"), '<select name="skill_id"><option value="">' + esc(T("tf.no_skill")) + "</option>" + skills.map(function (s) { return opt(s.id, s.name, s.id === tf.skill_id); }).join("") + "</select>") +
         fieldHtml(T("bt.skill_ver"), '<select name="skill_version_id"><option value="">' + esc(T("bt.latest")) + "</option></select>") + "</div>" +
         fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
-        '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div class="form-row sched"><select name="sched">' + ["manual", "hourly", "daily", "weekdays", "weekly", "custom"].map(function (k) { return opt(k, T("tf.s_" + k), k === sc.kind); }).join("") + "</select>" +
-        '<input name="minute" type="number" min="0" max="59" value="' + sc.minute + '" data-s="hourly" aria-label="' + esc(T("tf.minute")) + '">' +
-        '<select name="dow" data-s="weekly">' + DOW.map(function (d) { return opt(d, dowName(d), d === sc.dow); }).join("") + "</select>" +
-        '<input name="at" type="time" value="' + esc(sc.time) + '" data-s="daily weekdays weekly">' +
-        '<input name="cron" class="mono" value="' + esc(sc.cron) + '" placeholder="*/30 * * * *" data-s="custom"></div>' +
-        '<div class="sched-prev" id="sp"></div></div>' +
+        '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
         '<div class="form-row">' + fieldHtml(T("tf.budget"), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint")) +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.enabled")) + "</label>" +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
-        var f = $("#tf", root), sp = $("#sp", root), timer;
+        var f = $("#tf", root);
         var loadVers = function () {
           var sel = f.skill_version_id;
           if (!f.skill_id.value) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>"; sel.disabled = true; return; }
           sel.disabled = false;
           api("/api/skills/" + enc(f.skill_id.value) + "/versions").then(function (v) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>" + v.versions.slice().reverse().map(function (x) { return opt(x.id, T("bt.pin_v", { n: x.no }), x.id === tf.skill_version_id); }).join(""); }).catch(fail);
         };
-        var preview = function () {
-          var k = f.sched.value;
-          $$("[data-s]", f).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-s").split(" ").indexOf(k) < 0); });
-          var c = buildCron(f);
-          if (!c) { sp.innerHTML = '<p class="muted">' + esc(T("tf.manual_hint")) + "</p>"; return; }
-          clearTimeout(timer);
-          timer = setTimeout(function () {
-            api("/api/schedule/preview?cron=" + enc(c)).then(function (d) {
-              sp.innerHTML = "<p><strong>" + esc(cronHuman(c)) + '</strong> <code class="muted">' + esc(c) + "</code></p><small class=\"muted\">" + esc(T("tf.next_runs", { tz: d.timezone || tzLabel() })) + "</small><ul class=\"next\">" + (d.times || []).map(function (t) { return "<li>" + esc(fmtTime(t, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })) + "</li>"; }).join("") + "</ul>";
-            }).catch(function (e) { sp.innerHTML = '<p class="err">' + esc(e.message) + "</p>"; });
-          }, 200);
-        };
-        loadVers(); preview();
+        var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
+        loadVers();
         f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
-        ["sched", "minute", "dow", "at", "cron"].forEach(function (n) { f[n].addEventListener("input", preview); f[n].addEventListener("change", preview); });
         f.addEventListener("submit", function (e) {
           e.preventDefault();
-          var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, provider: f.provider.value, cron: buildCron(f),
+          if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
+          var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, provider: f.provider.value, cron: se.value(),
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30 };
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
@@ -1279,7 +1486,7 @@
     var p;
     switch (parts[0]) {
       case undefined: p = renderHome(); break;
-      case "tasks": p = parts[1] ? renderTaskDetail(parts[1]) : renderTasks(); break;
+      case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(); break;
       case "skills": p = renderSkills(); break;
       case "buttons": p = renderButtons(); break;
       case "plugins": p = renderPlugins(); break;
