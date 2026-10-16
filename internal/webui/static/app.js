@@ -18,6 +18,8 @@
   var LANGS = ["en", "zh-CN"];
   function pickLang(pref) {
     if (pref && pref !== "auto" && LANGS.indexOf(pref) >= 0) return pref;
+    // Desktop shell: the OS locale comes from the core (webviews often report en-US).
+    if (state.osLang) return /^zh/i.test(state.osLang) ? "zh-CN" : "en";
     var nav = (navigator.languages && navigator.languages[0]) || navigator.language || "en";
     return /^zh/i.test(nav) ? "zh-CN" : "en";
   }
@@ -848,6 +850,7 @@
   function boot() {
     api("/api/me").then(function (me) {
       state.csrf = me.csrf_token;
+      state.osLang = me.os_language || "";
       return loadLang(me.language || "auto").then(function () { return me; });
     }).then(function (me) {
       state.tz = me.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;

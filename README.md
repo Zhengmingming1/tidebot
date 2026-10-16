@@ -186,6 +186,20 @@ agentctl tasks run --id <task_id>
 
 命令行的提示信息也有中英文，跟随系统语言，或者用 `TIDEBOT_LANG=zh-CN` / `TIDEBOT_LANG=en` 指定。
 
+## 桌面版（试验中）
+
+`cmd/tidebot-desktop` 是个托盘程序，核心直接跑在同一个进程里，窗口通过 webview 的进程内资源服务读 WebUI，不开端口。
+关掉窗口只是藏到托盘，定时任务照跑。托盘菜单能打开窗口、暂停/恢复调度、点一下跑某个按钮预设、临时开局域网访问、退出。
+运行完成、失败、需要确认、超预算都会弹系统通知。语言跟系统走。
+
+```bash
+scripts/build-desktop.sh linux        # 需要 Go 1.25、libgtk-3-dev、libwebkit2gtk-4.1-dev
+bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏在托盘
+```
+
+老实说：只在 Linux 上跑过。Windows 和 macOS 的构建脚本写好了但没验证。
+它用的是 Wails v3 beta，还会变。内存也不小，WebKit 加起来四五百 MB（核心本身十几 MB），数字在 docs/phase0-results.md。
+
 ## 现状
 
 这是一个人维护的个人项目，还在早期。

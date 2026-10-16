@@ -58,6 +58,9 @@ type Server struct {
 	enabled    bool
 	lastActive time.Time
 	sseIdle    time.Duration
+
+	// OSLanguage is set by the desktop shell; see DesktopHandler.
+	OSLanguage string
 }
 
 // New creates a WebUI server (not listening yet).
@@ -317,6 +320,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	totp, _ := s.deps.Auth.TOTPEnabled(r.Context())
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "csrf_token": sess.CSRFToken, "totp_enabled": totp, "user": "owner",
-		"timezone": s.loc().String(), "version": Version, "language": s.language(r.Context()),
+		"timezone": s.loc().String(), "version": Version, "language": s.language(r.Context()), "os_language": osLang(r.Context()),
 	})
 }
