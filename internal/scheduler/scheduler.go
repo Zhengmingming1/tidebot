@@ -16,14 +16,14 @@ type RunnerFunc func(ctx context.Context, task db.Task) error
 
 // Scheduler polls SQLite for due tasks.
 type Scheduler struct {
-	store    *db.Store
-	log      *slog.Logger
-	run      RunnerFunc
-	tick     time.Duration
-	parser   cron.Parser
-	mu       sync.Mutex
-	running  bool
-	cancel   context.CancelFunc
+	store   *db.Store
+	log     *slog.Logger
+	run     RunnerFunc
+	tick    time.Duration
+	parser  cron.Parser
+	mu      sync.Mutex
+	running bool
+	cancel  context.CancelFunc
 }
 
 // New creates a scheduler. tick defaults to 15s.
@@ -35,10 +35,10 @@ func New(store *db.Store, log *slog.Logger, tick time.Duration, run RunnerFunc) 
 		log = slog.Default()
 	}
 	return &Scheduler{
-		store: store,
-		log:   log,
-		run:   run,
-		tick:  tick,
+		store:  store,
+		log:    log,
+		run:    run,
+		tick:   tick,
 		parser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor),
 	}
 }

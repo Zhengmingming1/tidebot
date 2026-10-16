@@ -54,19 +54,19 @@ func EnvFromOS(profile Profile) (string, error) {
 // Secrets are included for the child only; callers must never log the returned values.
 func ChildEnv(base []string, profile Profile, apiKey string) []string {
 	strip := map[string]struct{}{
-		"ANTHROPIC_BASE_URL":             {},
-		"ANTHROPIC_AUTH_TOKEN":           {},
-		"ANTHROPIC_API_KEY":              {},
-		"ANTHROPIC_MODEL":                {},
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   {},
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": {},
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  {},
-		"ANTHROPIC_DEFAULT_FABLE_MODEL":  {},
-		"ANTHROPIC_SMALL_FAST_MODEL":     {},
-		"CLAUDE_CODE_SUBAGENT_MODEL":     {},
-		"CLAUDE_CODE_EFFORT_LEVEL":       {},
+		"ANTHROPIC_BASE_URL":              {},
+		"ANTHROPIC_AUTH_TOKEN":            {},
+		"ANTHROPIC_API_KEY":               {},
+		"ANTHROPIC_MODEL":                 {},
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":    {},
+		"ANTHROPIC_DEFAULT_SONNET_MODEL":  {},
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":   {},
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":   {},
+		"ANTHROPIC_SMALL_FAST_MODEL":      {},
+		"CLAUDE_CODE_SUBAGENT_MODEL":      {},
+		"CLAUDE_CODE_EFFORT_LEVEL":        {},
 		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": {},
-		"CLAUDE_CODE_MAX_CONTEXT_TOKENS": {},
+		"CLAUDE_CODE_MAX_CONTEXT_TOKENS":  {},
 	}
 	// Also strip the source secret env name so the child only sees AuthEnv.
 	if name := NormalizeSecretEnv(profile.SecretEnv); name != "" {
