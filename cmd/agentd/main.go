@@ -8,11 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
-	"github.com/Zhengmingming1/tidebot/internal/ipc"
 )
 
 func main() {
@@ -37,52 +35,18 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	if err := a.SeedBuiltinProviders(ctx); err != nil {
-		a.Log.Error("seed providers", "error", err)
-	}
-
-	ln, err := ipc.Listen(cfg.IPCPath)
+	d, err := a.StartDaemon(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ipc listen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "start: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() {
-		_ = ln.Close()
-		_ = os.Remove(cfg.IPCPath)
-	}()
-
-	srv := ipc.NewServer(a.Log)
-	a.RegisterRPC(srv)
-
-	a.Log.Info("agentd starting",
-		"db", cfg.DBPath,
-		"ipc", cfg.IPCPath,
-		"max_concurrency", cfg.MaxConcurrency,
-		"claude_bin", cfg.ClaudeBin,
-		"default_provider", cfg.DefaultProvider,
-		"webui", cfg.EffectiveWebUI(),
-		"webui_addr", cfg.WebUIAddr,
-	)
-
-	if cfg.EffectiveWebUI() {
-		if err := a.WebUI.Start(ctx); err != nil {
-			a.Log.Error("webui start", "error", err)
-		}
-	}
-
-	a.Sched.Start(ctx)
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(ctx, ln) }()
-
 	select {
 	case <-ctx.Done():
 		a.Log.Info("agentd shutting down")
-	case err := <-errCh:
+	case err := <-d.Errs:
 		if err != nil {
 			a.Log.Error("ipc server", "error", err)
 		}
 	}
-	a.Sched.Stop()
-	_ = a.WebUI.Stop(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	d.Stop()
 }

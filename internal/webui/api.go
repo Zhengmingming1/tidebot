@@ -232,27 +232,16 @@ func (s *Server) handleButtonRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 		return
 	}
-	for _, b := range s.loadButtons(r.Context()) {
-		if b.ID != parts[0] {
-			continue
+	label, err := s.RunButton(r.Context(), parts[0])
+	if err != nil {
+		code := 500
+		if label == "" {
+			code = 404
 		}
-		var err error
-		switch {
-		case b.TaskID != "" && s.deps.RunTask != nil:
-			err = s.deps.RunTask(b.TaskID, cost.BucketProduction)
-		case b.Prompt != "" && s.deps.QuickRun != nil:
-			err = s.deps.QuickRun(b.Prompt, b.Provider)
-		default:
-			err = fmt.Errorf("execution not available")
-		}
-		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-		writeJSON(w, 202, map[string]any{"ok": true, "started": b.Label})
+		writeErr(w, code, err.Error())
 		return
 	}
-	writeErr(w, 404, "button not found")
+	writeJSON(w, 202, map[string]any{"ok": true, "started": label})
 }
 
 func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {

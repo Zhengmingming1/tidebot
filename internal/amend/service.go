@@ -54,6 +54,8 @@ type Service struct {
 	Tasks *tasksvc.Service
 	Ver   *version.Service
 	AI    Structurer
+	// OnProposed, if set, is called after new requirement items were stored and await confirmation.
+	OnProposed func(taskID string, items []Item)
 }
 
 func New(db *sql.DB, tasks *tasksvc.Service, ver *version.Service, ai Structurer) *Service {
@@ -105,6 +107,9 @@ VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		out = append(out, it)
 	}
 	_ = actor
+	if s.OnProposed != nil && len(out) > 0 {
+		s.OnProposed(taskID, out)
+	}
 	return out, nil
 }
 
