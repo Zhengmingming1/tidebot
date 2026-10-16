@@ -18,13 +18,14 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/Zhengmingming1/tidebot/internal/auth"
+	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
 )
 
 // Version is shown in the UI footer.
-const Version = "0.2.0"
+var Version = buildinfo.Version
 
 func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/login", s.handleLogin)
@@ -50,6 +51,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/webui", s.withAuthCSRF(s.handleWebUIToggle))
 	mux.HandleFunc("/api/budgets", s.withAuthCSRF(s.handleBudgets))
 	mux.HandleFunc("/api/settings/language", s.withAuthCSRF(s.handleLanguage))
+	mux.HandleFunc("/api/rpc/", s.withAuthCSRF(s.handleExt))
 }
 
 func (s *Server) loc() *time.Location {
@@ -1112,4 +1114,26 @@ func parseBudgetDetail(d string) (code, used, limit string) {
 		return "zero", "", ""
 	}
 	return "", "", ""
+}
+
+func (s *Server) handleExt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	if s.deps.Ext == nil {
+		writeErr(w, http.StatusNotFound, "not available")
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	out, err := s.deps.Ext(r.Context(), strings.TrimPrefix(r.URL.Path, "/api/rpc/"), json.RawMessage(raw))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"result": out})
 }

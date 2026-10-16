@@ -38,6 +38,15 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	a.Sched.Start(ctx)
 	go a.runNotifier(ctx)
 	go a.runOptimizer(ctx)
+	go a.PluginHost.Run(ctx)
+	go a.runFileWatcher(ctx, 0)
+	go a.runRetention(ctx)
+	if os.Getenv("TIDEBOT_NO_AUTO_BACKUP") != "1" {
+		go a.runAutoBackup(ctx)
+	}
+	if v := a.claudeVersion(); !ClaudeCompatible(v) {
+		a.Log.Warn("claude code is older than tested", "version", v, "min", MinClaudeVersion)
+	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ctx, ln) }()
 	return &Daemon{a: a, Errs: errCh, close: func() {

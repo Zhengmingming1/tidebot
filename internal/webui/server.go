@@ -47,6 +47,12 @@ type Deps struct {
 	QuickRun func(prompt, providerName string) error
 	LogPath  func(runID string) string
 	Location *time.Location
+
+	// Public handlers mounted without session auth (they authenticate themselves),
+	// e.g. /hooks/ (webhook token/HMAC) and /metrics (bearer token).
+	Public map[string]http.Handler
+	// Ext serves POST /api/rpc/<method> for the owner session (plugins, triggers, backup...).
+	Ext func(ctx context.Context, method string, raw json.RawMessage) (any, error)
 }
 
 // Server is a togglable HTTP listener.
@@ -208,6 +214,9 @@ func (s *Server) routes() http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	for p, h := range s.deps.Public {
+		mux.Handle(p, h)
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)

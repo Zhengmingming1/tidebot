@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/db"
@@ -275,8 +274,8 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 		baseEnv = os.Environ()
 	}
 	cmd.Env = provider.ChildEnv(baseEnv, opts.Profile, opts.APIKey)
-	// Put process in its own group so we can signal the whole tree on cancel.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Own process group (unix) / job object (windows) so the whole tree dies on cancel.
+	setupProcess(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -290,6 +289,8 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 	if err := cmd.Start(); err != nil {
 		return Result{Status: "failed", ErrorMessage: err.Error(), ExitCode: -1}, err
 	}
+	release := afterStart(cmd)
+	defer release()
 
 	var (
 		events []Event
