@@ -41,6 +41,11 @@ func (a *App) applyGuard(ctx context.Context, opts *runner.Options) error {
 			}
 		}
 	}
+	if len(tools) == 0 && opts.TaskID != "" && a.Tasks != nil {
+		if v, err := a.Tasks.Get(ctx, opts.TaskID); err == nil && v.Spec != nil {
+			tools = v.Spec.AllowedTools
+		}
+	}
 	if len(tools) == 0 && externalTriggers[opts.TriggerKind] {
 		tools = guard.ExternalTools
 	}

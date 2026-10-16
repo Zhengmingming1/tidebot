@@ -24,6 +24,20 @@ func (a *App) registerRPC2(srv *ipc.Server) {
 	srv.Register("notify.add_rule", a.rpcNotifyAddRule)
 	srv.Register("notify.test", a.rpcNotifyTest)
 	srv.Register("notify.settings", a.rpcNotifySettings)
+	srv.Register("amendments.consolidation", func(ctx context.Context, raw json.RawMessage) (any, error) {
+		p, _ := decode[struct {
+			TaskID string `json:"task_id"`
+		}](raw)
+		return a.Amend.Consolidation(ctx, p.TaskID)
+	})
+	srv.Register("amendments.consolidate", func(ctx context.Context, raw json.RawMessage) (any, error) {
+		p, _ := decode[struct {
+			TaskID string `json:"task_id"`
+			Hash   string `json:"hash"`
+		}](raw)
+		vid, err := a.Amend.ApplyConsolidation(ctx, p.TaskID, p.Hash, "user")
+		return map[string]string{"version_id": vid}, err
+	})
 	a.registerSkillRPC(func(n string, h func(context.Context, json.RawMessage) (any, error)) { srv.Register(n, h) })
 }
 
