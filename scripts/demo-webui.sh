@@ -46,7 +46,7 @@ for i in ${sec//,/ }; do ctl amend confirm --id "$i" >/dev/null; done
 ctl tasks rollback --id "$T5" --version "$V1" --reason "try a different approach" >/dev/null
 third=$(ctl amend propose --task "$T5" --text "Sync the archive to the Backblaze B2 bucket" | python3 -c 'import json,sys; print(",".join(i["id"] for i in json.load(sys.stdin)))')
 for i in ${third//,/ }; do ctl amend confirm --id "$i" >/dev/null; done
-ctl amend propose --task "$T5" --text "Also keep backups for 10 days (not 7) only this run" >/dev/null
+ctl amend propose --task "$T5" --text "Also keep backups for 10 days (not 7); skip node_modules and .cache folders; send me a short summary when done" >/dev/null
 
 # A skill.
 mkdir -p "$H/skill/repo-summary"

@@ -36,6 +36,10 @@ type Budget struct {
 type Service struct {
 	DB  *sql.DB
 	Log *slog.Logger
+	// Loc is the timezone whose midnight resets daily budgets (default time.Local).
+	Loc *time.Location
+	// Now is overridable for tests.
+	Now func() time.Time
 }
 
 func New(db *sql.DB, log *slog.Logger) *Service {
@@ -45,9 +49,52 @@ func New(db *sql.DB, log *slog.Logger) *Service {
 	return &Service{DB: db, Log: log}
 }
 
-func nowUTC() string   { return time.Now().UTC().Format(time.RFC3339) }
-func dayUTC() string   { return time.Now().UTC().Format("2006-01-02") }
-func monthUTC() string { return time.Now().UTC().Format("2006-01") }
+func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
+
+func (s *Service) loc() *time.Location {
+	if s.Loc != nil {
+		return s.Loc
+	}
+	return time.Local
+}
+
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+// Today returns the current local day (YYYY-MM-DD) in the configured timezone.
+func (s *Service) Today() string { return s.now().In(s.loc()).Format("2006-01-02") }
+
+// DayBounds returns [start, end) of the local calendar day containing t in loc.
+// It handles DST days (23h/25h) correctly.
+func DayBounds(t time.Time, loc *time.Location) (time.Time, time.Time) {
+	lt := t.In(loc)
+	start := time.Date(lt.Year(), lt.Month(), lt.Day(), 0, 0, 0, 0, loc)
+	end := time.Date(lt.Year(), lt.Month(), lt.Day()+1, 0, 0, 0, 0, loc)
+	return start, end
+}
+
+// ResetsAt returns the next local midnight when daily budgets reset.
+func (s *Service) ResetsAt() time.Time {
+	_, end := DayBounds(s.now(), s.loc())
+	return end
+}
+
+// dayRange converts a local day string into UTC RFC3339 bounds for created_at.
+func (s *Service) dayRange(day string) (string, string, error) {
+	d, err := time.ParseInLocation("2006-01-02", day, s.loc())
+	if err != nil {
+		return "", "", fmt.Errorf("bad day %q", day)
+	}
+	st, en := DayBounds(d, s.loc())
+	return st.UTC().Format(time.RFC3339), en.UTC().Format(time.RFC3339), nil
+}
+
+// DayRange is the exported form of dayRange.
+func (s *Service) DayRange(day string) (string, string, error) { return s.dayRange(day) }
 
 // EnsureDefaults seeds global daily and assist/optimization daily budgets if missing.
 func (s *Service) EnsureDefaults(ctx context.Context) error {
@@ -117,7 +164,7 @@ func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, run
 		checks = append(checks, struct{ scope, scopeID, period, buck string }{"task", taskID, "day", ""})
 	}
 
-	day := dayUTC()
+	day := s.Today()
 	for _, c := range checks {
 		b, err := s.findBudget(ctx, c.scope, c.scopeID, c.period, c.buck)
 		if err == sql.ErrNoRows {
@@ -174,8 +221,12 @@ FROM budgets WHERE scope=? AND scope_id=? AND period=? AND bucket=?`, scope, sco
 }
 
 func (s *Service) sumDay(ctx context.Context, day, scope, scopeID, bucket string) (usd float64, tokens int64, err error) {
-	q := `SELECT COALESCE(SUM(usd),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE day=?`
-	args := []any{day}
+	st, en, err := s.dayRange(day)
+	if err != nil {
+		return 0, 0, err
+	}
+	q := `SELECT COALESCE(SUM(usd),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE created_at >= ? AND created_at < ?`
+	args := []any{st, en}
 	if scope == "task" && scopeID != "" {
 		q += ` AND task_id=?`
 		args = append(args, scopeID)
@@ -199,7 +250,7 @@ INSERT INTO cost_ledger(run_id, bucket, task_id, usd, tokens, input_tokens, outp
 VALUES(?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(run_id) DO UPDATE SET usd=excluded.usd, tokens=excluded.tokens,
   input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens`,
-		runID, bucket, nullEmpty(taskID), usd, tokens, inTok, outTok, dayUTC(), monthUTC(), nowUTC())
+		runID, bucket, nullEmpty(taskID), usd, tokens, inTok, outTok, s.now().In(s.loc()).Format("2006-01-02"), s.now().In(s.loc()).Format("2006-01"), s.now().UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -239,6 +290,8 @@ UPDATE tasks SET status='paused', updated_at=? WHERE id=?`, nowUTC(), taskID)
 // SpendSummary aggregates spend for dashboards / agentctl.
 type SpendSummary struct {
 	Day         string             `json:"day"`
+	Timezone    string             `json:"timezone"`
+	ResetsAt    string             `json:"resets_at"`
 	TotalUSD    float64            `json:"total_usd"`
 	TotalTokens int64              `json:"total_tokens"`
 	ByBucket    map[string]float64 `json:"by_bucket_usd"`
@@ -260,11 +313,16 @@ type BudgetView struct {
 // Summary returns today's spend and budget usage.
 func (s *Service) Summary(ctx context.Context, day string) (SpendSummary, error) {
 	if day == "" {
-		day = dayUTC()
+		day = s.Today()
 	}
-	out := SpendSummary{Day: day, ByBucket: map[string]float64{}, ByBucketTok: map[string]int64{}}
+	out := SpendSummary{Day: day, Timezone: s.loc().String(), ResetsAt: s.ResetsAt().UTC().Format(time.RFC3339),
+		ByBucket: map[string]float64{}, ByBucketTok: map[string]int64{}}
+	st, en, err := s.dayRange(day)
+	if err != nil {
+		return out, err
+	}
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT bucket, COALESCE(SUM(usd),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE day=? GROUP BY bucket`, day)
+SELECT bucket, COALESCE(SUM(usd),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE created_at >= ? AND created_at < ? GROUP BY bucket`, st, en)
 	if err != nil {
 		return out, err
 	}
@@ -350,3 +408,6 @@ func nullInt(v, d int) int {
 	}
 	return v
 }
+
+// Location returns the timezone used for daily budget boundaries.
+func (s *Service) Location() *time.Location { return s.loc() }

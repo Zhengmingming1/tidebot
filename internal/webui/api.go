@@ -351,9 +351,8 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			maxUSD = b.MaxUSD
 		}
 	}
-	// budgets reset at next UTC midnight (ledger day is UTC)
-	nowUTC := time.Now().UTC()
-	reset := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day()+1, 0, 0, 0, 0, time.UTC)
+	// budgets reset at next local midnight of the configured timezone
+	reset := s.deps.Cost.ResetsAt()
 	var active int
 	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM runs WHERE status IN ('queued','running')`).Scan(&active)
 	writeJSON(w, 200, map[string]any{
@@ -362,7 +361,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"runs":     runs,
 		"spend": map[string]any{
 			"used_usd": sum.TotalUSD, "max_usd": maxUSD, "tokens": sum.TotalTokens,
-			"by_bucket": sum.ByBucket, "resets_at": reset.Format(time.RFC3339),
+			"by_bucket": sum.ByBucket, "resets_at": reset.UTC().Format(time.RFC3339), "timezone": sum.Timezone,
 		},
 		"active_runs": active,
 		"timezone":    s.loc().String(),
@@ -523,7 +522,26 @@ func (s *Server) handleAmendAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action := parts[0], parts[1]
+	var bb struct {
+		Only []string `json:"only"`
+	}
 	switch action {
+	case "confirm-batch":
+		_ = json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&bb)
+		res, err := s.deps.Amend.ConfirmBatch(r.Context(), id, bb.Only, "user")
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, res)
+	case "reject-batch":
+		_ = json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&bb)
+		n, err := s.deps.Amend.RejectBatch(r.Context(), id, bb.Only)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"rejected": n})
 	case "confirm":
 		a, err := s.deps.Amend.Confirm(r.Context(), id, "user")
 		if err != nil {
@@ -843,30 +861,38 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		Tokens int64   `json:"tokens"`
 	}
 	days := []dayRow{}
-	rows, err := s.deps.DB.QueryContext(ctx, `SELECT day, SUM(usd), SUM(tokens) FROM cost_ledger WHERE day >= ? GROUP BY day ORDER BY day`,
-		time.Now().UTC().AddDate(0, 0, -13).Format("2006-01-02"))
-	if err == nil {
-		for rows.Next() {
-			var d dayRow
-			if rows.Scan(&d.Day, &d.USD, &d.Tokens) == nil {
-				days = append(days, d)
-			}
+	today, _ := time.ParseInLocation("2006-01-02", sum.Day, s.deps.Cost.Location())
+	for i := 13; i >= 0; i-- {
+		d := dayRow{Day: today.AddDate(0, 0, -i).Format("2006-01-02")}
+		if st, en, err := s.deps.Cost.DayRange(d.Day); err == nil {
+			_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(usd),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE created_at >= ? AND created_at < ?`, st, en).Scan(&d.USD, &d.Tokens)
 		}
-		rows.Close()
+		if d.USD > 0 || d.Tokens > 0 {
+			days = append(days, d)
+		}
 	}
 	type evRow struct {
 		At     string `json:"at"`
 		Scope  string `json:"scope"`
+		Name   string `json:"name"`
 		Kind   string `json:"kind"`
 		Detail string `json:"detail"`
 		Action string `json:"action"`
 	}
 	events := []evRow{}
-	rows, err = s.deps.DB.QueryContext(ctx, `SELECT at, scope, kind, detail, action_taken FROM budget_events ORDER BY at DESC LIMIT 10`)
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT e.at, e.scope, COALESCE(e.scope_id,''), COALESCE(t.name,''), e.kind, e.detail, e.action_taken
+FROM budget_events e LEFT JOIN tasks t ON e.scope='task' AND t.id=e.scope_id ORDER BY e.at DESC LIMIT 10`)
 	if err == nil {
 		for rows.Next() {
 			var e evRow
-			if rows.Scan(&e.At, &e.Scope, &e.Kind, &e.Detail, &e.Action) == nil {
+			var sid string
+			if rows.Scan(&e.At, &e.Scope, &sid, &e.Name, &e.Kind, &e.Detail, &e.Action) == nil {
+				if e.Name == "" {
+					e.Name = sid
+				} else if sid != "" {
+					// show task name instead of raw id in the human-readable detail
+					e.Detail = strings.ReplaceAll(e.Detail, sid, e.Name)
+				}
 				events = append(events, e)
 			}
 		}
@@ -880,8 +906,9 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		Runs   int     `json:"runs"`
 	}
 	top := []taskSpend{}
+	dst, den, _ := s.deps.Cost.DayRange(sum.Day)
 	rows, err = s.deps.DB.QueryContext(ctx, `SELECT COALESCE(c.task_id,''), COALESCE(t.name,'(ad-hoc)'), SUM(c.usd), COUNT(1)
-FROM cost_ledger c LEFT JOIN tasks t ON t.id=c.task_id WHERE c.day=? GROUP BY c.task_id ORDER BY SUM(c.usd) DESC LIMIT 8`, sum.Day)
+FROM cost_ledger c LEFT JOIN tasks t ON t.id=c.task_id WHERE c.created_at >= ? AND c.created_at < ? GROUP BY c.task_id ORDER BY SUM(c.usd) DESC LIMIT 8`, dst, den)
 	if err == nil {
 		for rows.Next() {
 			var t taskSpend

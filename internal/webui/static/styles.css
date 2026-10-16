@@ -332,3 +332,6 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .hint.mt { margin: var(--s1) 0 0; }
 .search-results .none { padding: var(--s1); color: var(--text-3); }
 .search-results .sub { margin-left: auto; color: var(--text-3); }
+.req-sel { margin: 3px 2px 0 0; accent-color: var(--accent); width: 14px; height: 14px; flex: none; }
+.req-hint { display: flex; align-items: center; gap: 6px; color: var(--bad); margin-top: 8px; }
+.btn[disabled] { opacity: .55; cursor: not-allowed; }

@@ -91,6 +91,7 @@ func Open(cfg config.Config) (*App, error) {
 	a.Amend = amend.New(sqlDB, a.Tasks, ver, structurer)
 	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
 	a.Cost = cost.New(sqlDB, log)
+	a.Cost.Loc = cfg.Location()
 	a.Auth = auth.New(sqlDB)
 	if err := a.Cost.EnsureDefaults(context.Background()); err != nil {
 		log.Warn("cost defaults", "error", err)
