@@ -120,12 +120,20 @@ func (a *App) RunPrompt(ctx context.Context, prompt, workspace, providerName, ta
 	if workspace == "" {
 		workspace = a.Cfg.DataDir
 	}
+	extra := []string{
+		"--permission-mode", "dontAsk",
+		"--permission-prompts", "none",
+		"--restricted",
+		"--max-budget-usd", "0.05",
+		"--effort", "low",
+	}
 	return a.Runner.RunOnce(ctx, runner.Options{
 		ClaudeBin:    a.Cfg.ClaudeBin,
 		Prompt:       prompt,
 		WorkspaceDir: workspace,
 		Timeout:      timeout,
 		Bare:         true,
+		ExtraArgs:    extra,
 		Profile:      prof,
 		APIKey:       key,
 		TriggerKind:  trigger,

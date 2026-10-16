@@ -33,12 +33,20 @@ type FileDocument struct {
 
 // FromPreset builds a Profile from a built-in preset.
 func FromPreset(p Preset) Profile {
+	secretEnv := p.SecretEnv
+	if secretEnv == "" {
+		secretEnv = "TIDEBOT_API_KEY_" + strings.ToUpper(strings.ReplaceAll(p.ID, "-", "_"))
+	}
+	extra := map[string]string{}
+	for k, v := range p.ExtraEnv {
+		extra[k] = v
+	}
 	return Profile{
 		Name:           p.ID,
 		Preset:         p.ID,
 		BaseURL:        p.BaseURL,
 		AuthEnv:        p.AuthEnv,
-		SecretEnv:      "TIDEBOT_API_KEY_" + strings.ToUpper(strings.ReplaceAll(p.ID, "-", "_")),
+		SecretEnv:      secretEnv,
 		Model:          p.DefaultModel,
 		OpusModel:      p.OpusModel,
 		SonnetModel:    p.SonnetModel,
@@ -46,6 +54,7 @@ func FromPreset(p Preset) Profile {
 		FableModel:     p.FableModel,
 		SmallFastModel: p.SmallFastModel,
 		SubagentModel:  p.SubagentModel,
+		ExtraEnv:       extra,
 	}
 }
 
@@ -90,6 +99,24 @@ func (p Profile) Resolve() (Profile, error) {
 		}
 		if out.SubagentModel == "" {
 			out.SubagentModel = base.SubagentModel
+		}
+		if out.SecretEnv == "" {
+			out.SecretEnv = base.SecretEnv
+		}
+		if len(out.ExtraEnv) == 0 && len(base.ExtraEnv) > 0 {
+			out.ExtraEnv = map[string]string{}
+			for k, v := range base.ExtraEnv {
+				out.ExtraEnv[k] = v
+			}
+		} else if len(base.ExtraEnv) > 0 {
+			merged := map[string]string{}
+			for k, v := range base.ExtraEnv {
+				merged[k] = v
+			}
+			for k, v := range out.ExtraEnv {
+				merged[k] = v
+			}
+			out.ExtraEnv = merged
 		}
 	}
 	if out.Name == "" {

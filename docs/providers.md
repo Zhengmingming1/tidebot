@@ -31,6 +31,8 @@ config is left alone. Sources: [magpie integrate docs](https://usemagpie.ai/docs
 |---|---|---|---|
 | `anthropic` | *(default — do not set `ANTHROPIC_BASE_URL`)* | `ANTHROPIC_API_KEY` | Anthropic Claude Code docs |
 | `kimi` | `https://api.moonshot.ai/anthropic` | `ANTHROPIC_AUTH_TOKEN` | [Kimi Claude Code guide](https://platform.kimi.ai/docs/guide/claude-code-kimi) |
+| `kimi-coding` | `https://api.kimi.com/coding/` | `ANTHROPIC_API_KEY` (secret from `env:KIMI_API_KEY`) | [Kimi Code Claude Code 文档](https://www.kimi.com/code/docs/third-party-tools/claude-code) |
+| `kimi-coding-intl` | `https://api.kimi.ai/coding/` | `ANTHROPIC_API_KEY` (secret from `env:KIMI_API_KEY`) | [Kimi Code Claude Code (EN)](https://www.kimi.com/code/docs/en/third-party-tools/claude-code) |
 | `kimi-cn` | `https://api.moonshot.cn/anthropic` | `ANTHROPIC_AUTH_TOKEN` | Same guide (China region); community notes `.cn` vs `.ai` |
 | `deepseek` | `https://api.deepseek.com/anthropic` | `ANTHROPIC_AUTH_TOKEN` | [DeepSeek Claude Code integration](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/) |
 | `zhipu` | `https://open.bigmodel.cn/api/anthropic` | `ANTHROPIC_AUTH_TOKEN` | [智谱 Claude API 兼容](https://docs.bigmodel.cn/cn/guide/develop/claude/introduction) |
@@ -42,6 +44,34 @@ config is left alone. Sources: [magpie integrate docs](https://usemagpie.ai/docs
 
 Default model ids in presets are taken from the same pages at the time of writing (2026-10-16)
 and may change; override via `providers.yaml` or task settings.
+
+
+## Kimi Coding Plan vs Moonshot Open Platform
+
+These are **different products** with different keys and base URLs:
+
+| | Kimi Code (Coding Plan / membership) | Moonshot Open Platform (pay-as-you-go) |
+|---|---|---|
+| Anthropic base URL (CN) | `https://api.kimi.com/coding/` | `https://api.moonshot.cn/anthropic` |
+| Anthropic base URL (intl/global) | `https://api.kimi.ai/coding/` | `https://api.moonshot.ai/anthropic` |
+| Auth env for Claude Code | **`ANTHROPIC_API_KEY`** | **`ANTHROPIC_AUTH_TOKEN`** |
+| Example models | `k3-256k`, `k3[1m]`, `kimi-for-coding` | `kimi-k3[1m]`, `kimi-k2.7-code` |
+| tidebot preset | `kimi-coding` / `kimi-coding-intl` | `kimi` / `kimi-cn` |
+| Secret env | `env:KIMI_API_KEY` | `TIDEBOT_API_KEY_KIMI` (or override) |
+
+Official Coding Plan Claude Code config also sets `CLAUDE_CODE_EFFORT_LEVEL`,
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW`, and `CLAUDE_CODE_MAX_CONTEXT_TOKENS` — tidebot
+injects these via the preset `ExtraEnv` map into the child process only.
+
+### Secret resolution
+
+`secret_env` / preset `SecretEnv` accepts:
+
+- `KIMI_API_KEY` — read that environment variable
+- `env:KIMI_API_KEY` — same, explicit form
+
+The key is never written to SQLite or logs; it is only set on the Claude Code
+child as `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN` for other presets).
 
 ## Custom providers
 

@@ -55,3 +55,55 @@ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/agentd ./cmd/agentd
 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/agentctl ./cmd/agentctl
 ./scripts/measure.sh
 ```
+
+## 真实 Claude Code + Kimi Coding Plan E2E（2026-10-16 10:29–10:30 上海时间）
+
+> 密钥仅通过环境变量 `KIMI_API_KEY` 注入子进程，**未**写入仓库、日志或 SQLite。
+
+| 项 | 值 |
+|---|---|
+| Claude Code | **2.1.301**（`@anthropic-ai/claude-code`，Node v22.23.3） |
+| Provider | `kimi-coding` |
+| Base URL | `https://api.kimi.com/coding/` |
+| Auth | `ANTHROPIC_API_KEY` ← `env:KIMI_API_KEY` |
+| Model | `k3-256k` |
+| 文档来源 | https://www.kimi.com/code/docs/third-party-tools/claude-code |
+
+### 手动 `agentctl run`
+
+| 项 | 值 |
+|---|---|
+| Prompt | 要求只回复一个英文词 `pong`，禁用工具 |
+| Flags | `--bare --permission-mode dontAsk --permission-prompts none --restricted --max-budget-usd 0.05 --effort low` |
+| Status | **succeeded** |
+| Result | `pong` |
+| Cost | **$0.00413** |
+| Tokens | in **611** / out **43** |
+| Duration | ~4.2 s（wall） / result.duration_ms 3508 |
+| Session | UUID（Claude Code 2.x） |
+
+### 定时任务触发一次
+
+| 项 | 值 |
+|---|---|
+| Trigger | cron（强制 `next_run_at` 到期后由 `agentd` 调度） |
+| Status | **succeeded** |
+| Cost | **$0.001866** |
+| Tokens | in **97** / out **45** |
+| Duration | ~9.9 s wall |
+
+### 运行时 RSS（真实采样）
+
+| 进程 | 观测 |
+|---|---|
+| `agentctl`（手动 run） | ~6.8–7.5 MiB |
+| `claude` 子进程树（手动 run） | 峰值约 **227 MiB**（232264 KB），稳态约 212–217 MiB |
+| `agentd`（调度期间） | **~8.2–9.2 MiB**（8440–9436 KB） |
+| `claude`（调度触发的一次） | 峰值约 **221 MiB**（226960 KB） |
+
+对照最终方案「Claude Code 会话约 0.3–1.3 GB」第三方区间：本次短对话实测约 **0.22 GB**，与「短任务偏低端」相符。
+
+### 解析兼容性
+
+- 真实 stream-json 含 `system/ui_invalidate`、`system/thinking_tokens`、assistant thinking 块等；结果事件仍为 `type=result` + `usage` + `total_cost_usd`，现有解析器可用。
+- 脱敏样例：`testdata/streamjson/kimi-coding-pong.ndjson`（回归测试 `TestParseRealKimiCodingFixture`）。

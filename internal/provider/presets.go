@@ -8,6 +8,7 @@ type Preset struct {
 	DisplayName    string
 	BaseURL        string // empty = Anthropic default (do not set ANTHROPIC_BASE_URL)
 	AuthEnv        string // ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY
+	SecretEnv      string // e.g. "env:KIMI_API_KEY" or "KIMI_API_KEY"; never logged
 	DefaultModel   string
 	OpusModel      string
 	SonnetModel    string
@@ -15,6 +16,7 @@ type Preset struct {
 	FableModel     string
 	SmallFastModel string
 	SubagentModel  string
+	ExtraEnv       map[string]string // non-secret Claude Code env (effort, context window, …)
 	Notes          string
 	SourceURL      string
 }
@@ -43,6 +45,35 @@ func BuiltIn() []Preset {
 			HaikuModel: "kimi-k2.7-code", FableModel: "kimi-k3[1m]", SubagentModel: "kimi-k3[1m]",
 			Notes:     "Mainland China endpoint; key must be created on the .cn platform.",
 			SourceURL: "https://platform.kimi.ai/docs/guide/claude-code-kimi",
+		},
+		{
+			// Kimi Coding Plan (membership) — NOT the pay-as-you-go Moonshot Open Platform.
+			ID: "kimi-coding", DisplayName: "Kimi Code / Coding Plan (CN)",
+			BaseURL: "https://api.kimi.com/coding/", AuthEnv: "ANTHROPIC_API_KEY",
+			SecretEnv: "env:KIMI_API_KEY",
+			DefaultModel: "k3-256k", OpusModel: "k3-256k", SonnetModel: "k3-256k",
+			HaikuModel: "k3-256k", FableModel: "k3-256k", SubagentModel: "k3-256k",
+			ExtraEnv: map[string]string{
+				"CLAUDE_CODE_EFFORT_LEVEL":         "high",
+				"CLAUDE_CODE_AUTO_COMPACT_WINDOW":  "262144",
+				"CLAUDE_CODE_MAX_CONTEXT_TOKENS":   "262144",
+			},
+			Notes:     "Kimi Code membership Anthropic-compatible endpoint (China). Uses ANTHROPIC_API_KEY per official docs.",
+			SourceURL: "https://www.kimi.com/code/docs/third-party-tools/claude-code",
+		},
+		{
+			ID: "kimi-coding-intl", DisplayName: "Kimi Code / Coding Plan (intl)",
+			BaseURL: "https://api.kimi.ai/coding/", AuthEnv: "ANTHROPIC_API_KEY",
+			SecretEnv: "env:KIMI_API_KEY",
+			DefaultModel: "k3-256k", OpusModel: "k3-256k", SonnetModel: "k3-256k",
+			HaikuModel: "k3-256k", FableModel: "k3-256k", SubagentModel: "k3-256k",
+			ExtraEnv: map[string]string{
+				"CLAUDE_CODE_EFFORT_LEVEL":         "high",
+				"CLAUDE_CODE_AUTO_COMPACT_WINDOW":  "262144",
+				"CLAUDE_CODE_MAX_CONTEXT_TOKENS":   "262144",
+			},
+			Notes:     "Kimi Code membership Anthropic-compatible endpoint (overseas).",
+			SourceURL: "https://www.kimi.com/code/docs/en/third-party-tools/claude-code",
 		},
 		{
 			ID: "deepseek", DisplayName: "DeepSeek",

@@ -3,14 +3,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"text/tabwriter"
 
 	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
 	"github.com/Zhengmingming1/tidebot/internal/provider"
+	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
 
 func main() {
@@ -39,6 +42,7 @@ func main() {
 		providerName := fs.String("provider", cfg.DefaultProvider, "provider profile name")
 		workspace := fs.String("workspace", "", "working directory")
 		timeout := fs.Duration("timeout", cfg.DefaultTimeout, "run timeout")
+		saveEvents := fs.String("save-events", "", "optional path to write sanitized stream-json events")
 		_ = fs.Parse(args)
 		if *prompt == "" {
 			fatal(fmt.Errorf("--prompt is required"))
@@ -46,12 +50,21 @@ func main() {
 		res, err := a.RunPrompt(ctx, *prompt, *workspace, *providerName, "", "manual", *timeout)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "run finished with error: %v (status=%s run_id=%s)\n", err, res.Status, res.RunID)
+			if *saveEvents != "" {
+				_ = writeSanitizedEvents(*saveEvents, res)
+			}
 			os.Exit(1)
 		}
 		fmt.Printf("run_id=%s status=%s session=%s cost_usd=%.6f tokens_in=%d tokens_out=%d duration_ms=%d\n",
 			res.RunID, res.Status, res.SessionID, res.TotalCostUSD, res.InputTokens, res.OutputTokens, res.DurationMS)
 		if res.ResultText != "" {
 			fmt.Println(res.ResultText)
+		}
+		if *saveEvents != "" {
+			if err := writeSanitizedEvents(*saveEvents, res); err != nil {
+				fatal(err)
+			}
+			fmt.Fprintf(os.Stderr, "wrote sanitized events to %s\n", *saveEvents)
 		}
 
 	case "runs":
@@ -147,3 +160,31 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
+
+func writeSanitizedEvents(path string, res runner.Result) error {
+	reUUID := regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	reSess := regexp.MustCompile(`sess_[A-Za-z0-9_-]+`)
+	reKeyish := regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._\-]+)`)
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for _, ev := range res.Events {
+		raw := string(ev.Raw)
+		if raw == "" {
+			b, mErr := json.Marshal(ev)
+			if mErr != nil {
+				continue
+			}
+			raw = string(b)
+		}
+		raw = reUUID.ReplaceAllString(raw, "00000000-0000-0000-0000-000000000000")
+		raw = reSess.ReplaceAllString(raw, "sess_REDACTED")
+		raw = reKeyish.ReplaceAllString(raw, "***")
+		if _, err := f.WriteString(raw + "\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}

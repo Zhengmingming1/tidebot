@@ -114,3 +114,52 @@ func MustPreset(id string) Preset {
 	}
 	return p
 }
+
+func TestKimiCodingPreset(t *testing.T) {
+	p, ok := LookupPreset("kimi-coding")
+	if !ok {
+		t.Fatal("missing kimi-coding")
+	}
+	if p.BaseURL != "https://api.kimi.com/coding/" {
+		t.Fatalf("base=%s", p.BaseURL)
+	}
+	if p.AuthEnv != "ANTHROPIC_API_KEY" {
+		t.Fatalf("auth=%s", p.AuthEnv)
+	}
+	if p.SecretEnv != "env:KIMI_API_KEY" {
+		t.Fatalf("secret=%s", p.SecretEnv)
+	}
+	prof := FromPreset(p)
+	resolved, err := prof.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KIMI_API_KEY", "test-kimi-key-value")
+	key, err := EnvFromOS(resolved)
+	if err != nil || key != "test-kimi-key-value" {
+		t.Fatalf("key err=%v", err)
+	}
+	env := ChildEnv([]string{"PATH=/bin", "KIMI_API_KEY=test-kimi-key-value", "ANTHROPIC_AUTH_TOKEN=stale"}, resolved, key)
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "ANTHROPIC_API_KEY=test-kimi-key-value") {
+		t.Fatalf("missing API_KEY injection: %s", joined)
+	}
+	if strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN=") {
+		t.Fatalf("AUTH_TOKEN should be stripped: %s", joined)
+	}
+	if strings.Contains(joined, "KIMI_API_KEY=") {
+		t.Fatalf("source secret env should be stripped from child: %s", joined)
+	}
+	if !strings.Contains(joined, "CLAUDE_CODE_EFFORT_LEVEL=high") {
+		t.Fatalf("missing effort: %s", joined)
+	}
+}
+
+func TestNormalizeSecretEnv(t *testing.T) {
+	if NormalizeSecretEnv("env:KIMI_API_KEY") != "KIMI_API_KEY" {
+		t.Fatal()
+	}
+	if NormalizeSecretEnv("KIMI_API_KEY") != "KIMI_API_KEY" {
+		t.Fatal()
+	}
+}
