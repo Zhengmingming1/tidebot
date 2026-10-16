@@ -59,8 +59,24 @@ if [[ -n "${TIDEBOT_MOCK_ECHO_ENV:-}" ]]; then
   echo "mock base_url=$BASE model=$MODEL bare=$BARE" >&2
 fi
 
-COST="0.00123"
-IN_TOK=12
+# Optional demo streaming: TIDEBOT_MOCK_STEPS=N emits N progress events, sleeping
+# TIDEBOT_MOCK_STEP_SLEEP seconds between them (used for WebUI live-log demos).
+STEPS="${TIDEBOT_MOCK_STEPS:-0}"
+for ((s=1; s<=STEPS; s++)); do
+  sleep "${TIDEBOT_MOCK_STEP_SLEEP:-0.5}"
+  if (( s % 2 == 1 )); then
+    printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"step $s of $STEPS\"}}]},\"session_id\":\"$SESSION\"}"
+  else
+    printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Finished step $s of $STEPS\"}]},\"session_id\":\"$SESSION\"}"
+  fi
+done
+
+COST="${TIDEBOT_MOCK_COST:-0.00123}"
+if [[ "${TIDEBOT_MOCK_RANDOM_COST:-}" == "1" ]]; then
+  COST=$(awk -v s="$$" 'BEGIN{srand(s); printf "%.4f", 0.02 + rand()*0.27}')
+  IN_TOK_R=$(awk -v s="$$" 'BEGIN{srand(s+1); printf "%d", 800 + rand()*9000}')
+fi
+IN_TOK=${IN_TOK_R:-12}
 OUT_TOK=34
 # Optional: fail if no auth when TIDEBOT_MOCK_REQUIRE_AUTH=1
 if [[ "${TIDEBOT_MOCK_REQUIRE_AUTH:-}" == "1" ]]; then
