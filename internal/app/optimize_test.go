@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,5 +42,26 @@ func TestCanaryRoutingInRuns(t *testing.T) {
 	a.recordSkillOutcomes(ctx, []skillChoice{{sk.ID, p.VersionID, true}}, runner.Result{RunID: "r2"}, os.ErrClosed, false)
 	if l, _ := a.Optimize.Proposals(ctx, sk.ID); l[0].Status != "withdrawn" {
 		t.Fatal(l[0].Status)
+	}
+}
+
+func TestSkillOptimizerReachableFromWebUI(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	d := t.TempDir()
+	_ = os.WriteFile(filepath.Join(d, "SKILL.md"), []byte("---\nname: w\ndescription: d\n---\nx\n"), 0o644)
+	sk, err := a.Skills.ImportDir(ctx, "w", d, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"skill_id": sk.ID, "mode": "propose"})
+	out, err := a.CallExt(ctx, "skills.optimize_settings", raw)
+	if err != nil || out.(optimize.Settings).Mode != "propose" {
+		t.Fatal(err, out)
+	}
+	for _, m := range []string{"skills.proposals", "skills.promote", "skills.discard", "skills.compare", "skills.canary_start"} {
+		if _, ok := a.extRPC()[m]; !ok {
+			t.Fatalf("%s not exposed", m)
+		}
 	}
 }

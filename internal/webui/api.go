@@ -86,9 +86,11 @@ type taskDTO struct {
 	VersionNo   int      `json:"version_no"`
 	VersionID   string   `json:"version_id"`
 	Constraints []string `json:"constraints"`
-	Skills      []string `json:"skills"`
-	RunsToday   int      `json:"runs_today"`
-	LastStatus  string   `json:"last_status"`
+	// ConstraintIDs parallels Constraints; amendment items refer to constraints by id.
+	ConstraintIDs []string `json:"constraint_ids"`
+	Skills        []string `json:"skills"`
+	RunsToday     int      `json:"runs_today"`
+	LastStatus    string   `json:"last_status"`
 }
 
 func toTaskDTO(v tasksvc.TaskView) taskDTO {
@@ -97,7 +99,7 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 		Prompt: v.Task.Prompt, Workspace: v.Task.WorkspaceDir,
 		NextRunAt: v.Task.NextRunAt.String, LastFiredAt: v.Task.LastFiredAt.String,
 		CreatedAt: v.Task.CreatedAt, UpdatedAt: v.Task.UpdatedAt,
-		Constraints: []string{}, Skills: []string{},
+		Constraints: []string{}, ConstraintIDs: []string{}, Skills: []string{},
 	}
 	if v.CurrentVersion != nil {
 		d.VersionNo = v.CurrentVersion.VersionNo
@@ -114,6 +116,7 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 		}
 		for _, c := range v.Spec.Constraints {
 			d.Constraints = append(d.Constraints, c.Text)
+			d.ConstraintIDs = append(d.ConstraintIDs, c.ID)
 		}
 		for _, b := range v.Spec.SkillBindings {
 			d.Skills = append(d.Skills, b.SkillName)
@@ -502,6 +505,31 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch parts[1] {
+	case "amendments-confirm":
+		// Confirm selected pending items across messages of this task in one go: one new version.
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.NewDecoder(io.LimitReader(r.Body, 32<<10)).Decode(&body); err != nil || len(body.IDs) == 0 || len(body.IDs) > 100 {
+				writeErr(w, 400, "ids required (1-100)")
+				return
+			}
+			for _, iid := range body.IDs {
+				var tid string
+				if err := s.deps.DB.QueryRowContext(r.Context(), `SELECT task_id FROM requirement_items WHERE id=?`, iid).Scan(&tid); err != nil || tid != id {
+					writeErr(w, 400, "item does not belong to this task")
+					return
+				}
+			}
+			res, err := s.deps.Amend.ConfirmItems(r.Context(), body.IDs, "user")
+			if err != nil {
+				writeErr(w, 400, err.Error())
+				return
+			}
+			writeJSON(w, 200, res)
+		})).ServeHTTP(w, r)
+		return
 	case "amendments":
 		if r.Method == http.MethodGet {
 			list, err := s.deps.Amend.List(ctx, id, "")
@@ -631,6 +659,18 @@ func (s *Server) handleAmendAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, a)
+	case "edit":
+		var body struct {
+			Content string `json:"content"`
+			Scope   string `json:"scope"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body)
+		it, err := s.deps.Amend.Edit(r.Context(), id, body.Content, body.Scope)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, it)
 	case "reject":
 		if err := s.deps.Amend.Reject(r.Context(), id); err != nil {
 			writeErr(w, 400, err.Error())
@@ -713,11 +753,16 @@ func (s *Server) handleSkillSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cur, _ := s.deps.Ver.GetPointer(r.Context(), version.EntitySkill, id, version.PointerCurrent)
+		can, _ := s.deps.Ver.GetPointer(r.Context(), version.EntitySkill, id, version.PointerCanary)
 		out := []versionDTO{}
 		for _, v := range vers {
 			out = append(out, versionDTO{ID: v.ID, No: v.VersionNo, ParentID: v.ParentVersionID.String, Source: v.Source, Message: v.Message.String, CreatedAt: v.CreatedAt})
 		}
-		writeJSON(w, 200, map[string]any{"versions": out, "current": cur.String})
+		writeJSON(w, 200, map[string]any{"versions": out, "current": cur.String, "canary": can.String})
+	case "diff":
+		s.handleSkillDiff(w, r, id)
+	case "files":
+		s.handleSkillFiles(w, r, id)
 	case "rollback":
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var body struct {

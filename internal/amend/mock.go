@@ -14,7 +14,7 @@ func (MockStructurer) Structure(_ context.Context, _ string, spec *tasksvc.Spec,
 	u := strings.TrimSpace(utterance)
 	lower := strings.ToLower(u)
 	scope := "permanent"
-	if strings.Contains(lower, "this run") || strings.Contains(lower, "仅本次") || strings.Contains(lower, "only this") || strings.Contains(lower, "next time") {
+	if strings.Contains(lower, "this run") || strings.Contains(lower, "仅本次") || strings.Contains(lower, "only this") || strings.Contains(lower, "next time") || strings.Contains(lower, "下次") {
 		scope = "next_run"
 	}
 	op := "add"
@@ -44,12 +44,13 @@ func (MockStructurer) Structure(_ context.Context, _ string, spec *tasksvc.Spec,
 
 func splitClauses(u string) []string {
 	var parts []string
-	for _, a := range strings.Split(u, ";") {
+	for _, a := range strings.FieldsFunc(u, func(r rune) bool { return r == ';' || r == '；' }) {
 		b := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(a), "."))
 		if b == "" {
 			continue
 		}
-		parts = append(parts, strings.ToUpper(b[:1])+b[1:])
+		r := []rune(b)
+		parts = append(parts, strings.ToUpper(string(r[:1]))+string(r[1:]))
 	}
 	if len(parts) == 0 {
 		return []string{u}
