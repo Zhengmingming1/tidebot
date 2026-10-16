@@ -944,3 +944,39 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .presets .preset strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .presets .preset small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .presets .preset small code { background: none; padding: 0; font-size: 12px; white-space: nowrap; }
+
+/* ---- add-provider card wall ---- */
+.modal.ap-modal { width: 880px; max-width: 100%; padding: 0; overflow: hidden; display: flex; flex-direction: column; max-height: calc(100vh - 32px); }
+.ap { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.ap-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 10px; }
+.ap-head h2 { margin: 0; font-size: 18px; }
+.ap-search { position: relative; margin: 0 22px 12px; max-width: 420px; }
+.ap-search .i { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-3); }
+.ap-search input[type=search] { width: 100%; height: 36px; padding-left: 34px; }
+.ap-search .i { z-index: 1; pointer-events: none; }
+.ap-body { display: grid; grid-template-columns: 168px 1fr; min-height: 0; flex: 1; border-top: 1px solid var(--border); }
+.ap-rail { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-right: 1px solid var(--border); overflow-y: auto; }
+.ap-rail button { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 0; background: none; border-radius: var(--radius-sm); color: var(--text-2); text-align: left; cursor: pointer; font: inherit; white-space: nowrap; }
+.ap-rail button:hover { background: var(--bg-sunk); }
+.ap-rail button.active { background: var(--accent-50); color: var(--accent-600); font-weight: 600; }
+.ap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 12px 14px; overflow-y: auto; align-content: start; min-height: 0; }
+.ap-tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 12px; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); text-align: left; cursor: pointer; font: inherit; color: var(--text); transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
+.ap-tile:hover { border-color: var(--border-strong); box-shadow: var(--shadow); }
+.ap-tile.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ap-tile:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.ap-tile strong { font-size: 14.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-tile small { font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-tile.hidden { display: none; }
+.ap-chk { position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; display: none; place-items: center; }
+.ap-tile.on .ap-chk { display: grid; }
+.ap-logo { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 17px; }
+.br-anthropic { background: #d97757; } .br-kimi { background: #111; } .br-deepseek { background: #4d6bfe; }
+.br-zhipu { background: #3b3bd6; } .br-qwen { background: #615ced; } .br-magpie { background: #b45309; } .br-other { background: #64748b; }
+.ap-tag { font-size: 11.5px; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--bg-sunk); color: var(--text-2); }
+.ap-tile:first-child .ap-tag, .ap-tile[data-cat="official"] .ap-tag { background: var(--accent-50); color: var(--accent-600); }
+.ap-custom { border-style: dashed; align-items: center; justify-content: center; text-align: center; color: var(--accent-600); background: transparent; }
+.ap-custom > .i { width: 22px; height: 22px; }
+.ap-empty { grid-column: 1 / -1; text-align: center; padding: 24px 0; }
+.ap-foot { display: flex; align-items: center; gap: 8px; padding: 12px 22px; border-top: 1px solid var(--border); background: var(--surface); }
+.ap-foot > .muted { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+@media (max-width: 760px) { .ap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ap-body { grid-template-columns: 1fr; } .ap-rail { flex-direction: row; overflow-x: auto; border-right: 0; } }
