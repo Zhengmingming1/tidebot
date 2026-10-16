@@ -9,6 +9,13 @@ permissions:
   contents: read
 
 jobs:
+  i18n:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: zh-CN / en key parity
+        run: python3 scripts/check-i18n.py
+
   core:
     strategy:
       fail-fast: false

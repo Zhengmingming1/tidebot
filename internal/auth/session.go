@@ -119,7 +119,7 @@ func (s *Service) Login(ctx context.Context, password, totpCode, ip string) (*Se
 		return nil, errors.New("invalid credentials")
 	}
 	if totpEn == 1 {
-		if !VerifyTOTP(secret, totpCode) {
+		if !VerifyTOTP(secret, strings.TrimSpace(totpCode)) && !s.useRecoveryCode(ctx, totpCode) {
 			_ = s.recordAttempt(ctx, ip, false, "bad_totp")
 			return nil, errors.New("invalid credentials")
 		}
@@ -186,13 +186,21 @@ func (s *Service) checkRateLimit(ctx context.Context, ip string) error {
 	}
 	since := time.Now().UTC().Add(-LoginWindow).Format(time.RFC3339)
 	var fails int
+	var oldest sql.NullString
 	err := s.DB.QueryRowContext(ctx, `
-SELECT COUNT(1) FROM login_attempts WHERE ip=? AND ok=0 AND at>=?`, ip, since).Scan(&fails)
+SELECT COUNT(1), MIN(at) FROM login_attempts WHERE ip=? AND ok=0 AND at>=?`, ip, since).Scan(&fails, &oldest)
 	if err != nil {
 		return err
 	}
 	if fails >= LoginMaxFails {
-		return errors.New("too many login attempts; try later")
+		wait := LoginWindow
+		if t, perr := time.Parse(time.RFC3339, oldest.String); perr == nil {
+			wait = time.Until(t.Add(LoginWindow))
+			if wait < time.Second {
+				wait = time.Second
+			}
+		}
+		return &RateLimitError{RetryAfter: wait}
 	}
 	return nil
 }

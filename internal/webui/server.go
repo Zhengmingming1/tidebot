@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -302,6 +303,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := auth.ClientIP(r.RemoteAddr)
 	sess, err := s.deps.Auth.Login(r.Context(), body.Password, body.TOTP, ip)
+	var rl *auth.RateLimitError
+	if errors.As(err, &rl) {
+		secs := int(rl.RetryAfter.Seconds() + 0.999)
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		writeJSON(w, 429, map[string]any{"error": rl.Error(), "retry_after": secs})
+		return
+	}
 	if err != nil {
 		writeErr(w, 401, err.Error())
 		return

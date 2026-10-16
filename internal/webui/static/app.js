@@ -257,61 +257,188 @@
     var c = crumbs && crumbs.length ? '<div class="crumbs">' + crumbs.map(function (x, i) {
       return (i ? '<span class="sep">' + ic("chev", "sm") + "</span>" : "") + (x[1] ? '<a href="' + esc(x[1]) + '">' + esc(x[0]) + "</a>" : "<span>" + esc(x[0]) + "</span>");
     }).join("") + "</div>" : "";
+    var mac = /Mac|iPhone|iPad/.test(navigator.platform || "");
     $("#topbar").innerHTML = c + '<div class="spacer"></div>' +
-      '<div class="search">' + ic("search") + '<input id="q" type="search" placeholder="' + esc(T("top.search")) + '" autocomplete="off" aria-label="' + esc(T("top.search_label")) + '"><kbd>K</kbd><div id="qres" class="search-results hidden"></div></div>' +
+      '<button class="search pal-open" id="q-open" aria-label="' + esc(T("top.search_label")) + '">' + ic("search") + '<span class="ph">' + esc(T("pal.placeholder")) + "</span><kbd>" + (mac ? "⌘" : "Ctrl") + " K</kbd></button>" +
       '<button class="lang-btn" id="btn-lang" title="' + esc(T("top.language")) + '" aria-label="' + esc(T("top.language")) + '">' + (state.lang === "zh-CN" ? "中" : "EN") + "</button>" +
       '<button class="icon-btn" id="btn-refresh" title="' + esc(T("top.refresh")) + '" aria-label="' + esc(T("top.refresh")) + '">' + ic("refresh") + "</button>" +
-      '<div class="rel"><button class="icon-btn" id="btn-bell" title="' + esc(T("top.notifications")) + '" aria-label="' + esc(T("top.notifications")) + '">' + ic("bell") + '<span class="badge-dot hidden" id="bell-dot"></span></button><div id="notif" class="popover hidden"></div></div>';
+      '<div class="rel"><button class="icon-btn" id="btn-bell" title="' + esc(T("top.notifications")) + '" aria-label="' + esc(T("top.notifications")) + '" aria-haspopup="true">' + ic("bell") + '<span class="badge-dot hidden" id="bell-dot"></span></button><div id="notif" class="popover notif-center hidden"></div></div>';
     wireTopbar();
   }
 
+  function notifTitle(n) { var k = "notif." + n.event, v = T(k); return v === k ? cap(n.event.replace(/_/g, " ")) : v; }
+  function markAllRead(list) {
+    if (list && list[0]) { state.notifSeen = list[0].created_at; try { localStorage.setItem("tb_notif_seen", state.notifSeen); } catch (e) {} }
+    var dot = $("#bell-dot"); if (dot) dot.classList.add("hidden");
+  }
+  function renderNotifCenter(pop, data) {
+    var items = data.items || [], pend = data.pending || [];
+    var groups = { failed: [], confirm: [], other: [] };
+    items.forEach(function (n) { (groups[n.group] || groups.other).push(n); });
+    var unread = function (n) { return n.created_at > state.notifSeen; };
+    var it = function (n) {
+      return '<div class="item' + (unread(n) ? " unread" : "") + '"><strong>' + esc(notifTitle(n)) + "</strong><div>" + esc(n.body) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small></div>";
+    };
+    var sec = function (key, inner, count) {
+      return '<div class="ngroup"><h5>' + esc(T("nc." + key)) + (count ? ' <span class="pill sm">' + esc(count) + "</span>" : "") + "</h5>" + (inner || '<div class="item muted">' + esc(T("nc.empty")) + "</div>") + "</div>";
+    };
+    var confirmInner = pend.map(function (p) {
+      return '<a class="item link-item" href="#/tasks/' + enc(p.task_id) + '/thread">' + ic("sparkle", "sm") + "<span>" + esc(T("nc.pending_amend", { name: p.task_name || shortId(p.task_id), n: p.count })) + "</span></a>";
+    }).join("") + groups.confirm.slice(0, 5).map(it).join("");
+    var nconf = pend.reduce(function (a, p) { return a + p.count; }, 0) + groups.confirm.length;
+    pop.innerHTML = '<div class="nc-head"><h4>' + esc(T("top.notifications")) + '</h4><button class="btn sm ghost" id="nc-read">' + esc(T("nc.mark_all")) + "</button></div>" +
+      sec("failed", groups.failed.slice(0, 5).map(it).join(""), groups.failed.length) +
+      sec("confirm", confirmInner, nconf) +
+      sec("other", groups.other.slice(0, 5).map(it).join(""), 0);
+    $("#nc-read", pop).addEventListener("click", function (e) { e.stopPropagation(); markAllRead(items); $$(".item.unread", pop).forEach(function (x) { x.classList.remove("unread"); }); toast(T("nc.marked")); });
+    $$("a.link-item", pop).forEach(function (a) { a.addEventListener("click", function () { pop.classList.add("hidden"); }); });
+  }
+  function toggleNotif() {
+    var pop = $("#notif");
+    if (!pop) return;
+    if (!pop.classList.contains("hidden")) { pop.classList.add("hidden"); return; }
+    api("/api/notifications/center").then(function (data) {
+      renderNotifCenter(pop, data);
+      pop.classList.remove("hidden");
+    }).catch(fail);
+  }
+
   function wireTopbar() {
-    var q = $("#q"), res = $("#qres"), timer;
-    q.addEventListener("input", function () {
-      clearTimeout(timer);
-      var v = q.value.trim();
-      if (!v) { res.classList.add("hidden"); return; }
-      timer = setTimeout(function () {
-        api("/api/search?q=" + enc(v)).then(function (hits) {
-          res.innerHTML = hits.length ? hits.map(function (h) {
-            var href = h.kind === "task" ? "#/tasks/" + enc(h.id) : h.kind === "run" ? "#/runs/" + enc(h.id) : "#/skills";
-            return '<a href="' + href + '"><span class="kind">' + esc(T("search.kind." + h.kind)) + "</span><span>" + esc(h.kind === "run" ? T("search.run", { id: shortId(h.id) }) : h.name) + '</span><span class="sub">' + esc(h.sub) + "</span></a>";
-          }).join("") : '<div class="none">' + esc(T("search.none")) + "</div>";
-          res.classList.remove("hidden");
-        }).catch(function () {});
-      }, 180);
-    });
-    q.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { var a = $("a", res); if (a) { location.hash = a.getAttribute("href"); res.classList.add("hidden"); q.blur(); } }
-      if (e.key === "Escape") { res.classList.add("hidden"); q.blur(); }
-    });
-    q.addEventListener("blur", function () { setTimeout(function () { res.classList.add("hidden"); }, 150); });
+    $("#q-open").addEventListener("click", function () { openPalette(); });
     $("#btn-refresh").addEventListener("click", function () { refresh(); });
     $("#btn-lang").addEventListener("click", function () {
       var next = state.lang === "zh-CN" ? "en" : "zh-CN";
       setLanguage(next);
     });
-    $("#btn-bell").addEventListener("click", function (e) {
-      e.stopPropagation();
-      var pop = $("#notif");
-      if (!pop.classList.contains("hidden")) { pop.classList.add("hidden"); return; }
-      api("/api/notifications").then(function (list) {
-        pop.innerHTML = "<h4>" + esc(T("top.notifications")) + "</h4>" + (list.length ? list.slice(0, 8).map(function (n) {
-          return '<div class="item"><strong>' + esc(T("notif." + n.event) === "notif." + n.event ? cap(n.event.replace(/_/g, " ")) : T("notif." + n.event)) + "</strong><div>" + esc(n.body) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small></div>";
-        }).join("") : '<div class="item muted">' + esc(T("notif.none")) + "</div>");
-        pop.classList.remove("hidden");
-        if (list[0]) { state.notifSeen = list[0].created_at; localStorage.setItem("tb_notif_seen", state.notifSeen); }
-        $("#bell-dot").classList.add("hidden");
-      }).catch(fail);
-    });
-    api("/api/notifications").then(function (list) {
-      var dot = $("#bell-dot");
-      if (dot) dot.classList.toggle("hidden", !(list[0] && list[0].created_at > state.notifSeen));
+    $("#btn-bell").addEventListener("click", function (e) { e.stopPropagation(); toggleNotif(); });
+    api("/api/notifications/center").then(function (d) {
+      var dot = $("#bell-dot"), list = d.items || [];
+      if (dot) dot.classList.toggle("hidden", !((list[0] && list[0].created_at > state.notifSeen) || (d.pending || []).length));
     }).catch(function () {});
   }
   document.addEventListener("click", function (e) { var p = $("#notif"); if (p && !p.contains(e.target)) p.classList.add("hidden"); });
+
+  // ---------- command palette ----------
+  // Ctrl/⌘+K opens it. Arrow keys move, Enter runs. Search responses that arrive
+  // after a newer query was typed are dropped (seq check), so slow requests never
+  // overwrite fresh results.
+  var pal = { seq: 0, items: [], sel: 0, buttons: null, timer: null };
+  function palCommands() {
+    var go = function (h) { return function () { location.hash = h; }; };
+    return [
+      { kind: "cmd", icon: "plus", label: T("pal.new_task"), run: function () { taskFormModal(null); } },
+      { kind: "cmd", icon: "sparkle", label: T("home.quick"), run: function () { quickRunModal(); } },
+      { kind: "cmd", icon: "globe", label: T("pal.lang_to", { l: state.lang === "zh-CN" ? "English" : "简体中文" }), run: function () { setLanguage(state.lang === "zh-CN" ? "en" : "zh-CN"); } },
+      { kind: "cmd", icon: "bell", label: T("pal.notifications"), run: function () { setTimeout(toggleNotif, 0); } },
+      { kind: "cmd", icon: "more", label: T("pal.shortcuts"), run: function () { shortcutsHelp(); } },
+      { kind: "nav", icon: "home", label: T("nav.home"), run: go("#/") },
+      { kind: "nav", icon: "tasks", label: T("nav.tasks"), run: go("#/tasks") },
+      { kind: "nav", icon: "skills", label: T("nav.skills"), run: go("#/skills") },
+      { kind: "nav", icon: "runs", label: T("nav.runs"), run: go("#/runs") },
+      { kind: "nav", icon: "spend", label: T("nav.spend"), run: go("#/spend") },
+      { kind: "nav", icon: "settings", label: T("nav.settings"), run: go("#/settings") }
+    ].concat(SET_SECTIONS.map(function (k) { return { kind: "nav", icon: "settings", label: T("nav.settings") + " › " + T("setnav." + k), run: go("#/settings/" + k) }; }));
+  }
+  function palMatch(label, q) { return !q || label.toLowerCase().indexOf(q.toLowerCase()) >= 0; }
+  function openPalette() {
+    var root = $("#pal-root");
+    if (!root) { root = document.createElement("div"); root.id = "pal-root"; document.body.appendChild(root); }
+    if (root.innerHTML) { var qi = $("#pal-q"); if (qi) qi.focus(); return; }
+    var opener = document.activeElement;
+    root.innerHTML = '<div class="modal-bg pal-bg"><div class="card palette" role="dialog" aria-modal="true" aria-label="' + esc(T("pal.title")) + '">' +
+      '<div class="pal-in">' + ic("search") + '<input id="pal-q" type="text" autocomplete="off" maxlength="200" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" placeholder="' + esc(T("pal.placeholder")) + '"></div>' +
+      '<ul id="pal-list" role="listbox"></ul><div class="pal-foot muted"><span><kbd>↑</kbd><kbd>↓</kbd> ' + esc(T("pal.k_move")) + "</span><span><kbd>Enter</kbd> " + esc(T("pal.k_run")) + "</span><span><kbd>Esc</kbd> " + esc(T("pal.k_close")) + "</span><span><kbd>?</kbd> " + esc(T("pal.shortcuts")) + "</span></div></div></div>";
+    var input = $("#pal-q");
+    var close = function () { root.innerHTML = ""; pal.seq++; document.removeEventListener("keydown", onKey, true); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
+    pal.close = close;
+    var onKey = function (e) {
+      if (!root.innerHTML) return;
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); palSelect(pal.sel + (e.key === "ArrowDown" ? 1 : -1)); }
+      else if (e.key === "Enter") { e.preventDefault(); palRun(pal.sel); }
+      else if (e.key === "Tab") { e.preventDefault(); input.focus(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    $(".pal-bg", root).addEventListener("mousedown", function (e) { if (e.target.classList.contains("pal-bg")) close(); });
+    input.addEventListener("input", function () { palUpdate(input.value.trim()); });
+    if (!pal.buttons) api("/api/buttons").then(function (l) { pal.buttons = l || []; if (root.innerHTML) palUpdate(input.value.trim()); }).catch(function () { pal.buttons = []; });
+    palUpdate("");
+    input.focus();
+  }
+  function palUpdate(q) {
+    var local = palCommands().filter(function (c) { return palMatch(c.label, q); });
+    var btns = (pal.buttons || []).filter(function (b) { return palMatch(b.label, q); }).slice(0, 5).map(function (b) {
+      return { kind: "button", icon: "play", label: T("pal.run_button", { name: b.label }), run: function () { runButton(b.id); } };
+    });
+    pal.items = local.concat(btns);
+    pal.sel = 0;
+    palDraw();
+    clearTimeout(pal.timer);
+    if (!q) return;
+    var my = ++pal.seq;
+    pal.timer = setTimeout(function () {
+      api("/api/search?q=" + enc(q)).then(function (hits) {
+        if (my !== pal.seq || !$("#pal-list")) return; // stale response: drop it
+        var extra = [];
+        hits.forEach(function (h) {
+          if (h.kind === "task") {
+            extra.push({ kind: "task", icon: "tasks", label: h.name, sub: h.sub, run: function () { location.hash = "#/tasks/" + enc(h.id); } });
+            extra.push({ kind: "run_task", icon: "play", label: T("pal.run_task", { name: h.name }), run: function () {
+              api("/api/tasks/" + enc(h.id) + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); }).catch(fail);
+            } });
+          } else if (h.kind === "skill") extra.push({ kind: "skill", icon: "skills", label: h.name, sub: h.sub, run: function () { location.hash = "#/skills/" + enc(h.id); } });
+          else extra.push({ kind: "run", icon: "runs", label: T("search.run", { id: shortId(h.id) }), sub: h.sub, run: function () { location.hash = "#/runs/" + enc(h.id); } });
+        });
+        pal.items = extra.concat(pal.items);
+        pal.sel = 0;
+        palDraw();
+      }).catch(function () {});
+    }, 150);
+  }
+  function palDraw() {
+    var ul = $("#pal-list");
+    if (!ul) return;
+    ul.innerHTML = pal.items.length ? pal.items.map(function (it, i) {
+      return '<li role="option" id="pal-o' + i + '" data-i="' + i + '" aria-selected="' + (i === pal.sel) + '" class="' + (i === pal.sel ? "sel" : "") + '">' + ic(it.icon, "sm") + '<span class="kind">' + esc(T("pal.kind." + it.kind)) + "</span><span class=\"lbl\">" + esc(it.label) + "</span>" + (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "") + "</li>";
+    }).join("") : '<li class="none muted">' + esc(T("search.none")) + "</li>";
+    $$("li[data-i]", ul).forEach(function (li) {
+      li.addEventListener("mousemove", function () { if (pal.sel !== +li.getAttribute("data-i")) palSelect(+li.getAttribute("data-i")); });
+      li.addEventListener("click", function () { palRun(+li.getAttribute("data-i")); });
+    });
+    var q = $("#pal-q"); if (q) q.setAttribute("aria-activedescendant", pal.items.length ? "pal-o" + pal.sel : "");
+  }
+  function palSelect(i) {
+    if (!pal.items.length) return;
+    pal.sel = (i + pal.items.length) % pal.items.length;
+    palDraw();
+    var li = $("#pal-o" + pal.sel); if (li && li.scrollIntoView) li.scrollIntoView({ block: "nearest" });
+  }
+  function palRun(i) {
+    var it = pal.items[i];
+    if (!it) return;
+    if (pal.close) pal.close();
+    it.run();
+  }
+  function shortcutsHelp() {
+    var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
+    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r", T("sc.goto")]];
+    modal('<div class="card-head"><span class="ico">' + ic("more") + "</span><h2>" + esc(T("sc.title")) + '</h2></div><table class="tbl sc-table"><tbody>' +
+      rows.map(function (r) { return "<tr><td>" + r[0].split(" / ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join(" / ") + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") +
+      '</tbody></table><div class="actions"><button class="btn" id="sc-close">' + esc(T("btn.close")) + "</button></div>", function (r, close) { $("#sc-close").addEventListener("click", close); });
+  }
+  var gPending = 0;
   document.addEventListener("keydown", function (e) {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); var q = $("#q"); if (q) q.focus(); }
+    if ($("#shell") && $("#shell").classList.contains("hidden")) return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); return; }
+    var t = e.target, typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+    if (typing || e.metaKey || e.ctrlKey || e.altKey || $("#modal-root").innerHTML || ($("#pal-root") && $("#pal-root").innerHTML)) return;
+    if (e.key === "?") { e.preventDefault(); shortcutsHelp(); return; }
+    if (e.key === "g") { gPending = Date.now(); return; }
+    if (gPending && Date.now() - gPending < 1000) {
+      var dest = { h: "#/", t: "#/tasks", r: "#/runs", s: "#/skills", b: "#/buttons" }[e.key];
+      gPending = 0;
+      if (dest) { e.preventDefault(); location.hash = dest; }
+    }
   });
 
   function renderStatus(o) {
@@ -333,20 +460,61 @@
     l.classList.remove("hidden");
     l.innerHTML = '<div class="card login-card"><div class="brand"><span class="brand-mark">' + waveMark() + '</span><span class="brand-text"><strong>tidebot</strong><small>' + esc(T("brand.tagline")) + '</small></span></div>' +
       '<form id="login-form" autocomplete="on"><label class="field"><span>' + esc(T("login.password")) + '</span><input type="password" id="lp" required minlength="8" autocomplete="current-password" autofocus></label>' +
-      '<label class="field' + (totp ? "" : " hidden") + '" id="totp-field"><span>' + esc(T("login.totp")) + '</span><input id="lt" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>' +
-      '<p class="err" id="lerr"></p><button class="btn primary" type="submit">' + esc(T("login.submit")) + '</button></form>' +
+      '<div class="' + (totp ? "" : "hidden") + '" id="totp-field"><label class="field"><span id="lt-lbl">' + esc(T("login.totp")) + '</span><input id="lt" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>' +
+      '<button type="button" class="link-btn" id="lt-rec">' + esc(T("login.use_recovery")) + "</button></div>" +
+      '<p class="err" id="lerr" role="alert"></p><button class="btn primary" type="submit" id="lsub">' + esc(T("login.submit")) + '</button></form>' +
       '<p class="login-foot">' + esc(T("login.foot")) + ' <code>agentctl auth set-password</code></p>' +
       '<div class="login-lang">' + langSelect("login-lang-sel") + "</div></div>";
     $("#login-lang-sel").addEventListener("change", function (e) { loadLang(e.target.value).then(function () { showLogin(totp); }); });
-    $("#login-form").addEventListener("submit", function (e) {
-      e.preventDefault();
-      $("#lerr").textContent = "";
-      api("/api/login", { method: "POST", body: { password: $("#lp").value, totp: $("#lt").value } }).then(function () { boot(); })
-        .catch(function (err) {
-          if (/credentials/.test(err.message) || err.status === 401) $("#totp-field").classList.remove("hidden");
-          $("#lerr").textContent = err.message;
-        });
+    var lt = $("#lt"), recMode = false, busy = false, waitTimer = null;
+    $("#lt-rec").addEventListener("click", function () {
+      recMode = !recMode;
+      lt.value = "";
+      lt.setAttribute("inputmode", recMode ? "text" : "numeric");
+      lt.setAttribute("maxlength", recMode ? "11" : "6");
+      lt.setAttribute("autocomplete", recMode ? "off" : "one-time-code");
+      if (recMode) lt.removeAttribute("pattern"); else lt.setAttribute("pattern", "[0-9]{6}");
+      lt.placeholder = recMode ? "abcde-12345" : "123456";
+      $("#lt-lbl").textContent = T(recMode ? "login.recovery" : "login.totp");
+      $("#lt-rec").textContent = T(recMode ? "login.use_totp" : "login.use_recovery");
+      lt.focus();
     });
+    var countdown = function (secs) {
+      var sub = $("#lsub"), end = Date.now() + secs * 1000;
+      clearInterval(waitTimer);
+      var tick = function () {
+        var left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        if (!document.contains(sub)) { clearInterval(waitTimer); return; }
+        if (!left) { clearInterval(waitTimer); sub.disabled = false; $("#lerr").textContent = ""; return; }
+        sub.disabled = true;
+        $("#lerr").textContent = T("login.wait", { t: T("login.wait_ms", { m: Math.floor(left / 60), s: left % 60 }) });
+      };
+      tick(); waitTimer = setInterval(tick, 1000);
+    };
+    var submit = function () {
+      if (busy || $("#lsub").disabled) return;
+      busy = true;
+      $("#lerr").textContent = "";
+      api("/api/login", { method: "POST", body: { password: $("#lp").value, totp: lt.value } }).then(function () { clearInterval(waitTimer); boot(); })
+        .catch(function (err) {
+          if (err.status === 429) { countdown((err.data && err.data.retry_after) || 60); return; }
+          if (err.status === 401) {
+            var wasHidden = $("#totp-field").classList.contains("hidden");
+            $("#totp-field").classList.remove("hidden");
+            $("#lerr").textContent = wasHidden ? T("login.bad_or_totp") : T("login.bad");
+            if (!wasHidden) { lt.value = ""; } (wasHidden ? lt : $("#lp")).focus();
+            return;
+          }
+          $("#lerr").textContent = err.message;
+        }).then(function () { busy = false; });
+    };
+    // Six digits typed (or pasted/autofilled) = submit; no extra click.
+    lt.addEventListener("input", function () {
+      if (recMode) return;
+      lt.value = lt.value.replace(/\D/g, "").slice(0, 6);
+      if (lt.value.length === 6 && $("#lp").value) submit();
+    });
+    $("#login-form").addEventListener("submit", function (e) { e.preventDefault(); submit(); });
   }
 
   // ---------- page plumbing ----------
@@ -1888,47 +2056,202 @@
   }
 
   // ---------- SETTINGS ----------
-  function renderSettings() {
+  // Left nav + one section at a time. Every row has an id, so #/settings/<section>/<item>
+  // scrolls to it. Autosaved fields show "Saved ✓" next to them. Dangerous actions
+  // live in the danger zone at the bottom of General.
+  var SET_SECTIONS = ["general", "providers", "budgets", "security", "notifications", "data", "about"];
+  var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", security: "shield", notifications: "bell", data: "folder", about: "info" };
+  function savedMark(el) {
+    if (!el) return;
+    var host = el.closest(".set-row, .field") || el.parentNode, m = $(".saved-mark", host);
+    if (!m) { m = document.createElement("span"); m.className = "saved-mark"; m.setAttribute("role", "status"); host.appendChild(m); }
+    m.textContent = T("set.saved");
+    m.classList.remove("fade"); void m.offsetWidth; m.classList.add("fade");
+  }
+  function renderSettings(section, item) {
+    section = SET_SECTIONS.indexOf(section) >= 0 ? section : "general";
     return api("/api/settings").then(function (st) {
-      var g = (st.budgets || []).filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || {};
-      var buckets = (st.budgets || []).filter(function (b) { return b.scope === "bucket"; });
       // title/sub are trusted dictionary strings; "{cmd}" is replaced with a <code> chip after escaping.
-      var row = function (title, sub, right, cmd) { return '<div class="set-row"><div class="lbl"><strong>' + esc(title) + "</strong><small>" + esc(sub).replace("{cmd}", cmd ? "<code>" + esc(cmd) + "</code>" : "") + "</small></div>" + right + "</div>"; };
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.settings")) + "</h1><p>" + esc(T("set.sub")) + "</p></div></div>" +
-        '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>WebUI</h2></div>" +
-        row(T("set.webui_on"), T("set.webui_on_sub"), '<button class="switch' + (st.webui_enabled ? " on" : "") + '" id="sw-webui" aria-label="' + esc(T("set.webui_on")) + '"></button>', "agentctl webui on") +
-        row(T("set.addr"), T(st.allow_lan ? "set.lan_on" : "set.lan_off"), "<code>" + esc(st.addr) + "</code>") +
-        row("HTTPS", T("set.https_sub"), '<span class="pill ' + (st.tls ? "ok" : "plain") + '">' + esc(T(st.tls ? "set.enabled" : "set.off")) + "</span>") +
-        row(T("set.idle"), T("set.idle_sub"), "<span>" + esc(T("set.min", { n: st.idle_minutes })) + "</span>") + "</section>" +
-        '<section class="card fill"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("set.security")) + "</h2></div>" +
-        row(T("login.password"), T("set.pw_sub"), '<span class="pill ok">' + esc(T("set.set")) + "</span>", "agentctl auth set-password") +
-        row(T("set.totp"), T("set.totp_sub"), '<span class="pill ' + (st.totp_enabled ? "ok" : "plain") + '">' + esc(T(st.totp_enabled ? "set.on" : "set.off")) + "</span>", "agentctl auth totp-setup") +
-        row(T("set.cookies"), T("set.cookies_sub"), "") +
-        row(T("set.tz"), T("set.tz_sub"), "<span>" + esc(tzLabel()) + "</span>") +
-        row(T("set.language"), T("set.language_sub"), langSelect("set-lang")) +
-        row(T("set.session"), T("set.session_sub"), '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button>") + "</section></div>" +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + '</h2><span class="link muted">' + esc(T("set.bud_note")) + '</span></div><form id="bud" class="grid g4">' +
-        '<label class="field"><span>' + esc(T("set.g_usd")) + "</span>" + '<input name="g_usd" type="number" step="0.01" min="0" value="' + esc(g.max_usd || "") + '"></label>' +
-        '<label class="field"><span>' + esc(T("set.g_tok")) + "</span>" + '<input name="g_tok" type="number" step="1000" min="0" value="' + esc(g.max_tokens || "") + '"></label>' +
-        buckets.map(function (b) { return '<label class="field"><span>' + esc(T("set.b_usd", { b: bucketName(b) })) + '</span><input name="b_' + esc(b.scope_id) + '" type="number" step="0.01" min="0" value="' + esc(b.max_usd || "") + '"></label>'; }).join("") +
-        '<div class="field"><span>&nbsp;</span><button class="btn primary">' + esc(T("set.save_bud")) + '</button></div></form></section>' +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("key") + '</span><h2>' + esc(T("set.providers")) + '</h2><span class="link muted">' + esc(T("pv.sub")) + '</span></div><div id="pv-box"><p class="muted">…</p></div></section>',
-        "settings", [[T("nav.settings")]]);
-      $("#set-lang").addEventListener("change", function (e) { setLanguage(e.target.value); });
-      providerCards($("#pv-box")).catch(fail);
-      $("#btn-logout").addEventListener("click", function () {
-        api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; showLogin(); });
-      });
-      $("#sw-webui").addEventListener("click", function () {
-        confirmDialog({ title: T("set.off_title"), body: T("set.confirm_off"), ok: T("set.turn_off"), danger: true }).then(function (y) { if (y) api("/api/webui", { method: "POST", body: { enabled: false } }).then(function () { toast(T("toast.webui_off")); }).catch(fail); });
-      });
-      $("#bud").addEventListener("submit", function (e) {
-        e.preventDefault();
-        var f = e.target, reqs = [api("/api/budgets", { method: "POST", body: { scope: "global", period: "day", max_usd: parseFloat(f.g_usd.value) || 0, max_tokens: parseInt(f.g_tok.value, 10) || 0 } })];
-        buckets.forEach(function (b) { reqs.push(api("/api/budgets", { method: "POST", body: { scope: "bucket", scope_id: b.scope_id, bucket: b.scope_id, period: "day", max_usd: parseFloat(f["b_" + b.scope_id].value) || 0 } })); });
-        Promise.all(reqs).then(function () { toast(T("toast.bud_saved")); }).catch(fail);
-      });
+      var row = function (key, title, sub, right, cmd) { return '<div class="set-row" id="set-' + key + '"><div class="lbl"><strong>' + esc(title) + "</strong><small>" + esc(sub).replace("{cmd}", cmd ? "<code>" + esc(cmd) + "</code>" : "") + "</small></div>" + right + "</div>"; };
+      var nav = '<nav class="set-nav" aria-label="' + esc(T("nav.settings")) + '">' + SET_SECTIONS.map(function (k) {
+        return '<a href="#/settings/' + k + '"' + (k === section ? ' class="active" aria-current="page"' : "") + ">" + ic(SET_ICONS[k], "sm") + "<span>" + esc(T("setnav." + k)) + "</span></a>";
+      }).join("") + "</nav>";
+      var head = '<div class="card-head"><span class="ico">' + ic(SET_ICONS[section]) + "</span><h2>" + esc(T("setnav." + section)) + "</h2></div>";
+      var body = "", after = function () {};
+      if (section === "general") {
+        body = '<section class="card">' + head +
+          row("language", T("set.language"), T("set.language_sub"), langSelect("set-lang")) +
+          row("timezone", T("set.tz"), T("set.tz_sub"), "<span>" + esc(tzLabel()) + "</span>") +
+          row("webui", T("set.addr"), T(st.allow_lan ? "set.lan_on" : "set.lan_off"), "<code>" + esc(st.addr) + "</code>") +
+          row("https", "HTTPS", T("set.https_sub"), '<span class="pill ' + (st.tls ? "ok" : "plain") + '">' + esc(T(st.tls ? "set.enabled" : "set.off")) + "</span>") +
+          row("idle", T("set.idle"), T("set.idle_sub"), "<span>" + esc(T("set.min", { n: st.idle_minutes })) + "</span>") + "</section>" +
+          '<section class="card danger-zone" id="set-danger"><div class="card-head"><span class="ico">' + ic("bolt") + "</span><h2>" + esc(T("set.danger")) + "</h2></div>" +
+          row("webui_off", T("set.webui_on"), T("set.webui_on_sub"), '<button class="btn danger sm" id="dz-webui">' + esc(T("set.turn_off")) + "</button>", "agentctl webui on") +
+          row("reset_ui", T("set.reset_ui"), T("set.reset_ui_sub"), '<button class="btn danger sm" id="dz-reset">' + esc(T("set.reset")) + "</button>") + "</section>";
+        after = function () {
+          $("#set-lang").addEventListener("change", function (e) { setLanguage(e.target.value).then(function () { savedMark($("#set-lang")); }); });
+          $("#dz-webui").addEventListener("click", function () {
+            confirmDialog({ title: T("set.off_title"), body: T("set.confirm_off"), ok: T("set.turn_off"), danger: true }).then(function (y) { if (y) api("/api/webui", { method: "POST", body: { enabled: false } }).then(function () { toast(T("toast.webui_off")); }).catch(fail); });
+          });
+          $("#dz-reset").addEventListener("click", function () {
+            confirmDialog({ title: T("set.reset_ui"), body: T("set.reset_ui_confirm"), ok: T("set.reset"), danger: true }).then(function (y) {
+              if (!y) return;
+              try { Object.keys(localStorage).filter(function (k) { return /^tb_/.test(k); }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
+              state.notifSeen = ""; toast(T("set.reset_done"));
+            });
+          });
+        };
+      } else if (section === "providers") {
+        body = '<section class="card">' + head + '<p class="muted pad-x">' + esc(T("pv.sub")) + '</p><div id="pv-box"><p class="muted">…</p></div></section>';
+        after = function () { providerCards($("#pv-box")).catch(fail); };
+      } else if (section === "budgets") {
+        var g = (st.budgets || []).filter(function (x) { return x.scope === "global" && x.period === "day"; })[0] || {};
+        var buckets = (st.budgets || []).filter(function (x) { return x.scope === "bucket"; });
+        body = '<section class="card">' + head + '<p class="muted pad-x">' + esc(T("set.bud_auto")) + '</p><div class="grid g3 pad-x" id="bud">' +
+          '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd")) + '</span><input data-bud="g_usd" type="number" step="0.01" min="0" value="' + esc(g.max_usd || "") + '"></label>' +
+          '<label class="field" id="set-g_tok"><span>' + esc(T("set.g_tok")) + '</span><input data-bud="g_tok" type="number" step="1000" min="0" value="' + esc(g.max_tokens || "") + '"></label>' +
+          buckets.map(function (x) { return '<label class="field" id="set-b_' + esc(x.scope_id) + '"><span>' + esc(T("set.b_usd", { b: bucketName(x) })) + '</span><input data-bud="b" data-sid="' + esc(x.scope_id) + '" type="number" step="0.01" min="0" value="' + esc(x.max_usd || "") + '"></label>'; }).join("") +
+          '</div><p class="pad-x"><a href="#/spend">' + esc(T("set.bud_more")) + " " + ic("arrow", "sm") + "</a></p></section>";
+        after = function () {
+          $$("[data-bud]").forEach(function (inp) {
+            inp.addEventListener("change", function () {
+              var k = inp.getAttribute("data-bud"), v = inp.value, req;
+              if (k === "g_usd" || k === "g_tok") {
+                var u = $('[data-bud="g_usd"]').value, t = $('[data-bud="g_tok"]').value;
+                req = { scope: "global", period: "day", max_usd: parseFloat(u) || 0, max_tokens: parseInt(t, 10) || 0 };
+              } else {
+                var sid = inp.getAttribute("data-sid");
+                req = { scope: "bucket", scope_id: sid, bucket: sid, period: "day", max_usd: parseFloat(v) || 0 };
+              }
+              api("/api/budgets", { method: "POST", body: req }).then(function () { savedMark(inp); }).catch(fail);
+            });
+          });
+        };
+      } else if (section === "security") {
+        body = '<section class="card">' + head +
+          row("password", T("login.password"), T("set.pw_sub"), '<span class="pill ok">' + esc(T("set.set")) + "</span>", "agentctl auth set-password") +
+          row("2fa", T("set.totp"), T(st.totp_enabled ? "set.totp_on_sub" : "set.totp_off_sub"), st.totp_enabled ?
+            '<span class="row-gap"><span class="pill ok">' + esc(T("set.on")) + '</span><button class="btn sm" id="tf-off">' + esc(T("tf.disable")) + "</button></span>" :
+            '<button class="btn primary sm" id="tf-on">' + esc(T("tf.enable")) + "</button>") +
+          row("cookies", T("set.cookies"), T("set.cookies_sub"), "") +
+          row("session", T("set.session"), T("set.session_sub"), '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button>") + "</section>";
+        after = function () {
+          $("#btn-logout").addEventListener("click", function () {
+            api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; showLogin(); });
+          });
+          if ($("#tf-on")) $("#tf-on").addEventListener("click", twoFASetup);
+          if ($("#tf-off")) $("#tf-off").addEventListener("click", twoFADisable);
+        };
+      } else if (section === "notifications") {
+        body = '<section class="card">' + head + '<div id="nt-box"><p class="muted pad-x">…</p></div></section>';
+        after = function () {
+          rpc("notify.overview", {}).then(function (o) {
+            var hours = '<select id="nt-digest" aria-label="' + esc(T("set.digest")) + '"><option value="">' + esc(T("set.off")) + "</option>" + Array.from({ length: 24 }, function (_, h) { return '<option value="' + h + '"' + (String(h) === o.digest_hour ? " selected" : "") + ">" + (h < 10 ? "0" : "") + h + ":00</option>"; }).join("") + "</select>";
+            $("#nt-box").innerHTML =
+              row("quiet", T("set.quiet"), T("set.quiet_sub"), '<input id="nt-quiet" maxlength="11" placeholder="22:00-08:00" value="' + esc(o.quiet || "") + '">') +
+              row("digest", T("set.digest"), T("set.digest_sub"), hours) +
+              row("channels", T("set.channels"), T("set.channels_sub"), "", "agentctl notify add") +
+              '<ul class="plain-list pad-x">' + ((o.channels || []).length ? o.channels.map(function (c) { return "<li>" + ic("bell", "sm") + "<strong>" + esc(c.name) + '</strong> <span class="pill plain">' + esc(c.kind) + "</span> " + '<span class="pill ' + (c.enabled ? "ok" : "plain") + '">' + esc(T(c.enabled ? "set.on" : "set.off")) + "</span></li>"; }).join("") : '<li class="muted">' + esc(T("set.no_channels")) + "</li>") + "</ul>";
+            $("#nt-quiet").addEventListener("change", function (e) {
+              var v = e.target.value.trim();
+              if (v && !/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(v)) { toast(T("set.quiet_bad"), true); return; }
+              rpc("notify.settings", { quiet: v }).then(function () { savedMark(e.target); }).catch(fail);
+            });
+            $("#nt-digest").addEventListener("change", function (e) {
+              if (e.target.value === "") return;
+              rpc("notify.settings", { digest_hour: +e.target.value }).then(function () { savedMark(e.target); }).catch(fail);
+            });
+            jumpTo(item);
+          }).catch(fail);
+        };
+      } else if (section === "data") {
+        body = '<section class="card">' + head +
+          row("backup", T("set.backup"), T("set.backup_sub"), '<button class="btn sm" id="bk-now">' + esc(T("set.backup_now")) + "</button>", "agentctl backup create --passphrase") +
+          '<div id="bk-list" class="pad-x"><p class="muted">…</p></div>' +
+          row("restore", T("set.restore"), T("set.restore_sub"), "", "agentctl backup restore <file>") + "</section>";
+        after = function () {
+          var load = function () {
+            return rpc("backups.list", {}).then(function (l) {
+              $("#bk-list").innerHTML = l && l.length ? '<table class="tbl"><thead><tr><th>' + esc(T("set.bk_when")) + "</th><th>" + esc(T("set.bk_kind")) + '</th><th class="right">' + esc(T("set.bk_size")) + "</th></tr></thead><tbody>" + l.slice(0, 10).map(function (x) {
+                return "<tr><td>" + esc(when(x.created_at)) + "</td><td>" + esc(T("set.bk_" + (x.kind === "auto" ? "auto" : "manual"))) + '</td><td class="right">' + esc(fmtBytes(x.size_bytes)) + "</td></tr>";
+              }).join("") + "</tbody></table>" : '<p class="muted">' + esc(T("set.bk_none")) + "</p>";
+            });
+          };
+          load().catch(fail);
+          $("#bk-now").addEventListener("click", function (e) {
+            e.target.disabled = true;
+            rpc("backups.create", {}).then(function () { toast(T("set.bk_done")); return load(); }).catch(fail).then(function () { e.target.disabled = false; });
+          });
+        };
+      } else if (section === "about") {
+        body = '<section class="card">' + head +
+          row("version", T("set.version"), T("set.version_sub"), "<code>" + esc(state.version || "dev") + "</code>") +
+          row("terms", T("set.terms"), T("set.terms_sub"), "") +
+          row("source", T("set.source"), T("set.source_sub"), '<code>github.com/Zhengmingming1/tidebot</code>') + "</section>";
+      }
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.settings")) + "</h1><p>" + esc(T("set.sub")) + '</p></div></div><div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
+        "settings", [[T("nav.settings"), "#/settings"], [T("setnav." + section)]]);
+      after();
+      jumpTo(item);
     });
+  }
+  function jumpTo(item) {
+    if (!item) return;
+    var el = document.getElementById("set-" + item);
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("flash");
+    setTimeout(function () { el.classList.remove("flash"); }, 1600);
+  }
+  // 2FA: scan → verify → recovery codes. Nothing is enabled until a code verifies;
+  // the codes are shown once, in this dialog only.
+  function twoFASetup() {
+    api("/api/auth/2fa/begin", { method: "POST", body: {} }).then(function (b) {
+      var steps = '<ol class="steps"><li class="on" data-st="1">' + esc(T("tf.s1")) + '</li><li data-st="2">' + esc(T("tf.s2")) + '</li><li data-st="3">' + esc(T("tf.s3")) + "</li></ol>";
+      modal('<div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("tf.title")) + "</h2></div>" + steps +
+        '<div id="tf-body"><div class="tf-scan"><img id="tf-qr" alt="' + esc(T("tf.qr_alt")) + '" width="180" height="180"><div><p>' + esc(T("tf.scan")) + '</p><p class="muted">' + esc(T("tf.manual")) + '</p><code class="secret-code" id="tf-secret"></code></div></div>' +
+        '<label class="field"><span>' + esc(T("tf.code")) + '</span><input id="tf-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label><p class="err" id="tf-err"></p>' +
+        '<div class="actions"><button class="btn" id="tf-cancel">' + esc(T("btn.cancel")) + '</button><button class="btn primary" id="tf-verify">' + esc(T("tf.verify")) + "</button></div></div>",
+        function (root, close) {
+          $("#tf-qr").src = b.qr;
+          $("#tf-secret").textContent = b.secret.replace(/(.{4})/g, "$1 ").trim();
+          $("#tf-cancel").addEventListener("click", close);
+          var code = $("#tf-code"), busy = false;
+          code.focus();
+          var verify = function () {
+            if (busy) return; busy = true;
+            $("#tf-err").textContent = "";
+            api("/api/auth/2fa/confirm", { method: "POST", body: { code: code.value } }).then(function (r) {
+              $$(".steps li", root).forEach(function (li) { li.classList.toggle("on", li.getAttribute("data-st") === "3"); li.classList.toggle("done", li.getAttribute("data-st") !== "3"); });
+              var txt = r.recovery_codes.join("\n");
+              $("#tf-body").innerHTML = '<p class="ok-text">' + esc(T("tf.enabled")) + '</p><p>' + esc(T("tf.rec_intro")) + '</p><pre class="rec-codes" id="tf-rec"></pre><p class="muted">' + esc(T("tf.rec_once")) + "</p>" +
+                '<div class="actions"><button class="btn" id="tf-copy">' + esc(T("tf.copy")) + '</button><button class="btn" id="tf-dl">' + esc(T("tf.download")) + '</button><button class="btn primary" id="tf-done">' + esc(T("tf.done")) + "</button></div>";
+              $("#tf-rec").textContent = txt;
+              $("#tf-copy").addEventListener("click", function () { copyText(txt); });
+              $("#tf-dl").addEventListener("click", function () {
+                var a = document.createElement("a");
+                a.href = URL.createObjectURL(new Blob(["tidebot recovery codes\n\n" + txt + "\n"], { type: "text/plain" }));
+                a.download = "tidebot-recovery-codes.txt"; document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+              });
+              $("#tf-done").addEventListener("click", function () { txt = ""; close(); refresh(); });
+            }).catch(function (e) { $("#tf-err").textContent = T("tf.bad_code"); code.select(); }).then(function () { busy = false; });
+          };
+          code.addEventListener("input", function () { code.value = code.value.replace(/\D/g, "").slice(0, 6); if (code.value.length === 6) verify(); });
+          $("#tf-verify").addEventListener("click", verify);
+        });
+    }).catch(fail);
+  }
+  function twoFADisable() {
+    modal('<div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("tf.disable")) + '</h2></div><p>' + esc(T("tf.disable_sub")) + '</p><label class="field"><span>' + esc(T("login.password")) + '</span><input type="password" id="tf-pw" autocomplete="current-password" maxlength="1024"></label><p class="err" id="tf-err"></p>' +
+      '<div class="actions"><button class="btn" id="tf-cancel">' + esc(T("btn.cancel")) + '</button><button class="btn danger" id="tf-go">' + esc(T("tf.disable")) + "</button></div>", function (root, close) {
+        $("#tf-pw").focus();
+        $("#tf-cancel").addEventListener("click", close);
+        $("#tf-go").addEventListener("click", function () {
+          api("/api/auth/2fa/disable", { method: "POST", body: { password: $("#tf-pw").value } }).then(function () { close(); toast(T("tf.disabled")); refresh(); })
+            .catch(function () { $("#tf-err").textContent = T("tf.bad_pw"); });
+        });
+      });
   }
 
   // ---------- router ----------
@@ -1957,7 +2280,7 @@
       case "plugins": p = renderPlugins(); break;
       case "runs": p = parts[1] ? renderRunDetail(parts[1]) : renderRuns(params); break;
       case "spend": p = renderSpend(); break;
-      case "settings": p = renderSettings(); break;
+      case "settings": p = renderSettings(parts[1], parts[2]); break;
       default: p = renderHome();
     }
     p = Promise.resolve(p).then(function () { if (soft) { window.scrollTo(0, y); if (page()) page().scrollTop = sy; } }, function (e) {

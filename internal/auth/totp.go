@@ -49,3 +49,13 @@ func hotp(key []byte, counter int64) string {
 	truncated := (int(sum[offset])&0x7f)<<24 | (int(sum[offset+1])&0xff)<<16 | (int(sum[offset+2])&0xff)<<8 | (int(sum[offset+3]) & 0xff)
 	return fmt.Sprintf("%06d", truncated%1000000)
 }
+
+// TOTPCodeAt returns the 6-digit code for secret at time t ("" if the secret is invalid).
+// Used by tests and by nothing on the request path.
+func TOTPCodeAt(secret string, t time.Time) string {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.ReplaceAll(secret, " ", "")))
+	if err != nil {
+		return ""
+	}
+	return hotp(key, t.Unix()/30)
+}

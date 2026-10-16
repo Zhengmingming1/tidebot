@@ -53,6 +53,8 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/schedule/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
 	mux.HandleFunc("/api/spend/breakdown", s.withAuthCSRF(s.handleSpendBreakdown))
+	mux.HandleFunc("/api/notifications/center", s.withAuthCSRF(s.handleNotifCenter))
+	mux.HandleFunc("/api/auth/2fa/", s.withAuthCSRF(s.handle2FA))
 	mux.HandleFunc("/api/notifications", s.withAuthCSRF(s.handleNotifications))
 	mux.HandleFunc("/api/search", s.withAuthCSRF(s.handleSearch))
 	mux.HandleFunc("/api/settings", s.withAuthCSRF(s.handleSettings))
@@ -1126,6 +1128,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Sub  string `json:"sub"`
 	}
 	out := []hit{}
+	if len([]rune(q)) > 200 {
+		writeErr(w, 400, "query too long")
+		return
+	}
 	if q == "" {
 		writeJSON(w, 200, out)
 		return
