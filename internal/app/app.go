@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/amend"
+	"github.com/Zhengmingming1/tidebot/internal/auth"
 	"github.com/Zhengmingming1/tidebot/internal/config"
+	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/logging"
@@ -22,6 +24,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
+	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
 
 // App is the core runtime shared by daemon and CLI.
@@ -38,6 +41,9 @@ type App struct {
 	Tasks    *tasksvc.Service
 	Amend    *amend.Service
 	Skills   *skillstore.Service
+	Cost     *cost.Service
+	Auth     *auth.Service
+	WebUI    *webui.Server
 }
 
 // Open loads config, opens DB, and builds subsystems.
@@ -82,6 +88,22 @@ func Open(cfg config.Config) (*App, error) {
 	}
 	a.Amend = amend.New(sqlDB, a.Tasks, ver, structurer)
 	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
+	a.Cost = cost.New(sqlDB, log)
+	a.Auth = auth.New(sqlDB)
+	if err := a.Cost.EnsureDefaults(context.Background()); err != nil {
+		log.Warn("cost defaults", "error", err)
+	}
+	if err := a.Auth.EnsureOwner(context.Background()); err != nil {
+		log.Warn("auth owner", "error", err)
+	}
+	// Restore webui.enabled from settings if present.
+	if v, err := a.Auth.GetSetting(context.Background(), "webui.enabled"); err == nil && v != "" {
+		a.Cfg.WebUIEnabled = v == "true" || v == "1"
+	}
+	a.WebUI = webui.New(webui.Deps{
+		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
+		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Ver: ver, Reg: reg, Log: log,
+	})
 	return a, nil
 }
 
@@ -89,6 +111,9 @@ func Open(cfg config.Config) (*App, error) {
 func (a *App) Close() error {
 	if a.Sched != nil {
 		a.Sched.Stop()
+	}
+	if a.WebUI != nil {
+		_ = a.WebUI.Stop(context.Background())
 	}
 	if a.DB != nil {
 		return a.DB.Close()
@@ -148,16 +173,45 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	opts.Profile = prof
 	opts.APIKey = key
 	opts.Logger = a.Log
+	bucket := opts.CostBucket
+	if bucket == "" {
+		bucket = cost.BucketProduction
+	}
+	runMax := 0.05
+	if a.Cost != nil {
+		chk, err := a.Cost.CheckBeforeRun(ctx, opts.TaskID, bucket, runMax)
+		if err != nil {
+			return runner.Result{}, err
+		}
+		if !chk.OK {
+			_ = a.Cost.LogBreach(ctx, chk.BreachScope, opts.TaskID, bucket, "cap", chk.Reason, chk.BreachAction)
+			if opts.TaskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
+				_ = a.Cost.PauseTask(ctx, opts.TaskID, chk.Reason)
+			}
+			return runner.Result{}, fmt.Errorf("budget blocked: %s", chk.Reason)
+		}
+		if chk.Warn {
+			a.Log.Warn("budget warning", "detail", chk.WarnDetail)
+		}
+		runMax = chk.RunMaxUSD
+		if runMax <= 0 {
+			runMax = 0.01
+		}
+	}
 	if len(opts.ExtraArgs) == 0 {
 		opts.ExtraArgs = []string{
 			"--permission-mode", "dontAsk",
 			"--permission-prompts", "none",
 			"--restricted",
-			"--max-budget-usd", "0.05",
+			"--max-budget-usd", fmt.Sprintf("%.4f", runMax),
 			"--effort", "low",
 		}
 	}
-	return a.Runner.RunOnce(ctx, opts)
+	res, err := a.Runner.RunOnce(ctx, opts)
+	if err == nil && a.Cost != nil {
+		_ = a.Cost.Record(ctx, res.RunID, opts.TaskID, bucket, res.TotalCostUSD, res.InputTokens, res.OutputTokens)
+	}
+	return res, err
 }
 
 func isMockBin(bin string) bool {
@@ -229,7 +283,7 @@ func (a *App) SeedBuiltinProviders(ctx context.Context) error {
 		}
 		row := db.ProviderRow{
 			ID: id.New("prov"), Name: p.Name,
-			Preset: sql.NullString{String: p.Preset, Valid: p.Preset != ""},
+			Preset:  sql.NullString{String: p.Preset, Valid: p.Preset != ""},
 			BaseURL: p.BaseURL, AuthEnv: p.AuthEnv, Model: p.Model,
 			OpusModel: p.OpusModel, SonnetModel: p.SonnetModel, HaikuModel: p.HaikuModel,
 			FableModel: p.FableModel, SmallFastModel: p.SmallFastModel, SubagentModel: p.SubagentModel,

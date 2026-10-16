@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>tidebot</title>
+  <link rel="stylesheet" href="/static/styles.css"/>
+</head>
+<body>
+  <div id="app">
+    <aside id="nav" class="hidden">
+      <div class="brand">tidebot</div>
+      <a href="#/" data-page="home">首页</a>
+      <a href="#/tasks" data-page="tasks">任务</a>
+      <a href="#/skills" data-page="skills">技能</a>
+      <a href="#/runs" data-page="runs">运行</a>
+      <a href="#/spend" data-page="spend">花费</a>
+      <a href="#/settings" data-page="settings">设置</a>
+      <button id="btn-logout" type="button">退出</button>
+    </aside>
+    <main id="main">
+      <section id="login-view">
+        <h1>登录</h1>
+        <form id="login-form">
+          <label>密码 <input type="password" id="login-password" required minlength="8" autocomplete="current-password"/></label>
+          <label class="totp-row hidden">TOTP <input type="text" id="login-totp" inputmode="numeric" autocomplete="one-time-code"/></label>
+          <p id="login-error" class="error"></p>
+          <button type="submit">登录</button>
+        </form>
+        <p class="hint">首次使用请先用 <code>agentctl auth set-password</code> 设置密码。</p>
+      </section>
+      <section id="page" class="hidden"></section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -8,6 +8,10 @@ import (
 	"runtime"
 	"time"
 
+	"database/sql"
+
+	"github.com/Zhengmingming1/tidebot/internal/auth"
+	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
@@ -36,6 +40,13 @@ func (a *App) RegisterRPC(srv *ipc.Server) {
 	srv.Register("skills.list", a.rpcSkillsList)
 	srv.Register("skills.rollback", a.rpcSkillsRollback)
 	srv.Register("skills.pin", a.rpcSkillsPin)
+	srv.Register("spend.summary", a.rpcSpendSummary)
+	srv.Register("spend.set_budget", a.rpcSpendSetBudget)
+	srv.Register("webui.status", a.rpcWebUIStatus)
+	srv.Register("webui.set", a.rpcWebUISet)
+	srv.Register("auth.set_password", a.rpcAuthSetPassword)
+	srv.Register("auth.totp_setup", a.rpcAuthTOTPSetup)
+	srv.Register("auth.totp_disable", a.rpcAuthTOTPDisable)
 }
 
 func (a *App) rpcStatus(ctx context.Context, _ json.RawMessage) (any, error) {
@@ -43,16 +54,17 @@ func (a *App) rpcStatus(ctx context.Context, _ json.RawMessage) (any, error) {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	return map[string]any{
-		"ok":              true,
-		"db":              a.Cfg.DBPath,
-		"ipc":             a.Cfg.IPCPath,
-		"max_concurrency": a.Cfg.MaxConcurrency,
-		"active_runs":     active,
+		"ok":               true,
+		"db":               a.Cfg.DBPath,
+		"ipc":              a.Cfg.IPCPath,
+		"max_concurrency":  a.Cfg.MaxConcurrency,
+		"active_runs":      active,
 		"default_provider": a.Cfg.DefaultProvider,
-		"webui":           a.Cfg.EffectiveWebUI(),
-		"heap_alloc_mib":  float64(ms.HeapAlloc) / (1024 * 1024),
-		"go_version":      runtime.Version(),
-		"time":            time.Now().UTC().Format(time.RFC3339),
+		"webui":            a.WebUI != nil && a.WebUI.Enabled(),
+		"webui_configured": a.Cfg.EffectiveWebUI(),
+		"heap_alloc_mib":   float64(ms.HeapAlloc) / (1024 * 1024),
+		"go_version":       runtime.Version(),
+		"time":             time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
 
@@ -272,3 +284,98 @@ func (a *App) rpcSkillsPin(ctx context.Context, params json.RawMessage) (any, er
 	return nil, a.Skills.PinOnTask(ctx, p.TaskID, p.SkillID, p.SkillVersionID, "user")
 }
 
+func (a *App) rpcSpendSummary(ctx context.Context, params json.RawMessage) (any, error) {
+	var p struct {
+		Day string `json:"day"`
+	}
+	_ = json.Unmarshal(params, &p)
+	return a.Cost.Summary(ctx, p.Day)
+}
+
+func (a *App) rpcSpendSetBudget(ctx context.Context, params json.RawMessage) (any, error) {
+	var p struct {
+		Scope     string  `json:"scope"`
+		ScopeID   string  `json:"scope_id"`
+		Period    string  `json:"period"`
+		Bucket    string  `json:"bucket"`
+		MaxUSD    float64 `json:"max_usd"`
+		MaxTokens int64   `json:"max_tokens"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, err
+	}
+	if p.Scope == "" {
+		p.Scope = "global"
+	}
+	if p.Period == "" {
+		p.Period = "day"
+	}
+	b := cost.Budget{
+		Scope: p.Scope, ScopeID: p.ScopeID, Period: p.Period, Bucket: p.Bucket,
+		MaxUSD:    sql.NullFloat64{Float64: p.MaxUSD, Valid: p.MaxUSD > 0},
+		MaxTokens: sql.NullInt64{Int64: p.MaxTokens, Valid: p.MaxTokens > 0},
+		Action:    "pause_notify", WarnAtPct: 80,
+	}
+	return nil, a.Cost.UpsertBudget(ctx, b)
+}
+
+func (a *App) rpcWebUIStatus(ctx context.Context, _ json.RawMessage) (any, error) {
+	_ = ctx
+	return map[string]any{
+		"enabled":    a.WebUI != nil && a.WebUI.Enabled(),
+		"addr":       a.Cfg.WebUIAddr,
+		"configured": a.Cfg.WebUIEnabled,
+	}, nil
+}
+
+func (a *App) rpcWebUISet(ctx context.Context, params json.RawMessage) (any, error) {
+	var p struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, err
+	}
+	if a.WebUI == nil {
+		return nil, fmt.Errorf("webui not initialized")
+	}
+	if err := a.WebUI.SetEnabled(ctx, p.Enabled); err != nil {
+		return nil, err
+	}
+	return map[string]any{"enabled": a.WebUI.Enabled()}, nil
+}
+
+func (a *App) rpcAuthSetPassword(ctx context.Context, params json.RawMessage) (any, error) {
+	var p struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.Password == "" {
+		return nil, fmt.Errorf("password required")
+	}
+	return nil, a.Auth.SetPassword(ctx, p.Password)
+}
+
+func (a *App) rpcAuthTOTPSetup(ctx context.Context, params json.RawMessage) (any, error) {
+	var p struct {
+		Code   string `json:"code"`
+		Secret string `json:"secret"`
+	}
+	_ = json.Unmarshal(params, &p)
+	if p.Secret == "" {
+		sec, uri, err := auth.GenerateTOTPSecret("tidebot", "owner")
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"secret": sec, "uri": uri, "note": "confirm with auth.totp_setup code+secret"}, nil
+	}
+	if !auth.VerifyTOTP(p.Secret, p.Code) {
+		return nil, fmt.Errorf("invalid totp code")
+	}
+	if err := a.Auth.EnableTOTP(ctx, p.Secret); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func (a *App) rpcAuthTOTPDisable(ctx context.Context, _ json.RawMessage) (any, error) {
+	return nil, a.Auth.DisableTOTP(ctx)
+}
