@@ -2221,8 +2221,10 @@
   var spendView = { range: "7d", by: "task" }, spendCache = {};
   function renderSpend() {
     spendCache = {};
-    var spendP = api("/api/spend"); // start both while the route's cache window is open
-    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; }); }, function () {}).then(function () { return spendP; }).then(function (d) {
+    var spendP = api("/api/spend"); // start all while the route's cache window is open
+    var bkKey = spendView.range + "|" + spendView.by;
+    var bkP = api("/api/spend/breakdown?range=" + spendView.range + "&by=" + spendView.by).then(function (r) { spendCache[bkKey] = r; }, function () {});
+    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
       var s = d.summary, budgets = s.budgets || [];
       var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0, max_tokens: 0 };
       var runsToday = d.top_tasks.reduce(function (a, t) { return a + t.runs; }, 0);
