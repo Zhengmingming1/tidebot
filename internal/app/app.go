@@ -146,6 +146,7 @@ func Open(cfg config.Config) (*App, error) {
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
 		LogPath: a.Runner.LogPath, Location: cfg.Location(),
 		Ext:           a.CallExt,
+		ClaudeStatus:  func(ctx context.Context, force bool) any { return a.ClaudeStatus(ctx, force) },
 		QuickRunSkill: a.startQuickRunSkill,
 		Providers:     providerAdmin{a},
 		Public:        map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},

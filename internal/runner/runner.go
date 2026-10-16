@@ -38,6 +38,8 @@ type Options struct {
 	HasNextRunItems bool
 	CostBucket      string // production|canary|optimization|dry_run|assist
 	Logger          *slog.Logger
+	// RunID is filled in by RunOnce (used to label the live process list).
+	RunID string
 }
 
 // Result is the outcome of one run.
@@ -169,6 +171,9 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 	fmt.Fprintf(logW, "[%s] run %s started (provider=%s)\n", started.Local().Format("15:04:05"), runID, opts.Profile.Name)
+	if opts.RunID == "" {
+		opts.RunID = runID
+	}
 	res, err := execute(runCtx, opts, logW)
 	res.RunID = runID
 	finished := time.Now().UTC()
@@ -291,6 +296,8 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 	}
 	release := afterStart(cmd)
 	defer release()
+	untrack := trackProc(cmd.Process.Pid, opts.RunID)
+	defer untrack()
 
 	var (
 		events []Event
