@@ -676,13 +676,43 @@
   }
 
   // ---------- PLUGINS ----------
+  function rpc(method, params) {
+    return api("/api/rpc/" + method, { method: "POST", body: params || {} }).then(function (r) { return r.result; });
+  }
   function renderPlugins() {
-    var kinds = [["terminal", T("pl.mcp"), T("pl.mcp_sub"), T("pl.none_inst")], ["bell", T("pl.notifiers"), T("pl.notifiers_sub"), T("pl.builtin")], ["globe", T("pl.triggers"), T("pl.triggers_sub"), T("pl.none_inst")]];
-    mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + "</p></div></div>" +
-      '<div class="grid g3">' + kinds.map(function (x) {
-        return '<section class="card fill"><div class="card-head"><span class="ico">' + ic(x[0]) + "</span><h3>" + esc(x[1]) + '</h3></div><p class="grow muted">' + esc(x[2]) + '</p><div class="card-foot"><span class="pill plain">' + esc(x[3]) + "</span></div></section>";
-      }).join("") + '</div><section class="card">' + emptyState("plugins", T("pl.empty"), T("pl.empty_sub")) + "</section>", "plugins", [[T("nav.plugins")]]);
-    return Promise.resolve();
+    return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list")]).then(function (res) {
+      var d = res[0] || {}, plugins = res[1] || [], trig = res[2] || [], baks = res[3] || [];
+      var stat = function (label, v) { return '<div class="stat"><span class="muted">' + esc(label) + "</span><strong>" + esc(v) + "</strong></div>"; };
+      var r24 = d.runs_24h || {}, n24 = 0; Object.keys(r24).forEach(function (k) { n24 += r24[k]; });
+      var health = '<section class="card"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("pl.health")) + '</h2></div><div class="grid g4">' +
+        stat(T("pl.runs24"), n24) + stat(T("pl.success7"), Math.round((d.success_rate_7d || 0) * 100) + "%") +
+        stat(T("pl.p95"), ((d.duration_p95_ms || 0) / 1000).toFixed(1) + " s") + stat(T("pl.cost7"), usd(d.cost_7d_usd || 0, 2)) +
+        stat(T("pl.confirms"), d.pending_confirmations || 0) + stat(T("pl.claude"), d.claude_version || "?") +
+        stat(T("pl.disk"), ((d.disk_bytes || 0) / 1048576).toFixed(1) + " MB") + stat(T("pl.backup"), d.last_backup ? fmtTime(d.last_backup) : T("td.none")) + "</div></section>";
+      var prow = plugins.length ? '<table class="table"><thead><tr><th>' + esc(T("pl.col_plugin")) + "</th><th>" + esc(T("pl.col_version")) + "</th><th>" + esc(T("pl.col_perms")) + '</th><th class="right"></th></tr></thead><tbody>' + plugins.map(function (p) {
+        var cur = p.current || {};
+        return "<tr><td><strong>" + esc(p.name) + '</strong> <span class="muted">' + esc(p.id) + "</span>" + (p.enabled ? "" : ' <span class="pill plain">' + esc(T("pl.disabled")) + "</span>") + "</td><td>" + esc(cur.version || "-") + "</td><td>" + (cur.approved_permissions || []).map(function (x) { return '<span class="pill plain">' + esc(x) + "</span>"; }).join(" ") +
+          '</td><td class="right"><button class="btn sm" data-pl-uninstall="' + esc(p.id) + '">' + esc(T("pl.uninstall")) + "</button></td></tr>";
+      }).join("") + "</tbody></table>" : emptyState("plugins", T("pl.empty"), T("pl.empty_sub"));
+      var trow = trig.length ? '<table class="table"><tbody>' + trig.map(function (t) {
+        return "<tr><td><span class=\"pill plain\">" + esc(t.kind) + "</span></td><td>" + esc(t.kind === "webhook" ? "/hooks/" + t.id : (t.config && (t.config.path || t.config.trigger_id)) || "") + '</td><td><a href="#/tasks/' + esc(t.task_id) + '">' + esc(T("nav.tasks")) + '</a></td><td class="right"><button class="btn sm" data-trg-del="' + esc(t.id) + '">' + esc(T("pl.remove")) + "</button></td></tr>";
+      }).join("") + "</tbody></table>" : '<p class="muted">' + esc(T("pl.no_triggers")) + "</p>";
+      var brow = '<p class="muted">' + esc(baks.length ? T("pl.backups_n", { n: baks.length }) : T("pl.no_backups")) + "</p>";
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn" id="bk-now">' + esc(T("pl.backup_now")) + "</button></div></div>" + health +
+        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("plugins") + "</span><h2>" + esc(T("pl.installed")) + "</h2></div>" + prow + '<p class="muted pad">' + esc(T("pl.install_hint")) + "</p></section>" +
+        '<div class="grid g2"><section class="card"><div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("pl.triggers")) + "</h2></div>" + trow + "</section>" +
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section></div>", "plugins", [[T("nav.plugins")]]);
+      $$("[data-pl-uninstall]").forEach(function (b) { b.addEventListener("click", function () {
+        if (!confirm(T("pl.uninstall_confirm"))) return;
+        rpc("plugins.uninstall", { id: b.getAttribute("data-pl-uninstall") }).then(route).catch(function (e) { toast(e.message, true); });
+      }); });
+      $$("[data-trg-del]").forEach(function (b) { b.addEventListener("click", function () {
+        rpc("triggers.delete", { id: b.getAttribute("data-trg-del") }).then(route).catch(function (e) { toast(e.message, true); });
+      }); });
+      $("#bk-now").addEventListener("click", function () {
+        rpc("backup.create", {}).then(function (r) { toast(T("pl.backup_done", { path: r.path })); route(); }).catch(function (e) { toast(e.message, true); });
+      });
+    });
   }
 
   // ---------- RUNS ----------

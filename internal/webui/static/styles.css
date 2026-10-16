@@ -340,3 +340,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .lang-sel { height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-size: 13px; }
 .login-lang { display: flex; justify-content: center; margin-top: 16px; }
 :lang(zh-CN) body, html:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", Roboto, sans-serif; }
+
+.stat{display:flex;flex-direction:column;gap:2px;padding:6px 0}
+.stat strong{font-size:1.15em}
+.pad{padding:8px 16px}
