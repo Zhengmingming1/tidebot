@@ -343,8 +343,10 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 		}
 	}()
 
-	waitErr := cmd.Wait()
+	// Read everything before Wait: Wait closes the pipes and would drop the tail
+	// (including the final result event) on a fast-exiting process.
 	wg.Wait()
+	waitErr := cmd.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()

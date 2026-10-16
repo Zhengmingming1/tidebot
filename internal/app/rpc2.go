@@ -13,6 +13,11 @@ import (
 func (a *App) registerRPC2(srv *ipc.Server) {
 	srv.Register("policy.get", a.rpcPolicyGet)
 	srv.Register("policy.set", a.rpcPolicySet)
+	srv.Register("guard.check", a.rpcGuardCheck)
+	srv.Register("guard.list", a.rpcGuardList)
+	srv.Register("guard.approve", a.rpcGuardDecide(true))
+	srv.Register("guard.deny", a.rpcGuardDecide(false))
+	srv.Register("guard.scan", a.rpcGuardScan)
 }
 
 func decode[T any](raw json.RawMessage) (T, error) {

@@ -35,6 +35,7 @@ type Config struct {
 	WebUIIdleMinutes int           `json:"webui_idle_minutes" yaml:"webui_idle_minutes"`
 	Timezone         string        `json:"timezone" yaml:"timezone"` // IANA name for UI display; empty = system
 	SchedulerTick    time.Duration `json:"scheduler_tick" yaml:"scheduler_tick"`
+	GuardDisabled    bool          `json:"guard_disabled" yaml:"guard_disabled"` // skip the PreToolUse danger hook
 	IPCPath          string        `json:"ipc_path" yaml:"ipc_path"`
 }
 

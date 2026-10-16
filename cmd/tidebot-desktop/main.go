@@ -20,6 +20,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -30,6 +31,10 @@ import (
 var icon []byte
 
 func main() {
+	if guard.IsHookInvocation(os.Args[1:]) {
+		guard.HookMain(os.Stdin, os.Stdout)
+		return
+	}
 	configPath := flag.String("config", "", "path to config.yaml/json")
 	hidden := flag.Bool("hidden", false, "start minimized to tray (used by autostart)")
 	bridge := flag.String("bridge", defaultBridge(), "webview bridge: inproc (no port) | loopback (127.0.0.1 random port + one-time token)")

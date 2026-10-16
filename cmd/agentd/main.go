@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +15,10 @@ import (
 )
 
 func main() {
+	if guard.IsHookInvocation(os.Args[1:]) {
+		guard.HookMain(os.Stdin, os.Stdout)
+		return
+	}
 	configPath := flag.String("config", "", "path to config.yaml/json")
 	noWebUI := flag.Bool("no-webui", false, "disable HTTP WebUI listener (D8)")
 	flag.Parse()
