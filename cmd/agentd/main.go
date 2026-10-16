@@ -61,7 +61,14 @@ func main() {
 		"claude_bin", cfg.ClaudeBin,
 		"default_provider", cfg.DefaultProvider,
 		"webui", cfg.EffectiveWebUI(),
+		"webui_addr", cfg.WebUIAddr,
 	)
+
+	if cfg.EffectiveWebUI() {
+		if err := a.WebUI.Start(ctx); err != nil {
+			a.Log.Error("webui start", "error", err)
+		}
+	}
 
 	a.Sched.Start(ctx)
 	errCh := make(chan error, 1)
@@ -76,5 +83,6 @@ func main() {
 		}
 	}
 	a.Sched.Stop()
+	_ = a.WebUI.Stop(context.Background())
 	time.Sleep(100 * time.Millisecond)
 }

@@ -78,6 +78,79 @@ func main() {
 		case "resume":
 			must(cli.Call("tasks.resume", map[string]string{"id": needFlag(rest, "--id")}, nil))
 			fmt.Println("ok")
+		case "spend":
+			sub := "summary"
+			if len(args) > 0 {
+				sub = args[0]
+			}
+			switch sub {
+			case "summary", "ls", "list":
+				var out any
+				must(cli.Call("spend.summary", map[string]string{"day": flagOpt(args, "--day", "")}, &out))
+				printJSON(out)
+			case "set-budget":
+				p := map[string]any{
+					"scope":      flagOpt(args, "--scope", "global"),
+					"scope_id":   flagOpt(args, "--scope-id", ""),
+					"period":     flagOpt(args, "--period", "day"),
+					"bucket":     flagOpt(args, "--bucket", ""),
+					"max_usd":    atof(flagOpt(args, "--max-usd", "0")),
+					"max_tokens": atoi(flagOpt(args, "--max-tokens", "0")),
+				}
+				must(cli.Call("spend.set_budget", p, nil))
+				fmt.Println("ok")
+			default:
+				fatal(fmt.Errorf("usage: agentctl spend summary|set-budget"))
+			}
+
+		case "webui":
+			if len(args) == 0 {
+				var out any
+				must(cli.Call("webui.status", nil, &out))
+				printJSON(out)
+				break
+			}
+			switch args[0] {
+			case "on", "enable":
+				var out any
+				must(cli.Call("webui.set", map[string]any{"enabled": true}, &out))
+				printJSON(out)
+			case "off", "disable":
+				var out any
+				must(cli.Call("webui.set", map[string]any{"enabled": false}, &out))
+				printJSON(out)
+			case "status":
+				var out any
+				must(cli.Call("webui.status", nil, &out))
+				printJSON(out)
+			default:
+				fatal(fmt.Errorf("usage: agentctl webui [on|off|status]"))
+			}
+
+		case "auth":
+			if len(args) == 0 {
+				fatal(fmt.Errorf("usage: agentctl auth set-password|totp-setup|totp-disable"))
+			}
+			switch args[0] {
+			case "set-password":
+				pw := flagOpt(args[1:], "--password", "")
+				if pw == "" {
+					fatal(fmt.Errorf("--password required"))
+				}
+				must(cli.Call("auth.set_password", map[string]string{"password": pw}, nil))
+				fmt.Println("ok")
+			case "totp-setup":
+				p := map[string]string{"secret": flagOpt(args[1:], "--secret", ""), "code": flagOpt(args[1:], "--code", "")}
+				var out any
+				must(cli.Call("auth.totp_setup", p, &out))
+				printJSON(out)
+			case "totp-disable":
+				must(cli.Call("auth.totp_disable", nil, nil))
+				fmt.Println("ok")
+			default:
+				fatal(fmt.Errorf("unknown auth subcommand"))
+			}
+
 		case "run":
 			must(cli.Call("tasks.run", map[string]string{"id": needFlag(rest, "--id")}, nil))
 			fmt.Println("ok")
@@ -173,6 +246,79 @@ func main() {
 			fatal(fmt.Errorf("unknown skills subcommand"))
 		}
 
+	case "spend":
+		sub := "summary"
+		if len(args) > 0 {
+			sub = args[0]
+		}
+		switch sub {
+		case "summary", "ls", "list":
+			var out any
+			must(cli.Call("spend.summary", map[string]string{"day": flagOpt(args, "--day", "")}, &out))
+			printJSON(out)
+		case "set-budget":
+			p := map[string]any{
+				"scope":      flagOpt(args, "--scope", "global"),
+				"scope_id":   flagOpt(args, "--scope-id", ""),
+				"period":     flagOpt(args, "--period", "day"),
+				"bucket":     flagOpt(args, "--bucket", ""),
+				"max_usd":    atof(flagOpt(args, "--max-usd", "0")),
+				"max_tokens": atoi(flagOpt(args, "--max-tokens", "0")),
+			}
+			must(cli.Call("spend.set_budget", p, nil))
+			fmt.Println("ok")
+		default:
+			fatal(fmt.Errorf("usage: agentctl spend summary|set-budget"))
+		}
+
+	case "webui":
+		if len(args) == 0 {
+			var out any
+			must(cli.Call("webui.status", nil, &out))
+			printJSON(out)
+			break
+		}
+		switch args[0] {
+		case "on", "enable":
+			var out any
+			must(cli.Call("webui.set", map[string]any{"enabled": true}, &out))
+			printJSON(out)
+		case "off", "disable":
+			var out any
+			must(cli.Call("webui.set", map[string]any{"enabled": false}, &out))
+			printJSON(out)
+		case "status":
+			var out any
+			must(cli.Call("webui.status", nil, &out))
+			printJSON(out)
+		default:
+			fatal(fmt.Errorf("usage: agentctl webui [on|off|status]"))
+		}
+
+	case "auth":
+		if len(args) == 0 {
+			fatal(fmt.Errorf("usage: agentctl auth set-password|totp-setup|totp-disable"))
+		}
+		switch args[0] {
+		case "set-password":
+			pw := flagOpt(args[1:], "--password", "")
+			if pw == "" {
+				fatal(fmt.Errorf("--password required"))
+			}
+			must(cli.Call("auth.set_password", map[string]string{"password": pw}, nil))
+			fmt.Println("ok")
+		case "totp-setup":
+			p := map[string]string{"secret": flagOpt(args[1:], "--secret", ""), "code": flagOpt(args[1:], "--code", "")}
+			var out any
+			must(cli.Call("auth.totp_setup", p, &out))
+			printJSON(out)
+		case "totp-disable":
+			must(cli.Call("auth.totp_disable", nil, nil))
+			fmt.Println("ok")
+		default:
+			fatal(fmt.Errorf("unknown auth subcommand"))
+		}
+
 	case "run":
 		// Ad-hoc run still goes through daemon via a one-shot task create+run is heavy;
 		// expose as tasks.create then tasks.run, or keep a thin status-only CLI.
@@ -193,6 +339,9 @@ func usage() {
   agentctl runs [--task ID]
   agentctl amend propose|list|confirm|reject|resolve
   agentctl skills import|list|rollback|pin
+  agentctl spend summary|set-budget
+  agentctl webui [on|off|status]
+  agentctl auth set-password|totp-setup|totp-disable
   agentctl version
 
 IPC path: $TIDEBOT_HOME/agentd.sock (or config ipc_path / TIDEBOT_IPC)
@@ -245,4 +394,16 @@ func flagVal(args []string, name string, pos int) string {
 	}
 	fatal(fmt.Errorf("%s required", name))
 	return ""
+}
+
+func atof(s string) float64 {
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
+}
+
+func atoi(s string) int64 {
+	var n int64
+	fmt.Sscanf(s, "%d", &n)
+	return n
 }

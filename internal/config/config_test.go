@@ -24,6 +24,9 @@ func TestLoadYAMLAndEnv(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	for _, k := range []string{"TIDEBOT_LOG_LEVEL", "TIDEBOT_HOME", "TIDEBOT_CLAUDE_BIN", "TIDEBOT_MAX_CONCURRENCY", "TIDEBOT_DEFAULT_PROVIDER", "TIDEBOT_WEBUI", "TIDEBOT_CONFIG"} {
+		t.Setenv(k, "")
+	}
 	t.Setenv("TIDEBOT_CLAUDE_BIN", "/tmp/fake-claude")
 	t.Setenv("TIDEBOT_MAX_CONCURRENCY", "4")
 	cfg, err := Load(path)

@@ -107,3 +107,25 @@ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/agentctl ./cmd/agentctl
 
 - 真实 stream-json 含 `system/ui_invalidate`、`system/thinking_tokens`、assistant thinking 块等；结果事件仍为 `type=result` + `usage` + `total_cost_usd`，现有解析器可用。
 - 脱敏样例：`testdata/streamjson/kimi-coding-pong.ndjson`（回归测试 `TestParseRealKimiCodingFixture`）。
+
+## Phase 1b：成本控制 + WebUI（2026-10-16）
+
+测量环境同阶段 0（本机实跑，上海时间 UTC+8）。
+
+### agentd 空闲 RSS：WebUI 开 vs 关
+
+| 模式 | VmRSS |
+|------|-------|
+| WebUI off (`--no-webui` / `webui_enabled: false`) | **13.88 MiB** (14216 KiB) |
+| WebUI on (`webui_enabled: true`，监听 127.0.0.1) | **14.20 MiB** (14544 KiB) |
+| 差值 (on − off) | **+0.32 MiB** |
+
+说明：二进制因 `go:embed` 静态资源变大（agentd ~17 MiB）；空闲 RSS 仍接近阶段 0 量级，WebUI 监听额外约 0.32 MiB。
+
+### 测试
+
+`go vet ./...` 与 `go test ./...` 全绿（含 auth / CSRF / budget / webui toggle）。
+
+### 截图（未入库）
+
+保存在 `/workspace/tidebot-shots/*.png`（login / home / tasks / task-detail / skills / runs / spend / settings）。

@@ -27,6 +27,12 @@ type Config struct {
 	ProvidersFile    string        `json:"providers_file" yaml:"providers_file"`
 	WebUIEnabled     bool          `json:"webui_enabled" yaml:"webui_enabled"`
 	NoWebUI          bool          `json:"no_webui" yaml:"no_webui"` // CLI override
+	WebUIAddr        string        `json:"webui_addr" yaml:"webui_addr"`
+	WebUIAllowLAN    bool          `json:"webui_allow_lan" yaml:"webui_allow_lan"`
+	WebUITLSCert     string        `json:"webui_tls_cert" yaml:"webui_tls_cert"`
+	WebUITLSKey      string        `json:"webui_tls_key" yaml:"webui_tls_key"`
+	WebUIAllowHTTP   bool          `json:"webui_allow_http" yaml:"webui_allow_http"` // explicit: LAN without TLS
+	WebUIIdleMinutes int           `json:"webui_idle_minutes" yaml:"webui_idle_minutes"`
 	SchedulerTick    time.Duration `json:"scheduler_tick" yaml:"scheduler_tick"`
 	IPCPath          string        `json:"ipc_path" yaml:"ipc_path"`
 }
@@ -39,19 +45,21 @@ func Default() Config {
 	}
 	appHome := filepath.Join(home, ".tidebot")
 	return Config{
-		HomeDir:         appHome,
-		DataDir:         filepath.Join(appHome, "data"),
-		DBPath:          filepath.Join(appHome, "data", "tidebot.db"),
-		LogLevel:        "info",
-		LogFormat:       "text",
-		ClaudeBin:       "claude",
-		MaxConcurrency:  2,
-		DefaultTimeout:  30 * time.Minute,
-		DefaultProvider: "anthropic",
-		ProvidersFile:   filepath.Join(appHome, "providers.yaml"),
-		WebUIEnabled:    false,
-		SchedulerTick:   15 * time.Second,
-		IPCPath:         filepath.Join(appHome, "agentd.sock"),
+		HomeDir:          appHome,
+		DataDir:          filepath.Join(appHome, "data"),
+		DBPath:           filepath.Join(appHome, "data", "tidebot.db"),
+		LogLevel:         "info",
+		LogFormat:        "text",
+		ClaudeBin:        "claude",
+		MaxConcurrency:   2,
+		DefaultTimeout:   30 * time.Minute,
+		DefaultProvider:  "anthropic",
+		ProvidersFile:    filepath.Join(appHome, "providers.yaml"),
+		WebUIEnabled:     false,
+		WebUIAddr:        "127.0.0.1:7420",
+		WebUIIdleMinutes: 30,
+		SchedulerTick:    15 * time.Second,
+		IPCPath:          filepath.Join(appHome, "agentd.sock"),
 	}
 }
 
@@ -161,6 +169,15 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("TIDEBOT_WEBUI"); v != "" {
 		cfg.WebUIEnabled = parseBool(v)
+	}
+	if v := os.Getenv("TIDEBOT_WEBUI_ADDR"); v != "" {
+		cfg.WebUIAddr = v
+	}
+	if v := os.Getenv("TIDEBOT_WEBUI_ALLOW_LAN"); v != "" {
+		cfg.WebUIAllowLAN = parseBool(v)
+	}
+	if v := os.Getenv("TIDEBOT_WEBUI_ALLOW_HTTP"); v != "" {
+		cfg.WebUIAllowHTTP = parseBool(v)
 	}
 	if v := os.Getenv("TIDEBOT_IPC"); v != "" {
 		cfg.IPCPath = v
