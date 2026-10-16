@@ -31,11 +31,33 @@ import (
 //go:embed assets/icon.png
 var icon []byte
 
-//go:embed assets/icon-running.png
+//go:embed assets/tray-normal.png
+var trayIdle []byte
+
+//go:embed assets/tray-running.png
 var iconRunning []byte
 
-//go:embed assets/icon-error.png
+//go:embed assets/tray-error.png
 var iconError []byte
+
+//go:embed assets/tray-normal-template.png
+var trayIdleTpl []byte
+
+//go:embed assets/tray-running-template.png
+var trayRunningTpl []byte
+
+//go:embed assets/tray-error-template.png
+var trayErrorTpl []byte
+
+// setTrayIcon uses monochrome template images in the macOS menu bar (they
+// follow light/dark mode) and the colored mark elsewhere.
+func (s *shell) setTrayIcon(colored, template []byte) {
+	if runtime.GOOS == "darwin" {
+		s.tray.SetTemplateIcon(template)
+		return
+	}
+	s.tray.SetIcon(colored)
+}
 
 func main() {
 	if guard.IsHookInvocation(os.Args[1:]) {
@@ -240,7 +262,7 @@ func (s *shell) open() {
 
 func (s *shell) buildTray() {
 	s.tray = s.app.SystemTray.New()
-	s.tray.SetIcon(icon)
+	s.setTrayIcon(trayIdle, trayIdleTpl)
 	s.lastIcon = app.TrayIdle
 	s.tray.SetTooltip(i18n.T("desktop.tooltip"))
 	s.status = s.core.TrayStatus(s.ctx, nil)
@@ -306,11 +328,11 @@ func (s *shell) applyIcon(state string) {
 	s.lastIcon = state
 	switch state {
 	case app.TrayRunning:
-		s.tray.SetIcon(iconRunning)
+		s.setTrayIcon(iconRunning, trayRunningTpl)
 	case app.TrayError:
-		s.tray.SetIcon(iconError)
+		s.setTrayIcon(iconError, trayErrorTpl)
 	default:
-		s.tray.SetIcon(icon)
+		s.setTrayIcon(trayIdle, trayIdleTpl)
 	}
 }
 

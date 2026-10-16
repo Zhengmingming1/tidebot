@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- tidebot app icon master. Apple grid: 824x824 body at (100,100), corner radius 185. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#4c8df2"/>
+      <stop offset="0.55" stop-color="#2563d9"/>
+      <stop offset="1" stop-color="#1640a3"/>
+    </linearGradient>
+    <linearGradient id="sand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6efe2"/>
+      <stop offset="1" stop-color="#e7d9bf"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".22"/>
+      <stop offset=".5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#0b1f4d" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <g filter="url(#sh)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  </g>
+  <g clip-path="url(#body)">
+    <!-- sun / moon that pulls the tide -->
+    <circle cx="672" cy="318" r="74" fill="#ffd98a"/>
+    <circle cx="672" cy="318" r="74" fill="#fff" opacity=".18"/>
+    <!-- waves -->
+    <path d="M168 470c62-46 124-46 186 0s124 46 186 0 124-46 186 0 98 40 150 18" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="44" stroke-linecap="round"/>
+    <path d="M168 586c62-46 124-46 186 0s124 46 186 0 124-46 186 0 98 40 150 18" fill="none" stroke="#ffffff" stroke-width="48" stroke-linecap="round"/>
+    <!-- sand shore -->
+    <path d="M100 734c118-52 236-60 354-30 120 30 238 36 470-24v300H100z" fill="url(#sand)"/>
+    <path d="M100 734c118-52 236-60 354-30 120 30 238 36 470-24" fill="none" stroke="#ffffff" stroke-opacity=".7" stroke-width="10"/>
+    <rect x="100" y="100" width="824" height="420" fill="url(#gloss)"/>
+  </g>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#0b1f4d" stroke-opacity=".12"/>
+</svg>

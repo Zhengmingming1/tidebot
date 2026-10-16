@@ -17,12 +17,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 lipo -create -output "$APP/Contents/MacOS/tidebot-desktop" "$B/arm64" "$B/amd64"
 lipo -info "$APP/Contents/MacOS/tidebot-desktop"
 sed "s/@VERSION@/$VER/g" "$ROOT/packaging/macos/Info.plist" > "$APP/Contents/Info.plist"
-ICON="$B/icon.iconset"; mkdir -p "$ICON"
-for s in 16 32 128 256 512; do
-  sips -z $s $s "$ROOT/cmd/tidebot-desktop/assets/icon.png" --out "$ICON/icon_${s}x${s}.png" >/dev/null
-  d=$((s*2)); sips -z $d $d "$ROOT/cmd/tidebot-desktop/assets/icon.png" --out "$ICON/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICON" -o "$APP/Contents/Resources/tidebot.icns"
+cp "$ROOT/packaging/macos/tidebot.icns" "$APP/Contents/Resources/tidebot.icns"  # from branding/icon.svg (scripts/gen-icons.py)
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
   codesign --force --deep --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$APP"
 else
