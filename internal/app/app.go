@@ -227,7 +227,11 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	if opts.WorkspaceDir == "" {
 		opts.WorkspaceDir = a.Cfg.DataDir
 	}
-	opts.ClaudeBin = a.Cfg.ClaudeBin
+	bin, env := a.claudeExec(ctx)
+	opts.ClaudeBin = bin
+	if opts.EnvBase == nil {
+		opts.EnvBase = env
+	}
 	opts.Timeout = timeout
 	opts.Bare = true
 	opts.Profile = prof

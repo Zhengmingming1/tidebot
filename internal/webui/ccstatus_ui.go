@@ -32,3 +32,21 @@ func (s *Server) handleClaudeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, s.deps.ClaudeStatus(r.Context(), force))
 }
+
+// handlePickFile: POST → {"path": "..."} from the native dialog; 501 outside the desktop app.
+func (s *Server) handlePickFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "POST only")
+		return
+	}
+	if s.PickFile == nil {
+		writeErr(w, 501, "not available in the browser")
+		return
+	}
+	p, err := s.PickFile("Claude Code")
+	if err != nil {
+		writeErr(w, 500, "dialog failed")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"path": p})
+}

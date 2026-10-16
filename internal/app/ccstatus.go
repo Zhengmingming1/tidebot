@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -47,6 +45,7 @@ type CCProvider struct {
 	CheckedAt string `json:"checked_at,omitempty"`
 	LatencyMS int64  `json:"latency_ms,omitempty"`
 	Detail    string `json:"detail,omitempty"`
+	KeySet    bool   `json:"key_set"` // an API key/token is configured for it
 }
 
 type CCStatus struct {
@@ -66,6 +65,11 @@ type CCStatus struct {
 		StartedAt string `json:"started_at"`
 	} `json:"core"`
 	CheckedAt string `json:"checked_at"`
+	// How claude was located; Searched lists candidates when it wasn't.
+	Method   string   `json:"method"`
+	Searched []string `json:"searched,omitempty"`
+	Note     string   `json:"note,omitempty"`
+	Custom   bool     `json:"custom_path"` // a path was set by hand
 }
 
 // CCState maps the facts to one headline state (pure; unit tested).
@@ -126,13 +130,14 @@ func (a *App) ClaudeStatus(ctx context.Context, force bool) CCStatus {
 		claudeVer.Unlock()
 	}
 	st := CCStatus{MinVersion: MinClaudeVersion, Sessions: []CCSession{}}
-	if p, err := exec.LookPath(a.claudeBin()); err == nil {
-		st.Found = true
-		if abs, err := filepath.Abs(p); err == nil {
-			p = abs
-		}
-		st.Path = p
+	loc := a.ResolveClaude(ctx, force)
+	st.Method, st.Note = loc.Method, loc.Note
+	st.Custom = a.configuredClaude(ctx) != "" && a.configuredClaude(ctx) != "claude"
+	if loc.Path != "" {
+		st.Found, st.Path = true, loc.Path
 		st.Version = a.claudeVersion()
+	} else {
+		st.Searched = loc.Searched
 	}
 	st.Compatible = ClaudeCompatible(st.Version)
 	st.Provider = a.providerHealth(ctx)
@@ -192,6 +197,9 @@ func (a *App) providerHealth(ctx context.Context) CCProvider {
 	out := CCProvider{Name: name, Health: "unknown"}
 	if p, ok := a.Registry.Get(name); ok {
 		out.Model = p.Model
+		if _, err := a.ResolveAPIKey(p); err == nil {
+			out.KeySet = true
+		}
 	}
 	var test providerTest
 	if raw, _ := a.Auth.GetSetting(ctx, "provider.last_test."+name); raw != "" {

@@ -73,6 +73,8 @@ type Server struct {
 
 	// OSLanguage is set by the desktop shell; see DesktopHandler.
 	OSLanguage string
+	// PickFile opens a native file dialog (desktop app only; nil elsewhere).
+	PickFile func(title string) (string, error)
 }
 
 // New creates a WebUI server (not listening yet).

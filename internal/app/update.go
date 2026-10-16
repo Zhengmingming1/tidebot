@@ -29,6 +29,13 @@ func execOutput(ctx context.Context, bin string, args ...string) (string, error)
 	return string(out), err
 }
 
+func execOutputEnv(ctx context.Context, env []string, bin string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = env
+	out, err := cmd.Output()
+	return string(out), err
+}
+
 func randomToken() string {
 	b := make([]byte, 24)
 	_, _ = rand.Read(b)
