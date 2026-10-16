@@ -30,6 +30,10 @@ type Scheduler struct {
 	// Gate, when set, may defer a due task (e.g. on battery / about to sleep).
 	// A deferred task is left due and retried on the next tick; its schedule is not advanced.
 	Gate func(task db.Task) (deferRun bool, reason string)
+
+	// Catchup, when set, returns how many of the missed fire times (oldest first) to run now
+	// (final-plan §12: skip | run_once | run_all with a grace period). Nil means run once.
+	Catchup func(task db.Task, missed []time.Time, now time.Time) int
 }
 
 // SetPaused pauses or resumes firing of due tasks (manual runs are unaffected).
@@ -120,26 +124,64 @@ func (s *Scheduler) handleDue(ctx context.Context, task db.Task) error {
 	if policy == "" {
 		policy = "skip"
 	}
-	if policy == "skip" {
+	if policy != "parallel" {
 		active, err := s.store.HasActiveRun(ctx, task.ID)
 		if err != nil {
 			return err
 		}
 		if active {
+			if policy == "queue" {
+				// leave it due; it fires on the first tick after the active run ends
+				s.log.Info("queue overlapping run", "task_id", task.ID)
+				return nil
+			}
 			s.log.Info("skip overlapping run", "task_id", task.ID)
-			// still advance next_run_at so we don't spin
 			return s.advanceSchedule(ctx, task, time.Now())
 		}
 	}
 
-	fired := time.Now().UTC()
-	if err := s.advanceSchedule(ctx, task, fired); err != nil {
+	now := time.Now().UTC()
+	n := 1
+	if s.Catchup != nil {
+		n = s.Catchup(task, s.missedTimes(task, now), now)
+		if n == 0 {
+			s.log.Info("skip missed run(s)", "task_id", task.ID)
+		}
+	}
+	if err := s.advanceSchedule(ctx, task, now); err != nil {
 		return err
 	}
 	if s.run == nil {
 		return nil
 	}
-	return s.run(ctx, task)
+	for i := 0; i < n; i++ {
+		if err := s.run(ctx, task); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// missedTimes lists due fire times from next_run_at up to now (capped at 100).
+func (s *Scheduler) missedTimes(task db.Task, now time.Time) []time.Time {
+	if !task.NextRunAt.Valid {
+		return []time.Time{now}
+	}
+	first, err := time.Parse(time.RFC3339, task.NextRunAt.String)
+	if err != nil {
+		return []time.Time{now}
+	}
+	out := []time.Time{first}
+	t := first
+	for len(out) < 100 {
+		nx, err := s.NextRun(task.CronExpr, t)
+		if err != nil || nx.After(now) {
+			break
+		}
+		out = append(out, nx)
+		t = nx
+	}
+	return out
 }
 
 func (s *Scheduler) advanceSchedule(ctx context.Context, task db.Task, from time.Time) error {
