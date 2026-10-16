@@ -14,6 +14,30 @@ type rpcFunc = func(context.Context, json.RawMessage) (any, error)
 // for the owner's WebUI session, through /api/rpc/<method>.
 func (a *App) extRPC() map[string]rpcFunc {
 	m := map[string]rpcFunc{
+		// Settings page: channel list without config (webhook URLs can carry tokens).
+		"notify.overview": func(ctx context.Context, _ json.RawMessage) (any, error) {
+			chs, err := a.Notify.Channels(ctx)
+			if err != nil {
+				return nil, err
+			}
+			list := []map[string]any{}
+			for _, c := range chs {
+				list = append(list, map[string]any{"id": c.ID, "kind": c.Kind, "name": c.Name, "enabled": c.Enabled})
+			}
+			q, _ := a.settingString(ctx, "notify.quiet")
+			h, _ := a.settingString(ctx, "notify.digest_hour")
+			return map[string]any{"channels": list, "quiet": q, "digest_hour": h}, nil
+		},
+		"notify.settings": a.rpcNotifySettings,
+		"backups.list":    func(ctx context.Context, _ json.RawMessage) (any, error) { return a.ListBackups(ctx) },
+		// WebUI backups never include secrets (no passphrase over the wire).
+		"backups.create": func(ctx context.Context, _ json.RawMessage) (any, error) {
+			p, err := a.CreateBackup(ctx, BackupOptions{Kind: "manual"})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]string{"path": p}, nil
+		},
 		"plugins.list": func(ctx context.Context, _ json.RawMessage) (any, error) { return a.Plugins.List(ctx) },
 		"plugins.get": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			p, _ := decode[struct{ ID string }](raw)

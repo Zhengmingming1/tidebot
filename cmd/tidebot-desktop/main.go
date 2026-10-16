@@ -30,6 +30,12 @@ import (
 //go:embed assets/icon.png
 var icon []byte
 
+//go:embed assets/icon-running.png
+var iconRunning []byte
+
+//go:embed assets/icon-error.png
+var iconError []byte
+
 func main() {
 	if guard.IsHookInvocation(os.Args[1:]) {
 		guard.HookMain(os.Stdin, os.Stdout)
@@ -102,6 +108,7 @@ func main() {
 		_ = json.Unmarshal([]byte(raw), &lang)
 	}
 	i18n.SetLang(lang)
+	sh.lastLang = lang
 
 	core.Sched.Gate = powerGate(core.Log)
 	if v, _ := core.Auth.GetSetting(ctx, "desktop.scheduler_paused"); v == "true" {
@@ -140,8 +147,10 @@ func main() {
 		sh.win.Hide()
 		sh.hintOnce.Do(func() { sh.notify("hint", i18n.T("desktop.n.still_running"), "") })
 	})
+	sh.daemonErrs = d.Errs
 	sh.buildTray()
 	go sh.watchEvents(core.Events.Subscribe(32))
+	go sh.pollTray(ctx)
 	if err := sh.app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
@@ -165,6 +174,13 @@ type shell struct {
 	notifier *notifications.NotificationService
 	hintOnce sync.Once
 	mu       sync.Mutex
+
+	daemonErrs <-chan error
+	daemonDead error
+	status     app.TrayStatus
+	lastSig    string
+	lastLang   string
+	lastIcon   string
 }
 
 func (s *shell) open() {
@@ -175,12 +191,93 @@ func (s *shell) open() {
 func (s *shell) buildTray() {
 	s.tray = s.app.SystemTray.New()
 	s.tray.SetIcon(icon)
+	s.lastIcon = app.TrayIdle
 	s.tray.SetTooltip(i18n.T("desktop.tooltip"))
+	s.status = s.core.TrayStatus(s.ctx, nil)
+	s.lastSig = s.status.Signature()
 	s.refreshMenu()
 	s.tray.OnClick(s.open)
 }
 
-// refreshMenu rebuilds the tray menu (labels follow pause state and preset list).
+// pollTray re-checks health every 2s: the core must answer on its IPC socket within
+// 1s, so a dead daemon shows up as a problem in under 5s. The menu is rebuilt only
+// when something visible changed, and follows the language setting.
+func (s *shell) pollTray(ctx context.Context) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		select {
+		case err := <-s.daemonErrs:
+			if err == nil {
+				err = fmt.Errorf("ipc server stopped")
+			}
+			s.daemonDead = err
+		default:
+		}
+		alive := s.daemonDead
+		if alive == nil {
+			alive = s.core.PingIPC(time.Second)
+		}
+		lang := s.languageSetting()
+		st := s.core.TrayStatus(ctx, alive)
+		sig := st.Signature()
+		if sig == s.lastSig && lang == s.lastLang {
+			continue
+		}
+		langChanged := lang != s.lastLang
+		s.lastSig, s.lastLang, s.status = sig, lang, st
+		if langChanged {
+			i18n.SetLang(lang)
+		}
+		application.InvokeSync(func() {
+			s.applyIcon(st.Icon)
+			s.refreshMenu()
+		})
+	}
+}
+
+func (s *shell) languageSetting() string {
+	var lang string
+	if raw, _ := s.core.Auth.GetSetting(s.ctx, "language"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &lang)
+	}
+	return lang
+}
+
+func (s *shell) applyIcon(state string) {
+	if s.tray == nil || state == s.lastIcon {
+		return
+	}
+	s.lastIcon = state
+	switch state {
+	case app.TrayRunning:
+		s.tray.SetIcon(iconRunning)
+	case app.TrayError:
+		s.tray.SetIcon(iconError)
+	default:
+		s.tray.SetIcon(icon)
+	}
+}
+
+func (s *shell) tooltip() string {
+	switch {
+	case len(s.status.Problems) > 0:
+		return i18n.T("desktop.tooltip_problem")
+	case s.core.Sched.Paused():
+		return i18n.T("desktop.tooltip_paused")
+	case s.status.Running > 0:
+		return i18n.T("desktop.n.running", s.status.Running)
+	}
+	return i18n.T("desktop.tooltip")
+}
+
+// refreshMenu rebuilds the tray menu. Order: problems (only when there are any) →
+// running count → first 5 buttons → pause-all checkbox → LAN → open → quit.
 func (s *shell) refreshMenu() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -188,44 +285,35 @@ func (s *shell) refreshMenu() {
 	// on the same menu leaves stale labels in the tray host.
 	m := application.NewMenu()
 	s.menu = m
-	m.Add(i18n.T("desktop.open")).OnClick(func(*application.Context) { s.open() })
-	m.AddSeparator()
-	pauseLabel := i18n.T("desktop.pause")
-	if s.core.Sched.Paused() {
-		pauseLabel = i18n.T("desktop.resume")
-	}
-	m.Add(pauseLabel).OnClick(func(*application.Context) {
-		p := !s.core.Sched.Paused()
-		s.core.Sched.SetPaused(p)
-		_ = s.core.Auth.SetSetting(s.ctx, "desktop.scheduler_paused", fmt.Sprint(p))
-		tip := i18n.T("desktop.tooltip")
-		if p {
-			tip = i18n.T("desktop.tooltip_paused")
+	if len(s.status.Problems) > 0 {
+		m.Add(i18n.T("desktop.p.header")).SetEnabled(false)
+		for _, p := range s.status.Problems {
+			label := i18n.T(p.Key)
+			if p.N > 0 {
+				label = i18n.T(p.Key, p.N)
+			}
+			m.Add("⚠ " + label).OnClick(func(*application.Context) { s.open() })
 		}
-		s.tray.SetTooltip(tip)
-		s.refreshMenu()
-	})
-	// Presets: a real submenu on Windows/macOS. Linux's DBus tray menu (beta.30) shows
-	// submenus empty, so there they are listed inline under a disabled header.
-	var sub *application.Menu
-	if runtime.GOOS == "linux" {
 		m.AddSeparator()
-		m.Add(i18n.T("desktop.run")).SetEnabled(false)
-		sub = m
-	} else {
-		sub = m.AddSubmenu(i18n.T("desktop.run"))
 	}
+	if s.status.Running > 0 {
+		m.Add(i18n.T("desktop.n.running", s.status.Running)).SetEnabled(false)
+	} else {
+		m.Add(i18n.T("desktop.idle")).SetEnabled(false)
+	}
+	m.AddSeparator()
+	// Buttons inline (the first 5); Linux's DBus tray menu shows submenus empty anyway.
+	m.Add(i18n.T("desktop.run")).SetEnabled(false)
 	btns := s.core.WebUI.Buttons(s.ctx)
 	if len(btns) == 0 {
-		sub.Add(i18n.T("desktop.no_presets")).SetEnabled(false)
+		m.Add("    " + i18n.T("desktop.no_presets")).SetEnabled(false)
+	}
+	if len(btns) > 5 {
+		btns = btns[:5]
 	}
 	for _, b := range btns {
 		id := b.ID
-		label := b.Label
-		if runtime.GOOS == "linux" {
-			label = "    " + label
-		}
-		sub.Add(label).OnClick(func(*application.Context) {
+		m.Add("    " + b.Label).OnClick(func(*application.Context) {
 			label, err := s.core.WebUI.RunButton(s.ctx, id)
 			if err != nil {
 				s.notify("btn", i18n.T("desktop.n.failed", label), err.Error())
@@ -234,6 +322,15 @@ func (s *shell) refreshMenu() {
 			s.notify("btn", i18n.T("desktop.n.started", label), "")
 		})
 	}
+	m.AddSeparator()
+	m.AddCheckbox(i18n.T("desktop.pause_all"), s.core.Sched.Paused()).OnClick(func(*application.Context) {
+		p := !s.core.Sched.Paused()
+		s.core.Sched.SetPaused(p)
+		_ = s.core.Auth.SetSetting(s.ctx, "desktop.scheduler_paused", fmt.Sprint(p))
+		s.status.Paused = p
+		s.tray.SetTooltip(s.tooltip())
+		s.refreshMenu()
+	})
 	m.AddCheckbox(i18n.T("desktop.lan"), s.core.WebUI.LANEnabled()).OnClick(func(c *application.Context) {
 		on := !s.core.WebUI.LANEnabled()
 		addr, err := s.core.WebUI.SetLAN(s.ctx, on)
@@ -245,10 +342,12 @@ func (s *shell) refreshMenu() {
 		s.refreshMenu()
 	})
 	m.AddSeparator()
+	m.Add(i18n.T("desktop.open")).OnClick(func(*application.Context) { s.open() })
 	m.Add(i18n.T("desktop.quit")).OnClick(func(*application.Context) { s.app.Quit() })
 	m.Update()
 	if s.tray != nil {
 		s.tray.SetMenu(m) // Linux DBus menu only re-exports the layout on SetMenu
+		s.tray.SetTooltip(s.tooltip())
 	}
 }
 
