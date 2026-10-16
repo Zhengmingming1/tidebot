@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +111,39 @@ func TestAuthCSRFAndToggle(t *testing.T) {
 	s.routes().ServeHTTP(rr, req)
 	if rr.Code != 200 {
 		t.Fatalf("budgets %d %s", rr.Code, rr.Body.String())
+	}
+
+	// every mutating API route enforces CSRF
+	for _, path := range []string{"/api/buttons", "/api/tasks/x/run", "/api/skills/x/rollback", "/api/settings/language", "/api/amendments/x/confirm-batch"} {
+		rr = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
+		req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: sessionID})
+		s.routes().ServeHTTP(rr, req)
+		if rr.Code != 403 {
+			t.Fatalf("%s: want csrf 403 got %d", path, rr.Code)
+		}
+	}
+
+	// language preference persists and is reported by /api/me
+	for _, tc := range []struct {
+		body string
+		code int
+	}{{`{"language":"zh-CN"}`, 200}, {`{"language":"fr"}`, 400}} {
+		rr = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPut, "/api/settings/language", bytes.NewReader([]byte(tc.body)))
+		req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: sessionID})
+		req.Header.Set(auth.CSRFHeader, csrf)
+		s.routes().ServeHTTP(rr, req)
+		if rr.Code != tc.code {
+			t.Fatalf("language %s: %d", tc.body, rr.Code)
+		}
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: sessionID})
+	s.routes().ServeHTTP(rr, req)
+	if !strings.Contains(rr.Body.String(), `"language":"zh-CN"`) {
+		t.Fatalf("me language: %s", rr.Body.String())
 	}
 
 	// toggle off/on without restart of process

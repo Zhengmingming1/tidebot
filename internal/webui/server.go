@@ -317,6 +317,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	totp, _ := s.deps.Auth.TOTPEnabled(r.Context())
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "csrf_token": sess.CSRFToken, "totp_enabled": totp, "user": "owner",
-		"timezone": s.loc().String(), "version": Version,
+		"timezone": s.loc().String(), "version": Version, "language": s.language(r.Context()),
 	})
 }

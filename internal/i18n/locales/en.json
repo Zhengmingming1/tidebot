@@ -1,0 +1,11 @@
+{
+ "cli.usage": "agentctl — talks to agentd over local Unix socket\n\n  agentctl status\n  agentctl providers\n  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag\n  agentctl runs [--task ID]\n  agentctl amend propose|list|confirm|reject|resolve\n  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   (one version for the whole batch)\n  agentctl skills import|list|rollback|pin\n  agentctl spend summary|set-budget\n  agentctl webui [on|off|status]\n  agentctl auth set-password|totp-setup|totp-disable\n  agentctl version\n\nIPC path: $TIDEBOT_HOME/agentd.sock (or config ipc_path / TIDEBOT_IPC)\nLanguage: TIDEBOT_LANG=en|zh-CN (default: system locale)\n",
+ "cli.error": "error: %v",
+ "cli.ok": "ok",
+ "cli.usage_line": "usage: %s",
+ "cli.connect": "connect agentd at %s: %v (is agentd running?)",
+ "cli.required": "%s required",
+ "cli.unknown_sub": "unknown %s subcommand %q",
+ "cli.use_tasks": "use: agentctl tasks create ... && agentctl tasks run --id <id>",
+ "cli.unknown_cmd": "unknown command %q"
+}

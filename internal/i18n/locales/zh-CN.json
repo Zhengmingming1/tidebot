@@ -1,0 +1,11 @@
+{
+ "cli.usage": "agentctl — 通过本地 Unix socket 与 agentd 通信\n\n  agentctl status\n  agentctl providers\n  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag\n  agentctl runs [--task ID]\n  agentctl amend propose|list|confirm|reject|resolve\n  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   （整批只生成一个版本）\n  agentctl skills import|list|rollback|pin\n  agentctl spend summary|set-budget\n  agentctl webui [on|off|status]\n  agentctl auth set-password|totp-setup|totp-disable\n  agentctl version\n\nIPC 路径：$TIDEBOT_HOME/agentd.sock（或配置 ipc_path / TIDEBOT_IPC）\n语言：TIDEBOT_LANG=en|zh-CN（默认跟随系统）\n",
+ "cli.error": "错误：%v",
+ "cli.ok": "完成",
+ "cli.usage_line": "用法：%s",
+ "cli.connect": "无法连接 %s 上的 agentd：%v（agentd 在运行吗？）",
+ "cli.required": "缺少 %s",
+ "cli.unknown_sub": "未知的 %s 子命令 %q",
+ "cli.use_tasks": "请使用：agentctl tasks create ... && agentctl tasks run --id <id>",
+ "cli.unknown_cmd": "未知命令 %q"
+}
