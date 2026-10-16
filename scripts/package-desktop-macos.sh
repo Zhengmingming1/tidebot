@@ -28,7 +28,7 @@ if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
 else
   codesign --force --deep --sign - "$APP"   # ad-hoc; Gatekeeper will still warn
 fi
-DMG="$OUT/tidebot-desktop_${VER}_macos_universal.dmg"
+DMG="$OUT/tidebot-desktop-${VER}-macOS-AppleSilicon-Intel.dmg"
 mkdir -p "$B/dmg" && cp -R "$APP" "$B/dmg/" && ln -s /Applications "$B/dmg/Applications"
 hdiutil create -volname "tidebot" -srcfolder "$B/dmg" -ov -format UDZO "$DMG"
 if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then

@@ -127,7 +127,7 @@ jobs:
         run: |
           V="${TAG#v}"
           NSIS="$(command -v makensis || echo '/c/Program Files (x86)/NSIS/makensis.exe')"
-          "$NSIS" -DVERSION="$V" -DSRC="$(cygpath -w "$PWD/stage")" -DOUTFILE="$(cygpath -w "$PWD/dist/tidebot-desktop_${V}_windows_amd64_setup.exe")" packaging/windows/installer.nsi
+          "$NSIS" -DVERSION="$V" -DSRC="$(cygpath -w "$PWD/stage")" -DOUTFILE="$(cygpath -w "$PWD/dist/tidebot-desktop-${V}-Windows-x64-Setup.exe")" packaging/windows/installer.nsi
       - name: sign installer (optional)
         env:
           WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
@@ -190,18 +190,21 @@ jobs:
           path: dist
           pattern: "{server,desktop-*}"
           merge-multiple: true
+      - name: stable "latest" aliases for the desktop files
+        run: |
+          # versionless copies so README links can use releases/latest/download/<name>
+          cd dist
+          for f in tidebot-desktop-*-macOS-AppleSilicon-Intel.dmg tidebot-desktop-*-Windows-x64-Setup.exe tidebot-desktop-*-Linux-x64.AppImage tidebot-desktop-*-Linux-x64.deb; do
+            [ -f "$f" ] && cp "$f" "$(echo "$f" | sed -E 's/^tidebot-desktop-[^-]+-/tidebot-desktop-/')"
+          done
+          ls -l
       - name: checksums
         run: |
           cd dist
           sha256sum * > checksums.txt
           cat checksums.txt
       - name: notes
-        run: |
-          V="${TAG#v}"
-          NOTES="docs/release-notes/${TAG}.md"
-          if [ -f "$NOTES" ]; then cp "$NOTES" notes.md; else echo "tidebot ${TAG}" > notes.md; fi
-          IMG="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/tidebot:${V}"
-          printf '\n## Docker\n\n    docker pull %s\n\n## Checksums\n\nSee `checksums.txt` (sha256).\n' "$IMG" >> notes.md
+        run: bash scripts/release-notes.sh "$TAG" "${{ github.repository }}" > notes.md
       - name: create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
