@@ -17,6 +17,15 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 )
 
+type osLangKey struct{}
+
+// osLang is reported by /api/me only for requests from the native window, so that language
+// "auto" follows the OS locale there (webviews often report en-US) but not for LAN browsers.
+func osLang(ctx context.Context) string {
+	v, _ := ctx.Value(osLangKey{}).(string)
+	return v
+}
+
 // Button is a configured one-click preset (for the desktop tray menu).
 type Button struct {
 	ID    string `json:"id"`
@@ -70,7 +79,7 @@ func (s *Server) DesktopHandler(ctx context.Context) (http.Handler, error) {
 		}
 		id := sess.ID
 		mu.Unlock()
-		r2 := r.Clone(r.Context())
+		r2 := r.Clone(context.WithValue(r.Context(), osLangKey{}, s.OSLanguage))
 		r2.Header.Del("Cookie")
 		r2.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: id})
 		if r2.RemoteAddr == "" {

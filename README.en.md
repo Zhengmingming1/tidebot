@@ -186,6 +186,20 @@ agentctl tasks run --id <task_id>
 
 CLI messages come in English and Chinese too. They follow your system locale, or set `TIDEBOT_LANG=en` / `TIDEBOT_LANG=zh-CN`.
 
+## Desktop app (experimental)
+
+`cmd/tidebot-desktop` is a tray app. The core runs in the same process and the window reads the WebUI through the webview's in-process asset handler, so no port is opened.
+Closing the window just hides it to the tray; scheduled tasks keep running. The tray menu opens the window, pauses/resumes the scheduler, runs a button preset, toggles LAN access and quits.
+You get native notifications when a run finishes, fails, needs approval or hits the budget. Language follows the OS.
+
+```bash
+scripts/build-desktop.sh linux        # needs Go 1.25, libgtk-3-dev, libwebkit2gtk-4.1-dev
+bin/tidebot-desktop --autostart enable --hidden   # start on login, hidden in the tray
+```
+
+Honest status: I've only run it on Linux. The Windows and macOS build scripts exist but are untested.
+It's built on Wails v3 beta, which still moves. It isn't light either: with WebKit it's 400 to 500 MB RSS (the core alone is ~14 MB). Numbers are in docs/phase0-results.md.
+
 ## Status
 
 This is a personal project maintained by one person, and it's early.

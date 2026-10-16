@@ -129,3 +129,27 @@ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/agentctl ./cmd/agentctl
 ### 截图（未入库）
 
 保存在 `/workspace/tidebot-shots/*.png`（login / home / tasks / task-detail / skills / runs / spend / settings）。
+
+## 桌面壳（cmd/tidebot-desktop，Wails v3.0.0-beta.30）
+
+2026-10-16 在本机 Linux（Debian 13，WebKitGTK 2.54，Xvfb + xfce4-panel，无 GPU）实测。
+
+| 项 | 数值 |
+|----|------|
+| 二进制（`-s -w -trimpath`，gtk3 tag） | 17.2 MB（17187824 B），动态链接 GTK3 / WebKitGTK 4.1 |
+| 空闲 RSS，窗口打开，60 s 后 | 壳+核心 196 MB + WebKitWebProcess 316 MB + NetworkProcess 62 MB = 575 MB（PSS 338 MB） |
+| 空闲 RSS，`--hidden` 启动到托盘，45 s 后 | 184 + 217 + 62 = 463 MB（PSS 238 MB） |
+
+RSS 大头是 WebKit 和 GTK 共享库（软件渲染），不是 Go 核心；同一个核心单跑 agentd 约 14 MB。
+真机上有 GPU 和共享库页缓存，数值应更低，但我没测。
+
+选型简记：Wails v2 没有托盘；Tauri v2 功能全，但要 Rust 壳 + Go sidecar 两个进程。
+Wails v3 有托盘、单实例、通知和 `AssetOptions.Handler`（进程内桥，不开端口），所以选它，
+代价是 beta 和 Go 1.25，所以放在独立的嵌套 module 里，根 module 仍是 Go 1.24、无 cgo。
+
+验证过（Linux）：托盘菜单（打开 / 暂停-恢复 / 按钮预设 / 局域网开关 / 退出）、关窗隐藏到托盘且调度继续、
+第二次启动聚焦已有窗口且不抢 IPC socket、运行完成 / 失败 / 超预算通知、局域网开关在未配 TLS 时拒绝并通知、
+托盘与 WebUI 跟随系统语言（zh_CN）、XDG autostart 写入/删除（单测）。
+未测：Windows、macOS（构建脚本和 docs/ci/desktop.yml 已写）、loopback 桥在 WebView2 上的表现、
+睡眠前延后（只留了钩子，Linux 只读电池 sysfs）。
+Linux 托盘子菜单在 beta.30 的 DBus 菜单里显示为空，所以 Linux 上预设平铺在菜单里。
