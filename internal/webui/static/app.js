@@ -1608,13 +1608,76 @@
       $("#pv-add", box).addEventListener("click", function () { presetPicker(presets, function (pr) { provSel = "+new"; openDrawer(function (dw) { providerDetail(dw, null, pr, presetById, again); }); }); });
     });
   }
+  // Brand metadata for the "add provider" card wall. cat: official|cn|coding|local; tag: i18n key; b: brand color class.
+  var PV_BRAND = {
+    "anthropic": { zh: "Anthropic", en: "Anthropic", cat: "official", tag: "ap.t_official", b: "br-anthropic", m: "A" },
+    "kimi-cn": { zh: "Kimi", en: "Kimi (China)", cat: "cn", tag: "ap.t_cn", b: "br-kimi", m: "K" },
+    "kimi": { zh: "Kimi 国际版", en: "Kimi (global)", cat: "cn", tag: "ap.t_intl", b: "br-kimi", m: "K" },
+    "deepseek": { zh: "DeepSeek", en: "DeepSeek", cat: "cn", tag: "ap.t_cn", b: "br-deepseek", m: "D" },
+    "zhipu": { zh: "智谱 GLM", en: "Zhipu GLM", cat: "cn", tag: "ap.t_cn", b: "br-zhipu", m: "智" },
+    "zai": { zh: "Z.AI GLM", en: "Z.AI GLM", cat: "cn", tag: "ap.t_intl", b: "br-zhipu", m: "Z" },
+    "qwen": { zh: "通义千问", en: "Qwen", cat: "cn", tag: "ap.t_cn", b: "br-qwen", m: "通" },
+    "kimi-coding": { zh: "Kimi Code", en: "Kimi Code", cat: "coding", tag: "ap.t_cp_cn", b: "br-kimi", m: "K" },
+    "kimi-coding-intl": { zh: "Kimi Code", en: "Kimi Code", cat: "coding", tag: "ap.t_cp_intl", b: "br-kimi", m: "K" },
+    "qwen-coding": { zh: "通义千问 Coding", en: "Qwen Coding", cat: "coding", tag: "ap.t_cp_cn", b: "br-qwen", m: "通" },
+    "qwen-coding-intl": { zh: "通义千问 Coding", en: "Qwen Coding", cat: "coding", tag: "ap.t_cp_intl", b: "br-qwen", m: "通" },
+    "magpie": { zh: "Magpie", en: "Magpie", cat: "local", tag: "ap.t_local", b: "br-magpie", m: "M" }
+  };
   function presetPicker(presets, pick) {
-    modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T("pv.add")) + '</h2></div><p class="hint">' + esc(T("pv.pick")) + '</p><input type="search" id="pr-q" placeholder="' + esc(T("pv.pick_search")) + '"><div class="grid g3 presets mt">' + presets.map(function (p, i) {
-      return '<button type="button" class="card preset" data-pr="' + i + '" data-q="' + esc((p.name + " " + p.id).toLowerCase()) + '">' + pvAvatar({ name: p.name }, {}) + "<strong>" + esc(p.name) + "</strong><small><code>" + esc(p.base_url || (p.id === "custom" ? T("pv.custom_sub") : "api.anthropic.com")) + "</code></small>" + (p.model ? "<small>" + esc(p.model) + "</small>" : "") + "</button>";
-    }).join("") + '</div><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
-      $("#pr-q", root).addEventListener("input", function (e) { var q = e.target.value.trim().toLowerCase(); $$("[data-pr]", root).forEach(function (b) { b.classList.toggle("hidden", q && b.getAttribute("data-q").indexOf(q) < 0); }); });
-      $$("[data-pr]", root).forEach(function (b) { b.addEventListener("click", function () { close(); pick(presets[+b.getAttribute("data-pr")]); }); });
+    var zh = (state.lang || "").indexOf("zh") === 0;
+    var cats = [["all", "ap.c_all", "home"], ["official", "ap.c_official", "shield"], ["cn", "ap.c_cn", "globe"], ["coding", "ap.c_coding", "code"], ["local", "ap.c_local", "user"]];
+    var custom = presets.filter(function (p) { return p.id === "custom"; })[0];
+    var order = Object.keys(PV_BRAND), rank = function (p) { var k = order.indexOf(p.id); return k < 0 ? 99 : k; };
+    var list = presets.filter(function (p) { return p.id !== "custom"; }).sort(function (a, b) { return rank(a) - rank(b); });
+    var tile = function (p) {
+      var m = PV_BRAND[p.id] || { zh: p.name, en: p.name, cat: "local", tag: "ap.t_local", b: "br-other", m: (p.name || "?").slice(0, 1).toUpperCase() };
+      var nm = zh ? m.zh : m.en;
+      return '<button type="button" role="option" aria-selected="false" class="ap-tile" data-pr="' + presets.indexOf(p) + '" data-cat="' + m.cat + '" data-q="' + esc((p.name + " " + p.id + " " + m.zh + " " + m.en).toLowerCase()) + '" title="' + esc(p.name) + '">' +
+        '<span class="ap-chk" aria-hidden="true">' + ic("check", "sm") + "</span>" +
+        '<span class="ap-logo ' + m.b + '" aria-hidden="true">' + esc(m.m) + "</span><strong>" + esc(nm) + '</strong><span class="ap-tag">' + esc(T(m.tag)) + '</span><small class="muted">' + esc(T("ap.def_model", { m: p.model || (p.id === "anthropic" ? T("ap.m_claude") : T("ap.m_gw")) })) + "</small></button>";
+    };
+    modal('<div class="ap"><div class="ap-head"><h2>' + esc(T("pv.add")) + '</h2><button type="button" class="icon-btn" data-close aria-label="' + esc(T("btn.close")) + '">' + ic("x") + "</button></div>" +
+      '<div class="ap-search">' + ic("search", "sm") + '<input type="search" id="pr-q" autofocus placeholder="' + esc(T("ap.search")) + '" aria-label="' + esc(T("ap.search")) + '"></div>' +
+      '<div class="ap-body"><nav class="ap-rail" role="tablist">' + cats.map(function (c, i) { return '<button type="button" role="tab" data-cat="' + c[0] + '" class="' + (i ? "" : "active") + '" aria-selected="' + !i + '">' + ic(c[2], "sm") + esc(T(c[1])) + "</button>"; }).join("") + "</nav>" +
+      '<div class="ap-grid presets" role="listbox" aria-label="' + esc(T("pv.add")) + '">' + list.map(tile).join("") +
+      (custom ? '<button type="button" role="option" aria-selected="false" class="ap-tile ap-custom" data-pr="' + presets.indexOf(custom) + '" data-cat="local" data-q="custom 自定义 ' + esc(custom.name.toLowerCase()) + '"><span class="ap-chk" aria-hidden="true">' + ic("check", "sm") + "</span>" + ic("plus") + "<strong>" + esc(T("ap.custom")) + '</strong><small class="muted">' + esc(T("ap.custom_sub")) + "</small></button>" : "") +
+      '<p class="muted ap-empty hidden">' + esc(T("ap.none")) + "</p></div></div>" +
+      '<div class="ap-foot"><span class="muted">' + ic("info", "sm") + esc(T("ap.hint")) + '</span><span class="grow"></span><button type="button" class="btn" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="ap-next" disabled>' + esc(T("ap.next")) + "</button></div></div>",
+    function (root, close) {
+      var q = $("#pr-q", root), cat = "all", sel = -1, next = $("#ap-next", root);
+      var tiles = function () { return $$(".ap-tile", root).filter(function (t) { return !t.classList.contains("hidden"); }); };
+      var select = function (t, focus) {
+        $$(".ap-tile", root).forEach(function (x) { x.classList.toggle("on", x === t); x.setAttribute("aria-selected", x === t); });
+        sel = t ? +t.getAttribute("data-pr") : -1; next.disabled = sel < 0;
+        if (t) { t.scrollIntoView({ block: "nearest" }); if (focus) t.focus(); }
+      };
+      var filter = function () {
+        var v = q.value.trim().toLowerCase();
+        $$(".ap-tile", root).forEach(function (t) { t.classList.toggle("hidden", (cat !== "all" && t.getAttribute("data-cat") !== cat) || (v && t.getAttribute("data-q").indexOf(v) < 0)); });
+        var vis = tiles(); $(".ap-empty", root).classList.toggle("hidden", vis.length > 0);
+        var cur = vis.filter(function (t) { return +t.getAttribute("data-pr") === sel; })[0];
+        select(cur || vis[0] || null, false);
+      };
+      var go = function () { if (sel >= 0) { var p = presets[sel]; close(); pick(p); } };
+      q.addEventListener("input", filter);
+      $$(".ap-rail button", root).forEach(function (b) { b.addEventListener("click", function () { cat = b.getAttribute("data-cat"); $$(".ap-rail button", root).forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-selected", x === b); }); filter(); }); });
+      $$(".ap-tile", root).forEach(function (t) { t.addEventListener("click", function () { select(t, false); }); t.addEventListener("dblclick", go); });
+      next.addEventListener("click", go);
+      root.addEventListener("keydown", function (e) {
+        if (e.target.closest && e.target.closest(".ap-rail")) return;
+        var vis = tiles(), i = vis.findIndex(function (t) { return +t.getAttribute("data-pr") === sel; });
+        if (e.key === "Enter" && !(e.target.tagName === "BUTTON" && !e.target.classList.contains("ap-tile"))) { e.preventDefault(); go(); return; }
+        var cols = (getComputedStyle($(".ap-grid", root)).gridTemplateColumns.split(" ").length) || 3;
+        var d = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key];
+        if (!d || !vis.length) return;
+        if (e.target === q && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
+        e.preventDefault();
+        var j = i < 0 ? 0 : Math.max(0, Math.min(vis.length - 1, i + d));
+        select(vis[j], e.target !== q);
+      });
+      filter();
     });
+    var box = $("#modal-root .modal"); if (box) box.classList.add("ap-modal");
   }
   function providerDetail(host, p, preset, presetById, done) {
     var creating = !p || p.dup;
