@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -36,6 +37,9 @@ func TestReadLinuxPower(t *testing.T) {
 }
 
 func TestAutostartLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("XDG autostart is Linux-only")
+	}
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := setAutostart(true, true); err != nil {
 		t.Fatal(err)
