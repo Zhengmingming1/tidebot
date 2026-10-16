@@ -5,16 +5,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/Zhengmingming1/tidebot/internal/guard"
-	"github.com/Zhengmingming1/tidebot/internal/notify"
-	"github.com/Zhengmingming1/tidebot/internal/optimize"
-	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/guard"
+	"github.com/Zhengmingming1/tidebot/internal/notify"
+	"github.com/Zhengmingming1/tidebot/internal/optimize"
+	"github.com/Zhengmingming1/tidebot/internal/plugin"
+	"github.com/Zhengmingming1/tidebot/internal/policy"
 
 	"github.com/Zhengmingming1/tidebot/internal/amend"
 	"github.com/Zhengmingming1/tidebot/internal/auth"
@@ -35,25 +38,29 @@ import (
 
 // App is the core runtime shared by daemon and CLI.
 type App struct {
-	Cfg      config.Config
-	Log      *slog.Logger
-	DB       *sql.DB
-	Store    *db.Store
-	Registry *provider.Registry
-	Secrets  secrets.Backend
-	Runner   *runner.Runner
-	Sched    *scheduler.Scheduler
-	Ver      *version.Service
-	Tasks    *tasksvc.Service
-	Amend    *amend.Service
-	Skills   *skillstore.Service
-	Cost     *cost.Service
-	Auth     *auth.Service
-	WebUI    *webui.Server
-	Events   *Bus
-	Policy   *policy.Store
-	Notify   *notify.Service
-	Optimize *optimize.Service
+	Cfg        config.Config
+	Log        *slog.Logger
+	DB         *sql.DB
+	Store      *db.Store
+	Registry   *provider.Registry
+	Secrets    secrets.Backend
+	Runner     *runner.Runner
+	Sched      *scheduler.Scheduler
+	Ver        *version.Service
+	Tasks      *tasksvc.Service
+	Amend      *amend.Service
+	Skills     *skillstore.Service
+	Cost       *cost.Service
+	Auth       *auth.Service
+	WebUI      *webui.Server
+	Events     *Bus
+	Policy     *policy.Store
+	Notify     *notify.Service
+	Optimize   *optimize.Service
+	Plugins    *plugin.Store
+	PluginHost *plugin.Host
+
+	trig *triggerState
 
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
@@ -118,6 +125,7 @@ func Open(cfg config.Config) (*App, error) {
 	a.Optimize.OnEvent = func(kind, skillID, detail string) {
 		a.Events.Emit(Event{Kind: kind, Detail: detail, TaskName: a.skillName(skillID)})
 	}
+	a.initPlugins()
 	a.Cost = cost.New(sqlDB, log)
 	a.Cost.Loc = cfg.Location()
 	a.Auth = auth.New(sqlDB)
@@ -136,6 +144,8 @@ func Open(cfg config.Config) (*App, error) {
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Ver: ver, Reg: reg, Log: log,
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
 		LogPath: a.Runner.LogPath, Location: cfg.Location(),
+		Ext:    a.CallExt,
+		Public: map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
 	})
 	return a, nil
 }
@@ -231,6 +241,9 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		if runMax <= 0 {
 			runMax = 0.01
 		}
+		if bucket == cost.BucketDryRun && runMax > DryRunBudgetUSD {
+			runMax = DryRunBudgetUSD
+		}
 	}
 	if len(opts.ExtraArgs) == 0 {
 		opts.ExtraArgs = []string{
@@ -241,10 +254,14 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			"--effort", "low",
 		}
 	}
+	opts.ExtraArgs = append(opts.ExtraArgs, a.mcpArgs(ctx, bucket)...)
 	if err := a.applyGuard(ctx, &opts); err != nil {
 		return runner.Result{}, err
 	}
+	// Keep Claude Code from self-updating mid-run; version is recorded per run.
+	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
 	res, err := a.Runner.RunOnce(ctx, opts)
+	a.recordRunMeta(ctx, res.RunID)
 	if err == nil && a.Cost != nil {
 		_ = a.Cost.Record(ctx, res.RunID, opts.TaskID, bucket, res.TotalCostUSD, res.InputTokens, res.OutputTokens)
 	}
@@ -283,6 +300,7 @@ func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket 
 	if prompt == "" {
 		prompt = task.Prompt
 	}
+	prompt = externalPrompt(ctx, prompt)
 	ws := task.WorkspaceDir
 	if view.Spec != nil && view.Spec.WorkspaceDir != "" {
 		ws = view.Spec.WorkspaceDir

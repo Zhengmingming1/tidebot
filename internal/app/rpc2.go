@@ -38,6 +38,7 @@ func (a *App) registerRPC2(srv *ipc.Server) {
 		vid, err := a.Amend.ApplyConsolidation(ctx, p.TaskID, p.Hash, "user")
 		return map[string]string{"version_id": vid}, err
 	})
+	a.registerRPC3(srv)
 	a.registerSkillRPC(func(n string, h func(context.Context, json.RawMessage) (any, error)) { srv.Register(n, h) })
 }
 

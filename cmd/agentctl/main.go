@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/config"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
@@ -22,7 +23,7 @@ func main() {
 	args := os.Args[2:]
 
 	if cmd == "version" {
-		fmt.Println("tidebot agentctl phase1")
+		fmt.Println("tidebot agentctl", buildinfo.Version)
 		return
 	}
 
