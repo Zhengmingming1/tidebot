@@ -59,8 +59,12 @@ func (s *Service) ConfirmTOTP(ctx context.Context, code string) ([]string, error
 	if err != nil {
 		return nil, err
 	}
+	stored, err := s.storeTOTP(p.secret)
+	if err != nil {
+		return nil, err
+	}
 	_, err = s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, recovery_codes_hash=?, updated_at=? WHERE id='owner'`,
-		p.secret, strings.Join(hashes, ","), nowUTC())
+		stored, strings.Join(hashes, ","), nowUTC())
 	if err != nil {
 		return nil, err
 	}

@@ -78,3 +78,20 @@ func TestDispatchRulesDigestQuiet(t *testing.T) {
 		t.Fatal("header injection")
 	}
 }
+
+func TestDispatchStoresKeyAndParams(t *testing.T) {
+	sqlDB, err := db.Open(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	s := New(sqlDB, secrets.NewMemory())
+	_, _ = s.Dispatch(context.Background(), Message{Event: "run_failed", Title: "Run failed: a", Key: "run_failed", Params: map[string]string{"name": "a", "detail": "x"}}, "")
+	var key, params string
+	if err := sqlDB.QueryRow(`SELECT msg_key, msg_params FROM notifications`).Scan(&key, &params); err != nil {
+		t.Fatal(err)
+	}
+	if key != "run_failed" || params != `{"detail":"x","name":"a"}` {
+		t.Fatalf("%q %q", key, params)
+	}
+}

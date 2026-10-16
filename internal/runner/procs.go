@@ -1,8 +1,6 @@
 package runner
 
 import (
-	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,16 +47,47 @@ func ActiveProcs() []Proc {
 	return out
 }
 
-// procRSS reads VmRSS from /proc on Linux; other systems report 0.
+// procRSS is the resident memory of pid plus all its descendants (claude runs
+// node, which may spawn helpers). 0 when the OS won't tell us.
 func procRSS(pid int) int64 {
-	if runtime.GOOS != "linux" {
-		return 0
-	}
-	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")
+	tab, err := procTable()
 	if err != nil {
 		return 0
 	}
-	return ParseVmRSS(string(b))
+	return TreeRSS(pid, tab)
+}
+
+// ProcInfo is one row of the OS process table.
+type ProcInfo struct {
+	PPID int
+	RSS  int64 // bytes
+}
+
+// TreeRSS sums RSS for root and every descendant in tab.
+func TreeRSS(root int, tab map[int]ProcInfo) int64 {
+	if _, ok := tab[root]; !ok {
+		return 0
+	}
+	kids := map[int][]int{}
+	for pid, p := range tab {
+		if pid != root {
+			kids[p.PPID] = append(kids[p.PPID], pid)
+		}
+	}
+	var total int64
+	seen := map[int]bool{}
+	stack := []int{root}
+	for len(stack) > 0 {
+		pid := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		total += tab[pid].RSS
+		stack = append(stack, kids[pid]...)
+	}
+	return total
 }
 
 // ParseVmRSS extracts "VmRSS:  12345 kB" from a /proc/<pid>/status body, in bytes.

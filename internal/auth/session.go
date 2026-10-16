@@ -21,7 +21,8 @@ const (
 
 // Service handles single-user auth (D6).
 type Service struct {
-	DB *sql.DB
+	DB      *sql.DB
+	totpKey []byte // see SetMasterKey; nil keeps legacy plaintext (tests only)
 }
 
 func New(db *sql.DB) *Service { return &Service{DB: db} }
@@ -69,7 +70,11 @@ func (s *Service) SetPassword(ctx context.Context, password string) error {
 
 // EnableTOTP stores a secret and marks TOTP enabled after verify.
 func (s *Service) EnableTOTP(ctx context.Context, secret string) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, updated_at=? WHERE id='owner'`, secret, nowUTC())
+	stored, err := s.storeTOTP(secret)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, updated_at=? WHERE id='owner'`, stored, nowUTC())
 	return err
 }
 
@@ -119,6 +124,10 @@ func (s *Service) Login(ctx context.Context, password, totpCode, ip string) (*Se
 		return nil, errors.New("invalid credentials")
 	}
 	if totpEn == 1 {
+		if secret, err = s.openTOTP("owner", secret); err != nil {
+			_ = s.recordAttempt(ctx, ip, false, "totp_undecryptable")
+			return nil, errors.New("invalid credentials")
+		}
 		if !VerifyTOTP(secret, strings.TrimSpace(totpCode)) && !s.useRecoveryCode(ctx, totpCode) {
 			_ = s.recordAttempt(ctx, ip, false, "bad_totp")
 			return nil, errors.New("invalid credentials")
@@ -270,4 +279,12 @@ func (s *Service) CreateLocalSession(ctx context.Context, origin string) (*Sessi
 		return nil, err
 	}
 	return s.createSession(ctx, origin)
+}
+
+// storeTOTP encrypts when a key is configured (always, in the app).
+func (s *Service) storeTOTP(secret string) (string, error) {
+	if s.totpKey == nil {
+		return secret, nil
+	}
+	return s.sealTOTP("owner", secret)
 }

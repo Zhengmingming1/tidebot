@@ -28,6 +28,20 @@ for zh_path, en_path in PAIRS:
         elif set(PH.findall(str(zh[k]))) != set(PH.findall(str(en[k]))):
             print(f"{k}: placeholders differ: zh {sorted(set(PH.findall(zh[k])))} en {sorted(set(PH.findall(en[k])))}"); bad += 1
     print(f"{zh_path} / {en_path}: {len(zh)} keys")
+# Every structured notification key the server stores needs a WebUI title.
+src = pathlib.Path("internal/app/notify.go").read_text("utf-8")
+m = re.search(r"NotificationKeys = \[\]string\{([^}]*)\}", src)
+if not m:
+    print("internal/app/notify.go: NotificationKeys not found"); bad += 1
+else:
+    keys = re.findall(r'"(\w+)"', m.group(1))
+    for zh_path, en_path in PAIRS[:1]:
+        for path in (zh_path, en_path):
+            d = json.loads(pathlib.Path(path).read_text("utf-8"))
+            for k in keys:
+                if f"ntf.{k}.t" not in d:
+                    print(f"{path}: missing notification key ntf.{k}.t"); bad += 1
+    print(f"notification keys: {len(keys)}")
 if bad:
     print(f"i18n check failed: {bad} problem(s)"); sys.exit(1)
 print("i18n check ok")
