@@ -868,6 +868,10 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		Kind   string `json:"kind"`
 		Detail string `json:"detail"`
 		Action string `json:"action"`
+		// Structured form of Detail so the UI can translate it (code: usd_cap | token_cap | zero).
+		Code string `json:"code,omitempty"`
+		Used string `json:"used,omitempty"`
+		Cap  string `json:"cap,omitempty"`
 	}
 	events := []evRow{}
 	rows, err := s.deps.DB.QueryContext(ctx, `SELECT e.at, e.scope, COALESCE(e.scope_id,''), COALESCE(t.name,''), e.kind, e.detail, e.action_taken
@@ -883,6 +887,7 @@ FROM budget_events e LEFT JOIN tasks t ON e.scope='task' AND t.id=e.scope_id ORD
 					// show task name instead of raw id in the human-readable detail
 					e.Detail = strings.ReplaceAll(e.Detail, sid, e.Name)
 				}
+				e.Code, e.Used, e.Cap = parseBudgetDetail(e.Detail)
 				events = append(events, e)
 			}
 		}
@@ -1088,4 +1093,23 @@ func (s *Server) handleLanguage(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 405, "method not allowed")
 	}
+}
+
+var (
+	reUSDCap   = regexp.MustCompile(`daily USD cap reached \(([\d.]+)/([\d.]+)\)`)
+	reTokenCap = regexp.MustCompile(`daily token cap reached \((\d+)/(\d+)\)`)
+)
+
+// parseBudgetDetail turns the stored English breach text into a code + numbers.
+func parseBudgetDetail(d string) (code, used, limit string) {
+	if m := reUSDCap.FindStringSubmatch(d); m != nil {
+		return "usd_cap", m[1], m[2]
+	}
+	if m := reTokenCap.FindStringSubmatch(d); m != nil {
+		return "token_cap", m[1], m[2]
+	}
+	if strings.Contains(d, "remaining daily budget is zero") {
+		return "zero", "", ""
+	}
+	return "", "", ""
 }

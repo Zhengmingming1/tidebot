@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/notify"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"log/slog"
 	"os"
@@ -49,6 +50,7 @@ type App struct {
 	WebUI    *webui.Server
 	Events   *Bus
 	Policy   *policy.Store
+	Notify   *notify.Service
 
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
@@ -85,12 +87,14 @@ func Open(cfg config.Config) (*App, error) {
 		DB:       sqlDB,
 		Store:    store,
 		Registry: reg,
-		Secrets:  secrets.Chain{secrets.EnvBackend{}},
+		Secrets:  secrets.Chain{secrets.NewFileBackend(cfg.HomeDir), secrets.EnvBackend{}},
 		Runner:   runner.New(store, log, cfg.MaxConcurrency),
 		Ver:      ver,
 	}
 	a.Runner.LogDir = filepath.Join(cfg.DataDir, "runs")
 	a.Policy = &policy.Store{DB: sqlDB}
+	a.Notify = notify.New(sqlDB, a.Secrets)
+	a.Notify.Loc = cfg.Location()
 	a.Sched = scheduler.New(store, log, cfg.SchedulerTick, a.runTaskScheduled)
 	a.Sched.Catchup = a.catchup
 	if v, err := strconv.ParseFloat(os.Getenv("TIDEBOT_RETRY_SCALE"), 64); err == nil && v > 0 {

@@ -18,6 +18,12 @@ func (a *App) registerRPC2(srv *ipc.Server) {
 	srv.Register("guard.approve", a.rpcGuardDecide(true))
 	srv.Register("guard.deny", a.rpcGuardDecide(false))
 	srv.Register("guard.scan", a.rpcGuardScan)
+	srv.Register("notify.channels", a.rpcNotifyChannels)
+	srv.Register("notify.add_channel", a.rpcNotifyAddChannel)
+	srv.Register("notify.remove_channel", a.rpcNotifyRemoveChannel)
+	srv.Register("notify.add_rule", a.rpcNotifyAddRule)
+	srv.Register("notify.test", a.rpcNotifyTest)
+	srv.Register("notify.settings", a.rpcNotifySettings)
 }
 
 func decode[T any](raw json.RawMessage) (T, error) {

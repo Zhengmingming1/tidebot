@@ -27,5 +27,8 @@
   "desktop.n.lan_on": "WebUI 已对局域网开放：%s",
   "desktop.n.lan_fail": "无法开启局域网访问：%s",
   "desktop.n.still_running": "Tidebot 仍在托盘里运行",
-  "desktop.quick_task": "快速运行"
+  "desktop.quick_task": "快速运行",
+  "notify.breaker": "连续失败已暂停：%s",
+  "notify.confirm": "危险操作待确认：%s",
+  "notify.test": "Tidebot 测试通知"
 }
