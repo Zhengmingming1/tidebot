@@ -123,6 +123,9 @@ func main() {
 		core.Sched.SetPaused(true)
 	}
 	core.SetUpdateProduct("desktop")
+	core.WebUI.PickFile = func(title string) (string, error) {
+		return sh.app.Dialog.OpenFile().SetTitle(title).CanChooseFiles(true).ShowHiddenFiles(true).PromptForSingleSelection()
+	}
 	d, err := core.StartDaemon(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start core (is agentd already running?):", err)

@@ -512,16 +512,24 @@
         var cmd = "npm i -g @anthropic-ai/claude-code";
         h += '<p class="cc-hint">' + esc(T("cc.install_hint")) + '</p><div class="cc-cmd"><code>' + esc(cmd) + '</code><button class="btn sm" id="cc-copy">' + esc(T("tf.copy")) + "</button></div>" +
           '<p class="muted small">' + esc(T("cc.install_after")) + "</p>";
+        if (st.note) h += '<p class="cc-err small">' + esc(st.note) + "</p>";
+        if (st.searched && st.searched.length) h += '<details class="cc-searched"><summary>' + esc(T("cc.searched", { n: st.searched.length })) + "</summary><ul>" +
+          st.searched.map(function (x) { return "<li><code>" + esc(x) + "</code></li>"; }).join("") + "</ul></details>";
       }
+      h += '<div class="cc-pathset"><label for="cc-path-in">' + esc(T("cc.set_path")) + '</label><div class="cc-path-row"><input id="cc-path-in" spellcheck="false" placeholder="/opt/homebrew/bin/claude" value="' + esc(st.custom_path ? st.path || "" : "") + '">' +
+        '<button class="btn sm" id="cc-pick" type="button">' + esc(T("cc.pick")) + '</button><button class="btn sm primary" id="cc-path-save" type="button">' + esc(T("btn.save")) + "</button></div>" +
+        (st.custom_path ? '<button class="link-btn small" id="cc-path-auto" type="button">' + esc(T("cc.path_auto")) + "</button>" : "") + '<p class="err small" id="cc-path-err" role="alert"></p></div>';
       var pv = st.provider || {};
       var health = pv.health === "ok" ? '<span class="pill ok sm">' + esc(T("cc.p_ok")) + "</span>" : pv.health === "failing" ? '<span class="pill bad sm">' + esc(T("cc.p_failing")) + "</span>" : '<span class="pill plain sm">' + esc(T("cc.p_unknown")) + "</span>";
       var checked = pv.checked_at ? esc(T(pv.source === "test" ? "cc.by_test" : "cc.by_run", { t: when(pv.checked_at) })) + (pv.latency_ms ? " · " + esc(pv.latency_ms) + " ms" : "") : esc(T("cc.never_checked"));
       h += '<dl class="cc-kv">' +
         (st.found ? kv(T("cc.path"), "<code>" + esc(st.path) + "</code>") : "") +
+        (st.found && st.method ? kv(T("cc.found_by"), esc(T("cc.m_" + st.method))) : "") +
         (st.found ? kv(T("cc.version"), esc(st.version || T("cc.unknown")) + (st.compatible ? "" : ' <span class="pill warn sm">' + esc(T("cc.too_old")) + "</span>")) : "") +
         kv(T("cc.min"), esc(st.min_version)) +
         kv(T("cc.provider"), esc(pv.name || "—") + (pv.model ? ' <span class="muted">· ' + esc(pv.model) + "</span>" : "") + " " + health) +
         kv(T("cc.last_check"), checked) +
+        (!pv.key_set && pv.health !== "ok" ? '<dd class="cc-hint2 small">' + esc(T("cc.no_key_hint")) + "</dd>" : "") +
         (pv.health === "failing" && pv.detail ? kv(T("cc.error"), esc(pv.detail), "cc-err") : "") +
         kv(T("cc.core"), esc((st.core.version || "dev") + " · " + T("cc.uptime", { t: dur(Math.max(1, st.core.uptime_sec) * 1000) }))) + "</dl>";
       h += '<h5 class="cc-sub">' + esc(T("cc.sessions", { n: st.sessions.length })) + (st.total_rss_bytes ? ' <span class="muted">· ' + esc(fmtMem(st.total_rss_bytes)) + "</span>" : "") + "</h5>";
@@ -537,6 +545,17 @@
       loadCC(true).then(function () { var b2 = $("#cc-recheck"); if (b2) b2.disabled = false; });
     });
     $("#cc-models").addEventListener("click", function () { pop.remove(); });
+    var savePath = function (p) {
+      $("#cc-path-err").textContent = "";
+      return rpc("claude.set_path", { path: p }).then(function (st2) { cc.st = st2; paintCC(); toast(T("cc.path_saved")); })
+        .catch(function (err) { var e = $("#cc-path-err"); if (e) e.textContent = (err && err.message) || String(err); });
+    };
+    if ($("#cc-path-save")) $("#cc-path-save").addEventListener("click", function () { savePath($("#cc-path-in").value.trim()); });
+    if ($("#cc-path-auto")) $("#cc-path-auto").addEventListener("click", function () { savePath(""); });
+    if ($("#cc-pick")) $("#cc-pick").addEventListener("click", function () {
+      api("/api/desktop/pick-file", { method: "POST", body: {} }).then(function (r) { if (r && r.path) { $("#cc-path-in").value = r.path; savePath(r.path); } })
+        .catch(function () { $("#cc-path-in").focus(); toast(T("cc.pick_browser")); });
+    });
     $$("a", pop).forEach(function (a) { if (a.getAttribute("href").indexOf("#/runs/") === 0) a.addEventListener("click", function () { pop.remove(); }); });
   }
   setInterval(function () { if (state.csrf && !document.hidden) loadCC(false); }, 30000);

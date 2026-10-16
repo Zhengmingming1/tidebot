@@ -63,7 +63,7 @@
   "cc.h_provider": "模型接入异常",
   "cc.h_ready": "{v} · 就绪",
   "cc.h_running": "运行中 {n} 个会话",
-  "cc.install_after": "装好后点「重新检查」。如果装在别的位置，可以在配置里设 claude_bin。",
+  "cc.install_after": "装好后点「重新检查」。如果装在不常见的位置，可以在下面设置路径。",
   "cc.install_hint": "tidebot 靠本机的 Claude Code 命令行干活，先装一下：",
   "cc.last_check": "上次检查",
   "cc.min": "最低支持",
@@ -924,5 +924,17 @@
   "ntf.plugin_notify.b": "{detail}",
   "ntf.generic.t": "{kind}：{name}",
   "ntf.generic.b": "{detail}",
-  "ntf.test.t": "Tidebot 测试通知"
+  "ntf.test.t": "Tidebot 测试通知",
+  "cc.searched": "查找过 {n} 个位置",
+  "cc.set_path": "Claude Code 路径（可选）",
+  "cc.pick": "选择…",
+  "cc.path_auto": "改回自动查找",
+  "cc.path_saved": "已保存 Claude Code 路径",
+  "cc.pick_browser": "只有桌面版能弹出文件选择框，请直接粘贴路径（终端里运行 which claude 可以看到）。",
+  "cc.found_by": "查找方式",
+  "cc.m_configured": "你设置的路径",
+  "cc.m_login_shell": "登录 shell",
+  "cc.m_path": "PATH",
+  "cc.m_known_dir": "常见安装目录",
+  "cc.no_key_hint": "这个服务商还没保存密钥。如果 Claude Code 已用订阅登录（claude login）可以不填；否则到模型设置里填 API key 并点「测试」。"
 }

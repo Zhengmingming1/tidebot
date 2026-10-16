@@ -293,15 +293,14 @@ func (a *App) claudeVersion() string {
 	}
 	claudeVer.at = time.Now()
 	claudeVer.v = ""
-	bin := a.Cfg.ClaudeBin
-	if bin == "" {
-		bin = "claude"
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := execOutput(ctx, bin, "--version")
-	if err == nil {
-		claudeVer.v = parseClaudeVersion(out)
+	if r := a.ResolveClaude(ctx, false); r.Version != "" {
+		claudeVer.v = r.Version
+	} else if bin, env := a.claudeExec(ctx); bin != "" {
+		if out, err := execOutputEnv(ctx, env, bin, "--version"); err == nil {
+			claudeVer.v = parseClaudeVersion(out)
+		}
 	}
 	return claudeVer.v
 }
@@ -396,6 +395,7 @@ func (a *App) systemRPC() map[string]rpcFunc {
 			}
 			return a.UpdateStatus(ctx), nil
 		},
+		"claude.set_path": a.rpcSetClaudePath,
 		"update.status":   func(ctx context.Context, _ json.RawMessage) (any, error) { return a.UpdateStatus(ctx), nil },
 		"update.settings": a.rpcUpdateSettings,
 		"update.apply":    func(ctx context.Context, _ json.RawMessage) (any, error) { return a.ApplyUpdateNow(ctx) },

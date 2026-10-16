@@ -63,7 +63,7 @@
   "cc.h_provider": "Model provider problem",
   "cc.h_ready": "{v} · ready",
   "cc.h_running": "{n} session(s) running",
-  "cc.install_after": "Then click Recheck. If it lives somewhere else, set claude_bin in the config.",
+  "cc.install_after": "Press Recheck after installing. If it lives somewhere unusual, set the path below.",
   "cc.install_hint": "tidebot drives the Claude Code CLI on this machine. Install it first:",
   "cc.last_check": "Last check",
   "cc.min": "Min supported",
@@ -924,5 +924,17 @@
   "ntf.plugin_notify.b": "{detail}",
   "ntf.generic.t": "{kind}: {name}",
   "ntf.generic.b": "{detail}",
-  "ntf.test.t": "Tidebot test notification"
+  "ntf.test.t": "Tidebot test notification",
+  "cc.searched": "Looked in {n} places",
+  "cc.set_path": "Claude Code path (optional)",
+  "cc.pick": "Choose…",
+  "cc.path_auto": "Detect automatically again",
+  "cc.path_saved": "Claude Code path saved",
+  "cc.pick_browser": "File picker is only in the desktop app; paste the path instead (run `which claude` in Terminal).",
+  "cc.found_by": "Found via",
+  "cc.m_configured": "path you set",
+  "cc.m_login_shell": "your login shell",
+  "cc.m_path": "PATH",
+  "cc.m_known_dir": "common install folder",
+  "cc.no_key_hint": "No API key saved for this provider. Fine if Claude Code is logged in with your subscription (claude login); otherwise add a key in model settings and press Test."
 }
