@@ -34,6 +34,18 @@ Spend. The daily budget resets at midnight in your own timezone (not UTC). Going
 
 ![Spend](docs/images/spend.png)
 
+Skill versions and diffs. Compare any two versions. Rollback only moves the pointer here too, and you have 10 seconds to undo it. On the right is the optimizer: it only proposes candidates, and promoting one is always your click.
+
+![Skill diff](docs/images/skill-diff.png)
+
+Ctrl+K (⌘K on a Mac) opens a command palette. It searches tasks, skills and runs, and can run a task, run a button or switch language. You can do all of it from the keyboard; `?` lists the shortcuts.
+
+![Command palette](docs/images/palette.png)
+
+Settings are split into General / Providers / Budgets / Security / Notifications / Data & backup / About, and every item has its own URL, e.g. `#/settings/security/2fa`. You can turn on two-factor sign-in there: scan, type one code, save the recovery codes. Nothing changes until a code checks out.
+
+![Settings](docs/images/settings.png)
+
 The UI speaks English and Simplified Chinese. It follows your browser by default and there's a switch in the top bar. Chinese screenshots are in [README.md](README.md).
 
 ## What it does
@@ -42,9 +54,9 @@ Scheduled tasks you can keep talking to. Tasks have a cron schedule or run on de
 
 Skills with versions and rollback. Import a Claude Code skill directory; every re-import is a new version. A task can pin a specific skill version, and you can roll back when a new one misbehaves.
 
-Optional skill optimization (not finished). The schema has a place for it and there's a separate `optimization` budget bucket, but automatic rewriting and canary comparison aren't implemented yet.
+Optional skill optimization (off by default). Three modes: off, suggest only, canary. Canary sends part of the runs to a candidate version and shows success rate, cost and duration side by side. It never promotes anything on its own; you confirm that.
 
-Buttons and plugins. A button is a one-click preset bound to a task or a prompt; the first four show up on the home page. The plugins page is a placeholder for now. Installing MCP servers and triggers isn't built yet.
+Buttons and plugins. A button is a one-click preset bound to a task or a prompt. The home page shows them in the order you set, by drag or Alt+arrow keys. When you install a plugin you tick its permissions one by one (high-risk ones start unticked), and you can revoke a single one later. Plugins with settings get a form; password-type fields can't be read back once saved.
 
 Cost caps. Daily limits per global / task / bucket (production, canary, optimization, assist). Checked before every run, with `--max-budget-usd` as a backstop during the run.
 
@@ -218,8 +230,9 @@ CLI messages come in English and Chinese too. They follow your system locale, or
 ## Desktop app (experimental)
 
 `cmd/tidebot-desktop` is a tray app. The core runs in the same process and the window reads the WebUI through the webview's in-process asset handler, so no port is opened.
-Closing the window just hides it to the tray; scheduled tasks keep running. The tray menu opens the window, pauses/resumes the scheduler, runs a button preset, toggles LAN access and quits.
-You get native notifications when a run finishes, fails, needs approval or hits the budget. Language follows the OS.
+Closing the window just hides it to the tray; scheduled tasks keep running. The tray menu, top to bottom: a problems section that only shows up when something is wrong (core not responding, today's budget used up, failures in the last hour), how many tasks are running, your first 5 buttons, "Pause all schedules", LAN access, open, quit.
+The icon has three states: idle, running, needs attention. If the core dies, the tray shows it within about 3 seconds.
+You get native notifications when a run finishes, fails, needs approval or hits the budget. The menu language follows the WebUI language setting, or the OS if you never set one.
 
 ```bash
 scripts/build-desktop.sh linux        # needs Go 1.25, libgtk-3-dev, libwebkit2gtk-4.1-dev
@@ -246,7 +259,9 @@ Works today:
 - Notifications: email, webhook, Feishu, DingTalk, WeCom, Telegram, with quiet hours and a daily digest
 - Backups (`.agentbak`, secrets only with a passphrase) and restore (`agentd restore`), log cleanup, a health summary and Prometheus `/metrics`
 - Sandbox dry-runs: runs against a copy of the workspace, billed to the dry_run bucket, and tells you which files changed
-- WebUI in English and Chinese; a desktop app (tray + window)
+- WebUI in English and Chinese, with a CI check that both dictionaries have the same keys; command palette and shortcuts; notifications grouped into failed / needs me / other
+- Optional two-factor sign-in (TOTP) with one-time recovery codes; after too many failed logins it tells you how long to wait
+- A desktop app (tray + window)
 - CI runs the tests on Linux, macOS and Windows; Windows uses a named pipe for local IPC
 
 Not there yet:
