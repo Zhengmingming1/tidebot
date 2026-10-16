@@ -28,6 +28,7 @@ type Config struct {
 	WebUIEnabled     bool          `json:"webui_enabled" yaml:"webui_enabled"`
 	NoWebUI          bool          `json:"no_webui" yaml:"no_webui"` // CLI override
 	SchedulerTick    time.Duration `json:"scheduler_tick" yaml:"scheduler_tick"`
+	IPCPath          string        `json:"ipc_path" yaml:"ipc_path"`
 }
 
 // Default returns a Config with sensible Phase-0 defaults.
@@ -50,6 +51,7 @@ func Default() Config {
 		ProvidersFile:   filepath.Join(appHome, "providers.yaml"),
 		WebUIEnabled:    false,
 		SchedulerTick:   15 * time.Second,
+		IPCPath:         filepath.Join(appHome, "agentd.sock"),
 	}
 }
 
@@ -120,6 +122,9 @@ func applyEnv(cfg *Config) {
 		if os.Getenv("TIDEBOT_PROVIDERS_FILE") == "" {
 			cfg.ProvidersFile = filepath.Join(v, "providers.yaml")
 		}
+		if os.Getenv("TIDEBOT_IPC") == "" {
+			cfg.IPCPath = filepath.Join(v, "agentd.sock")
+		}
 	}
 	if v := os.Getenv("TIDEBOT_DB"); v != "" {
 		cfg.DBPath = v
@@ -157,6 +162,9 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("TIDEBOT_WEBUI"); v != "" {
 		cfg.WebUIEnabled = parseBool(v)
 	}
+	if v := os.Getenv("TIDEBOT_IPC"); v != "" {
+		cfg.IPCPath = v
+	}
 }
 
 func parseBool(s string) bool {
@@ -184,7 +192,7 @@ func (c Config) Validate() error {
 
 // EnsureDirs creates HomeDir and DataDir if missing.
 func (c Config) EnsureDirs() error {
-	for _, d := range []string{c.HomeDir, c.DataDir, filepath.Dir(c.DBPath)} {
+	for _, d := range []string{c.HomeDir, c.DataDir, filepath.Dir(c.DBPath), filepath.Dir(c.IPCPath)} {
 		if d == "" || d == "." {
 			continue
 		}
