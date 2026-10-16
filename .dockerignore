@@ -1,0 +1,6 @@
+.git
+bin
+dist
+measure-out
+docs/images
+cmd/tidebot-desktop

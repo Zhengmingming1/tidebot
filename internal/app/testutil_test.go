@@ -17,6 +17,9 @@ func mockClaude() string {
 
 func newTestApp(t *testing.T) *App {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("mock claude is a shell script; app tests run on unix")
+	}
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.HomeDir = dir

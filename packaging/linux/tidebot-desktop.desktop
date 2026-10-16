@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=tidebot
+Comment=Scheduled Claude Code tasks
+Exec=tidebot-desktop
+Icon=tidebot
+Categories=Development;Utility;
+Terminal=false

@@ -1,0 +1,12 @@
+[Unit]
+Description=tidebot agentd (per-user)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/agentd
+Restart=on-failure
+RestartSec=5
+Environment=TIDEBOT_MANAGED=1
+
+[Install]
+WantedBy=default.target

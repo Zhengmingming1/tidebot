@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -188,6 +189,9 @@ func installRunnable(t *testing.T, s *Store, api string) {
 }
 
 func TestHostPermissionsAndSecrets(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("host tests exec the test binary without .exe")
+	}
 	t.Setenv("TIDEBOT_TEST_PLUGIN", "1")
 	s := newStore(t)
 	installRunnable(t, s, "kv")
@@ -225,6 +229,9 @@ func TestHostPermissionsAndSecrets(t *testing.T) {
 }
 
 func TestHostCrashBreaker(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("host tests exec the test binary without .exe")
+	}
 	t.Setenv("TIDEBOT_TEST_PLUGIN", "1")
 	s := newStore(t)
 	installRunnable(t, s, "kv")
