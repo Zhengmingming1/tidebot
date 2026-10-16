@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -80,6 +81,7 @@ func Open(cfg config.Config) (*App, error) {
 		Runner:   runner.New(store, log, cfg.MaxConcurrency),
 		Ver:      ver,
 	}
+	a.Runner.LogDir = filepath.Join(cfg.DataDir, "runs")
 	a.Sched = scheduler.New(store, log, cfg.SchedulerTick, a.runTask)
 	a.Tasks = tasksvc.New(store, ver, a.Sched)
 	structurer := amend.Structurer(amend.MockStructurer{})
@@ -103,6 +105,8 @@ func Open(cfg config.Config) (*App, error) {
 	a.WebUI = webui.New(webui.Deps{
 		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Ver: ver, Reg: reg, Log: log,
+		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
+		LogPath: a.Runner.LogPath, Location: cfg.Location(),
 	})
 	return a, nil
 }
@@ -219,6 +223,10 @@ func isMockBin(bin string) bool {
 }
 
 func (a *App) runTask(ctx context.Context, task db.Task) error {
+	return a.runTaskTrigger(ctx, task, "cron", cost.BucketProduction)
+}
+
+func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket string) error {
 	providerName := a.Cfg.DefaultProvider
 	view, err := a.Tasks.Get(ctx, task.ID)
 	if err == nil && view.Spec != nil && view.Spec.Provider != "" {
@@ -252,8 +260,8 @@ func (a *App) runTask(ctx context.Context, task db.Task) error {
 		timeout = a.Cfg.DefaultTimeout
 	}
 	res, err := a.RunPromptEx(ctx, runner.Options{
-		Prompt: prompt, WorkspaceDir: ws, TriggerKind: "cron", TaskID: task.ID,
-		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0,
+		Prompt: prompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
+		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket,
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
@@ -293,5 +301,35 @@ func (a *App) SeedBuiltinProviders(ctx context.Context) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// startTaskAsync runs a task in the background (WebUI buttons / Run now).
+func (a *App) startTaskAsync(taskID, bucket string) error {
+	task, err := a.Store.GetTask(context.Background(), taskID)
+	if err != nil {
+		return fmt.Errorf("task not found")
+	}
+	go func() {
+		if err := a.runTaskTrigger(context.Background(), *task, "manual", bucket); err != nil {
+			a.Log.Warn("manual task run", "task_id", taskID, "error", err)
+		}
+	}()
+	return nil
+}
+
+// startQuickRunAsync runs an ad-hoc prompt in the background.
+func (a *App) startQuickRunAsync(prompt, providerName string) error {
+	if _, err := a.ResolveProfile(providerName); err != nil {
+		return err
+	}
+	go func() {
+		_, err := a.RunPromptEx(context.Background(), runner.Options{
+			Prompt: prompt, TriggerKind: "quick", CostBucket: cost.BucketProduction,
+		}, providerName, 0)
+		if err != nil {
+			a.Log.Warn("quick run", "error", err)
+		}
+	}()
 	return nil
 }
