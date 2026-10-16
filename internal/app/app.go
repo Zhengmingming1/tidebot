@@ -239,6 +239,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		}
 		if chk.Warn {
 			a.Log.Warn("budget warning", "detail", chk.WarnDetail)
+			a.warnOnce(chk.WarnDetail)
 		}
 		runMax = chk.RunMaxUSD
 		if runMax <= 0 {

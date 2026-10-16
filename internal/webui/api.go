@@ -52,6 +52,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/scheduler/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/schedule/preview", s.withAuthCSRF(s.handleCronPreview))
 	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
+	mux.HandleFunc("/api/spend/breakdown", s.withAuthCSRF(s.handleSpendBreakdown))
 	mux.HandleFunc("/api/notifications", s.withAuthCSRF(s.handleNotifications))
 	mux.HandleFunc("/api/search", s.withAuthCSRF(s.handleSearch))
 	mux.HandleFunc("/api/settings", s.withAuthCSRF(s.handleSettings))
@@ -1211,9 +1212,26 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 		Bucket    string  `json:"bucket"`
 		MaxUSD    float64 `json:"max_usd"`
 		MaxTokens int64   `json:"max_tokens"`
+		Action    string  `json:"action"`
+		WarnAtPct int     `json:"warn_at_pct"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body); err != nil {
 		writeErr(w, 400, "bad json")
+		return
+	}
+	// pause_notify: block the run and pause the task; block_notify: block the run, keep the task on.
+	if body.Action == "" {
+		body.Action = "pause_notify"
+	}
+	if body.Action != "pause_notify" && body.Action != "block_notify" {
+		writeErr(w, 400, "action must be pause_notify or block_notify")
+		return
+	}
+	if body.WarnAtPct == 0 {
+		body.WarnAtPct = 80
+	}
+	if body.WarnAtPct < 1 || body.WarnAtPct > 100 {
+		writeErr(w, 400, "warn_at_pct must be 1-100")
 		return
 	}
 	if body.Scope == "" {
@@ -1232,7 +1250,7 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 		Scope: body.Scope, ScopeID: body.ScopeID, Period: body.Period, Bucket: body.Bucket,
 		MaxUSD:    sql.NullFloat64{Float64: body.MaxUSD, Valid: body.MaxUSD > 0},
 		MaxTokens: sql.NullInt64{Int64: body.MaxTokens, Valid: body.MaxTokens > 0},
-		Action:    "pause_notify", WarnAtPct: 80,
+		Action:    body.Action, WarnAtPct: body.WarnAtPct,
 	}
 	if err := s.deps.Cost.UpsertBudget(r.Context(), b); err != nil {
 		writeErr(w, 500, err.Error())

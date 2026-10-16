@@ -30,5 +30,6 @@
   "desktop.quick_task": "quick run",
   "notify.breaker": "Paused after repeated failures: %s",
   "notify.confirm": "Confirmation needed: %s",
-  "notify.test": "Tidebot test notification"
+  "notify.test": "Tidebot test notification",
+  "desktop.n.budget_warn": "Budget almost used up"
 }

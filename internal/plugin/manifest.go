@@ -23,6 +23,9 @@ type Manifest struct {
 	Runtime     Runtime     `yaml:"runtime" json:"runtime"`
 	Contributes Contributes `yaml:"contributes" json:"contributes"`
 	Permissions Permissions `yaml:"permissions" json:"permissions"`
+	// ConfigSchema is a JSON Schema subset (object of string/number/integer/boolean/array
+	// properties, enum, required, writeOnly) the WebUI turns into a settings form.
+	ConfigSchema map[string]any `yaml:"config_schema" json:"config_schema,omitempty"`
 }
 
 // Runtime describes the plugin process.
@@ -169,6 +172,11 @@ func (m *Manifest) Validate(dir string) error {
 					return fmt.Errorf("connector %s uses undeclared secret %s", c.ID, mm[1])
 				}
 			}
+		}
+	}
+	if m.ConfigSchema != nil {
+		if _, err := ParseSchema(m.ConfigSchema); err != nil {
+			return fmt.Errorf("config_schema: %w", err)
 		}
 	}
 	for _, h := range m.Permissions.HostAPI {

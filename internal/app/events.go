@@ -11,6 +11,7 @@ const (
 	EventRunFailed      = "run_failed"
 	EventApprovalNeeded = "approval_needed"
 	EventBudgetBreached = "budget_breached"
+	EventBudgetWarning  = "budget_warning"
 )
 
 // Event is a user-facing occurrence. It never carries secrets or prompt bodies.

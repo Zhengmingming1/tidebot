@@ -30,5 +30,6 @@
   "desktop.quick_task": "快速运行",
   "notify.breaker": "连续失败已暂停：%s",
   "notify.confirm": "危险操作待确认：%s",
-  "notify.test": "Tidebot 测试通知"
+  "notify.test": "Tidebot 测试通知",
+  "desktop.n.budget_warn": "预算快用完了"
 }

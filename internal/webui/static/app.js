@@ -965,16 +965,49 @@
       skills.forEach(function (x) { sname[x.id] = x.name; });
       var cards = list.map(function (b, i) {
         var sub = b.description || (b.task_id ? T("bt.runs_task", { name: tname[b.task_id] || b.task_id }) : b.skill_id ? T("bt.runs_skill", { name: sname[b.skill_id] || b.skill_id }) : T("bt.prompt", { p: b.prompt }));
-        return '<div class="card qa fill' + (b.color ? " colored" : "") + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '"><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(sub) + '</small><div class="req-actions"><button class="btn sm" data-edit="' + i + '">' + esc(T("btn.edit")) + '</button><button class="btn sm danger" data-del="' + i + '">' + esc(T("btn.remove")) + '</button></div></div>';
+        return '<div class="card qa fill' + (b.color ? " colored" : "") + '" draggable="true" tabindex="0" data-idx="' + i + '" aria-roledescription="' + esc(T("bt.sortable")) + '" aria-label="' + esc(b.label) + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '"><span class="grip qa-grip" aria-hidden="true" title="' + esc(T("bt.sort_hint")) + '">⋮⋮</span><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(sub) + '</small><div class="req-actions"><button class="btn sm" data-edit="' + i + '">' + esc(T("btn.edit")) + '</button><button class="btn sm danger" data-del="' + i + '">' + esc(T("btn.remove")) + '</button></div></div>';
       });
       cards.push('<button class="card qa tint" id="b-add"><span class="qa-ico">' + ic("plus", "lg") + "</span><strong>" + esc(T("bt.new")) + "</strong><small>" + esc(T("bt.new_sub")) + " " + ic("arrow", "sm") + "</small></button>");
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + '</p></div></div><div class="grid g4">' + cards.join("") + "</div>", "buttons", [[T("nav.buttons")]]);
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + '</p></div></div><p class="hint">' + esc(T("bt.sort_hint")) + '</p><div class="grid g4" id="bt-grid">' + cards.join("") + '</div><div class="sr-only" aria-live="polite" id="bt-live"></div>', "buttons", [[T("nav.buttons")]]);
       applyColors(page());
       var save = function (nl) { return api("/api/buttons", { method: "PUT", body: nl }).then(function () { toast(T("toast.buttons_saved")); renderButtons(); }); };
       $("#b-add").addEventListener("click", function () { buttonModal(list, null, tasks, skills, save); });
       $$("[data-edit]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); buttonModal(list, +b.getAttribute("data-edit"), tasks, skills, save); }); });
       $$("[data-del]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); var k = +b.getAttribute("data-del"); confirmDialog({ title: T("bt.rm_title", { n: list[k].label }), body: T("bt.confirm_rm"), ok: T("btn.remove"), danger: true }).then(function (y) { if (!y) return; var nl = list.slice(); nl.splice(k, 1); save(nl).catch(fail); }); }); });
       $$("[data-run]").forEach(function (c) { c.addEventListener("click", function (e) { if (e.target.closest("button")) return; runButton(c.getAttribute("data-run"), c); }); });
+      // ordering: drag with the mouse, or focus a card and press Alt+←/→ (Alt+↑/↓)
+      var grid = $("#bt-grid"), order = function () { return $$("[data-idx]", grid).map(function (c) { return list[+c.getAttribute("data-idx")]; }); };
+      var persist = function (focusId) {
+        var nl = order();
+        if (nl.every(function (b, k) { return b === list[k]; })) return;
+        api("/api/buttons", { method: "PUT", body: nl }).then(function () {
+          $("#bt-live").textContent = T("bt.order_saved");
+          toast(T("bt.order_saved"));
+          renderButtons().then(function () { var c = $('[data-run="' + focusId + '"]'); if (c) c.focus(); });
+        }).catch(fail);
+      };
+      $$("[data-idx]", grid).forEach(function (c) {
+        c.addEventListener("dragstart", function (e) { c.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.getAttribute("data-run")); });
+        c.addEventListener("dragend", function () { c.classList.remove("dragging"); persist(c.getAttribute("data-run")); });
+        c.addEventListener("keydown", function (e) {
+          if (e.target !== c) return;
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); runButton(c.getAttribute("data-run"), c); return; }
+          if (!e.altKey) return;
+          var back = e.key === "ArrowLeft" || e.key === "ArrowUp", fwd = e.key === "ArrowRight" || e.key === "ArrowDown";
+          if (!back && !fwd) return;
+          e.preventDefault();
+          var sib = back ? c.previousElementSibling : c.nextElementSibling;
+          if (!sib || !sib.hasAttribute("data-idx")) return;
+          grid.insertBefore(c, back ? sib : sib.nextSibling);
+          persist(c.getAttribute("data-run"));
+        });
+      });
+      grid.addEventListener("dragover", function (e) {
+        var drag = $(".dragging", grid); if (!drag) return;
+        e.preventDefault();
+        var after = $$("[data-idx]:not(.dragging)", grid).filter(function (x) { var r = x.getBoundingClientRect(); return e.clientY < r.bottom && e.clientX < r.left + r.width / 2 || e.clientY < r.top; })[0];
+        if (after) grid.insertBefore(drag, after); else grid.insertBefore(drag, $("#b-add"));
+      });
     });
   }
 
@@ -1426,14 +1459,15 @@
           var trig = ((m.contributes || {}).triggers || []);
           prev.innerHTML = '<div class="preview"><p><strong>' + esc(m.name || m.id) + '</strong> <span class="tag">' + esc(m.version || "") + '</span> <code class="muted">' + esc(m.id || "") + "</code></p>" +
             '<p class="muted">' + esc(T("pl.hash", { h: String(ver.content_hash || "").slice(0, 16) })) + "</p>" +
-            "<h4>" + esc(T("pl.perms")) + "</h4>" + (req.length ? '<ul class="perms">' + req.map(function (p) { return "<li>" + ic("shield", "sm") + "<code>" + esc(p) + "</code>" + (fresh.indexOf(p) >= 0 ? ' <span class="pill warn">' + esc(T("pl.new_perm")) + "</span>" : "") + "</li>"; }).join("") + "</ul>" : '<p class="muted">' + esc(T("pl.no_perms")) + "</p>") +
+            "<h4>" + esc(T("pl.perms")) + "</h4>" + (req.length ? permChooser(req, fresh) : '<p class="muted">' + esc(T("pl.no_perms")) + "</p>") +
             (trig.length ? "<h4>" + esc(T("pl.contrib_triggers")) + "</h4><p>" + trig.map(function (t) { return '<span class="pill plain">' + esc(t.kind + ": " + (t.title || t.id)) + "</span>"; }).join(" ") + "</p>" : "") +
-            '<p class="hint">' + esc(T("pl.approve_hint")) + "</p></div>";
+            '<p class="hint">' + esc(T("pl.grant_hint")) + "</p></div>";
           foot.innerHTML = '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="pl-ok">' + ic("shield", "sm") + esc(T("pl.approve")) + "</button>";
           $$("[data-close]", foot).forEach(function (b) { b.addEventListener("click", close); });
           $("#pl-ok", foot).addEventListener("click", function (e) {
             e.target.disabled = true;
-            rpc("plugins.approve", { version_id: ver.id, permissions: req }).then(function () { close(); toast(T("pl.installed_ok", { n: m.name || m.id })); refresh(); }).catch(function (err) { e.target.disabled = false; fail(err); });
+            var granted = $$("[data-perm]", prev).filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+            rpc("plugins.approve", { version_id: ver.id, permissions: granted }).then(function () { close(); toast(T("pl.installed_ok", { n: m.name || m.id })); refresh(); }).catch(function (err) { e.target.disabled = false; fail(err); });
           });
         }).catch(function (e) { prev.innerHTML = '<p class="notice bad">' + ic("x", "sm") + esc(e.message) + "</p>"; });
       });
@@ -1475,13 +1509,92 @@
     }).catch(fail);
   }
 
+
+  // ---------- plugin permissions, config forms, trigger cards (I5) ----------
+  var PERM_GROUPS = [["fs", /^fs\./], ["net", /^network:/], ["exec", /^host_api:/], ["secret", /^secret:/]];
+  function permRisk(p) {
+    if (/^fs\.write:|^secret:|^host_api:runs\.start$/.test(p) || /^network:\*/.test(p) || /^fs\.read:(\/|~)$/.test(p)) return "high";
+    if (/^network:|^fs\.read:|^host_api:notify\.send$/.test(p)) return "med";
+    return "low";
+  }
+  function permLabel(p) { var i = p.indexOf(":"); return { kind: p.slice(0, i), val: p.slice(i + 1) }; }
+  function groupPerms(list) {
+    return PERM_GROUPS.map(function (g) { return { key: g[0], items: list.filter(function (p) { return g[1].test(p); }) }; }).filter(function (g) { return g.items.length; });
+  }
+  function permChooser(req, fresh) {
+    return '<div class="perm-groups">' + groupPerms(req).map(function (g) {
+      return '<fieldset class="perm-g"><legend>' + ic(g.key === "fs" ? "folder" : g.key === "net" ? "globe" : g.key === "exec" ? "bolt" : "key", "sm") + esc(T("perm.g_" + g.key)) + "</legend>" + g.items.map(function (p) {
+        var r = permRisk(p), l = permLabel(p);
+        return '<label class="perm-row"><input type="checkbox" data-perm value="' + esc(p) + '"' + (r === "high" ? "" : " checked") + '><span class="grow"><span class="muted">' + esc(T("perm.k_" + l.kind.replace(".", "_"))) + "</span> <code>" + esc(l.val) + "</code>" + (fresh && fresh.indexOf(p) >= 0 ? ' <span class="pill warn sm">' + esc(T("pl.new_perm")) + "</span>" : "") + '</span><span class="risk ' + r + '">' + esc(T("perm.r_" + r)) + "</span></label>";
+      }).join("") + "</fieldset>";
+    }).join("") + "</div>";
+  }
+  function permCard(p) {
+    var cur = p.current || {}, req = cur.requested_permissions || [], ok = cur.approved_permissions || [];
+    if (!req.length) return '<p class="muted">' + esc(T("pl.no_perms")) + "</p>";
+    return groupPerms(req).map(function (g) {
+      return '<div class="perm-line"><small class="muted">' + esc(T("perm.g_" + g.key)) + "</small>" + g.items.map(function (x) {
+        var on = ok.indexOf(x) >= 0, l = permLabel(x);
+        return '<span class="perm-chip ' + (on ? "on " : "off ") + permRisk(x) + '"><code>' + esc(l.val) + "</code>" + '<button class="linkish" data-perm-t="' + esc(p.id) + '" data-perm-v="' + esc(x) + '" data-on="' + (on ? "1" : "") + '">' + esc(T(on ? "perm.revoke" : "perm.grant")) + "</button></span>";
+      }).join("") + "</div>";
+    }).join("");
+  }
+  function schemaForm(fields, values, secretsSet) {
+    return fields.map(function (f) {
+      var v = values[f.key] !== undefined ? values[f.key] : f.default, nm = ' name="' + esc(f.key) + '" data-f="' + esc(f.key) + '" data-t="' + esc(f.type) + '"';
+      var lab = (f.title || f.key) + (f.required ? " *" : ""), inner;
+      if (f.type === "boolean") return '<label class="check field-check"><input type="checkbox"' + nm + (v ? " checked" : "") + "> " + esc(lab) + (f.description ? '<small class="hint">' + esc(f.description) + "</small>" : "") + "</label>";
+      if (f.type === "array") inner = '<div class="multi">' + f.items_enum.map(function (x) { return '<label class="check"><input type="checkbox" data-arr="' + esc(f.key) + '" value="' + esc(x) + '"' + ((v || []).map(String).indexOf(String(x)) >= 0 ? " checked" : "") + "> " + esc(x) + "</label>"; }).join("") + "</div>";
+      else if (f.enum && f.enum.length) inner = "<select" + nm + ">" + (f.required ? "" : opt("", "—", v == null)) + f.enum.map(function (x) { return opt(x, x, String(x) === String(v)); }).join("") + "</select>";
+      else if (f.write_only) inner = '<input type="password" autocomplete="new-password"' + nm + ' placeholder="' + esc(T(secretsSet[f.key] ? "cfg.secret_keep" : "cfg.secret_new")) + '"' + (f.max_length ? ' maxlength="' + f.max_length + '"' : "") + ">";
+      else if (f.type === "number" || f.type === "integer") inner = '<input type="number"' + nm + (f.type === "integer" ? ' step="1"' : ' step="any"') + (f.minimum != null ? ' min="' + f.minimum + '"' : "") + (f.maximum != null ? ' max="' + f.maximum + '"' : "") + ' value="' + esc(v == null ? "" : v) + '"' + (f.required ? " required" : "") + ">";
+      else inner = "<input" + nm + ' value="' + esc(v == null ? "" : v) + '"' + (f.max_length ? ' maxlength="' + f.max_length + '"' : ' maxlength="4000"') + (f.required ? " required" : "") + ">";
+      return fieldHtml(lab, inner, f.description || (f.write_only ? T("cfg.secret_hint") : ""));
+    }).join("");
+  }
+  function readSchemaForm(root, fields) {
+    var out = {};
+    fields.forEach(function (f) {
+      if (f.type === "array") { out[f.key] = $$('[data-arr="' + f.key + '"]', root).filter(function (c) { return c.checked; }).map(function (c) { var n = Number(c.value); return f.items_enum.some(function (x) { return typeof x === "number"; }) && !isNaN(n) ? n : c.value; }); return; }
+      var el = $('[data-f="' + f.key + '"]', root); if (!el) return;
+      if (f.type === "boolean") { out[f.key] = el.checked; return; }
+      if (el.value === "") return;
+      out[f.key] = f.type === "number" || f.type === "integer" ? Number(el.value) : el.value;
+    });
+    return out;
+  }
+  function pluginConfigModal(p) {
+    rpc("plugins.config_get", { id: p.id }).then(function (cv) {
+      modal('<div class="card-head"><span class="ico">' + ic("settings") + "</span><h2>" + esc(T("cfg.title", { n: p.name })) + '</h2></div><form id="pcf" novalidate>' + schemaForm(cv.fields || [], cv.values || {}, cv.secrets_set || {}) + '<p class="notice bad hidden" id="pcf-err"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
+        var f = $("#pcf", root);
+        f.addEventListener("submit", function (e) {
+          e.preventDefault();
+          if (!f.reportValidity()) return;
+          rpc("plugins.config_set", { id: p.id, values: readSchemaForm(f, cv.fields || []) }).then(function () { close(); toast(T("cfg.saved")); }).catch(function (err) { var x = $("#pcf-err", root); x.textContent = err.message; x.classList.remove("hidden"); });
+        });
+      });
+    }).catch(fail);
+  }
+  function copyText(t) { return (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(t) : new Promise(function (ok) { var ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); ok(); })).then(function () { toast(T("tr.copied")); }); }
+  function triggerCard(t, tname) {
+    var url = location.origin + "/hooks/" + t.id;
+    var curl = "curl -X POST " + url + " \\\n  -H \"Authorization: Bearer $TIDEBOT_HOOK_TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"hello\":\"world\"}'";
+    var res = t.last_result || "", good = res === "accepted";
+    return '<div class="card trig' + (t.enabled ? "" : " off") + '"><div class="trig-head"><span class="ico">' + ic(t.kind === "webhook" ? "globe" : t.kind === "file_change" ? "folder" : "bolt") + '</span><div class="grow"><strong>' + esc(T("tr.k_" + (t.kind === "file_change" ? "file" : t.kind === "webhook" ? "webhook" : "plugin"))) + '</strong><small><a href="#/tasks/' + enc(t.task_id) + '">' + esc(tname[t.task_id] || t.task_id) + "</a>" + (t.plugin_id ? " · " + esc(t.plugin_id) : "") + "</small></div>" +
+      '<button class="switch' + (t.enabled ? " on" : "") + '" data-trg-en="' + esc(t.id) + '" role="switch" aria-checked="' + !!t.enabled + '" aria-label="' + esc(T("tr.enabled")) + '"></button></div>' +
+      '<p class="trig-last">' + (t.last_fired_at ? esc(T("tr.last", { t: ago(t.last_fired_at), n: t.fire_count })) + ' <span class="pill sm ' + (good ? "ok" : "bad") + '">' + esc(good ? T("tr.r_ok") : res) + "</span>" : '<span class="muted">' + esc(T("tr.never")) + "</span>") + "</p>" +
+      (t.kind === "webhook" ? '<div class="copy-row"><code class="grow">' + esc(url) + '</code><button class="btn sm" data-copy="' + esc(url) + '">' + esc(T("tr.copy_url")) + '</button></div><details class="curl"><summary>' + esc(T("tr.curl")) + '</summary><pre class="code">' + esc(curl) + '</pre><button class="btn sm" data-copy="' + esc(curl) + '">' + esc(T("tr.copy_curl")) + '</button><small class="hint">' + esc(T("tr.curl_token")) + "</small></details>" : t.kind === "file_change" ? '<p class="mono muted">' + esc((t.config || {}).path || "") + "</p>" : "") +
+      '<div class="row-actions">' + (t.kind === "webhook" || t.kind === "file_change" ? '<button class="btn sm" data-trg-test="' + esc(t.id) + '"' + (t.enabled ? "" : " disabled") + ">" + ic("play", "sm") + esc(T("tr.test")) + "</button>" : "") + '<button class="btn sm ghost danger" data-trg-del="' + esc(t.id) + '">' + esc(T("pl.remove")) + "</button></div></div>";
+  }
+
   // ---------- PLUGINS ----------
   function rpc(method, params) {
     return api("/api/rpc/" + method, { method: "POST", body: params || {} }).then(function (r) { return r.result; });
   }
   function renderPlugins() {
-    return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list")]).then(function (res) {
-      var d = res[0] || {}, plugins = res[1] || [], trig = res[2] || [], baks = res[3] || [];
+    return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; })]).then(function (res) {
+      var d = res[0] || {}, plugins = res[1] || [], trig = res[2] || [], baks = res[3] || [], tname = {};
+      (res[4] || []).forEach(function (t) { tname[t.id] = t.name; });
       var stat = function (label, v) { return '<div class="stat"><span class="muted">' + esc(label) + "</span><strong>" + esc(v) + "</strong></div>"; };
       var r24 = d.runs_24h || {}, n24 = 0; Object.keys(r24).forEach(function (k) { n24 += r24[k]; });
       var health = '<section class="card"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("pl.health")) + '</h2></div><div class="grid g4">' +
@@ -1489,19 +1602,18 @@
         stat(T("pl.p95"), ((d.duration_p95_ms || 0) / 1000).toFixed(1) + " s") + stat(T("pl.cost7"), usd(d.cost_7d_usd || 0, 2)) +
         stat(T("pl.confirms"), d.pending_confirmations || 0) + stat(T("pl.claude"), d.claude_version || "?") +
         stat(T("pl.disk"), ((d.disk_bytes || 0) / 1048576).toFixed(1) + " MB") + stat(T("pl.backup"), d.last_backup ? fmtTime(d.last_backup) : T("td.none")) + "</div></section>";
-      var prow = plugins.length ? '<table class="table"><thead><tr><th>' + esc(T("pl.col_plugin")) + "</th><th>" + esc(T("pl.col_version")) + "</th><th>" + esc(T("pl.col_perms")) + '</th><th class="right"></th></tr></thead><tbody>' + plugins.map(function (p) {
-        var cur = p.current || {};
-        return "<tr><td><strong>" + esc(p.name) + '</strong> <span class="muted">' + esc(p.id) + "</span>" + (p.enabled ? "" : ' <span class="pill plain">' + esc(T("pl.disabled")) + "</span>") + "</td><td>" + esc(cur.version || "-") + "</td><td>" + (cur.approved_permissions || []).map(function (x) { return '<span class="pill plain">' + esc(x) + "</span>"; }).join(" ") +
-          '</td><td class="right"><button class="btn sm" data-pl-uninstall="' + esc(p.id) + '">' + esc(T("pl.uninstall")) + "</button></td></tr>";
-      }).join("") + "</tbody></table>" : emptyState("plugins", T("pl.empty"), T("pl.empty_sub"));
-      var trow = trig.length ? '<table class="table"><tbody>' + trig.map(function (t) {
-        return "<tr><td><span class=\"pill plain\">" + esc(t.kind) + "</span></td><td>" + esc(t.kind === "webhook" ? "/hooks/" + t.id : (t.config && (t.config.path || t.config.trigger_id)) || "") + '</td><td><a href="#/tasks/' + esc(t.task_id) + '">' + esc(T("nav.tasks")) + '</a></td><td class="right"><button class="btn sm" data-trg-del="' + esc(t.id) + '">' + esc(T("pl.remove")) + "</button></td></tr>";
-      }).join("") + "</tbody></table>" : '<p class="muted">' + esc(T("pl.no_triggers")) + "</p>";
+      var prow = plugins.length ? '<div class="grid g2 pl-cards">' + plugins.map(function (p) {
+        var cur = p.current || {}, m = cur.manifest || {}, hasCfg = m.config_schema && m.config_schema.properties && Object.keys(m.config_schema.properties).length;
+        return '<div class="card plug' + (p.enabled ? "" : " off") + '"><div class="trig-head"><span class="ico">' + ic("plugins") + '</span><div class="grow"><strong>' + esc(p.name) + ' <span class="tag">' + esc(cur.version || "-") + '</span></strong><small class="mono">' + esc(p.id) + '</small></div><button class="switch' + (p.enabled ? " on" : "") + '" data-pl-en="' + esc(p.id) + '" role="switch" aria-checked="' + !!p.enabled + '" aria-label="' + esc(T("pl.enabled")) + '"></button></div>' +
+          '<div class="perm-box"><small class="muted">' + esc(T("perm.granted_title")) + "</small>" + permCard(p) + "</div>" +
+          '<div class="row-actions">' + (hasCfg ? '<button class="btn sm" data-pl-cfg="' + esc(p.id) + '">' + ic("settings", "sm") + esc(T("cfg.open")) + "</button>" : '<span class="muted sm-t">' + esc(T("cfg.none")) + "</span>") + '<span class="grow"></span><button class="btn sm ghost danger" data-pl-uninstall="' + esc(p.id) + '">' + esc(T("pl.uninstall")) + "</button></div></div>";
+      }).join("") + "</div>" : emptyState("plugins", T("pl.empty"), T("pl.empty_sub"));
+      var trow = trig.length ? '<div class="grid g2 trig-cards">' + trig.map(function (t) { return triggerCard(t, tname); }).join("") + "</div>" : '<p class="muted">' + esc(T("pl.no_triggers")) + "</p>";
       var brow = '<p class="muted">' + esc(baks.length ? T("pl.backups_n", { n: baks.length }) : T("pl.no_backups")) + "</p>";
       mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn" id="bk-now">' + esc(T("pl.backup_now")) + '</button><button class="btn primary" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + "</button></div></div>" + health +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("plugins") + "</span><h2>" + esc(T("pl.installed")) + "</h2></div>" + prow + "</section>" +
-        '<div class="grid g2"><section class="card"><div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("pl.triggers")) + '</h2><button class="btn sm link" id="tr-add">' + ic("plus", "sm") + esc(T("tr.new")) + "</button></div>" + trow + "</section>" +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section></div>", "plugins", [[T("nav.plugins")]]);
+        '<h2 class="sec-h">' + ic("plugins") + esc(T("pl.installed")) + "</h2>" + prow +
+        '<h2 class="sec-h">' + ic("globe") + esc(T("pl.triggers")) + '<span class="grow"></span><button class="btn sm" id="tr-add">' + ic("plus", "sm") + esc(T("tr.new")) + "</button></h2>" + trow +
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section>", "plugins", [[T("nav.plugins")]]);
       $$("[data-pl-uninstall]").forEach(function (b) { b.addEventListener("click", function () {
         var pid = b.getAttribute("data-pl-uninstall");
         confirmDialog({ title: T("pl.uninstall_title"), body: T("pl.uninstall_confirm"), ok: T("pl.uninstall"), danger: true, typeName: pid }).then(function (y) {
@@ -1514,6 +1626,17 @@
         });
       }); });
       $("#pl-add").addEventListener("click", pluginInstallModal);
+      var byId = {}; plugins.forEach(function (p) { byId[p.id] = p; });
+      $$("[data-pl-cfg]").forEach(function (b) { b.addEventListener("click", function () { pluginConfigModal(byId[b.getAttribute("data-pl-cfg")]); }); });
+      $$("[data-pl-en]").forEach(function (b) { b.addEventListener("click", function () { var on = !b.classList.contains("on"); rpc("plugins.enable", { id: b.getAttribute("data-pl-en"), enabled: on }).then(function () { toast(T(on ? "pl.enabled_on" : "pl.enabled_off")); refresh(); }).catch(fail); }); });
+      $$("[data-perm-t]").forEach(function (b) { b.addEventListener("click", function () {
+        var pid = b.getAttribute("data-perm-t"), perm = b.getAttribute("data-perm-v"), on = !!b.getAttribute("data-on");
+        var go = function () { rpc("plugins.permission", { id: pid, permission: perm, granted: !on }).then(function () { toast(T(on ? "perm.revoked" : "perm.granted")); refresh(); }).catch(fail); };
+        if (on) confirmDialog({ title: T("perm.revoke_title"), body: T("perm.revoke_body", { p: perm }), ok: T("perm.revoke"), danger: true }).then(function (y) { if (y) go(); }); else go();
+      }); });
+      $$("[data-trg-en]").forEach(function (b) { b.addEventListener("click", function () { var on = !b.classList.contains("on"); rpc("triggers.enable", { id: b.getAttribute("data-trg-en"), enabled: on }).then(function () { toast(T(on ? "tr.on" : "tr.off")); refresh(); }).catch(fail); }); });
+      $$("[data-trg-test]").forEach(function (b) { b.addEventListener("click", function () { b.disabled = true; rpc("triggers.test", { id: b.getAttribute("data-trg-test") }).then(function () { toast(T("tr.test_sent")); setTimeout(refresh, 800); }).catch(function (e) { b.disabled = false; fail(e); }); }); });
+      $$("[data-copy]").forEach(function (b) { b.addEventListener("click", function () { copyText(b.getAttribute("data-copy")).catch(fail); }); });
       $("#tr-add").addEventListener("click", function () { triggerModal(plugins); });
       $("#bk-now").addEventListener("click", function () {
         rpc("backup.create", {}).then(function (r) { toast(T("pl.backup_done", { path: r.path })); refresh(); }).catch(function (e) { toast(e.message, true); });
@@ -1706,7 +1829,9 @@
   // ---------- SPEND ----------
   var taskNames = {};
   function bucketName(b) { return b.scope === "global" ? T("sp.global") : b.scope === "bucket" ? (T("bucket." + b.scope_id) === "bucket." + b.scope_id ? cap(b.scope_id) : T("bucket." + b.scope_id)) : (taskNames[b.scope_id] || T("col.task") + " " + String(b.scope_id).slice(0, 12)); }
+  var spendView = { range: "7d", by: "task" }, spendCache = {};
   function renderSpend() {
+    spendCache = {};
     return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; }); }, function () {}).then(function () { return api("/api/spend"); }).then(function (d) {
       var s = d.summary, budgets = s.budgets || [];
       var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0, max_tokens: 0 };
@@ -1724,16 +1849,41 @@
         '<div class="card stat"><small>' + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd)) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(s.total_tokens)) + "</strong><span>" + esc(global.max_tokens ? T("sp.tok_cap", { n: num(global.max_tokens) }) : T("sp.no_tok_cap")) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.runs_today")) + "</small><strong>" + esc(runsToday) + "</strong><span>" + esc(plural(d.top_tasks.length, "sp.sources_one", "sp.sources_many")) + "</span></div></div>" +
-        '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.last14")) + '</h2><span class="link muted">' + esc(T("sp.peak", { v: usd(mx, 4) })) + '</span></div><div class="bars grow">' + days.map(function (x, j) {
-          return '<div class="bar' + (j === 13 ? " today" : "") + '" title="' + esc(x.day + " · " + usd(x.usd, 4)) + '"><span data-h="' + (x.usd / mx * 100) + '"></span><small>' + esc(x.day.slice(8)) + "</small></div>";
-        }).join("") + "</div></section>" +
-        '<section class="card fill"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + '</h2><a class="link" href="#/settings">' + esc(T("btn.edit")) + " " + ic("arrow", "sm") + '</a></div><div class="grow">' + budgets.map(function (b) {
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div></div>" +
+        '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
+        '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + '</h2></div><div class="grow">' + budgets.map(function (b, k) {
           var p = pct(b.used_usd, b.max_usd);
-          return '<div class="budget-row"><div><strong>' + esc(bucketName(b)) + '</strong> <span class="muted">· ' + esc(T("sp.per_" + b.period)) + '</span></div><div class="right">' + esc(usd(b.used_usd, 4)) + ' <span class="muted">/ ' + esc(usd(b.max_usd)) + '</span></div><div class="progress' + cls(p) + '"><span data-w="' + p + '"></span></div></div>';
-        }).join("") + "</div></section></div>" +
-        '<div class="grid g2"><section class="card flush fill"><div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T("sp.top")) + "</h2></div>" + (d.top_tasks.length ? '<table class="table"><thead><tr><th>' + esc(T("col.source")) + "</th><th>" + esc(T("nav.runs")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + d.top_tasks.map(function (t) { return "<tr><td><strong>" + esc(t.task_id ? t.name : T("run.adhoc_paren")) + "</strong></td><td>" + esc(t.runs) + '</td><td class="right"><strong>' + esc(usd(t.usd, 4)) + "</strong></td></tr>"; }).join("") + "</tbody></table>" : emptyState("receipt", T("sp.none_today"), "")) + "</section>" +
+          return '<div class="budget-row"><div><strong>' + esc(bucketName(b)) + '</strong> <span class="muted">· ' + esc(T("sp.per_" + b.period)) + '</span></div><div class="right">' + esc(usd(b.used_usd, 4)) + ' <span class="muted">/ ' + (b.max_usd ? esc(usd(b.max_usd)) : "∞") + '</span></div><div class="progress' + cls(p) + '" role="progressbar" aria-valuenow="' + Math.round(p) + '" aria-valuemin="0" aria-valuemax="100"><span data-w="' + p + '"></span></div>' +
+            '<div class="budget-act"><label>' + esc(T("sp.on_breach")) + ' <select data-bact="' + k + '">' + opt("pause_notify", T("sp.a_pause"), b.action !== "block_notify") + opt("block_notify", T("sp.a_block"), b.action === "block_notify") + '</select></label><label>' + esc(T("sp.warn_at")) + ' <select data-bwarn="' + k + '">' + [50, 70, 80, 90, 100].map(function (n) { return opt(n, n + "%", (b.warn_at_pct || 80) === n); }).join("") + "</select></label></div></div>";
+        }).join("") + '<p class="hint">' + esc(T("sp.breach_hint")) + "</p></div></section>" +
         '<section class="card flush fill"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("sp.events")) + "</h2></div>" + (d.events.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.when")) + "</th><th>" + esc(T("sp.scope")) + "</th><th>" + esc(T("sp.detail")) + "</th></tr></thead><tbody>" + d.events.map(function (e) { return '<tr><td class="nowrap">' + esc(when(e.at)) + '</td><td><span class="pill bad">' + esc(T("sp.scope_" + e.scope)) + "</span></td><td>" + esc(e.code ? T("be." + e.code, { name: e.name, used: e.used, cap: e.cap }) : e.detail) + "<small>" + esc(T("sp.action", { a: T("act." + e.action) === "act." + e.action ? e.action : T("act." + e.action) })) + "</small></td></tr>"; }).join("") + "</tbody></table>" : emptyState("shield", T("sp.no_breach"), T("sp.no_breach_sub"))) + "</section></div>",
         "spend", [[T("nav.spend")]]);
+      applySizes(page());
+      var paintBody = function (r) {
+        var rows = r.rows || [], mxd = Math.max.apply(null, (r.days || []).map(function (x) { return x.usd; }).concat([0.0001]));
+        var nm = function (x) { return spendView.by === "task" ? (x.key ? (x.name || taskNames[x.key] || x.key) : T("run.adhoc_paren")) : (x.key || T("sp.unknown")); };
+        $("#sp-body").innerHTML = '<div class="sp-total"><strong>' + esc(usd(r.total_usd || 0, 4)) + '</strong> <span class="muted">' + esc(T("sp.since", { d: spendView.range === "all" ? T("sp.rall") : r.since })) + "</span></div>" +
+          ((r.days || []).length ? '<div class="bars sp-bars">' + r.days.map(function (x) { return '<div class="bar" title="' + esc(x.day + " · " + usd(x.usd, 4)) + '"><span data-h="' + (x.usd / mxd * 100) + '"></span><small>' + esc(x.day.slice(5)) + "</small></div>"; }).join("") + "</div>" : "") +
+          (rows.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.col_" + spendView.by)) + "</th><th>" + esc(T("nav.runs")) + "</th><th>Tokens</th><th>" + esc(T("sp.share")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows.map(function (x) {
+            var sh = r.total_usd ? x.usd / r.total_usd * 100 : 0;
+            return "<tr><td><strong>" + esc(nm(x)) + "</strong></td><td>" + esc(x.runs) + "</td><td>" + esc(num(x.tokens)) + '</td><td><div class="progress thin"><span data-w="' + sh + '"></span></div></td><td class="right"><strong>' + esc(usd(x.usd, 4)) + "</strong></td></tr>";
+          }).join("") + "</tbody></table>" : emptyState("receipt", T("sp.none_range"), ""));
+        applySizes($("#sp-body"));
+      };
+      // cached per range+tab: switching back is instant and never flashes a loader
+      var load = function () {
+        var key = spendView.range + "|" + spendView.by;
+        if (spendCache[key]) paintBody(spendCache[key]); else if (!$("#sp-body").innerHTML) $("#sp-body").innerHTML = skeleton("list");
+        return api("/api/spend/breakdown?range=" + spendView.range + "&by=" + spendView.by).then(function (r) { spendCache[key] = r; if (key === spendView.range + "|" + spendView.by) paintBody(r); }).catch(function (e) { $("#sp-body").innerHTML = errorState(e.message); });
+      };
+      $$("[data-r]").forEach(function (b) { b.addEventListener("click", function () { spendView.range = b.getAttribute("data-r"); $$("[data-r]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-checked", x === b); }); load(); }); });
+      $$("[data-by]").forEach(function (b) { b.addEventListener("click", function () { spendView.by = b.getAttribute("data-by"); $$("[data-by]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-selected", x === b); }); load(); }); });
+      var saveBudget = function (k) {
+        var b = budgets[k];
+        api("/api/budgets", { method: "POST", body: { scope: b.scope, scope_id: b.scope_id, period: b.period, bucket: b.bucket, max_usd: b.max_usd, max_tokens: b.max_tokens, action: $('[data-bact="' + k + '"]').value, warn_at_pct: +$('[data-bwarn="' + k + '"]').value } }).then(function () { toast(T("sp.budget_saved")); }).catch(fail);
+      };
+      $$("[data-bact],[data-bwarn]").forEach(function (sel) { sel.addEventListener("change", function () { saveBudget(+(sel.getAttribute("data-bact") || sel.getAttribute("data-bwarn"))); }); });
+      load();
     });
   }
 

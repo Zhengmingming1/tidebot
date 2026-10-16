@@ -140,7 +140,8 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 	if err != nil || in.Current == nil || !in.Enabled {
 		return nil, errors.New("plugin not installed or disabled")
 	}
-	m := in.Current.Manifest
+	// Only granted permissions count: revoked host APIs are refused, revoked secrets not passed.
+	m := in.Current.Manifest.Restrict(in.Current.Approved)
 	if m.Runtime.Command == "" {
 		return nil, errors.New("plugin has no runtime")
 	}
@@ -183,8 +184,7 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 	}()
 	go h.readLoop(p, stdout, m)
 	go h.waitLoop(p)
-	cfg := map[string]any{}
-	_ = json.Unmarshal([]byte(h.pluginConfig(pluginID)), &cfg)
+	cfg := h.Store.ActivationConfig(h.ctx, pluginID)
 	if _, err := h.call(p, "plugin.activate", map[string]any{"config": cfg, "data_dir": dataDir}, 10*time.Second); err != nil {
 		h.Log.Warn("plugin activate", "plugin", pluginID, "error", err)
 	}

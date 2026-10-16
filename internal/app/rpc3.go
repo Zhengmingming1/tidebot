@@ -49,9 +49,37 @@ func (a *App) extRPC() map[string]rpcFunc {
 				VersionID   string   `json:"version_id"`
 				Permissions []string `json:"permissions"`
 			}](raw)
-			if err := a.Plugins.Approve(ctx, p.VersionID, p.Permissions); err != nil {
+			// Consent is per item: anything not listed is declined and stays off.
+			if err := a.Plugins.Grant(ctx, p.VersionID, p.Permissions); err != nil {
 				return nil, err
 			}
+			return map[string]bool{"ok": true}, nil
+		},
+		"plugins.permission": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, _ := decode[struct {
+				ID         string `json:"id"`
+				Permission string `json:"permission"`
+				Granted    bool   `json:"granted"`
+			}](raw)
+			if err := a.Plugins.SetPermission(ctx, p.ID, p.Permission, p.Granted); err != nil {
+				return nil, err
+			}
+			a.PluginHost.Stop(p.ID) // restart with the new grant set on next use
+			return map[string]bool{"ok": true}, nil
+		},
+		"plugins.config_get": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, _ := decode[struct{ ID string }](raw)
+			return a.Plugins.GetConfig(ctx, p.ID)
+		},
+		"plugins.config_set": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, _ := decode[struct {
+				ID     string         `json:"id"`
+				Values map[string]any `json:"values"`
+			}](raw)
+			if err := a.Plugins.SetConfig(ctx, p.ID, p.Values); err != nil {
+				return nil, err
+			}
+			a.PluginHost.Stop(p.ID)
 			return map[string]bool{"ok": true}, nil
 		},
 		"plugins.rollback": func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -104,6 +132,41 @@ func (a *App) extRPC() map[string]rpcFunc {
 				return nil, err
 			}
 			return a.createTrigger(ctx, in)
+		},
+		"triggers.enable": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, _ := decode[struct {
+				ID      string `json:"id"`
+				Enabled bool   `json:"enabled"`
+			}](raw)
+			v := 0
+			if p.Enabled {
+				v = 1
+			}
+			res, err := a.DB.ExecContext(ctx, `UPDATE trigger_bindings SET enabled=? WHERE id=?`, v, p.ID)
+			if err != nil {
+				return nil, err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return nil, errors.New("trigger not found")
+			}
+			return map[string]bool{"ok": true}, nil
+		},
+		// triggers.test fires the binding with a sample payload (marked as a test) so the run
+		// shows up in run history. Same rate limit and "task must be active" rule as real events.
+		"triggers.test": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, _ := decode[struct{ ID string }](raw)
+			b, err := a.getTrigger(ctx, p.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !b.Enabled {
+				return nil, errors.New("trigger is disabled")
+			}
+			payload := `{"test":true,"note":"test event sent from tidebot"}`
+			if err := a.fireTask(b.ID, b.TaskID, b.Kind, b.Kind+"-test:"+b.ID, payload); err != nil {
+				return nil, err
+			}
+			return map[string]bool{"ok": true}, nil
 		},
 		"triggers.delete": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			p, _ := decode[struct{ ID string }](raw)

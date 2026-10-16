@@ -32,6 +32,8 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		m.Title, m.Body = i18n.T("desktop.n.approval", name), i18n.T("desktop.n.approval_body", e.Count)
 	case EventBudgetBreached:
 		m.Title, m.Body = i18n.T("desktop.n.budget", name), e.Detail
+	case EventBudgetWarning:
+		m.Title, m.Body = i18n.T("desktop.n.budget_warn"), e.Detail
 	case EventBreakerTripped:
 		m.Title, m.Body = i18n.T("notify.breaker", name), e.Detail
 	case EventConfirmNeeded:
