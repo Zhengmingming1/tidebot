@@ -173,13 +173,28 @@
       });
     });
   }
-  function toast(msg, bad) {
-    var t = $("#toast");
-    t.textContent = msg;
-    t.className = "toast" + (bad ? " bad" : "");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(function () { t.className = "toast hidden"; }, 3200);
+  // Toasts: success fades after 3s, errors stay until closed, undo toasts last 8s with a button.
+  function toastBox() {
+    var box = $("#toasts");
+    if (!box) { box = document.createElement("div"); box.id = "toasts"; box.className = "toasts"; box.setAttribute("aria-live", "polite"); document.body.appendChild(box); }
+    return box;
   }
+  function toast(msg, bad, undo) {
+    var el = document.createElement("div");
+    el.className = "toast" + (bad ? " bad" : "") + (undo ? " undo" : "");
+    el.setAttribute("role", bad ? "alert" : "status");
+    el.innerHTML = '<span class="t-msg"></span>' + (undo ? '<button class="t-undo">' + esc(T("t.undo")) + "</button>" : "") + (bad || undo ? '<button class="t-x" aria-label="' + esc(T("btn.close")) + '">' + ic("x", "sm") + "</button>" : "");
+    $(".t-msg", el).textContent = msg;
+    var box = toastBox(), gone = false;
+    var close = function () { if (gone) return; gone = true; el.classList.add("out"); setTimeout(function () { el.remove(); }, 200); };
+    if (undo) $(".t-undo", el).addEventListener("click", function () { close(); undo(); });
+    var x = $(".t-x", el); if (x) x.addEventListener("click", close);
+    box.appendChild(el);
+    while (box.children.length > 4) box.firstChild.remove();
+    if (!bad) setTimeout(close, undo ? 8000 : 3000);
+    return close;
+  }
+  function toastUndo(msg, undo) { return toast(msg, false, undo); }
   function fail(e) { toast(e.message, true); }
   // CSP forbids inline style attributes; sizes are applied through CSSOM.
   function applySizes(root) {
@@ -266,7 +281,7 @@
       if (e.key === "Escape") { res.classList.add("hidden"); q.blur(); }
     });
     q.addEventListener("blur", function () { setTimeout(function () { res.classList.add("hidden"); }, 150); });
-    $("#btn-refresh").addEventListener("click", function () { route(); });
+    $("#btn-refresh").addEventListener("click", function () { refresh(); });
     $("#btn-lang").addEventListener("click", function () {
       var next = state.lang === "zh-CN" ? "en" : "zh-CN";
       setLanguage(next);
@@ -337,13 +352,56 @@
     page().innerHTML = html;
     applySizes(page());
   }
+  // Modal: role=dialog, Esc closes, Tab stays inside, focus returns to the opener.
   function modal(html, onMount) {
-    var root = $("#modal-root");
-    root.innerHTML = '<div class="modal-bg"><div class="card modal">' + html + "</div></div>";
-    var close = function () { root.innerHTML = ""; };
-    $(".modal-bg", root).addEventListener("click", function (e) { if (e.target.classList.contains("modal-bg")) close(); });
+    var root = $("#modal-root"), opener = document.activeElement;
+    root.innerHTML = '<div class="modal-bg"><div class="card modal" role="dialog" aria-modal="true" tabindex="-1">' + html + "</div></div>";
+    var box = $(".modal", root), h = $("h2", box);
+    if (h) { h.id = "modal-title"; box.setAttribute("aria-labelledby", "modal-title"); }
+    var close = function () {
+      if (!root.contains(box)) return;
+      root.innerHTML = ""; document.removeEventListener("keydown", onKey, true);
+      if (opener && opener.focus && document.contains(opener)) opener.focus();
+    };
+    var onKey = function (e) {
+      if (!root.contains(box)) { document.removeEventListener("keydown", onKey, true); return; }
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key !== "Tab") return;
+      var f = $$('a[href],button:not([disabled]),input:not([disabled]):not(.hidden),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])', box).filter(function (x) { return x.offsetParent !== null; });
+      if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    $(".modal-bg", root).addEventListener("mousedown", function (e) { if (e.target.classList.contains("modal-bg")) close(); });
     $$("[data-close]", root).forEach(function (b) { b.addEventListener("click", close); });
     if (onMount) onMount(root, close);
+    var first = $("[autofocus]", box) || $("input:not([type=hidden]):not(.hidden),textarea,select", box);
+    (first && first.offsetParent !== null ? first : box).focus();
+  }
+  // confirmDialog({title, body, ok, danger, typeName}) resolves true only when confirmed.
+  function confirmDialog(o) {
+    return new Promise(function (resolve) {
+      var done = false;
+      modal('<div class="card-head"><span class="ico' + (o.danger ? " danger" : "") + '">' + ic(o.danger ? "trash" : "info") + "</span><h2>" + esc(o.title) + "</h2></div>" +
+        (o.body ? '<p class="confirm-body">' + esc(o.body) + "</p>" : "") +
+        (o.typeName ? '<label class="field"><span>' + esc(T("cf.type_name", { n: o.typeName })) + '</span><input id="cf-name" autocomplete="off" spellcheck="false"></label>' : "") +
+        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn ' + (o.danger ? "danger-solid" : "primary") + '" id="cf-ok"' + (o.typeName ? " disabled" : " autofocus") + ">" + esc(o.ok || T("cf.ok")) + "</button></div>", function (root, close) {
+        var ok = $("#cf-ok", root), nm = $("#cf-name", root);
+        if (nm) nm.addEventListener("input", function () { ok.disabled = nm.value.trim() !== o.typeName; });
+        ok.addEventListener("click", function () { done = true; close(); resolve(true); });
+        var obs = new MutationObserver(function () { if (!root.contains(ok)) { obs.disconnect(); if (!done) resolve(false); } });
+        obs.observe(root, { childList: true });
+      });
+    });
+  }
+  function skeleton(kind) {
+    var row = '<div class="sk-row"><span class="sk sk-ico"></span><span class="sk sk-line w60"></span><span class="sk sk-line w20"></span></div>';
+    return '<div class="skel" aria-busy="true" aria-label="' + esc(T("st.loading")) + '"><div class="sk sk-title"></div><div class="sk sk-line w40"></div>' +
+      (kind === "cards" ? '<div class="grid g4 mt">' + '<div class="card sk-card"></div>'.repeat(4) + "</div>" : '<section class="card mt">' + row.repeat(6) + "</section>") + "</div>";
+  }
+  function errorState(msg, retry) {
+    return '<section class="card"><div class="empty">' + ic("info") + "<strong>" + esc(T("err.generic")) + "</strong>" + esc(msg || "") + '<div class="mt"><button class="btn primary" id="err-retry">' + ic("refresh", "sm") + esc(T("err.retry")) + "</button></div></div></section>";
   }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 
@@ -362,7 +420,7 @@
   function runButton(id, el) {
     if (el) el.classList.add("busy");
     return api("/api/buttons/" + enc(id) + "/run", { method: "POST", body: {} })
-      .then(function (r) { toast(T("toast.started", { name: r.started })); setTimeout(route, 700); })
+      .then(function (r) { toast(T("toast.started", { name: r.started })); setTimeout(refresh, 700); })
       .catch(fail)
       .then(function () { if (el) el.classList.remove("busy"); });
   }
@@ -406,7 +464,7 @@
   }
   function scheduleRefresh(hash, ms) {
     clearTimeout(scheduleRefresh._t);
-    scheduleRefresh._t = setTimeout(function () { if ((location.hash || "#/") === hash && !$("#modal-root").innerHTML) route(); }, ms);
+    scheduleRefresh._t = setTimeout(function () { if ((location.hash || "#/") === hash && !$("#modal-root").innerHTML) refresh(); }, ms);
   }
 
   function quickRunModal() {
@@ -568,7 +626,7 @@
       $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { renderTaskDetail(id, b.getAttribute("data-tab")); }); });
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); setTimeout(reload, 800); }).catch(fail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
-      $("#t-del").addEventListener("click", function () { if (!confirm(T("td.confirm_del", { n: t.name }))) return; api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); });
+      $("#t-del").addEventListener("click", function () { confirmDialog({ title: T("td.del_title"), body: T("td.confirm_del", { n: t.name }), ok: T("td.delete"), danger: true, typeName: t.name }).then(function (y) { if (y) api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); }); });
       var tg = $("#t-toggle");
       tg.addEventListener("click", function () { api(base + "/" + tg.getAttribute("data-act"), { method: "POST", body: {} }).then(reload).catch(fail); });
       var picked = function (bid) {
@@ -593,8 +651,14 @@
       $$("[data-resolve]").forEach(function (b) { b.addEventListener("click", function () { api("/api/amendments/" + enc(b.getAttribute("data-resolve")) + "/resolve", { method: "POST", body: { resolution: b.getAttribute("data-res") } }).then(reload).catch(fail); }); });
       var rollback = function (vid, no) {
         if (vid === vers.current) return;
-        if (!confirm(T("ver.confirm_rb", { n: no }))) return;
-        api(base + "/rollback", { method: "POST", body: { version_id: vid } }).then(function () { toast(T("toast.rolled_back", { n: no })); reload(); }).catch(fail);
+        var prevId = vers.current, prevNo = t.version_no;
+        confirmDialog({ title: T("ver.rb_title", { n: no }), body: T("ver.rb_body"), ok: T("ver.rollback") }).then(function (y) {
+          if (!y) return;
+          api(base + "/rollback", { method: "POST", body: { version_id: vid } }).then(function () {
+            reload();
+            toastUndo(T("toast.rolled_back", { n: no }), function () { api(base + "/rollback", { method: "POST", body: { version_id: prevId, reason: "undo" } }).then(function () { toast(T("toast.rolled_back", { n: prevNo })); reload(); }).catch(fail); });
+          }).catch(fail);
+        });
       };
       $$("[data-rollback]").forEach(function (b) { b.addEventListener("click", function () { rollback(b.getAttribute("data-rollback"), b.getAttribute("data-no")); }); });
       $$(".vtree .node").forEach(function (g) { g.addEventListener("click", function () { rollback(g.getAttribute("data-ver"), g.getAttribute("data-no")); }); });
@@ -629,7 +693,7 @@
             modal('<div class="card-head"><span class="ico">' + ic("branch") + "</span><h2>" + esc(b.getAttribute("data-name")) + '</h2></div><table class="table"><tbody>' + v.versions.slice().reverse().map(function (x) {
               return "<tr><td><strong>v" + esc(x.no) + "</strong>" + (x.id === v.current ? ' <span class="tag perm">' + esc(T("ver.current")) + "</span>" : "") + '</td><td class="nowrap">' + esc(when(x.created_at)) + '</td><td class="right">' + (x.id === v.current ? "" : '<button class="btn sm" data-srb="' + esc(x.id) + '">' + esc(T("ver.rollback")) + "</button>") + "</td></tr>";
             }).join("") + '</tbody></table><div class="actions"><button class="btn ghost" data-close>' + esc(T("btn.close")) + "</button></div>", function (root, close) {
-              $$("[data-srb]", root).forEach(function (x) { x.addEventListener("click", function () { api("/api/skills/" + enc(sid) + "/rollback", { method: "POST", body: { version_id: x.getAttribute("data-srb") } }).then(function () { close(); toast(T("toast.skill_rb")); renderSkills(); }).catch(fail); }); });
+              $$("[data-srb]", root).forEach(function (x) { x.addEventListener("click", function () { api("/api/skills/" + enc(sid) + "/rollback", { method: "POST", body: { version_id: x.getAttribute("data-srb") } }).then(function () { close(); renderSkills(); var prev = v.current; toastUndo(T("toast.skill_rb"), function () { api("/api/skills/" + enc(sid) + "/rollback", { method: "POST", body: { version_id: prev } }).then(function () { toast(T("toast.skill_rb")); renderSkills(); }).catch(fail); }); }).catch(fail); }); });
             });
           }).catch(fail);
         });
@@ -652,7 +716,7 @@
       var save = function (nl) { return api("/api/buttons", { method: "PUT", body: nl }).then(function () { toast(T("toast.buttons_saved")); renderButtons(); }); };
       $("#b-add").addEventListener("click", function () { buttonModal(list, null, tasks, skills, save); });
       $$("[data-edit]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); buttonModal(list, +b.getAttribute("data-edit"), tasks, skills, save); }); });
-      $$("[data-del]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); if (!confirm(T("bt.confirm_rm"))) return; var nl = list.slice(); nl.splice(+b.getAttribute("data-del"), 1); save(nl).catch(fail); }); });
+      $$("[data-del]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); var k = +b.getAttribute("data-del"); confirmDialog({ title: T("bt.rm_title", { n: list[k].label }), body: T("bt.confirm_rm"), ok: T("btn.remove"), danger: true }).then(function (y) { if (!y) return; var nl = list.slice(); nl.splice(k, 1); save(nl).catch(fail); }); }); });
       $$("[data-run]").forEach(function (c) { c.addEventListener("click", function (e) { if (e.target.closest("button")) return; runButton(c.getAttribute("data-run"), c); }); });
     });
   }
@@ -835,7 +899,7 @@
       $$("[data-pv-edit]", box).forEach(function (b) { b.addEventListener("click", function () { providerForm(byName[b.getAttribute("data-pv-edit")], null, again); }); });
       $$("[data-pv-dup]", box).forEach(function (b) { b.addEventListener("click", function () { var c = JSON.parse(JSON.stringify(byName[b.getAttribute("data-pv-dup")])); c.dup = true; providerForm(c, null, again); }); });
       $$("[data-pv-def]", box).forEach(function (b) { b.addEventListener("click", function () { api("/api/providers/" + enc(b.getAttribute("data-pv-def")) + "/default", { method: "POST", body: {} }).then(function () { toast(T("pv.default_set")); again(); }).catch(fail); }); });
-      $$("[data-pv-del]", box).forEach(function (b) { b.addEventListener("click", function () { var n = b.getAttribute("data-pv-del"); if (!confirm(T("pv.confirm_del", { n: n }))) return; api("/api/providers/" + enc(n), { method: "DELETE" }).then(function () { toast(T("pv.deleted")); again(); }).catch(fail); }); });
+      $$("[data-pv-del]", box).forEach(function (b) { b.addEventListener("click", function () { var n = b.getAttribute("data-pv-del"); confirmDialog({ title: T("pv.del_title"), body: T("pv.confirm_del", { n: n }), ok: T("btn.remove"), danger: true }).then(function (y) { if (y) api("/api/providers/" + enc(n), { method: "DELETE" }).then(function () { toast(T("pv.deleted")); again(); }).catch(fail); }); }); });
       $$("[data-pv-test]", box).forEach(function (b) { b.addEventListener("click", function () {
         var n = b.getAttribute("data-pv-test"), out = $('[data-tres="' + n + '"]', box);
         b.disabled = true; out.innerHTML = '<span class="muted">' + esc(T("pv.testing")) + "</span>";
@@ -957,7 +1021,7 @@
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
             close(); toast(T(taskId ? "tf.saved" : "tf.created"));
-            if (taskId) route(); else location.hash = "#/tasks/" + enc(t.id);
+            if (taskId) refresh(); else location.hash = "#/tasks/" + enc(t.id);
           }).catch(function (err) { btn.disabled = false; fail(err); });
         });
       });
@@ -982,7 +1046,7 @@
           $$("[data-close]", foot).forEach(function (b) { b.addEventListener("click", close); });
           $("#pl-ok", foot).addEventListener("click", function (e) {
             e.target.disabled = true;
-            rpc("plugins.approve", { version_id: ver.id, permissions: req }).then(function () { close(); toast(T("pl.installed_ok", { n: m.name || m.id })); route(); }).catch(function (err) { e.target.disabled = false; fail(err); });
+            rpc("plugins.approve", { version_id: ver.id, permissions: req }).then(function () { close(); toast(T("pl.installed_ok", { n: m.name || m.id })); refresh(); }).catch(function (err) { e.target.disabled = false; fail(err); });
           });
         }).catch(function (e) { prev.innerHTML = '<p class="notice bad">' + ic("x", "sm") + esc(e.message) + "</p>"; });
       });
@@ -1014,10 +1078,10 @@
               modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T("tr.token_title")) + '</h2></div><p class="notice">' + ic("info", "sm") + esc(T("tr.token_once")) + "</p>" +
                 fieldHtml("URL", '<input readonly class="mono" value="' + esc(url) + '">') + fieldHtml(T("tr.token"), '<input readonly class="mono" id="tok" value="' + esc(r.token) + '">') +
                 '<p class="hint">' + esc(T("tr.curl_hint")) + '</p><pre class="code">' + esc("curl -X POST -H 'Authorization: Bearer <token>' " + url) + '</pre><div class="actions"><button class="btn" id="tok-copy">' + esc(T("tr.copy")) + '</button><button class="btn primary" data-close>' + esc(T("tr.saved_it")) + "</button></div>", function (r2) {
-                $$("[data-close]", r2).forEach(function (b) { b.addEventListener("click", function () { route(); }); });
+                $$("[data-close]", r2).forEach(function (b) { b.addEventListener("click", function () { refresh(); }); });
                 $("#tok-copy", r2).addEventListener("click", function () { var t = $("#tok", r2); t.select(); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.resolve(document.execCommand("copy"))).then(function () { toast(T("tr.copied")); }); });
               });
-            } else { toast(T("tr.created")); route(); }
+            } else { toast(T("tr.created")); refresh(); }
           }).catch(fail);
         });
       });
@@ -1052,17 +1116,20 @@
         '<div class="grid g2"><section class="card"><div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("pl.triggers")) + '</h2><button class="btn sm link" id="tr-add">' + ic("plus", "sm") + esc(T("tr.new")) + "</button></div>" + trow + "</section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section></div>", "plugins", [[T("nav.plugins")]]);
       $$("[data-pl-uninstall]").forEach(function (b) { b.addEventListener("click", function () {
-        if (!confirm(T("pl.uninstall_confirm"))) return;
-        rpc("plugins.uninstall", { id: b.getAttribute("data-pl-uninstall") }).then(route).catch(function (e) { toast(e.message, true); });
+        var pid = b.getAttribute("data-pl-uninstall");
+        confirmDialog({ title: T("pl.uninstall_title"), body: T("pl.uninstall_confirm"), ok: T("pl.uninstall"), danger: true, typeName: pid }).then(function (y) {
+          if (y) rpc("plugins.uninstall", { id: pid }).then(refresh).catch(fail);
+        });
       }); });
       $$("[data-trg-del]").forEach(function (b) { b.addEventListener("click", function () {
-        if (!confirm(T("tr.confirm_del"))) return;
-        rpc("triggers.delete", { id: b.getAttribute("data-trg-del") }).then(route).catch(function (e) { toast(e.message, true); });
+        confirmDialog({ title: T("tr.del_title"), body: T("tr.confirm_del"), ok: T("btn.remove"), danger: true }).then(function (y) {
+          if (y) rpc("triggers.delete", { id: b.getAttribute("data-trg-del") }).then(refresh).catch(fail);
+        });
       }); });
       $("#pl-add").addEventListener("click", pluginInstallModal);
       $("#tr-add").addEventListener("click", function () { triggerModal(plugins); });
       $("#bk-now").addEventListener("click", function () {
-        rpc("backup.create", {}).then(function (r) { toast(T("pl.backup_done", { path: r.path })); route(); }).catch(function (e) { toast(e.message, true); });
+        rpc("backup.create", {}).then(function (r) { toast(T("pl.backup_done", { path: r.path })); refresh(); }).catch(function (e) { toast(e.message, true); });
       });
     });
   }
@@ -1181,8 +1248,7 @@
         api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; showLogin(); });
       });
       $("#sw-webui").addEventListener("click", function () {
-        if (!confirm(T("set.confirm_off"))) return;
-        api("/api/webui", { method: "POST", body: { enabled: false } }).then(function () { toast(T("toast.webui_off")); }).catch(fail);
+        confirmDialog({ title: T("set.off_title"), body: T("set.confirm_off"), ok: T("set.turn_off"), danger: true }).then(function (y) { if (y) api("/api/webui", { method: "POST", body: { enabled: false } }).then(function () { toast(T("toast.webui_off")); }).catch(fail); });
       });
       $("#bud").addEventListener("submit", function (e) {
         e.preventDefault();
@@ -1194,10 +1260,19 @@
   }
 
   // ---------- router ----------
-  function route() {
+  var lastHash = null;
+  // refresh(): re-render the current page in place (keeps scroll and open modals closed state).
+  function refresh() { return route(true); }
+  function route(soft) {
+    soft = soft === true;
     stopStream();
     clearTimeout(scheduleRefresh._t);
-    $("#modal-root").innerHTML = "";
+    if (!soft) $("#modal-root").innerHTML = "";
+    var y = window.scrollY, pg = page(), sy = pg ? pg.scrollTop : 0;
+    if (!soft && location.hash !== lastHash && pg) pg.innerHTML = skeleton(/^#\/(buttons)?$/.test(location.hash || "#/") ? "cards" : "list");
+    lastHash = location.hash;
+    var nav0 = (location.hash.replace(/^#\/?/, "").split(/[/?]/)[0]) || "home";
+    if (!soft) setNav(nav0);
     var h = location.hash.replace(/^#\/?/, "");
     var qi = h.indexOf("?"), params = new URLSearchParams(qi >= 0 ? h.slice(qi + 1) : "");
     var parts = (qi >= 0 ? h.slice(0, qi) : h).split("/").filter(Boolean).map(decodeURIComponent);
@@ -1213,10 +1288,13 @@
       case "settings": p = renderSettings(); break;
       default: p = renderHome();
     }
-    p.catch(function (e) { if (!e.auth) { renderTopbar([]); page().innerHTML = '<section class="card">' + emptyState("info", T("err.generic"), e.message) + "</section>"; } });
+    p = Promise.resolve(p).then(function () { if (soft) { window.scrollTo(0, y); if (page()) page().scrollTop = sy; } }, function (e) {
+      if (!e.auth) { renderTopbar([]); page().innerHTML = errorState(e.message); $("#err-retry").addEventListener("click", function () { lastHash = null; route(); }); }
+    });
     if (parts[0]) api("/api/overview").then(renderStatus).catch(function () {});
+    return p;
   }
-  window.addEventListener("hashchange", route);
+  window.addEventListener("hashchange", function () { route(); });
 
   function langSelect(id) {
     var opts = [["auto", T("lang.auto")], ["zh-CN", "简体中文"], ["en", "English"]];

@@ -474,5 +474,19 @@
   "up.pick_file": "选择文件",
   "up.pick_folder": "选择文件夹",
   "up.reading": "正在检查…",
-  "toast.skill_version": "已作为新版本导入。"
+  "toast.skill_version": "已作为新版本导入。",
+  "t.undo": "撤销",
+  "cf.type_name": "输入 {n} 以确认",
+  "cf.ok": "确认",
+  "st.loading": "加载中",
+  "err.retry": "重试",
+  "td.del_title": "删除任务?",
+  "ver.rb_title": "回滚到 v{n}?",
+  "ver.rb_body": "只会移动当前版本指针,不会生成新版本,可以撤销。",
+  "bt.rm_title": "删除按钮“{n}”?",
+  "pv.del_title": "删除服务商?",
+  "pl.uninstall_title": "卸载插件?",
+  "tr.del_title": "删除触发器?",
+  "set.off_title": "关闭 WebUI?",
+  "set.turn_off": "关闭"
 }
