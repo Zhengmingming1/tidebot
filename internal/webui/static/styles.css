@@ -335,3 +335,8 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .req-sel { margin: 3px 2px 0 0; accent-color: var(--accent); width: 14px; height: 14px; flex: none; }
 .req-hint { display: flex; align-items: center; gap: 6px; color: var(--bad); margin-top: 8px; }
 .btn[disabled] { opacity: .55; cursor: not-allowed; }
+.lang-btn { width: 40px; height: 40px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.lang-btn:hover { background: var(--bg-sunk); color: var(--text); }
+.lang-sel { height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-size: 13px; }
+.login-lang { display: flex; justify-content: center; margin-top: 16px; }
+:lang(zh-CN) body, html:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", Roboto, sans-serif; }

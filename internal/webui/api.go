@@ -29,26 +29,27 @@ const Version = "0.2.0"
 func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.withAuthCSRF(s.handleLogout))
-	mux.HandleFunc("/api/me", s.withAuth(s.handleMe))
-	mux.HandleFunc("/api/overview", s.withAuth(s.handleOverview))
-	mux.HandleFunc("/api/tasks", s.withAuth(s.handleTasks))
-	mux.HandleFunc("/api/tasks/", s.withAuth(s.handleTaskSub))
+	mux.HandleFunc("/api/me", s.withAuthCSRF(s.handleMe))
+	mux.HandleFunc("/api/overview", s.withAuthCSRF(s.handleOverview))
+	mux.HandleFunc("/api/tasks", s.withAuthCSRF(s.handleTasks))
+	mux.HandleFunc("/api/tasks/", s.withAuthCSRF(s.handleTaskSub))
 	mux.HandleFunc("/api/amendments/", s.withAuthCSRF(s.handleAmendAction))
-	mux.HandleFunc("/api/skills", s.withAuth(s.handleSkills))
+	mux.HandleFunc("/api/skills", s.withAuthCSRF(s.handleSkills))
 	mux.HandleFunc("/api/skills/import", s.withAuthCSRF(s.handleSkillsImport))
-	mux.HandleFunc("/api/skills/", s.withAuth(s.handleSkillSub))
-	mux.HandleFunc("/api/runs", s.withAuth(s.handleRuns))
+	mux.HandleFunc("/api/skills/", s.withAuthCSRF(s.handleSkillSub))
+	mux.HandleFunc("/api/runs", s.withAuthCSRF(s.handleRuns))
 	mux.HandleFunc("/api/runs/quick", s.withAuthCSRF(s.handleQuickRun))
-	mux.HandleFunc("/api/runs/", s.withAuth(s.handleRunSub))
-	mux.HandleFunc("/api/buttons", s.withAuth(s.handleButtons))
+	mux.HandleFunc("/api/runs/", s.withAuthCSRF(s.handleRunSub))
+	mux.HandleFunc("/api/buttons", s.withAuthCSRF(s.handleButtons))
 	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
-	mux.HandleFunc("/api/schedule", s.withAuth(s.handleSchedule))
-	mux.HandleFunc("/api/spend", s.withAuth(s.handleSpend))
-	mux.HandleFunc("/api/notifications", s.withAuth(s.handleNotifications))
-	mux.HandleFunc("/api/search", s.withAuth(s.handleSearch))
-	mux.HandleFunc("/api/settings", s.withAuth(s.handleSettings))
+	mux.HandleFunc("/api/schedule", s.withAuthCSRF(s.handleSchedule))
+	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
+	mux.HandleFunc("/api/notifications", s.withAuthCSRF(s.handleNotifications))
+	mux.HandleFunc("/api/search", s.withAuthCSRF(s.handleSearch))
+	mux.HandleFunc("/api/settings", s.withAuthCSRF(s.handleSettings))
 	mux.HandleFunc("/api/webui", s.withAuthCSRF(s.handleWebUIToggle))
 	mux.HandleFunc("/api/budgets", s.withAuthCSRF(s.handleBudgets))
+	mux.HandleFunc("/api/settings/language", s.withAuthCSRF(s.handleLanguage))
 }
 
 func (s *Server) loc() *time.Location {
@@ -1063,4 +1064,39 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// Languages supported by the WebUI dictionaries.
+var supportedLangs = map[string]bool{"auto": true, "en": true, "zh-CN": true}
+
+func (s *Server) language(ctx context.Context) string {
+	raw, _ := s.deps.Auth.GetSetting(ctx, "language")
+	var v string
+	if json.Unmarshal([]byte(raw), &v) == nil && supportedLangs[v] {
+		return v
+	}
+	return "auto"
+}
+
+func (s *Server) handleLanguage(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, 200, map[string]string{"language": s.language(r.Context())})
+	case http.MethodPut, http.MethodPost:
+		var body struct {
+			Language string `json:"language"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil || !supportedLangs[body.Language] {
+			writeErr(w, 400, "language must be auto, en or zh-CN")
+			return
+		}
+		bs, _ := json.Marshal(body.Language)
+		if err := s.deps.Auth.SetSetting(r.Context(), "language", string(bs)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]string{"language": body.Language})
+	default:
+		writeErr(w, 405, "method not allowed")
+	}
 }

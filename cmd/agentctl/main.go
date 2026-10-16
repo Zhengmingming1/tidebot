@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/Zhengmingming1/tidebot/internal/config"
+	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
 )
 
@@ -31,7 +32,7 @@ func main() {
 	}
 	cli, err := ipc.DialClient(cfg.IPCPath)
 	if err != nil {
-		fatal(fmt.Errorf("connect agentd at %s: %w (is agentd running?)", cfg.IPCPath, err))
+		fatal(fmt.Errorf("%s", i18n.T("cli.connect", cfg.IPCPath, err)))
 	}
 	defer cli.Close()
 
@@ -48,7 +49,7 @@ func main() {
 
 	case "tasks":
 		if len(args) == 0 {
-			fatal(fmt.Errorf("usage: agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag")))
 		}
 		sub := args[0]
 		rest := args[1:]
@@ -75,10 +76,10 @@ func main() {
 			printJSON(out)
 		case "pause":
 			must(cli.Call("tasks.pause", map[string]string{"id": needFlag(rest, "--id")}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		case "resume":
 			must(cli.Call("tasks.resume", map[string]string{"id": needFlag(rest, "--id")}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		case "spend":
 			sub := "summary"
 			if len(args) > 0 {
@@ -99,9 +100,9 @@ func main() {
 					"max_tokens": atoi(flagOpt(args, "--max-tokens", "0")),
 				}
 				must(cli.Call("spend.set_budget", p, nil))
-				fmt.Println("ok")
+				fmt.Println(i18n.T("cli.ok"))
 			default:
-				fatal(fmt.Errorf("usage: agentctl spend summary|set-budget"))
+				fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl spend summary|set-budget")))
 			}
 
 		case "webui":
@@ -125,21 +126,21 @@ func main() {
 				must(cli.Call("webui.status", nil, &out))
 				printJSON(out)
 			default:
-				fatal(fmt.Errorf("usage: agentctl webui [on|off|status]"))
+				fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl webui [on|off|status]")))
 			}
 
 		case "auth":
 			if len(args) == 0 {
-				fatal(fmt.Errorf("usage: agentctl auth set-password|totp-setup|totp-disable"))
+				fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl auth set-password|totp-setup|totp-disable")))
 			}
 			switch args[0] {
 			case "set-password":
 				pw := flagOpt(args[1:], "--password", "")
 				if pw == "" {
-					fatal(fmt.Errorf("--password required"))
+					fatal(fmt.Errorf("%s", i18n.T("cli.required", "--password")))
 				}
 				must(cli.Call("auth.set_password", map[string]string{"password": pw}, nil))
-				fmt.Println("ok")
+				fmt.Println(i18n.T("cli.ok"))
 			case "totp-setup":
 				p := map[string]string{"secret": flagOpt(args[1:], "--secret", ""), "code": flagOpt(args[1:], "--code", "")}
 				var out any
@@ -147,14 +148,14 @@ func main() {
 				printJSON(out)
 			case "totp-disable":
 				must(cli.Call("auth.totp_disable", nil, nil))
-				fmt.Println("ok")
+				fmt.Println(i18n.T("cli.ok"))
 			default:
-				fatal(fmt.Errorf("unknown auth subcommand"))
+				fatal(fmt.Errorf("%s", i18n.T("cli.unknown_sub", "auth", args[0])))
 			}
 
 		case "run":
 			must(cli.Call("tasks.run", map[string]string{"id": needFlag(rest, "--id")}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		case "versions":
 			var out any
 			must(cli.Call("tasks.versions", map[string]string{"id": needFlag(rest, "--id")}, &out))
@@ -163,14 +164,14 @@ func main() {
 			must(cli.Call("tasks.rollback", map[string]string{
 				"id": needFlag(rest, "--id"), "version_id": needFlag(rest, "--version"), "reason": flagOpt(rest, "--reason", "rollback"),
 			}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		case "tag":
 			must(cli.Call("tasks.tag", map[string]string{
 				"id": needFlag(rest, "--id"), "tag": needFlag(rest, "--tag"), "version_id": needFlag(rest, "--version"),
 			}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		default:
-			fatal(fmt.Errorf("unknown tasks subcommand %q", sub))
+			fatal(fmt.Errorf("%s", i18n.T("cli.unknown_sub", "tasks", sub)))
 		}
 
 	case "runs":
@@ -186,7 +187,7 @@ func main() {
 
 	case "amend":
 		if len(args) == 0 {
-			fatal(fmt.Errorf("usage: agentctl amend propose|list|confirm|reject|resolve"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl amend propose|list|confirm|reject|resolve")))
 		}
 		switch args[0] {
 		case "propose":
@@ -211,20 +212,20 @@ func main() {
 			if out != nil {
 				printJSON(out)
 			} else {
-				fmt.Println("ok")
+				fmt.Println(i18n.T("cli.ok"))
 			}
 		case "resolve":
 			must(cli.Call("amendments.resolve", map[string]string{
 				"id": needFlag(args[1:], "--id"), "resolution": needFlag(args[1:], "--resolution"),
 			}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		default:
-			fatal(fmt.Errorf("unknown amend subcommand"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.unknown_sub", "amend", args[0])))
 		}
 
 	case "skills":
 		if len(args) == 0 {
-			fatal(fmt.Errorf("usage: agentctl skills import|list|rollback|pin"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl skills import|list|rollback|pin")))
 		}
 		switch args[0] {
 		case "import":
@@ -241,15 +242,15 @@ func main() {
 			must(cli.Call("skills.rollback", map[string]string{
 				"id": needFlag(args[1:], "--id"), "version_id": needFlag(args[1:], "--version"),
 			}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		case "pin":
 			must(cli.Call("skills.pin", map[string]string{
 				"task_id": needFlag(args[1:], "--task"), "skill_id": needFlag(args[1:], "--skill"),
 				"skill_version_id": needFlag(args[1:], "--version"),
 			}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		default:
-			fatal(fmt.Errorf("unknown skills subcommand"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.unknown_sub", "skills", args[0])))
 		}
 
 	case "spend":
@@ -272,9 +273,9 @@ func main() {
 				"max_tokens": atoi(flagOpt(args, "--max-tokens", "0")),
 			}
 			must(cli.Call("spend.set_budget", p, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		default:
-			fatal(fmt.Errorf("usage: agentctl spend summary|set-budget"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl spend summary|set-budget")))
 		}
 
 	case "webui":
@@ -298,21 +299,21 @@ func main() {
 			must(cli.Call("webui.status", nil, &out))
 			printJSON(out)
 		default:
-			fatal(fmt.Errorf("usage: agentctl webui [on|off|status]"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl webui [on|off|status]")))
 		}
 
 	case "auth":
 		if len(args) == 0 {
-			fatal(fmt.Errorf("usage: agentctl auth set-password|totp-setup|totp-disable"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl auth set-password|totp-setup|totp-disable")))
 		}
 		switch args[0] {
 		case "set-password":
 			pw := flagOpt(args[1:], "--password", "")
 			if pw == "" {
-				fatal(fmt.Errorf("--password required"))
+				fatal(fmt.Errorf("%s", i18n.T("cli.required", "--password")))
 			}
 			must(cli.Call("auth.set_password", map[string]string{"password": pw}, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		case "totp-setup":
 			p := map[string]string{"secret": flagOpt(args[1:], "--secret", ""), "code": flagOpt(args[1:], "--code", "")}
 			var out any
@@ -320,15 +321,15 @@ func main() {
 			printJSON(out)
 		case "totp-disable":
 			must(cli.Call("auth.totp_disable", nil, nil))
-			fmt.Println("ok")
+			fmt.Println(i18n.T("cli.ok"))
 		default:
-			fatal(fmt.Errorf("unknown auth subcommand"))
+			fatal(fmt.Errorf("%s", i18n.T("cli.unknown_sub", "auth", args[0])))
 		}
 
 	case "run":
 		// Ad-hoc run still goes through daemon via a one-shot task create+run is heavy;
 		// expose as tasks.create then tasks.run, or keep a thin status-only CLI.
-		fatal(fmt.Errorf("use: agentctl tasks create ... && agentctl tasks run --id <id>"))
+		fatal(fmt.Errorf("%s", i18n.T("cli.use_tasks")))
 
 	default:
 		usage()
@@ -337,26 +338,11 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `agentctl — talks to agentd over local Unix socket
-
-  agentctl status
-  agentctl providers
-  agentctl tasks ls|get|create|pause|resume|run|versions|rollback|tag
-  agentctl runs [--task ID]
-  agentctl amend propose|list|confirm|reject|resolve
-  agentctl amend confirm --batch <amendment_id> [--only req1,req2]   (one version for the whole batch)
-  agentctl skills import|list|rollback|pin
-  agentctl spend summary|set-budget
-  agentctl webui [on|off|status]
-  agentctl auth set-password|totp-setup|totp-disable
-  agentctl version
-
-IPC path: $TIDEBOT_HOME/agentd.sock (or config ipc_path / TIDEBOT_IPC)
-`)
+	fmt.Fprint(os.Stderr, i18n.T("cli.usage"))
 }
 
 func fatal(err error) {
-	fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	fmt.Fprintln(os.Stderr, i18n.T("cli.error", err))
 	os.Exit(1)
 }
 
@@ -387,7 +373,7 @@ func amendTarget(args []string) map[string]any {
 func needFlag(args []string, name string) string {
 	v := flagOpt(args, name, "")
 	if v == "" {
-		fatal(fmt.Errorf("%s required", name))
+		fatal(fmt.Errorf("%s", i18n.T("cli.required", name)))
 	}
 	return v
 }
@@ -411,7 +397,7 @@ func flagVal(args []string, name string, pos int) string {
 	if pos >= 0 && pos < len(args) && args[pos] != "" && args[pos][0] != '-' {
 		return args[pos]
 	}
-	fatal(fmt.Errorf("%s required", name))
+	fatal(fmt.Errorf("%s", i18n.T("cli.required", name)))
 	return ""
 }
 
