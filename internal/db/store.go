@@ -34,26 +34,28 @@ type Task struct {
 
 // Run is one execution of a task (or ad-hoc prompt).
 type Run struct {
-	ID            string
-	UserID        string
-	TaskID        sql.NullString
-	Status        string
-	TriggerKind   string
-	ProviderID    sql.NullString
-	ProviderName  sql.NullString
-	Model         sql.NullString
-	Prompt        string
-	WorkspaceDir  string
-	SessionID     sql.NullString
-	ExitCode      sql.NullInt64
-	ErrorMessage  sql.NullString
-	TotalCostUSD  sql.NullFloat64
-	InputTokens   sql.NullInt64
-	OutputTokens  sql.NullInt64
-	DurationMS    sql.NullInt64
-	StartedAt     sql.NullString
-	FinishedAt    sql.NullString
-	CreatedAt     string
+	ID              string
+	UserID          string
+	TaskID          sql.NullString
+	Status          string
+	TriggerKind     string
+	ProviderID      sql.NullString
+	ProviderName    sql.NullString
+	Model           sql.NullString
+	Prompt          string
+	WorkspaceDir    string
+	SessionID       sql.NullString
+	ExitCode        sql.NullInt64
+	ErrorMessage    sql.NullString
+	TotalCostUSD    sql.NullFloat64
+	InputTokens     sql.NullInt64
+	OutputTokens    sql.NullInt64
+	DurationMS      sql.NullInt64
+	StartedAt       sql.NullString
+	FinishedAt      sql.NullString
+	CreatedAt       string
+	TaskVersionID   sql.NullString
+	HasNextRunItems bool
 }
 
 // ProviderRow is a persisted provider profile.
@@ -168,12 +170,13 @@ func (s *Store) InsertRun(ctx context.Context, r Run) error {
 	_, err := s.DB.ExecContext(ctx, `
 INSERT INTO runs(id, user_id, task_id, status, trigger_kind, provider_id, provider_name, model,
   prompt, workspace_dir, session_id, exit_code, error_message, total_cost_usd, input_tokens,
-  output_tokens, duration_ms, started_at, finished_at, created_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  output_tokens, duration_ms, started_at, finished_at, created_at, task_version_id, has_next_run_items)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, nullDefault(r.UserID, "owner"), r.TaskID, nullDefault(r.Status, "queued"),
 		nullDefault(r.TriggerKind, "manual"), r.ProviderID, r.ProviderName, r.Model,
 		r.Prompt, r.WorkspaceDir, r.SessionID, r.ExitCode, r.ErrorMessage, r.TotalCostUSD,
 		r.InputTokens, r.OutputTokens, r.DurationMS, r.StartedAt, r.FinishedAt, r.CreatedAt,
+		r.TaskVersionID, boolToInt(r.HasNextRunItems),
 	)
 	return err
 }
