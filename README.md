@@ -68,6 +68,12 @@ internal/secrets    密钥解析（env；钥匙串后续）
 testdata/mock-claude  假 claude，供测试与无 Key 联调
 ```
 
+## CI
+
+GitHub Actions 工作流样例在 [`docs/ci/github-actions-ci.yml`](docs/ci/github-actions-ci.yml)。
+当前用于登录的 OAuth token 没有 `workflow` 权限，无法直接推送到 `.github/workflows/`。
+启用方式：把该文件复制为 `.github/workflows/ci.yml` 后，用带 `workflow` scope 的 token/`gh auth login` 推送，或在 GitHub 网页上手动添加。
+
 ## 许可证
 
 私有仓库；产品名不使用 “Claude Code”。
