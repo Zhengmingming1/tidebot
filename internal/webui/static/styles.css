@@ -46,7 +46,7 @@ body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--font); -w
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-600); }
 button, input, select, textarea { font: inherit; color: inherit; }
-svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 svg.i.sm { width: 16px; height: 16px; }
 svg.i.lg { width: 28px; height: 28px; }
 .hidden { display: none !important; }
