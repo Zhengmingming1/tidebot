@@ -1,0 +1,1039 @@
+package webui
+
+import (
+	"bufio"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/robfig/cron/v3"
+
+	"github.com/Zhengmingming1/tidebot/internal/auth"
+	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
+	"github.com/Zhengmingming1/tidebot/internal/version"
+)
+
+// Version is shown in the UI footer.
+const Version = "0.2.0"
+
+func (s *Server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/logout", s.withAuthCSRF(s.handleLogout))
+	mux.HandleFunc("/api/me", s.withAuth(s.handleMe))
+	mux.HandleFunc("/api/overview", s.withAuth(s.handleOverview))
+	mux.HandleFunc("/api/tasks", s.withAuth(s.handleTasks))
+	mux.HandleFunc("/api/tasks/", s.withAuth(s.handleTaskSub))
+	mux.HandleFunc("/api/amendments/", s.withAuthCSRF(s.handleAmendAction))
+	mux.HandleFunc("/api/skills", s.withAuth(s.handleSkills))
+	mux.HandleFunc("/api/skills/import", s.withAuthCSRF(s.handleSkillsImport))
+	mux.HandleFunc("/api/skills/", s.withAuth(s.handleSkillSub))
+	mux.HandleFunc("/api/runs", s.withAuth(s.handleRuns))
+	mux.HandleFunc("/api/runs/quick", s.withAuthCSRF(s.handleQuickRun))
+	mux.HandleFunc("/api/runs/", s.withAuth(s.handleRunSub))
+	mux.HandleFunc("/api/buttons", s.withAuth(s.handleButtons))
+	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
+	mux.HandleFunc("/api/schedule", s.withAuth(s.handleSchedule))
+	mux.HandleFunc("/api/spend", s.withAuth(s.handleSpend))
+	mux.HandleFunc("/api/notifications", s.withAuth(s.handleNotifications))
+	mux.HandleFunc("/api/search", s.withAuth(s.handleSearch))
+	mux.HandleFunc("/api/settings", s.withAuth(s.handleSettings))
+	mux.HandleFunc("/api/webui", s.withAuthCSRF(s.handleWebUIToggle))
+	mux.HandleFunc("/api/budgets", s.withAuthCSRF(s.handleBudgets))
+}
+
+func (s *Server) loc() *time.Location {
+	if s.deps.Location != nil {
+		return s.deps.Location
+	}
+	return time.Local
+}
+
+// ---------- DTOs ----------
+
+type taskDTO struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"`
+	Cron        string   `json:"cron"`
+	Prompt      string   `json:"prompt"`
+	Goal        string   `json:"goal"`
+	Provider    string   `json:"provider"`
+	Workspace   string   `json:"workspace"`
+	NextRunAt   string   `json:"next_run_at"`
+	LastFiredAt string   `json:"last_fired_at"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
+	VersionNo   int      `json:"version_no"`
+	VersionID   string   `json:"version_id"`
+	Constraints []string `json:"constraints"`
+	Skills      []string `json:"skills"`
+	RunsToday   int      `json:"runs_today"`
+	LastStatus  string   `json:"last_status"`
+}
+
+func toTaskDTO(v tasksvc.TaskView) taskDTO {
+	d := taskDTO{
+		ID: v.Task.ID, Name: v.Task.Name, Status: v.Task.Status, Cron: v.Task.CronExpr,
+		Prompt: v.Task.Prompt, Workspace: v.Task.WorkspaceDir,
+		NextRunAt: v.Task.NextRunAt.String, LastFiredAt: v.Task.LastFiredAt.String,
+		CreatedAt: v.Task.CreatedAt, UpdatedAt: v.Task.UpdatedAt,
+		Constraints: []string{}, Skills: []string{},
+	}
+	if v.CurrentVersion != nil {
+		d.VersionNo = v.CurrentVersion.VersionNo
+		d.VersionID = v.CurrentVersion.ID
+	}
+	if v.Spec != nil {
+		d.Goal = v.Spec.Goal
+		d.Provider = v.Spec.Provider
+		if v.Spec.Prompt != "" {
+			d.Prompt = v.Spec.Prompt
+		}
+		if v.Spec.WorkspaceDir != "" {
+			d.Workspace = v.Spec.WorkspaceDir
+		}
+		for _, c := range v.Spec.Constraints {
+			d.Constraints = append(d.Constraints, c.Text)
+		}
+		for _, b := range v.Spec.SkillBindings {
+			d.Skills = append(d.Skills, b.SkillName)
+		}
+	}
+	return d
+}
+
+type runDTO struct {
+	ID           string  `json:"id"`
+	TaskID       string  `json:"task_id"`
+	TaskName     string  `json:"task_name"`
+	Status       string  `json:"status"`
+	Trigger      string  `json:"trigger"`
+	Provider     string  `json:"provider"`
+	Model        string  `json:"model"`
+	CostUSD      float64 `json:"cost_usd"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	DurationMS   int64   `json:"duration_ms"`
+	StartedAt    string  `json:"started_at"`
+	FinishedAt   string  `json:"finished_at"`
+	CreatedAt    string  `json:"created_at"`
+	Error        string  `json:"error"`
+	Prompt       string  `json:"prompt"`
+	VersionNo    int     `json:"version_no"`
+	Bucket       string  `json:"bucket"`
+}
+
+const runSelect = `SELECT r.id, COALESCE(r.task_id,''), COALESCE(t.name,''), r.status, r.trigger_kind,
+ COALESCE(r.provider_name,''), COALESCE(r.model,''), COALESCE(r.total_cost_usd,0),
+ COALESCE(r.input_tokens,0), COALESCE(r.output_tokens,0), COALESCE(r.duration_ms,0),
+ COALESCE(r.started_at,''), COALESCE(r.finished_at,''), r.created_at, COALESCE(r.error_message,''),
+ r.prompt, COALESCE(v.version_no,0), COALESCE(r.cost_bucket,'production')
+FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN versions v ON v.id = r.task_version_id`
+
+func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]runDTO, error) {
+	rows, err := s.deps.DB.QueryContext(ctx, runSelect+" "+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []runDTO{}
+	for rows.Next() {
+		var d runDTO
+		if err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
+			&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
+			&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket); err != nil {
+			return nil, err
+		}
+		if len(d.Prompt) > 300 {
+			d.Prompt = d.Prompt[:300] + "…"
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func limitParam(r *http.Request, def, max int) int {
+	n, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || n <= 0 {
+		return def
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
+
+// ---------- buttons ----------
+
+type buttonDTO struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Icon        string `json:"icon"`
+	TaskID      string `json:"task_id,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+	Provider    string `json:"provider,omitempty"`
+}
+
+var buttonIDRe = regexp.MustCompile(`^[a-z0-9_-]{1,40}$`)
+
+func (s *Server) loadButtons(ctx context.Context) []buttonDTO {
+	raw, _ := s.deps.Auth.GetSetting(ctx, "buttons")
+	out := []buttonDTO{}
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &out)
+	}
+	return out
+}
+
+func (s *Server) handleButtons(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, 200, s.loadButtons(r.Context()))
+	case http.MethodPut, http.MethodPost:
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var list []buttonDTO
+			if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&list); err != nil {
+				writeErr(w, 400, "bad json")
+				return
+			}
+			for _, b := range list {
+				if !buttonIDRe.MatchString(b.ID) || b.Label == "" || (b.TaskID == "" && b.Prompt == "") {
+					writeErr(w, 400, "each button needs id [a-z0-9_-], label and task_id or prompt")
+					return
+				}
+			}
+			bs, _ := json.Marshal(list)
+			if err := s.deps.Auth.SetSetting(r.Context(), "buttons", string(bs)); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, 200, list)
+		})).ServeHTTP(w, r)
+	default:
+		writeErr(w, 405, "method")
+	}
+}
+
+func (s *Server) handleButtonRun(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/buttons/"), "/")
+	if len(parts) != 2 || parts[1] != "run" || r.Method != http.MethodPost {
+		writeErr(w, 404, "not found")
+		return
+	}
+	for _, b := range s.loadButtons(r.Context()) {
+		if b.ID != parts[0] {
+			continue
+		}
+		var err error
+		switch {
+		case b.TaskID != "" && s.deps.RunTask != nil:
+			err = s.deps.RunTask(b.TaskID, cost.BucketProduction)
+		case b.Prompt != "" && s.deps.QuickRun != nil:
+			err = s.deps.QuickRun(b.Prompt, b.Provider)
+		default:
+			err = fmt.Errorf("execution not available")
+		}
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 202, map[string]any{"ok": true, "started": b.Label})
+		return
+	}
+	writeErr(w, 404, "button not found")
+}
+
+func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Prompt   string `json:"prompt"`
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil || strings.TrimSpace(body.Prompt) == "" {
+		writeErr(w, 400, "prompt required")
+		return
+	}
+	if s.deps.QuickRun == nil {
+		writeErr(w, 500, "execution not available")
+		return
+	}
+	if err := s.deps.QuickRun(body.Prompt, body.Provider); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 202, map[string]any{"ok": true})
+}
+
+// ---------- schedule ----------
+
+type scheduleItem struct {
+	TaskID   string `json:"task_id"`
+	TaskName string `json:"task_name"`
+	At       string `json:"at"`
+	Cron     string `json:"cron"`
+}
+
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
+func (s *Server) upcoming(ctx context.Context, horizon time.Duration, max int) ([]scheduleItem, error) {
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, name, cron_expr FROM tasks WHERE status='active' AND cron_expr <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	type t3 struct{ id, name, expr string }
+	var list []t3
+	for rows.Next() {
+		var x t3
+		if err := rows.Scan(&x.id, &x.name, &x.expr); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		list = append(list, x)
+	}
+	rows.Close()
+	now := time.Now().In(s.loc())
+	end := now.Add(horizon)
+	out := []scheduleItem{}
+	for _, x := range list {
+		sch, err := cronParser.Parse(x.expr)
+		if err != nil {
+			continue
+		}
+		next := now
+		for i := 0; i < 6; i++ {
+			next = sch.Next(next)
+			if next.IsZero() || next.After(end) {
+				break
+			}
+			out = append(out, scheduleItem{TaskID: x.id, TaskName: x.name, At: next.UTC().Format(time.RFC3339), Cron: x.expr})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At < out[j].At })
+	if len(out) > max {
+		out = out[:max]
+	}
+	return out, nil
+}
+
+func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
+	items, err := s.upcoming(r.Context(), 7*24*time.Hour, limitParam(r, 20, 100))
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "timezone": s.loc().String()})
+}
+
+// ---------- overview (home) ----------
+
+func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	sched, _ := s.upcoming(ctx, 48*time.Hour, 4)
+	runs, err := s.queryRuns(ctx, "ORDER BY r.created_at DESC LIMIT 8")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	sum, _ := s.deps.Cost.Summary(ctx, "")
+	var maxUSD float64
+	for _, b := range sum.Budgets {
+		if b.Scope == "global" && b.Period == "day" {
+			maxUSD = b.MaxUSD
+		}
+	}
+	// budgets reset at next UTC midnight (ledger day is UTC)
+	nowUTC := time.Now().UTC()
+	reset := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day()+1, 0, 0, 0, 0, time.UTC)
+	var active int
+	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM runs WHERE status IN ('queued','running')`).Scan(&active)
+	writeJSON(w, 200, map[string]any{
+		"buttons":  s.loadButtons(ctx),
+		"schedule": sched,
+		"runs":     runs,
+		"spend": map[string]any{
+			"used_usd": sum.TotalUSD, "max_usd": maxUSD, "tokens": sum.TotalTokens,
+			"by_bucket": sum.ByBucket, "resets_at": reset.Format(time.RFC3339),
+		},
+		"active_runs": active,
+		"timezone":    s.loc().String(),
+	})
+}
+
+// ---------- tasks ----------
+
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method")
+		return
+	}
+	list, err := s.deps.Tasks.List(r.Context())
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	out := []taskDTO{}
+	for _, v := range list {
+		out = append(out, toTaskDTO(v))
+	}
+	// enrich with last status / runs today
+	today := time.Now().UTC().Format("2006-01-02")
+	for i := range out {
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT status FROM runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1`, out[i].ID).Scan(&out[i].LastStatus)
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM runs WHERE task_id=? AND substr(created_at,1,10)=?`, out[i].ID, today).Scan(&out[i].RunsToday)
+	}
+	writeJSON(w, 200, out)
+}
+
+type versionDTO struct {
+	ID        string `json:"id"`
+	No        int    `json:"no"`
+	ParentID  string `json:"parent_id"`
+	Source    string `json:"source"`
+	Message   string `json:"message"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/tasks/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	id := parts[0]
+	ctx := r.Context()
+	if len(parts) == 1 {
+		v, err := s.deps.Tasks.Get(ctx, id)
+		if err != nil {
+			writeErr(w, 404, "task not found")
+			return
+		}
+		writeJSON(w, 200, toTaskDTO(v))
+		return
+	}
+	switch parts[1] {
+	case "amendments":
+		if r.Method == http.MethodGet {
+			list, err := s.deps.Amend.List(ctx, id, "")
+			if err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, 200, list)
+			return
+		}
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Utterance string `json:"utterance"`
+			}
+			if err := json.NewDecoder(io.LimitReader(r.Body, 32<<10)).Decode(&body); err != nil || strings.TrimSpace(body.Utterance) == "" {
+				writeErr(w, 400, "utterance required")
+				return
+			}
+			items, err := s.deps.Amend.Propose(r.Context(), id, body.Utterance, "user")
+			if err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, 200, items)
+		})).ServeHTTP(w, r)
+		return
+	case "versions":
+		vers, err := s.deps.Ver.ListVersions(ctx, version.EntityTask, id)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		cur, _ := s.deps.Ver.GetPointer(ctx, version.EntityTask, id, version.PointerCurrent)
+		out := []versionDTO{}
+		for _, v := range vers {
+			out = append(out, versionDTO{ID: v.ID, No: v.VersionNo, ParentID: v.ParentVersionID.String,
+				Source: v.Source, Message: v.Message.String, CreatedAt: v.CreatedAt})
+		}
+		writeJSON(w, 200, map[string]any{"versions": out, "current": cur.String})
+		return
+	case "runs":
+		runs, err := s.queryRuns(ctx, "WHERE r.task_id=? ORDER BY r.created_at DESC LIMIT ?", id, limitParam(r, 10, 100))
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, runs)
+		return
+	case "run":
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || s.deps.RunTask == nil {
+				writeErr(w, 405, "method")
+				return
+			}
+			if err := s.deps.RunTask(id, cost.BucketProduction); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, 202, map[string]any{"ok": true})
+		})).ServeHTTP(w, r)
+		return
+	case "pause", "resume":
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			st := "paused"
+			if parts[1] == "resume" {
+				st = "active"
+			}
+			if err := s.deps.Tasks.SetStatus(r.Context(), id, st, "webui"); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, 200, map[string]any{"ok": true, "status": st})
+		})).ServeHTTP(w, r)
+		return
+	case "rollback":
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				VersionID string `json:"version_id"`
+			}
+			_ = json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
+			if body.VersionID == "" {
+				writeErr(w, 400, "version_id required")
+				return
+			}
+			if err := s.deps.Tasks.Rollback(r.Context(), id, body.VersionID, "user", "webui rollback"); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, 200, map[string]any{"ok": true})
+		})).ServeHTTP(w, r)
+		return
+	}
+	writeErr(w, 404, "not found")
+}
+
+func (s *Server) handleAmendAction(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/amendments/"), "/")
+	if len(parts) < 2 || r.Method != http.MethodPost {
+		writeErr(w, 404, "not found")
+		return
+	}
+	id, action := parts[0], parts[1]
+	switch action {
+	case "confirm":
+		a, err := s.deps.Amend.Confirm(r.Context(), id, "user")
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, a)
+	case "reject":
+		if err := s.deps.Amend.Reject(r.Context(), id); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	case "resolve":
+		var body struct {
+			Resolution string `json:"resolution"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
+		if err := s.deps.Amend.ResolveConflict(r.Context(), id, body.Resolution); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	default:
+		writeErr(w, 404, "not found")
+	}
+}
+
+// ---------- skills ----------
+
+type skillDTO struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	VersionID string `json:"version_id"`
+	VersionNo int    `json:"version_no"`
+	UpdatedAt string `json:"updated_at"`
+	Files     int    `json:"files"`
+	UsedBy    int    `json:"used_by"`
+}
+
+func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
+	list, err := s.deps.Skills.List(r.Context())
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	out := []skillDTO{}
+	for _, sk := range list {
+		d := skillDTO{ID: sk.ID, Name: sk.Name}
+		if sk.CurrentVersion != nil {
+			d.VersionID = sk.CurrentVersion.ID
+			d.VersionNo = sk.CurrentVersion.VersionNo
+			d.UpdatedAt = sk.CurrentVersion.CreatedAt
+			_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM version_files WHERE version_id=?`, d.VersionID).Scan(&d.Files)
+		}
+		out = append(out, d)
+	}
+	// used_by: tasks whose current spec binds this skill
+	tasks, _ := s.deps.Tasks.List(r.Context())
+	for i := range out {
+		for _, t := range tasks {
+			if t.Spec == nil {
+				continue
+			}
+			for _, b := range t.Spec.SkillBindings {
+				if b.SkillID == out[i].ID {
+					out[i].UsedBy++
+				}
+			}
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) handleSkillSub(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/skills/"), "/")
+	if len(parts) != 2 || parts[0] == "" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	id := parts[0]
+	switch parts[1] {
+	case "versions":
+		vers, err := s.deps.Ver.ListVersions(r.Context(), version.EntitySkill, id)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		cur, _ := s.deps.Ver.GetPointer(r.Context(), version.EntitySkill, id, version.PointerCurrent)
+		out := []versionDTO{}
+		for _, v := range vers {
+			out = append(out, versionDTO{ID: v.ID, No: v.VersionNo, ParentID: v.ParentVersionID.String, Source: v.Source, Message: v.Message.String, CreatedAt: v.CreatedAt})
+		}
+		writeJSON(w, 200, map[string]any{"versions": out, "current": cur.String})
+	case "rollback":
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				VersionID string `json:"version_id"`
+			}
+			_ = json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
+			if body.VersionID == "" {
+				writeErr(w, 400, "version_id required")
+				return
+			}
+			if err := s.deps.Skills.Rollback(r.Context(), id, body.VersionID, "user"); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, 200, map[string]any{"ok": true})
+		})).ServeHTTP(w, r)
+	default:
+		writeErr(w, 404, "not found")
+	}
+}
+
+func (s *Server) handleSkillsImport(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+		Dir  string `json:"dir"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || body.Dir == "" {
+		writeErr(w, 400, "dir required")
+		return
+	}
+	if st, err := os.Stat(body.Dir); err != nil || !st.IsDir() {
+		writeErr(w, 400, "dir not found")
+		return
+	}
+	sk, err := s.deps.Skills.ImportDir(r.Context(), body.Name, body.Dir, "user")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": sk.ID, "name": sk.Name})
+}
+
+// ---------- runs ----------
+
+func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	where := "WHERE 1=1"
+	var args []any
+	if st := q.Get("status"); st != "" {
+		where += " AND r.status=?"
+		args = append(args, st)
+	}
+	if tid := q.Get("task_id"); tid != "" {
+		where += " AND r.task_id=?"
+		args = append(args, tid)
+	}
+	where += " ORDER BY r.created_at DESC LIMIT ?"
+	args = append(args, limitParam(r, 50, 200))
+	runs, err := s.queryRuns(r.Context(), where, args...)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, runs)
+}
+
+func (s *Server) runStatus(ctx context.Context, id string) string {
+	var st string
+	if err := s.deps.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE id=?`, id).Scan(&st); err != nil {
+		return ""
+	}
+	return st
+}
+
+func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/runs/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	id := parts[0]
+	if len(parts) == 1 {
+		runs, err := s.queryRuns(r.Context(), "WHERE r.id=?", id)
+		if err != nil || len(runs) == 0 {
+			writeErr(w, 404, "run not found")
+			return
+		}
+		writeJSON(w, 200, runs[0])
+		return
+	}
+	if parts[1] != "events" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	s.streamRunLog(w, r, id)
+}
+
+func isTerminal(st string) bool {
+	switch st {
+	case "succeeded", "failed", "canceled", "timeout", "skipped":
+		return true
+	}
+	return false
+}
+
+// streamRunLog tails the run's log file over SSE until the run ends,
+// the client disconnects, or the UI goes idle.
+func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID string) {
+	ctx := r.Context()
+	st := s.runStatus(ctx, runID)
+	if st == "" {
+		writeErr(w, 404, "run not found")
+		return
+	}
+	if !s.sseAllowed() {
+		writeErr(w, 429, "sse idle; interact with UI to resume")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, 500, "no flush")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	send := func(event, data string) {
+		for _, line := range strings.Split(data, "\n") {
+			if event != "" {
+				fmt.Fprintf(w, "event: %s\n", event)
+			}
+			fmt.Fprintf(w, "data: %s\n\n", line)
+		}
+		flusher.Flush()
+	}
+	path := ""
+	if s.deps.LogPath != nil {
+		path = s.deps.LogPath(runID)
+	}
+	var offset int64
+	readMore := func() bool {
+		if path == "" {
+			return false
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return false
+		}
+		br := bufio.NewReader(f)
+		ended := false
+		for {
+			line, err := br.ReadString('\n')
+			if len(line) > 0 && strings.HasSuffix(line, "\n") {
+				offset += int64(len(line))
+				line = strings.TrimRight(line, "\n")
+				if line == "[[end]]" {
+					ended = true
+					continue
+				}
+				send("", line)
+			}
+			if err != nil {
+				break
+			}
+		}
+		return ended
+	}
+	if readMore() {
+		send("end", s.runStatus(ctx, runID))
+		return
+	}
+	if path == "" && isTerminal(st) {
+		send("", "(no log captured for this run)")
+		send("end", st)
+		return
+	}
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		case <-ticker.C:
+			if readMore() {
+				send("end", s.runStatus(ctx, runID))
+				return
+			}
+			if cur := s.runStatus(ctx, runID); isTerminal(cur) {
+				readMore()
+				send("end", cur)
+				return
+			}
+			if !s.sseAllowed() {
+				send("idle", "stream paused (idle)")
+				return
+			}
+		}
+	}
+}
+
+// ---------- spend / notifications / search / settings ----------
+
+func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	sum, err := s.deps.Cost.Summary(ctx, "")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// last 14 days
+	type dayRow struct {
+		Day    string  `json:"day"`
+		USD    float64 `json:"usd"`
+		Tokens int64   `json:"tokens"`
+	}
+	days := []dayRow{}
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT day, SUM(usd), SUM(tokens) FROM cost_ledger WHERE day >= ? GROUP BY day ORDER BY day`,
+		time.Now().UTC().AddDate(0, 0, -13).Format("2006-01-02"))
+	if err == nil {
+		for rows.Next() {
+			var d dayRow
+			if rows.Scan(&d.Day, &d.USD, &d.Tokens) == nil {
+				days = append(days, d)
+			}
+		}
+		rows.Close()
+	}
+	type evRow struct {
+		At     string `json:"at"`
+		Scope  string `json:"scope"`
+		Kind   string `json:"kind"`
+		Detail string `json:"detail"`
+		Action string `json:"action"`
+	}
+	events := []evRow{}
+	rows, err = s.deps.DB.QueryContext(ctx, `SELECT at, scope, kind, detail, action_taken FROM budget_events ORDER BY at DESC LIMIT 10`)
+	if err == nil {
+		for rows.Next() {
+			var e evRow
+			if rows.Scan(&e.At, &e.Scope, &e.Kind, &e.Detail, &e.Action) == nil {
+				events = append(events, e)
+			}
+		}
+		rows.Close()
+	}
+	// top tasks today
+	type taskSpend struct {
+		TaskID string  `json:"task_id"`
+		Name   string  `json:"name"`
+		USD    float64 `json:"usd"`
+		Runs   int     `json:"runs"`
+	}
+	top := []taskSpend{}
+	rows, err = s.deps.DB.QueryContext(ctx, `SELECT COALESCE(c.task_id,''), COALESCE(t.name,'(ad-hoc)'), SUM(c.usd), COUNT(1)
+FROM cost_ledger c LEFT JOIN tasks t ON t.id=c.task_id WHERE c.day=? GROUP BY c.task_id ORDER BY SUM(c.usd) DESC LIMIT 8`, sum.Day)
+	if err == nil {
+		for rows.Next() {
+			var t taskSpend
+			if rows.Scan(&t.TaskID, &t.Name, &t.USD, &t.Runs) == nil {
+				top = append(top, t)
+			}
+		}
+		rows.Close()
+	}
+	writeJSON(w, 200, map[string]any{"summary": sum, "days": days, "events": events, "top_tasks": top})
+}
+
+func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
+	type n struct {
+		ID        string `json:"id"`
+		Event     string `json:"event"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+	}
+	out := []n{}
+	rows, err := s.deps.DB.QueryContext(r.Context(), `SELECT id, event, body, created_at FROM notifications ORDER BY created_at DESC LIMIT 20`)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var x n
+		if rows.Scan(&x.ID, &x.Event, &x.Body, &x.CreatedAt) == nil {
+			out = append(out, x)
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	type hit struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Sub  string `json:"sub"`
+	}
+	out := []hit{}
+	if q == "" {
+		writeJSON(w, 200, out)
+		return
+	}
+	like := "%" + strings.NewReplacer("%", `\%`, "_", `\_`).Replace(q) + "%"
+	query := func(kind, sqlq string) {
+		rows, err := s.deps.DB.QueryContext(r.Context(), sqlq, like, like)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var h hit
+			if rows.Scan(&h.ID, &h.Name, &h.Sub) == nil {
+				h.Kind = kind
+				out = append(out, h)
+			}
+		}
+	}
+	query("task", `SELECT id, name, status FROM tasks WHERE name LIKE ? ESCAPE '\' OR id LIKE ? ESCAPE '\' LIMIT 10`)
+	query("skill", `SELECT id, name, '' FROM skills WHERE name LIKE ? ESCAPE '\' OR id LIKE ? ESCAPE '\' LIMIT 10`)
+	query("run", `SELECT id, id, status FROM runs WHERE id LIKE ? ESCAPE '\' OR prompt LIKE ? ESCAPE '\' ORDER BY created_at DESC LIMIT 10`)
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	type prow struct {
+		Name    string `json:"name"`
+		BaseURL string `json:"base_url"`
+		Model   string `json:"model"`
+		AuthEnv string `json:"auth_env"`
+		KeySet  bool   `json:"key_set"`
+	}
+	providers := []prow{}
+	if s.deps.Reg != nil {
+		for _, p := range s.deps.Reg.List() {
+			providers = append(providers, prow{Name: p.Name, BaseURL: p.BaseURL, Model: p.Model, AuthEnv: p.AuthEnv,
+				KeySet: p.AuthEnv != "" && os.Getenv(p.AuthEnv) != ""})
+		}
+	}
+	sum, _ := s.deps.Cost.Summary(r.Context(), "")
+	totp, _ := s.deps.Auth.TOTPEnabled(r.Context())
+	writeJSON(w, 200, map[string]any{
+		"webui_enabled":    s.Enabled(),
+		"addr":             s.deps.Cfg.WebUIAddr,
+		"allow_lan":        s.deps.Cfg.WebUIAllowLAN,
+		"tls":              s.deps.Cfg.WebUITLSCert != "",
+		"idle_minutes":     s.deps.Cfg.WebUIIdleMinutes,
+		"providers":        providers,
+		"default_provider": s.deps.Cfg.DefaultProvider,
+		"budgets":          sum.Budgets,
+		"totp_enabled":     totp,
+		"timezone":         s.loc().String(),
+		"version":          Version,
+	})
+}
+
+func (s *Server) handleWebUIToggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "enabled": body.Enabled})
+	if !body.Enabled {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			_ = s.SetEnabled(context.Background(), false)
+		}()
+	}
+}
+
+func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Scope     string  `json:"scope"`
+		ScopeID   string  `json:"scope_id"`
+		Period    string  `json:"period"`
+		Bucket    string  `json:"bucket"`
+		MaxUSD    float64 `json:"max_usd"`
+		MaxTokens int64   `json:"max_tokens"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json")
+		return
+	}
+	if body.Scope == "" {
+		body.Scope = "global"
+	}
+	if body.Period == "" {
+		body.Period = "day"
+	}
+	switch body.Scope {
+	case "global", "task", "bucket":
+	default:
+		writeErr(w, 400, "bad scope")
+		return
+	}
+	b := cost.Budget{
+		Scope: body.Scope, ScopeID: body.ScopeID, Period: body.Period, Bucket: body.Bucket,
+		MaxUSD:    sql.NullFloat64{Float64: body.MaxUSD, Valid: body.MaxUSD > 0},
+		MaxTokens: sql.NullInt64{Int64: body.MaxTokens, Valid: body.MaxTokens > 0},
+		Action:    "pause_notify", WarnAtPct: 80,
+	}
+	if err := s.deps.Cost.UpsertBudget(r.Context(), b); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
