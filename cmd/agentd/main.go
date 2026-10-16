@@ -1,4 +1,4 @@
-// Command agentd is the tidebot core daemon (Phase 0 skeleton).
+// Command agentd is the tidebot core daemon.
 package main
 
 import (
@@ -12,6 +12,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
+	"github.com/Zhengmingming1/tidebot/internal/ipc"
 )
 
 func main() {
@@ -40,8 +41,22 @@ func main() {
 		a.Log.Error("seed providers", "error", err)
 	}
 
+	ln, err := ipc.Listen(cfg.IPCPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ipc listen: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() {
+		_ = ln.Close()
+		_ = os.Remove(cfg.IPCPath)
+	}()
+
+	srv := ipc.NewServer(a.Log)
+	a.RegisterRPC(srv)
+
 	a.Log.Info("agentd starting",
 		"db", cfg.DBPath,
+		"ipc", cfg.IPCPath,
 		"max_concurrency", cfg.MaxConcurrency,
 		"claude_bin", cfg.ClaudeBin,
 		"default_provider", cfg.DefaultProvider,
@@ -49,15 +64,17 @@ func main() {
 	)
 
 	a.Sched.Start(ctx)
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx, ln) }()
 
-	// Phase 0: no HTTP yet; idle wait. WebUI toggle is reserved for later stages.
-	if cfg.EffectiveWebUI() {
-		a.Log.Info("webui enabled in config but HTTP server not implemented in phase 0")
+	select {
+	case <-ctx.Done():
+		a.Log.Info("agentd shutting down")
+	case err := <-errCh:
+		if err != nil {
+			a.Log.Error("ipc server", "error", err)
+		}
 	}
-
-	<-ctx.Done()
-	a.Log.Info("agentd shutting down")
 	a.Sched.Stop()
-	// give in-flight runs a moment (Phase 0: best-effort)
 	time.Sleep(100 * time.Millisecond)
 }
