@@ -3,3 +3,16 @@ node_modules/
 dist/
 *.log
 .env
+
+# Build outputs
+/bin/
+/measure-out/
+/tmp/
+coverage.out
+*.db
+*.db-wal
+*.db-shm
+
+# Root-level binaries only (do not ignore cmd/agentd or cmd/agentctl)
+/agentd
+/agentctl
