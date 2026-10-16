@@ -463,3 +463,22 @@ func applyItem(spec tasksvc.Spec, it Item) (tasksvc.Spec, error) {
 	}
 	return spec, nil
 }
+
+// Edit changes the structured text (and scope) of an item that is still waiting for a decision.
+func (s *Service) Edit(ctx context.Context, itemID, content, scope string) (Item, error) {
+	content = strings.TrimSpace(content)
+	if content == "" || len(content) > 2000 {
+		return Item{}, fmt.Errorf("content must be 1-2000 characters")
+	}
+	if scope != "" && scope != "permanent" && scope != "next_run" {
+		return Item{}, fmt.Errorf("scope must be permanent or next_run")
+	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE requirement_items SET content=?, scope=COALESCE(NULLIF(?,''),scope) WHERE id=? AND status IN ('pending','needs_decision')`, content, scope, itemID)
+	if err != nil {
+		return Item{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Item{}, fmt.Errorf("item is not pending")
+	}
+	return s.get(ctx, itemID)
+}

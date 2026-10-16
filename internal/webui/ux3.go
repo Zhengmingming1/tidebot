@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/version"
 	"io"
 	"net/http"
 	"net/url"
@@ -41,12 +42,27 @@ type skillPreview struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Files       int            `json:"files"`
+	Size        int64          `json:"size"`
+	Tree        []previewFile  `json:"tree"`
+	Checks      []previewCheck `json:"checks"`
 	Existing    *skillExisting `json:"existing,omitempty"`
+}
+
+type previewFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// previewCheck keys are i18n-able on the client: skill_md, name, description, size.
+type previewCheck struct {
+	Key string `json:"key"`
+	OK  bool   `json:"ok"`
 }
 
 type skillExisting struct {
 	ID        string `json:"id"`
 	VersionNo int    `json:"version_no"`
+	NextNo    int    `json:"next_no"`
 }
 
 // handleSkillUpload accepts one archive in "file" (.zip/.skill/.tar.gz) or a folder upload as
@@ -135,12 +151,18 @@ func (s *Server) handleSkillUpload(w http.ResponseWriter, r *http.Request) {
 	if p.Name == "" && root != dest {
 		p.Name = filepath.Base(root)
 	}
-	_ = filepath.Walk(root, func(_ string, fi os.FileInfo, err error) error {
+	p.Tree = []previewFile{}
+	_ = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
 		if err == nil && fi.Mode().IsRegular() {
 			p.Files++
+			p.Size += fi.Size()
+			if rel, e := filepath.Rel(root, path); e == nil && len(p.Tree) < 500 {
+				p.Tree = append(p.Tree, previewFile{Path: filepath.ToSlash(rel), Size: fi.Size()})
+			}
 		}
 		return nil
 	})
+	p.Checks = []previewCheck{{"skill_md", true}, {"name", meta.Name != ""}, {"description", meta.Description != ""}, {"size", p.Size <= skillpkg.MaxTotalBytes}}
 	p.Existing = s.findSkill(r.Context(), p.Name)
 	_ = os.WriteFile(filepath.Join(dest, ".root"), []byte(root), 0o600)
 	writeJSON(w, 200, p)
@@ -159,6 +181,14 @@ func (s *Server) findSkill(ctx context.Context, name string) *skillExisting {
 			e := &skillExisting{ID: sk.ID}
 			if sk.CurrentVersion != nil {
 				e.VersionNo = sk.CurrentVersion.VersionNo
+			}
+			e.NextNo = e.VersionNo + 1
+			if vs, err := s.deps.Ver.ListVersions(ctx, version.EntitySkill, sk.ID); err == nil {
+				for _, v := range vs {
+					if v.VersionNo >= e.NextNo {
+						e.NextNo = v.VersionNo + 1
+					}
+				}
 			}
 			return e
 		}

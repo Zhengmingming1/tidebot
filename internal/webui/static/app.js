@@ -61,6 +61,7 @@
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     chev: '<path d="m9 6 6 6-6 6"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     doc: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
     sync: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>',
     pie: '<path d="M21 12A9 9 0 1 1 12 3v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
@@ -191,7 +192,7 @@
     var x = $(".t-x", el); if (x) x.addEventListener("click", close);
     box.appendChild(el);
     while (box.children.length > 4) box.firstChild.remove();
-    if (!bad) setTimeout(close, undo ? 8000 : 3000);
+    if (!bad) setTimeout(close, undo ? 10000 : 3000);
     return close;
   }
   function toastUndo(msg, undo) { return toast(msg, false, undo); }
@@ -642,8 +643,32 @@
   }
 
   var REQ_ST = { pending: ["info", "req.pending"], applied: ["ok", "req.applied"], scheduled: ["warn", "req.scheduled"], consumed: ["ok", "req.consumed"], rejected: ["", "req.rejected"], needs_decision: ["bad", "req.conflict"] };
-  function threadHtml(items) {
+  // impactLines: how the selected permanent items change the task's requirement list.
+  function impactLines(tk, its) {
+    var cons = tk.constraints || [], ids = tk.constraint_ids || [];
+    var out = cons.map(function (c, k) { return { op: " ", t: c, id: ids[k] }; });
+    its.forEach(function (i) {
+      if (i.scope === "next_run") { out.push({ op: "~", t: i.content }); return; }
+      var at = -1;
+      if (i.target_spec_item) out.forEach(function (x, k) { if (at < 0 && x.op === " " && (x.id === i.target_spec_item || x.t === i.target_spec_item)) at = k; });
+      if (i.op === "add") out.push({ op: "+", t: i.content });
+      else if (i.op === "delete") { if (at >= 0) out[at].op = "-"; else out.push({ op: "-", t: i.target_spec_item || i.content }); }
+      else if (at >= 0 && i.conflict_resolution === "coexist") out.push({ op: "+", t: i.content });
+      else { if (at >= 0) { out[at].op = "-"; out.splice(at + 1, 0, { op: "+", t: i.content }); } else out.push({ op: "+", t: i.content }); }
+    });
+    return out;
+  }
+  function impactHtml(lines, all) {
+    var shown = all ? lines : lines.filter(function (l) { return l.op !== " "; });
+    if (!shown.length) return "";
+    return '<ul class="idiff">' + shown.map(function (l) {
+      return '<li class="' + (l.op === "+" ? "ins" : l.op === "-" ? "del" : l.op === "~" ? "once" : "") + '"><span class="sg">' + esc(l.op === "-" ? "−" : l.op === "~" ? "↷" : l.op === " " ? "" : "+") + "</span>" + esc(l.t) + (l.op === "~" ? ' <small class="muted">' + esc(T("req.next_short")) + "</small>" : "") + "</li>";
+    }).join("") + "</ul>";
+  }
+  function threadHtml(items, tk) {
     if (!items.length) return emptyState("sparkle", T("thread.none"), T("thread.none_sub"));
+    tk = tk || {};
+    var cname = function (idv) { var k = (tk.constraint_ids || []).indexOf(idv); return k >= 0 ? tk.constraints[k] : idv; };
     var groups = [], idx = {};
     items.forEach(function (it) {
       var k = it.message_id || it.id;
@@ -654,35 +679,37 @@
       var all = function (f) { return g.items.every(f); };
       var scope = all(function (i) { return i.scope === "next_run"; }) ? "next" : all(function (i) { return i.scope === "permanent"; }) ? "perm" : "mixed";
       var pending = g.items.filter(function (i) { return i.status === "pending"; });
-      var reply = T(g.items.some(function (i) { return i.status === "needs_decision"; }) ? "thread.r_conflict"
+      var conflict = g.items.some(function (i) { return i.status === "needs_decision"; });
+      var reply = T(conflict ? "thread.r_conflict"
         : pending.length ? (scope === "next" ? "thread.r_next" : "thread.r_confirm")
         : all(function (i) { return i.status === "rejected"; }) ? "thread.r_discarded"
         : scope === "next" ? "thread.r_scheduled" : "thread.r_done");
-      var conflict = g.items.some(function (i) { return i.status === "needs_decision"; });
-      var multi = pending.length + g.items.filter(function (i) { return i.status === "needs_decision"; }).length > 1;
-      var bid = esc(g.key);
+      var impact = pending.length ? impactHtml(impactLines(tk, pending)) : "";
       return '<div class="msg"><span class="avatar">' + esc(T("thread.me")) + '</span><div><div class="msg-meta"><strong>' + esc(T("thread.you")) + '</strong><small>' + esc(ago(g.at)) + '</small></div><div class="msg-body">' + esc(g.utter || T("thread.amendment")) + "</div></div></div>" +
         '<div class="msg"><span class="avatar bot">' + waveMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + esc(ago(g.at)) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
-        '<div class="req-card"><div class="req-card-head">' + esc(T(scope === "next" ? "req.additional" : "req.updated")) +
+        '<div class="req-card"><div class="req-card-head">' + esc(T("req.structured")) +
         (scope === "next" ? '<span class="tag next">' + esc(T("req.next_only")) + "</span>" : scope === "perm" ? '<span class="tag perm">' + esc(T("req.permanent")) + "</span>" : '<span class="tag">' + esc(T("req.mixed")) + "</span>") + "</div>" +
         g.items.map(function (i) {
-          var sl = REQ_ST[i.status] ? [REQ_ST[i.status][0], T(REQ_ST[i.status][1])] : ["", i.status];
+          var expired = i.status === "consumed";
+          var sl = expired ? ["", T("req.expired")] : REQ_ST[i.status] ? [REQ_ST[i.status][0], T(REQ_ST[i.status][1])] : ["", i.status];
           var ck = i.status === "rejected" ? ic("x", "sm") : (i.status === "pending" || i.status === "needs_decision") ? ic("circle", "sm") : ic("checkc", "sm");
-          var sel = multi && i.status === "pending" ? '<input type="checkbox" class="req-sel" data-sel="' + bid + '" value="' + esc(i.id) + '" checked aria-label="' + esc(T("req.include")) + '">' : "";
-          return '<div class="req-item">' + sel + '<span class="ck ' + (i.status === "rejected" ? "no" : i.status === "pending" ? "pending" : "") + '">' + ck + '</span><span class="op">' + esc(T("op." + i.op)) + '</span><span class="txt">' + esc(i.content || i.target_spec_item) +
-            (scope === "mixed" ? ' <span class="tag ' + (i.scope === "next_run" ? "next" : "perm") + '">' + esc(T(i.scope === "next_run" ? "req.next_short" : "req.permanent")) + "</span>" : "") +
-            '</span><span class="st"><span class="pill ' + sl[0] + '">' + esc(sl[1]) + "</span></span></div>" +
+          var sel = i.status === "pending" ? '<input type="checkbox" class="req-sel" value="' + esc(i.id) + '" data-scope="' + esc(i.scope) + '" checked aria-label="' + esc(T("req.include")) + '">' : '<span class="ck ' + (i.status === "rejected" ? "no" : "") + '">' + ck + "</span>";
+          return '<div class="req-item' + (expired || i.status === "rejected" ? " expired" : "") + '">' + sel + '<span class="op">' + esc(T("op." + i.op)) + '</span><span class="txt">' +
+            (i.op !== "add" && i.target_spec_item ? '<s class="muted">' + esc(cname(i.target_spec_item)) + "</s> " + (i.op === "delete" ? "" : "→ ") : "") + esc(i.content || i.target_spec_item) +
+            ' <span class="tag ' + (i.scope === "next_run" ? "next" : "perm") + '">' + esc(T(i.scope === "next_run" ? "req.next_short" : "req.permanent")) + "</span>" +
+            '</span><span class="st">' + (i.status === "pending" || i.status === "needs_decision" ? '<button class="btn sm ghost icon-btn" data-ed="' + esc(i.id) + '" title="' + esc(T("req.edit")) + '" aria-label="' + esc(T("req.edit")) + '">' + ic("doc", "sm") + "</button>" : "") + '<span class="pill ' + sl[0] + '">' + esc(sl[1]) + "</span></span></div>" +
             (i.status === "needs_decision" ? '<div class="req-actions"><button class="btn sm" data-resolve="' + esc(i.id) + '" data-res="replace">' + esc(T("req.replace")) + '</button><button class="btn sm" data-resolve="' + esc(i.id) + '" data-res="coexist">' + esc(T("req.coexist")) + "</button></div>" : "");
         }).join("") +
-        (pending.length || conflict ? (conflict ? '<p class="hint req-hint">' + ic("info", "sm") + esc(T("req.resolve_first")) + "</p>" : "") +
-          '<div class="req-actions"><button class="btn ok" data-confirm="' + bid + '"' + (conflict ? " disabled" : "") + ">" + ic("check", "sm") + esc(T(multi ? "req.confirm_all" : "req.confirm")) + '</button><button class="btn danger" data-reject="' + bid + '">' + ic("x", "sm") + esc(T(multi ? "req.reject_all" : "req.reject")) + "</button></div>" : "") +
+        (impact ? '<div class="impact"><small>' + esc(T("req.impact")) + "</small>" + impact + "</div>" : "") +
+        (conflict ? '<p class="hint req-hint">' + ic("info", "sm") + esc(T("req.resolve_first")) + "</p>" : "") +
         "</div></div></div>";
     }).join("");
   }
 
   function taskTab(tab, tk, items, vers, extra) {
     if (tab === "thread") {
-      return '<div class="thread scroll" id="thread">' + threadHtml(items) + "</div>" +
+      return '<div class="thread scroll" id="thread">' + threadHtml(items, tk) + "</div>" +
+        (items.some(function (i) { return i.status === "pending"; }) ? '<div class="req-bar" id="req-bar" role="region" aria-label="' + esc(T("req.bar")) + '"><span id="rb-n"></span><span class="grow"></span><button class="btn sm ghost" id="rb-prev">' + esc(T("req.preview_all")) + '</button><button class="btn sm danger" id="rb-rej">' + esc(T("req.reject_sel")) + '</button><button class="btn sm ok" id="rb-ok"></button></div>' : "") +
         '<form class="composer" id="composer"><input name="u" placeholder="' + esc(T("thread.composer")) + '" autocomplete="off" maxlength="2000" aria-label="' + esc(T("thread.amendment")) + '"><button class="btn primary sm" type="submit" aria-label="' + esc(T("thread.send")) + '">' + ic("send", "sm") + "</button></form>";
     }
     if (tab === "overview") {
@@ -767,25 +794,42 @@
       $("#t-del").addEventListener("click", function () { confirmDialog({ title: T("td.del_title"), body: T("td.confirm_del", { n: t.name }), ok: T("td.delete"), danger: true, typeName: t.name }).then(function (y) { if (y) api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); }); });
       var tg = $("#t-toggle");
       tg.addEventListener("click", function () { api(base + "/" + tg.getAttribute("data-act"), { method: "POST", body: {} }).then(reload).catch(fail); });
-      var picked = function (bid) {
-        var boxes = $$('[data-sel="' + bid + '"]');
-        return boxes.length ? boxes.filter(function (c) { return c.checked; }).map(function (c) { return c.value; }) : null;
+      var sel = function () { return $$(".req-sel").filter(function (c) { return c.checked; }); };
+      var bar = function () {
+        var on = sel(), perm = on.some(function (c) { return c.getAttribute("data-scope") === "permanent"; });
+        var conflict = items.some(function (i) { return i.status === "needs_decision"; });
+        if (!$("#req-bar")) return;
+        $("#rb-n").textContent = T("req.n_selected", { n: on.length });
+        var ok = $("#rb-ok");
+        ok.textContent = on.length ? (perm ? T("req.confirm_to", { n: on.length, v: t.version_no + 1 }) : T("req.confirm_next", { n: on.length })) : T("req.confirm");
+        ok.disabled = !on.length || conflict;
+        $("#rb-rej").disabled = !on.length;
+        $("#rb-prev").disabled = !on.length;
       };
-      $$(".req-sel").forEach(function (c) { c.addEventListener("change", function () {
-        var bid = c.getAttribute("data-sel"), n = picked(bid).length, btn = $('[data-confirm="' + bid + '"]');
-        if (btn && !btn.hasAttribute("data-blocked")) btn.disabled = n === 0;
-      }); });
-      $$("[data-confirm][disabled]").forEach(function (b) { b.setAttribute("data-blocked", "1"); });
-      var batch = function (b, attr, act, msg) {
-        b.addEventListener("click", function () {
-          var bid = b.getAttribute(attr), only = picked(bid);
-          if (only && !only.length) return;
-          b.disabled = true;
-          api("/api/amendments/" + enc(bid) + "/" + act, { method: "POST", body: { only: only || [] } }).then(function () { toast(msg); reload(); }).catch(function (e) { b.disabled = false; fail(e); });
+      $$(".req-sel").forEach(function (c) { c.addEventListener("change", bar); });
+      bar();
+      var chosen = function () { var ids = sel().map(function (c) { return c.value; }); return items.filter(function (i) { return ids.indexOf(i.id) >= 0; }); };
+      if ($("#rb-prev")) $("#rb-prev").addEventListener("click", function () {
+        modal('<div class="card-head"><span class="ico">' + ic("branch") + "</span><h2>" + esc(T("req.preview_title", { v: t.version_no + 1 })) + '</h2></div><p class="hint">' + esc(T("req.preview_sub")) + "</p>" + impactHtml(impactLines(t, chosen()), true) + '<div class="actions"><button class="btn ghost" data-close>' + esc(T("btn.close")) + "</button></div>");
+      });
+      if ($("#rb-ok")) $("#rb-ok").addEventListener("click", function () {
+        var b = $("#rb-ok"); b.disabled = true;
+        api(base + "/amendments-confirm", { method: "POST", body: { ids: sel().map(function (c) { return c.value; }) } }).then(function (r) { toast(r.version_id ? T("req.made_version", { v: t.version_no + 1 }) : T("toast.confirmed")); reload(); }).catch(function (e) { b.disabled = false; fail(e); });
+      });
+      if ($("#rb-rej")) $("#rb-rej").addEventListener("click", function () {
+        var ids = sel().map(function (c) { return c.value; });
+        Promise.all(ids.map(function (x) { return api("/api/amendments/" + enc(x) + "/reject", { method: "POST", body: {} }); })).then(function () { toast(T("toast.rejected")); reload(); }).catch(fail);
+      });
+      $$("[data-ed]").forEach(function (b) { b.addEventListener("click", function () {
+        var it = items.filter(function (i) { return i.id === b.getAttribute("data-ed"); })[0];
+        modal('<div class="card-head"><span class="ico">' + ic("doc") + "</span><h2>" + esc(T("req.edit")) + '</h2></div><form id="ef">' + (it.target_spec_item && it.op !== "add" ? '<p class="hint">' + esc(T("req.replaces")) + " <s>" + esc((t.constraints || [])[(t.constraint_ids || []).indexOf(it.target_spec_item)] || it.target_spec_item) + "</s></p>" : "") +
+          fieldHtml(T("req.text"), '<textarea name="content" rows="3" maxlength="2000" required>' + esc(it.content) + "</textarea>") +
+          '<div class="seg" id="ef-scope">' + [["permanent", T("req.permanent")], ["next_run", T("req.next_only")]].map(function (x) { return '<button type="button" data-sc="' + x[0] + '" class="' + (it.scope === x[0] ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + '</div><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
+          var sc = it.scope;
+          $$("[data-sc]", root).forEach(function (x) { x.addEventListener("click", function () { sc = x.getAttribute("data-sc"); $$("[data-sc]", root).forEach(function (y) { y.classList.toggle("active", y === x); }); }); });
+          $("#ef", root).addEventListener("submit", function (e) { e.preventDefault(); api("/api/amendments/" + enc(it.id) + "/edit", { method: "POST", body: { content: e.target.content.value, scope: sc } }).then(function () { close(); toast(T("ie.saved")); reload(); }).catch(fail); });
         });
-      };
-      $$("[data-confirm]").forEach(function (b) { batch(b, "data-confirm", "confirm-batch", T("toast.confirmed")); });
-      $$("[data-reject]").forEach(function (b) { batch(b, "data-reject", "reject-batch", T("toast.rejected")); });
+      }); });
       $$("[data-resolve]").forEach(function (b) { b.addEventListener("click", function () { api("/api/amendments/" + enc(b.getAttribute("data-resolve")) + "/resolve", { method: "POST", body: { resolution: b.getAttribute("data-res") } }).then(reload).catch(fail); }); });
       var rollback = function (vid, no) {
         if (vid === vers.current) return;
@@ -818,24 +862,99 @@
     return api("/api/skills").then(function (skills) {
       var rows = skills.length ? '<table class="table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
         skills.map(function (s) {
-          return '<tr><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><strong>" + esc(s.name) + '</strong><small class="mono">' + esc(s.id) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + "</td><td>" + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
+          return '<tr><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + '</a><small class="mono">' + esc(s.id) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + "</td><td>" + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
             '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right"><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
         '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
       $("#sk-import").addEventListener("click", function () { skillImportModal(renderSkills); });
-      $$("[data-versions]").forEach(function (b) {
-        b.addEventListener("click", function () {
-          var sid = b.getAttribute("data-versions");
-          api("/api/skills/" + enc(sid) + "/versions").then(function (v) {
-            modal('<div class="card-head"><span class="ico">' + ic("branch") + "</span><h2>" + esc(b.getAttribute("data-name")) + '</h2></div><table class="table"><tbody>' + v.versions.slice().reverse().map(function (x) {
-              return "<tr><td><strong>v" + esc(x.no) + "</strong>" + (x.id === v.current ? ' <span class="tag perm">' + esc(T("ver.current")) + "</span>" : "") + '</td><td class="nowrap">' + esc(when(x.created_at)) + '</td><td class="right">' + (x.id === v.current ? "" : '<button class="btn sm" data-srb="' + esc(x.id) + '">' + esc(T("ver.rollback")) + "</button>") + "</td></tr>";
-            }).join("") + '</tbody></table><div class="actions"><button class="btn ghost" data-close>' + esc(T("btn.close")) + "</button></div>", function (root, close) {
-              $$("[data-srb]", root).forEach(function (x) { x.addEventListener("click", function () { api("/api/skills/" + enc(sid) + "/rollback", { method: "POST", body: { version_id: x.getAttribute("data-srb") } }).then(function () { close(); renderSkills(); var prev = v.current; toastUndo(T("toast.skill_rb"), function () { api("/api/skills/" + enc(sid) + "/rollback", { method: "POST", body: { version_id: prev } }).then(function () { toast(T("toast.skill_rb")); renderSkills(); }).catch(fail); }); }).catch(fail); }); });
-            });
+      $$("[data-versions]").forEach(function (b) { b.addEventListener("click", function () { location.hash = "#/skills/" + enc(b.getAttribute("data-versions")); }); });
+    });
+  }
+
+  // ---------- skill detail: version tree, diff, optimizer ----------
+  function diffView(d) {
+    var files = (d.files || []).filter(function (f) { return f.status !== "same"; });
+    if (!files.length) return '<p class="muted pad">' + esc(T("diff.identical")) + "</p>";
+    return '<p class="diff-sum"><span class="add">+' + esc(d.added) + '</span> <span class="del">−' + esc(d.removed) + "</span> · " + esc(T("diff.files_n", { n: files.length })) + "</p>" + files.map(function (f) {
+      var body = f.lines && f.lines.length ? '<table class="diff"><tbody>' + f.lines.map(function (l) {
+        if (l.op === "@") return '<tr class="gap"><td colspan="4">⋯</td></tr>';
+        var c = l.op === "+" ? "ins" : l.op === "-" ? "del" : "";
+        return '<tr class="' + c + '"><td class="ln-a">' + (l.a || "") + '</td><td class="ln-b">' + (l.b || "") + '</td><td class="sg">' + esc(l.op === " " ? "" : l.op === "-" ? "−" : "+") + '</td><td class="tx">' + esc(l.text) + "</td></tr>";
+      }).join("") + "</tbody></table>" : '<p class="muted pad">' + esc(T("diff.st_" + f.status)) + "</p>";
+      return '<details class="diff-file" open><summary><code>' + esc(f.path) + '</code><span class="pill sm ' + (f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "info") + '">' + esc(T("diff.st_" + f.status)) + '</span><span class="grow"></span>' + (f.added ? '<span class="add">+' + f.added + "</span> " : "") + (f.removed ? '<span class="del">−' + f.removed + "</span>" : "") + "</summary>" + body + "</details>";
+    }).join("");
+  }
+  function renderSkillDetail(id, params) {
+    var base = "/api/skills/" + enc(id);
+    return Promise.all([api("/api/skills"), api(base + "/versions"), rpc("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), rpc("skills.proposals", { skill_id: id }).catch(function () { return []; }), rpc("skills.compare", { skill_id: id }).catch(function () { return null; })]).then(function (r) {
+      var sk = (r[0] || []).filter(function (x) { return x.id === id; })[0];
+      if (!sk) throw new Error(T("sk.not_found"));
+      var vers = r[1], oset = r[2] || { mode: "off" }, props = r[3] || [], cmp = r[4];
+      var list = vers.versions.slice().reverse(), byId = {};
+      list.forEach(function (v) { byId[v.id] = v; });
+      var cur = byId[vers.current] || list[0];
+      var b = params.get("b") && byId[params.get("b")] ? params.get("b") : cur.id;
+      var a = params.get("a") && byId[params.get("a")] ? params.get("a") : ((byId[b] && byId[b].parent_id && byId[byId[b].parent_id]) ? byId[b].parent_id : (list[1] || cur).id);
+      var vopt = function (sel) { return list.map(function (v) { return opt(v.id, "v" + v.no + (v.id === vers.current ? " · " + T("ver.current") : v.id === vers.canary ? " · " + T("ver.canary") : ""), v.id === sel); }).join(""); };
+      var tree = '<ul class="vlist">' + list.map(function (v) {
+        var isCur = v.id === vers.current, isCan = v.id === vers.canary;
+        return '<li class="' + (isCur ? "cur" : "") + '"><span class="vdot' + (isCur ? " cur" : isCan ? " can" : "") + '"></span><div class="grow"><strong>v' + esc(v.no) + "</strong>" + (isCur ? ' <span class="tag perm">' + esc(T("ver.current")) + "</span>" : "") + (isCan ? ' <span class="tag next">' + esc(T("ver.canary")) + "</span>" : "") +
+          "<small>" + esc((T("src." + v.source) === "src." + v.source ? v.source : T("src." + v.source)) + " · " + when(v.created_at)) + (v.message ? " · " + esc(v.message) : "") + '</small></div><div class="row-actions"><button class="btn sm ghost" data-cmp="' + esc(v.id) + '">' + esc(T("diff.compare")) + "</button>" +
+          (isCur ? "" : '<button class="btn sm" data-srb="' + esc(v.id) + '" data-no="' + esc(v.no) + '">' + ic("rollback", "sm") + esc(T("ver.rollback")) + "</button>") + "</div></li>";
+      }).join("") + "</ul>";
+      var modes = [["off", T("opt.m_off"), T("opt.m_off_sub")], ["propose", T("opt.m_propose"), T("opt.m_propose_sub")], ["canary", T("opt.m_canary"), T("opt.m_canary_sub")]];
+      var pct = function (x) { return Math.round((x || 0) * 100) + "%"; };
+      var cmpTable = function (c) {
+        if (!c) return "";
+        var row = function (label, f) { return "<tr><th>" + esc(label) + "</th><td>" + esc(f(c.current)) + "</td><td>" + esc(f(c.candidate)) + "</td></tr>"; };
+        return '<table class="table cmp"><thead><tr><th></th><th>' + esc(T("opt.cur_col")) + "</th><th>" + esc(T("opt.cand_col")) + "</th></tr></thead><tbody>" + row(T("opt.runs"), function (x) { return x.runs; }) + row(T("opt.success"), function (x) { return x.runs ? pct(x.success_rate) : "—"; }) + row(T("opt.avg_cost"), function (x) { return x.runs ? usd(x.avg_cost_usd, 4) : "—"; }) + row(T("opt.p50"), function (x) { return x.runs ? dur(x.p50_ms) : "—"; }) + "</tbody></table>" + (c.note === "low_sample" ? '<p class="hint">' + ic("info", "sm") + esc(T("opt.low_sample")) + "</p>" : "");
+      };
+      var propHtml = props.length ? props.slice().reverse().map(function (p) {
+        var live = p.status === "pending" || p.status === "canary";
+        var v = byId[p.version_id];
+        return '<div class="prop' + (live ? "" : " done") + '"><div class="prop-head"><strong>' + esc(v ? "v" + v.no : shortId(p.version_id)) + '</strong><span class="pill sm ' + (p.status === "canary" ? "info" : p.status === "promoted" ? "ok" : live ? "warn" : "") + '">' + esc(T("opt.st_" + p.status)) + '</span><span class="tag">' + esc(T("opt.risk_" + (p.risk || "low"))) + '</span><small class="muted grow right">' + esc(ago(p.created_at)) + "</small></div>" +
+          (p.rationale ? '<p class="prop-why">' + esc(p.rationale) + "</p>" : "") +
+          (p.checks && p.checks.length ? '<ul class="checks">' + p.checks.map(function (c) { return '<li class="' + (c.ok ? "ok" : "bad") + '">' + ic(c.ok ? "check" : "x", "sm") + esc(c.name) + "</li>"; }).join("") + "</ul>" : "") +
+          (p.status === "canary" && cmp && cmp.proposal_id === p.id ? cmpTable(cmp) : "") +
+          '<div class="row-actions"><button class="btn sm ghost" data-cmp-pair="' + esc(p.version_id) + '">' + esc(T("opt.view_diff")) + "</button>" +
+          (live ? (p.status === "pending" ? '<button class="btn sm" data-canary="' + esc(p.id) + '">' + esc(T("opt.start_canary")) + "</button>" : "") + '<button class="btn sm danger" data-discard="' + esc(p.id) + '">' + esc(T("opt.discard")) + '</button><button class="btn sm primary" data-promote="' + esc(p.id) + '" data-no="' + esc(v ? v.no : "") + '">' + esc(T("opt.promote")) + "</button>" : "") + "</div></div>";
+      }).join("") : '<p class="muted">' + esc(T("opt.none")) + "</p>";
+      mount('<div class="grid g-detail">' +
+        '<section class="card"><div class="task-head"><div class="grow-col"><h1>' + esc(sk.name) + '</h1><p class="mono muted">' + esc(sk.id) + '</p><div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + "</span></div></div></div>" +
+        '<div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></section>" +
+        '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + "</span><h3>" + esc(T("ver.tree")) + "</h3></div>" + tree + '<p class="hint mt">' + ic("info", "sm") + esc(T("ver.rb_pointer")) + "</p></section>" +
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("opt.title")) + '</h3></div><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
+        '<h4 class="mt">' + esc(T("opt.proposals")) + "</h4>" + propHtml + "</section></div></div>",
+        "skills", [[T("nav.skills"), "#/skills"], [sk.name]]);
+      var load = function () {
+        var qa = $("#d-a").value, qb = $("#d-b").value;
+        history.replaceState(null, "", "#/skills/" + enc(id) + "?a=" + enc(qa) + "&b=" + enc(qb)); lastHash = location.hash;
+        if (qa === qb) { $("#diff").innerHTML = '<p class="muted pad">' + esc(T("diff.same_ver")) + "</p>"; return; }
+        api(base + "/diff?a=" + enc(qa) + "&b=" + enc(qb) + ($("#d-all").checked ? "&ctx=all" : "")).then(function (d) { $("#diff").innerHTML = diffView(d); }).catch(function (e) { $("#diff").innerHTML = errorState(e.message); });
+      };
+      ["#d-a", "#d-b", "#d-all"].forEach(function (s) { $(s).addEventListener("change", load); });
+      $("#d-swap").addEventListener("click", function () { var x = $("#d-a").value; $("#d-a").value = $("#d-b").value; $("#d-b").value = x; load(); });
+      $$("[data-cmp]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = bt.getAttribute("data-cmp"); $("#d-b").value = vers.current; load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
+      $$("[data-cmp-pair]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = vers.current; $("#d-b").value = bt.getAttribute("data-cmp-pair"); load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
+      var reload = function () { renderSkillDetail(id, new URLSearchParams("a=" + $("#d-a").value + "&b=" + $("#d-b").value)); };
+      $$("[data-srb]").forEach(function (bt) { bt.addEventListener("click", function () {
+        var vid = bt.getAttribute("data-srb"), no = bt.getAttribute("data-no"), prev = vers.current, prevNo = (byId[prev] || {}).no;
+        confirmDialog({ title: T("ver.rb_title", { n: no }), body: T("ver.rb_pointer"), ok: T("ver.rollback") }).then(function (y) {
+          if (!y) return;
+          api(base + "/rollback", { method: "POST", body: { version_id: vid } }).then(function () {
+            reload();
+            toastUndo(T("toast.rolled_back", { n: no }), function () { api(base + "/rollback", { method: "POST", body: { version_id: prev } }).then(function () { toast(T("toast.rolled_back", { n: prevNo })); reload(); }).catch(fail); });
           }).catch(fail);
         });
-      });
+      }); });
+      $$("#opt-mode [data-mode]").forEach(function (bt) { bt.addEventListener("click", function () {
+        rpc("skills.optimize_settings", { skill_id: id, mode: bt.getAttribute("data-mode") }).then(function () { toast(T("opt.mode_saved")); reload(); }).catch(fail);
+      }); });
+      $$("[data-canary]").forEach(function (bt) { bt.addEventListener("click", function () { rpc("skills.canary_start", { proposal_id: bt.getAttribute("data-canary") }).then(function () { toast(T("opt.canary_started")); reload(); }).catch(fail); }); });
+      $$("[data-discard]").forEach(function (bt) { bt.addEventListener("click", function () { confirmDialog({ title: T("opt.discard_title"), body: T("opt.discard_body"), ok: T("opt.discard"), danger: true }).then(function (y) { if (y) rpc("skills.discard", { proposal_id: bt.getAttribute("data-discard") }).then(function () { toast(T("opt.discarded")); reload(); }).catch(fail); }); }); });
+      $$("[data-promote]").forEach(function (bt) { bt.addEventListener("click", function () { confirmDialog({ title: T("opt.promote_title", { n: bt.getAttribute("data-no") }), body: T("opt.promote_body"), ok: T("opt.promote") }).then(function (y) { if (y) rpc("skills.promote", { proposal_id: bt.getAttribute("data-promote") }).then(function () { toast(T("opt.promoted")); reload(); }).catch(fail); }); }); });
+      load();
     });
   }
   // ---------- BUTTONS ----------
@@ -914,6 +1033,21 @@
     });
   }
 
+  function fmtBytes(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
+  // fileTree renders "a/b/c.md" paths as an indented tree; folders first.
+  function fileTree(files) {
+    var root = { d: {}, f: [] };
+    files.forEach(function (x) {
+      var parts = x.path.split("/"), n = root;
+      parts.slice(0, -1).forEach(function (p) { n = n.d[p] = n.d[p] || { d: {}, f: [] }; });
+      n.f.push({ name: parts[parts.length - 1], size: x.size });
+    });
+    var walk = function (n) {
+      return "<ul>" + Object.keys(n.d).sort().map(function (k) { return '<li class="dir">' + ic("folder", "sm") + esc(k) + "/" + walk(n.d[k]) + "</li>"; }).join("") +
+        n.f.sort(function (a, b) { return a.name < b.name ? -1 : 1; }).map(function (f) { return '<li class="file' + (f.name === "SKILL.md" ? " key" : "") + '">' + ic("doc", "sm") + esc(f.name) + '<small class="muted">' + esc(fmtBytes(f.size)) + "</small></li>"; }).join("") + "</ul>";
+    };
+    return '<div class="tree">' + walk(root) + "</div>";
+  }
   // ---------- skill import ----------
   function skillImportModal(done) {
     modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("sk.import")) + "</h2></div>" + dropZone("sk-drop", ".zip,.skill,.tar.gz,.tgz", true) + '<div id="sk-prev"></div><div class="actions" id="sk-foot"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
@@ -932,8 +1066,9 @@
         var ex = p.existing;
         prev.innerHTML = '<div class="preview"><form id="sk-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
           '<div class="field"><span>' + esc(T("sk.desc")) + '</span><p class="desc-box">' + esc(p.description || T("sk.no_desc")) + "</p></div>" +
-          '<p class="muted">' + esc(T("sk.files_n", { n: p.files })) + "</p>" +
-          (ex ? '<p class="notice">' + ic("info", "sm") + esc(T("sk.exists", { n: ex.version_no, next: ex.version_no + 1 })) + "</p>" : "") + "</form></div>";
+          '<ul class="checks">' + (p.checks || []).map(function (c) { return '<li class="' + (c.ok ? "ok" : "warn") + '">' + ic(c.ok ? "check" : "info", "sm") + esc(T("sk.chk_" + c.key)) + "</li>"; }).join("") + "</ul>" +
+          '<details class="ftree" open><summary>' + esc(T("sk.files_n", { n: p.files })) + " · " + esc(fmtBytes(p.size || 0)) + "</summary>" + fileTree(p.tree || []) + "</details>" +
+          (ex ? '<p class="notice">' + ic("info", "sm") + esc(T("sk.exists", { n: ex.version_no, next: ex.next_no || ex.version_no + 1 })) + "</p>" : "") + "</form></div>";
         foot.innerHTML = '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button>" +
           (ex ? '<button type="button" class="btn primary" id="sk-ver">' + ic("branch", "sm") + esc(T("sk.as_version")) + "</button>" : '<button type="button" class="btn primary" id="sk-go">' + esc(T("sk.import_btn")) + "</button>");
         $$("[data-close]", foot).forEach(function (b) { b.addEventListener("click", close); });
@@ -1667,7 +1802,7 @@
     switch (parts[0]) {
       case undefined: p = renderHome(); break;
       case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(); break;
-      case "skills": p = renderSkills(); break;
+      case "skills": p = parts[1] ? renderSkillDetail(parts[1], params) : renderSkills(); break;
       case "buttons": p = renderButtons(); break;
       case "plugins": p = renderPlugins(); break;
       case "runs": p = parts[1] ? renderRunDetail(parts[1]) : renderRuns(params); break;
