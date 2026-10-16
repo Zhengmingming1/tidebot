@@ -936,5 +936,12 @@
   "cc.m_login_shell": "登录 shell",
   "cc.m_path": "PATH",
   "cc.m_known_dir": "常见安装目录",
-  "cc.no_key_hint": "这个服务商还没保存密钥。如果 Claude Code 已用订阅登录（claude login）可以不填；否则到模型设置里填 API key 并点「测试」。"
+  "cc.no_key_hint": "这个服务商还没保存密钥。如果 Claude Code 已用订阅登录（claude login）可以不填；否则到模型设置里填 API key 并点「测试」。",
+  "pv.sec_basic": "基本信息",
+  "pv.sec_auth": "认证",
+  "pv.sec_adv": "高级",
+  "pv.key_ok": "已配置密钥",
+  "pv.key_none": "未配置密钥",
+  "pv.none_configured": "还没有配置服务商。添加一个就能开始跑任务。",
+  "pv.more": "另外 {n} 个未配置密钥的预设"
 }

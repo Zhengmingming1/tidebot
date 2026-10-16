@@ -108,6 +108,7 @@ jobs:
         run: |
           V="${TAG#v}"
           mkdir -p stage dist
+          (cd cmd/tidebot-desktop && go run github.com/tc-hib/go-winres@v0.3.3 simply --icon ../../packaging/windows/tidebot.ico --product-name tidebot --file-description tidebot)
           (cd cmd/tidebot-desktop && go build -trimpath -ldflags "-s -w -H windowsgui -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V" -o ../../stage/tidebot-desktop.exe .)
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V" -o stage/agentctl.exe ./cmd/agentctl
       - name: install NSIS if missing

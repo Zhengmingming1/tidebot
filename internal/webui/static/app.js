@@ -118,12 +118,13 @@
 
   var markN = 0;
   function waveMark() {
-    var gid = "tbg" + (markN++);
-    return '<svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f8cf0"/><stop offset="1" stop-color="#1546b0"/></linearGradient></defs>' +
-      '<circle cx="20" cy="20" r="19" fill="url(#' + gid + ')"/>' +
-      '<path d="M7 18.5c3.3-2.8 6.6-2.8 9.9 0s6.6 2.8 9.9 0 4.6-2.3 6.2-1.4" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round"/>' +
-      '<path d="M7 25c3.3-2.8 6.6-2.8 9.9 0s6.6 2.8 9.9 0 4.6-2.3 6.2-1.4" stroke="#fff" stroke-opacity=".7" stroke-width="2.6" fill="none" stroke-linecap="round"/>' +
-      '<path d="M10 12.5c2.4-1.9 5.3-1.9 7.7 0s5.3 1.9 7.7 0" stroke="#fff" stroke-opacity=".45" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>';
+    // Same drawing as branding/mark.svg (the app icon at small sizes).
+    var g = "tbg" + (markN++), c = "tbc" + markN;
+    return '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#4c8df2"/><stop offset="1" stop-color="#1640a3"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
+      '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/><circle cx="45" cy="18" r="6" fill="#ffd98a"/>' +
+      '<path d="M10 29c4-3 8-3 12 0s8 3 12 0 8-3 12 0 6 2.6 9 1.2" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="4" stroke-linecap="round"/>' +
+      '<path d="M10 38c4-3 8-3 12 0s8 3 12 0 8-3 12 0 6 2.6 9 1.2" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>' +
+      '<path d="M0 48c8-3.6 16-4 24-2 8 2 16 2.4 40-1.6V64H0z" fill="#efe4cf"/></g></svg>';
   }
   function waveArt() {
     return '<svg class="wave" viewBox="0 0 300 170" aria-hidden="true">' +
@@ -1534,22 +1535,54 @@
 
   // ---------- providers: list on the left, details on the right ----------
   var provSel = null;
+  var PV_COLORS = ["#2563eb", "#0d9488", "#7c3aed", "#db2777", "#ea580c", "#16a34a", "#0891b2", "#4f46e5"];
+  function pvDisplay(p, presetById) { var pr = presetById[p.preset] || presetById[p.name]; return pr && pr.name && pr.id !== "custom" ? pr.name : p.name; }
+  function pvAvatar(p, presetById) {
+    var n = pvDisplay(p || {}, presetById || {}) || "?", h = 0;
+    for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+    return '<span class="pv-av av' + (h % PV_COLORS.length) + '" aria-hidden="true">' + esc(n.replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, "").slice(0, 1).toUpperCase() || "?") + "</span>";
+  }
+  // Right-side drawer for editing one provider. Esc / backdrop closes.
+  function openDrawer(fill) {
+    closeDrawer();
+    var bg = document.createElement("div"), opener = document.activeElement;
+    bg.className = "drawer-bg"; bg.id = "drawer";
+    bg.innerHTML = '<aside class="drawer" role="dialog" aria-modal="true" tabindex="-1"></aside>';
+    document.body.appendChild(bg);
+    var d = $(".drawer", bg);
+    var onKey = function (e) { if (e.key === "Escape" && !$("#modal-root").innerHTML) { e.preventDefault(); closeDrawer(); } };
+    bg._off = function () { document.removeEventListener("keydown", onKey, true); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
+    document.addEventListener("keydown", onKey, true);
+    bg.addEventListener("mousedown", function (e) { if (e.target === bg) closeDrawer(); });
+    fill(d);
+        requestAnimationFrame(function () { bg.classList.add("open"); });
+    var first = $("input:not([type=hidden]):not([type=radio])", d); (first || d).focus();
+    return d;
+  }
+  function closeDrawer() { var bg = $("#drawer"); if (bg) { if (bg._off) bg._off(); bg.remove(); } }
   function providerCards(box) {
     return api("/api/providers").then(function (d) {
       var ps = d.providers || [], presets = d.presets || [], byName = {}, presetById = {};
       ps.forEach(function (p) { byName[p.name] = p; });
       presets.forEach(function (p) { presetById[p.id] = p; });
-      if (!provSel || (!byName[provSel] && provSel !== "+new")) provSel = (ps[0] || {}).name;
-      box.innerHTML = '<div class="pv-split"><div class="pv-list"><ul id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + ps.map(function (p) {
-        return '<li draggable="true" data-pv="' + esc(p.name) + '" tabindex="0" class="' + (p.name === provSel ? "on" : "") + '" aria-current="' + (p.name === provSel) + '"><span class="grip" aria-hidden="true">⋮⋮</span><span class="pv-n">' + esc(p.name) + "</span>" +
-          (p.default ? '<span class="pill ok sm">' + esc(T("pv.default")) + "</span>" : "") + '<span class="dot ' + (p.key_set ? "ok" : "") + '" title="' + esc(T(p.key_set ? "set.configured" : "set.missing")) + '"></span></li>';
-      }).join("") + '</ul><button class="btn sm wide" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + '</button><small class="hint">' + esc(T("pv.sort_hint")) + '</small></div><div class="pv-detail" id="pv-detail"></div></div>';
-      var again = function (sel) { if (sel) provSel = sel; return providerCards(box); };
-      var pick = function (n) { provSel = n; $$("#pv-ul li", box).forEach(function (li) { var on = li.getAttribute("data-pv") === n; li.classList.toggle("on", on); li.setAttribute("aria-current", on); }); providerDetail($("#pv-detail", box), byName[n], null, presetById, again); };
-      $$("#pv-ul li", box).forEach(function (li) {
-        li.addEventListener("click", function () { pick(li.getAttribute("data-pv")); });
+      var configured = function (p) { return p.default || p.key_set || p.used_by > 0; };
+      var shown = ps.filter(configured), hidden = ps.filter(function (p) { return !configured(p); });
+      var card = function (p) {
+        return '<li class="pv-card" draggable="true" data-pv="' + esc(p.name) + '" tabindex="0" role="button" aria-label="' + esc(pvDisplay(p, presetById)) + '">' + pvAvatar(p, presetById) +
+          '<div class="pv-main"><div class="pv-title"><strong>' + esc(pvDisplay(p, presetById)) + "</strong>" + (p.default ? '<span class="pill ok sm">' + esc(T("pv.default")) + "</span>" : "") + "</div>" +
+          '<small class="pv-meta"><code>' + esc((p.base_url || "https://api.anthropic.com").replace(/^https?:\/\//, "")) + "</code>" + (p.model ? " · " + esc(p.model) : "") + "</small></div>" +
+          '<span class="pv-key ' + (p.key_set ? "ok" : "") + '"><span class="dot ' + (p.key_set ? "ok" : "") + '"></span>' + esc(T(p.key_set ? "pv.key_ok" : "pv.key_none")) + "</span>" + ic("chev", "sm") + "</li>";
+      };
+      box.innerHTML = '<div class="pv-toolbar"><p class="muted">' + esc(T("pv.sub")) + '</p><button class="btn primary" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + "</button></div>" +
+        (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
+        (hidden.length ? '<details class="pv-more"><summary>' + esc(T("pv.more", { n: hidden.length })) + '</summary><ul class="pv-cards">' + hidden.map(card).join("") + "</ul></details>" : "") +
+        '<small class="hint">' + esc(T("pv.sort_hint")) + "</small>";
+      var again = function (sel) { return providerCards(box).then(function () { if (sel && $("#drawer")) open(sel); }); };
+      var open = function (n) { provSel = n; openDrawer(function (dw) { providerDetail(dw, byName[n] || null, null, presetById, again); }); };
+      $$(".pv-card", box).forEach(function (li) {
+        li.addEventListener("click", function () { open(li.getAttribute("data-pv")); });
         li.addEventListener("keydown", function (e) {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(li.getAttribute("data-pv")); }
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(li.getAttribute("data-pv")); }
           if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             e.preventDefault();
             var sib = e.key === "ArrowUp" ? li.previousElementSibling : li.nextElementSibling;
@@ -1560,24 +1593,24 @@
         li.addEventListener("dragstart", function (e) { li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", li.getAttribute("data-pv")); });
         li.addEventListener("dragend", function () { li.classList.remove("dragging"); saveOrder(); });
       });
-      var ul = $("#pv-ul", box);
-      ul.addEventListener("dragover", function (e) {
-        e.preventDefault();
-        var drag = $(".dragging", ul); if (!drag) return;
-        var after = $$("li:not(.dragging)", ul).filter(function (x) { var r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; })[0];
-        if (after) ul.insertBefore(drag, after); else ul.appendChild(drag);
+      $$(".pv-cards", box).forEach(function (ul) {
+        ul.addEventListener("dragover", function (e) {
+          e.preventDefault();
+          var drag = $(".dragging", ul); if (!drag) return;
+          var after = $$("li:not(.dragging)", ul).filter(function (x) { var r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; })[0];
+          if (after) ul.insertBefore(drag, after); else ul.appendChild(drag);
+        });
       });
       function saveOrder() {
-        var names = $$("#pv-ul li", box).map(function (x) { return x.getAttribute("data-pv"); });
+        var names = $$(".pv-card", box).map(function (x) { return x.getAttribute("data-pv"); });
         api("/api/providers/order", { method: "POST", body: { names: names } }).then(function () { toast(T("pv.order_saved")); }).catch(fail);
       }
-      $("#pv-add", box).addEventListener("click", function () { presetPicker(presets, function (pr) { provSel = "+new"; $$("#pv-ul li", box).forEach(function (li) { li.classList.remove("on"); }); providerDetail($("#pv-detail", box), null, pr, presetById, again); }); });
-      if (provSel && byName[provSel]) providerDetail($("#pv-detail", box), byName[provSel], null, presetById, again);
+      $("#pv-add", box).addEventListener("click", function () { presetPicker(presets, function (pr) { provSel = "+new"; openDrawer(function (dw) { providerDetail(dw, null, pr, presetById, again); }); }); });
     });
   }
   function presetPicker(presets, pick) {
     modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T("pv.add")) + '</h2></div><p class="hint">' + esc(T("pv.pick")) + '</p><input type="search" id="pr-q" placeholder="' + esc(T("pv.pick_search")) + '"><div class="grid g3 presets mt">' + presets.map(function (p, i) {
-      return '<button type="button" class="card preset" data-pr="' + i + '" data-q="' + esc((p.name + " " + p.id).toLowerCase()) + '"><strong>' + esc(p.name) + "</strong><small><code>" + esc(p.base_url || (p.id === "custom" ? T("pv.custom_sub") : "api.anthropic.com")) + "</code></small>" + (p.model ? "<small>" + esc(p.model) + "</small>" : "") + "</button>";
+      return '<button type="button" class="card preset" data-pr="' + i + '" data-q="' + esc((p.name + " " + p.id).toLowerCase()) + '">' + pvAvatar({ name: p.name }, {}) + "<strong>" + esc(p.name) + "</strong><small><code>" + esc(p.base_url || (p.id === "custom" ? T("pv.custom_sub") : "api.anthropic.com")) + "</code></small>" + (p.model ? "<small>" + esc(p.model) + "</small>" : "") + "</button>";
     }).join("") + '</div><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
       $("#pr-q", root).addEventListener("input", function (e) { var q = e.target.value.trim().toLowerCase(); $$("[data-pr]", root).forEach(function (b) { b.classList.toggle("hidden", q && b.getAttribute("data-q").indexOf(q) < 0); }); });
       $$("[data-pr]", root).forEach(function (b) { b.addEventListener("click", function () { close(); pick(presets[+b.getAttribute("data-pr")]); }); });
@@ -1592,18 +1625,28 @@
     var inp = function (n, val, extra) { return '<input name="' + n + '" value="' + esc(val || "") + '"' + (extra || "") + ">"; };
     var models = [["model", T("pv.m_main")], ["small_fast_model", T("pv.m_fast")], ["opus_model", "Opus"], ["sonnet_model", "Sonnet"], ["haiku_model", "Haiku"]];
     var link = base && base.source_url ? '<a class="link" href="' + esc(base.source_url) + '" target="_blank" rel="noopener noreferrer">' + ic("globe", "sm") + esc(T("pv.get_key")) + "</a>" : "";
-    host.innerHTML = '<div class="pv-head"><div><h3>' + esc(creating ? (p ? T("pv.dup_title") : T("pv.add_named", { n: preset.name })) : v.name) + "</h3>" +
-      (!creating ? '<small class="muted">' + (v.default ? esc(T("pv.default")) + " · " : "") + (v.used_by ? esc(plural(v.used_by, "tasks.count_one", "tasks.count_many")) : esc(T("pv.unused"))) + "</small>" : "") + "</div>" +
-      (!creating ? '<div class="row-actions">' + (v.default ? "" : '<button class="btn sm" id="pd-def">' + esc(T("pv.make_default")) + "</button>") + '<button class="btn sm" id="pd-dup">' + esc(T("pv.dup")) + "</button>" + (v.default ? "" : '<button class="btn sm danger" id="pd-del">' + ic("trash", "sm") + esc(T("btn.remove")) + "</button>") + "</div>" : "") + "</div>" +
-      '<form id="pvf" autocomplete="off">' +
-      '<div class="form-row">' + fieldHtml(T("set.name"), inp("name", v.name, ' required maxlength="40" pattern="[a-z0-9][a-z0-9._\\-]{0,39}"'), T("pv.name_hint")) + fieldHtml(T("pv.auth"), '<select name="auth_env">' + opt("ANTHROPIC_AUTH_TOKEN", "Bearer (ANTHROPIC_AUTH_TOKEN)", v.auth_env !== "ANTHROPIC_API_KEY") + opt("ANTHROPIC_API_KEY", "x-api-key (ANTHROPIC_API_KEY)", v.auth_env === "ANTHROPIC_API_KEY") + "</select>") + "</div>" +
-      '<label class="field"><span>Base URL</span><div class="in-group">' + inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"') + (base && base.base_url !== undefined ? '<button type="button" class="btn sm ghost" id="pd-reset" title="' + esc(base.base_url || "https://api.anthropic.com") + '">' + ic("rollback", "sm") + esc(T("pv.reset_url")) + "</button>" : "") + '</div><small class="hint">' + esc(T("pv.url_hint")) + "</small></label>" +
-      '<label class="field"><span>' + esc(T("pv.api_key")) + " " + link + '</span><div class="in-group"><input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(!creating && v.key_set && v.key_source === "store" ? T("pv.key_keep", { l: v.key_last4 || "" }) : !creating && v.key_source === "env" ? T("pv.key_env") : T("pv.key_new")) + '"><button type="button" class="btn sm ghost" id="pd-eye" aria-pressed="false" aria-label="' + esc(T("pv.show_key")) + '">' + esc(T("pv.show")) + '</button></div><small class="hint">' + esc(T("pv.key_hint")) + "</small></label>" +
+    var seg = function (val, label, sub) { return '<label class="seg-opt"><input type="radio" name="auth_env" value="' + val + '"' + ((val === "ANTHROPIC_API_KEY") === (v.auth_env === "ANTHROPIC_API_KEY") ? " checked" : "") + "><span><strong>" + esc(label) + "</strong><small>" + esc(sub) + "</small></span></label>"; };
+    var title = creating ? (p ? T("pv.dup_title") : T("pv.add_named", { n: preset.name })) : pvDisplay(v, presetById);
+    host.innerHTML = '<div class="drawer-head">' + pvAvatar(v, presetById) + '<div class="grow-col"><h2>' + esc(title) + "</h2>" +
+      (!creating ? '<small class="muted"><code>' + esc(v.name) + "</code> · " + (v.default ? esc(T("pv.default")) + " · " : "") + (v.used_by ? esc(plural(v.used_by, "tasks.count_one", "tasks.count_many")) : esc(T("pv.unused"))) + "</small>" : "") + "</div>" +
+      '<button type="button" class="icon-btn" data-drawer-close aria-label="' + esc(T("btn.close")) + '">' + ic("x") + "</button></div>" +
+      '<form id="pvf" class="drawer-body" autocomplete="off">' +
+      '<h4 class="sec">' + esc(T("pv.sec_basic")) + "</h4>" +
+      fieldHtml(T("set.name"), inp("name", v.name, ' required maxlength="40" pattern="[a-z0-9][a-z0-9._\\-]{0,39}"'), T("pv.name_hint")) +
+      '<label class="field"><span>Base URL</span><div class="in-group">' + inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"') + (base && base.base_url !== undefined ? '<button type="button" class="btn ghost" id="pd-reset" title="' + esc(base.base_url || "https://api.anthropic.com") + '">' + ic("rollback", "sm") + esc(T("pv.reset_url")) + "</button>" : "") + '</div><small class="hint">' + esc(T("pv.url_hint")) + "</small></label>" +
+      '<h4 class="sec">' + esc(T("pv.sec_auth")) + " " + link + "</h4>" +
+      '<div class="field"><span>' + esc(T("pv.auth")) + '</span><div class="seg" role="radiogroup" aria-label="' + esc(T("pv.auth")) + '">' + seg("ANTHROPIC_AUTH_TOKEN", "Bearer", "ANTHROPIC_AUTH_TOKEN") + seg("ANTHROPIC_API_KEY", "x-api-key", "ANTHROPIC_API_KEY") + "</div></div>" +
+      '<label class="field"><span>' + esc(T("pv.api_key")) + '</span><div class="in-group"><input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(!creating && v.key_set && v.key_source === "store" ? T("pv.key_keep", { l: v.key_last4 || "" }) : !creating && v.key_source === "env" ? T("pv.key_env") : T("pv.key_new")) + '"><button type="button" class="btn ghost" id="pd-eye" aria-pressed="false" aria-label="' + esc(T("pv.show_key")) + '">' + esc(T("pv.show")) + '</button></div><small class="hint">' + esc(T("pv.key_hint")) + "</small></label>" +
       (!creating && v.key_source === "store" ? '<label class="check"><input type="checkbox" name="clear_key"> ' + esc(T("pv.clear_key")) + "</label>" : "") +
-      '<div class="field"><span>' + esc(T("pv.models")) + '</span><div class="model-list">' + models.map(function (m) { return '<div class="model-row"><label>' + esc(m[1]) + "</label>" + inp(m[0], v[m[0]], ' maxlength="128"') + '<button type="button" class="btn sm" data-check="' + m[0] + '"' + (creating ? " disabled" : "") + ">" + esc(T("pv.check")) + '</button><span class="mres" data-res="' + m[0] + '"></span></div>'; }).join("") + "</div>" + (creating ? '<small class="hint">' + esc(T("pv.check_after_save")) + "</small>" : "") + "</div>" +
-      fieldHtml(T("pv.extra_env"), '<textarea name="extra_env" rows="2" placeholder="API_TIMEOUT_MS=600000">' + esc(envText) + "</textarea>", T("pv.extra_hint")) +
-      '<div class="pv-test" id="pd-test"></div>' +
-      '<div class="actions">' + (creating ? "" : '<button type="button" class="btn" id="pd-test-btn">' + ic("pulse", "sm") + esc(T("pv.test")) + "</button>") + '<button type="submit" class="btn" data-mode="save">' + esc(T("btn.save")) + '</button><button type="submit" class="btn primary" data-mode="test">' + ic("check", "sm") + esc(T("pv.save_test")) + "</button></div></form>";
+      '<h4 class="sec">' + esc(T("pv.models")) + "</h4>" +
+      '<div class="model-list">' + models.map(function (m) { return '<div class="model-row"><label for="pm-' + m[0] + '">' + esc(m[1]) + '</label><div class="in-group"><input id="pm-' + m[0] + '" name="' + m[0] + '" value="' + esc(v[m[0]] || "") + '" maxlength="128" spellcheck="false"><button type="button" class="btn ghost" data-check="' + m[0] + '"' + (creating ? " disabled" : "") + ">" + esc(T("pv.check")) + '</button></div><span class="mres" data-res="' + m[0] + '"></span></div>'; }).join("") + "</div>" + (creating ? '<small class="hint">' + esc(T("pv.check_after_save")) + "</small>" : "") +
+      '<details class="sec-adv"><summary class="sec">' + esc(T("pv.sec_adv")) + "</summary>" +
+      fieldHtml(T("pv.extra_env"), '<textarea name="extra_env" rows="3" placeholder="API_TIMEOUT_MS=600000">' + esc(envText) + "</textarea>", T("pv.extra_hint")) +
+      (!creating ? '<div class="row-actions">' + (v.default ? "" : '<button type="button" class="btn" id="pd-def">' + esc(T("pv.make_default")) + "</button>") + '<button type="button" class="btn" id="pd-dup">' + esc(T("pv.dup")) + "</button></div>" : "") + "</details>" +
+      '<div class="pv-test" id="pd-test" aria-live="polite"></div>' +
+      '<div class="drawer-foot">' + (!creating && !v.default ? '<button type="button" class="btn danger" id="pd-del">' + ic("trash", "sm") + esc(T("btn.remove")) + "</button>" : "") + '<span class="grow"></span>' +
+      (creating ? "" : '<button type="button" class="btn" id="pd-test-btn">' + ic("pulse", "sm") + esc(T("pv.test")) + "</button>") + '<button type="submit" class="btn" data-mode="save">' + esc(T("btn.save")) + '</button><button type="submit" class="btn primary" data-mode="test">' + ic("check", "sm") + esc(T("pv.save_test")) + "</button></div></form>";
+    $$("[data-drawer-close]", host).forEach(function (b) { b.addEventListener("click", closeDrawer); });
     var f = $("#pvf", host), out = $("#pd-test", host), mode = "save";
     var runTest = function (name, model, el) {
       el.innerHTML = '<span class="muted">' + esc(T("pv.testing")) + "</span>";
@@ -1618,7 +1661,7 @@
     $$("[data-mode]", f).forEach(function (b) { b.addEventListener("click", function () { mode = b.getAttribute("data-mode"); }); });
     var dd = $("#pd-def", host); if (dd) dd.addEventListener("click", function () { api("/api/providers/" + enc(v.name) + "/default", { method: "POST", body: {} }).then(function () { toast(T("pv.default_set")); done(v.name); }).catch(fail); });
     var dp = $("#pd-dup", host); if (dp) dp.addEventListener("click", function () { var c = JSON.parse(JSON.stringify(p)); c.dup = true; providerDetail(host, c, null, presetById, done); });
-    var dl = $("#pd-del", host); if (dl) dl.addEventListener("click", function () { confirmDialog({ title: T("pv.del_title"), body: T("pv.confirm_del", { n: v.name }), ok: T("btn.remove"), danger: true }).then(function (y) { if (y) api("/api/providers/" + enc(v.name), { method: "DELETE" }).then(function () { toast(T("pv.deleted")); provSel = null; done(); }).catch(fail); }); });
+    var dl = $("#pd-del", host); if (dl) dl.addEventListener("click", function () { confirmDialog({ title: T("pv.del_title"), body: T("pv.confirm_del", { n: v.name }), ok: T("btn.remove"), danger: true }).then(function (y) { if (y) api("/api/providers/" + enc(v.name), { method: "DELETE" }).then(function () { toast(T("pv.deleted")); provSel = null; closeDrawer(); done(); }).catch(fail); }); });
     f.addEventListener("submit", function (e) {
       e.preventDefault();
       var env = {}, bad = "";
@@ -2281,7 +2324,7 @@
           });
         };
       } else if (section === "providers") {
-        body = '<section class="card">' + head + '<p class="muted pad-x">' + esc(T("pv.sub")) + '</p><div id="pv-box"><p class="muted">…</p></div></section>';
+        body = '<section class="card">' + head + '<div id="pv-box" class="pad-x"><p class="muted">…</p></div></section>';
         after = function () { providerCards($("#pv-box")).catch(fail); };
       } else if (section === "budgets") {
         var g = (st.budgets || []).filter(function (x) { return x.scope === "global" && x.period === "day"; })[0] || {};
@@ -2486,7 +2529,7 @@
     soft = soft === true;
     stopStream(); stopPoll();
     clearTimeout(scheduleRefresh._t);
-    if (!soft) $("#modal-root").innerHTML = "";
+    if (!soft) { $("#modal-root").innerHTML = ""; closeDrawer(); }
     var y = window.scrollY, pg = page(), sy = pg ? pg.scrollTop : 0;
     if (!soft && location.hash !== lastHash && pg) {
       // Keep the old page on screen; only show a skeleton if loading is slow.

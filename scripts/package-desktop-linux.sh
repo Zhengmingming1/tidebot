@@ -13,7 +13,7 @@ LDF="-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$VER"
 deb="$(mktemp -d)"
 install -Dm755 "$OUT/.tidebot-desktop" "$deb/usr/bin/tidebot-desktop"
 install -Dm644 "$ROOT/packaging/linux/tidebot-desktop.desktop" "$deb/usr/share/applications/tidebot-desktop.desktop"
-install -Dm644 "$ROOT/cmd/tidebot-desktop/assets/icon.png" "$deb/usr/share/icons/hicolor/256x256/apps/tidebot.png"
+for n in 16 32 48 64 128 256 512; do install -Dm644 "$ROOT/packaging/linux/icons/${n}x${n}/tidebot.png" "$deb/usr/share/icons/hicolor/${n}x${n}/apps/tidebot.png"; done
 mkdir -p "$deb/DEBIAN"
 cat > "$deb/DEBIAN/control" <<CTL
 Package: tidebot-desktop
