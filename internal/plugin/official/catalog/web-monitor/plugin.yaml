@@ -1,0 +1,24 @@
+id: web-monitor
+name: Web page monitor
+version: 1.0.0
+runtime:
+  builtin: webmon
+  lifecycle: keepalive
+  limits: {memory_mb: 128, cpu_percent: 20}
+contributes:
+  triggers:
+    - id: page_changed
+      kind: web_monitor
+      title: Page changed
+      config_schema:
+        type: object
+        required: [url]
+        properties:
+          url: {type: string, title: Page URL, maxLength: 2000, x-order: 1}
+          selector: {type: string, title: CSS selector (optional), maxLength: 300, x-order: 2}
+          interval_minutes: {type: integer, title: Check every (minutes), minimum: 5, maximum: 1440, default: 60, x-order: 3}
+          threshold_pct: {type: number, title: Change threshold (%), minimum: 0, maximum: 100, default: 1, x-order: 4}
+          ignore_whitespace: {type: boolean, title: Ignore whitespace, default: true, x-order: 5}
+permissions:
+  network: ["*"]
+  host_api: [log.write]

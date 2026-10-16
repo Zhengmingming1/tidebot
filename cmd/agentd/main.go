@@ -5,6 +5,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/plugin"
+	"github.com/Zhengmingming1/tidebot/internal/plugin/official"
 	"os"
 	"os/signal"
 	"syscall"
@@ -23,6 +25,9 @@ func main() {
 	if guard.IsHookInvocation(os.Args[1:]) {
 		guard.HookMain(os.Stdin, os.Stdout)
 		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == plugin.BuiltinArg {
+		os.Exit(official.Main(os.Args[2:]))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Println("tidebot agentd", buildinfo.Version, buildinfo.Commit)

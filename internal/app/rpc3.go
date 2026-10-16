@@ -213,6 +213,12 @@ func (a *App) extRPC() map[string]rpcFunc {
 			return a.ImportPack(ctx, p.File)
 		},
 	}
+	for k, v := range a.officialRPC() {
+		m[k] = v
+	}
+	for k, v := range a.pluginAIRPC() {
+		m[k] = v
+	}
 	for k, v := range a.systemRPC() {
 		m[k] = v
 	}

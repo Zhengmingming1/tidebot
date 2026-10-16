@@ -30,7 +30,10 @@ type Manifest struct {
 
 // Runtime describes the plugin process.
 type Runtime struct {
-	Command         string   `yaml:"command" json:"command"`
+	Command string `yaml:"command" json:"command"`
+	// Builtin names an official plugin runtime compiled into tidebot itself. Only plugins
+	// installed from the embedded official catalog (hash-verified) may use it.
+	Builtin         string   `yaml:"builtin" json:"builtin,omitempty"`
 	Args            []string `yaml:"args" json:"args,omitempty"`
 	Protocol        string   `yaml:"protocol" json:"protocol"`
 	Lifecycle       string   `yaml:"lifecycle" json:"lifecycle"` // lazy | keepalive
@@ -66,6 +69,7 @@ type ConnectorDecl struct {
 	SideEffects bool   `yaml:"side_effects" json:"side_effects"`
 	MCP         struct {
 		Command string            `yaml:"command" json:"command"`
+		Builtin string            `yaml:"builtin" json:"builtin,omitempty"`
 		Args    []string          `yaml:"args" json:"args,omitempty"`
 		Env     map[string]string `yaml:"env" json:"env,omitempty"`
 	} `yaml:"mcp" json:"mcp"`
@@ -98,7 +102,9 @@ var (
 	reSemver     = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`)
 	reSecretRef  = regexp.MustCompile(`\$\{secret:([a-z0-9_]+)\}`)
 	hostAPIs     = map[string]bool{"runs.start": true, "notify.send": true, "tasks.read": true, "kv": true, "log.write": true}
-	triggerKinds = map[string]bool{"email": true, "webhook": true, "file_change": true, "im": true}
+	triggerKinds = map[string]bool{"email": true, "webhook": true, "file_change": true, "im": true, "rss": true, "web_monitor": true, "poll": true}
+	// TriggerKindList is the accepted trigger kinds (for errors and the UI).
+	TriggerKindList = "email|webhook|file_change|im|rss|web_monitor|poll"
 )
 
 // ParseManifest reads and validates plugin.yaml in dir.
@@ -145,6 +151,9 @@ func (m *Manifest) Validate(dir string) error {
 	if m.Runtime.Limits.CPUPercent <= 0 {
 		m.Runtime.Limits.CPUPercent = 50
 	}
+	if m.Runtime.Command != "" && m.Runtime.Builtin != "" {
+		return errors.New("runtime: set command or builtin, not both")
+	}
 	if m.Runtime.Command != "" {
 		if err := insideDir(dir, m.Runtime.Command); err != nil {
 			return fmt.Errorf("runtime.command: %w", err)
@@ -152,7 +161,7 @@ func (m *Manifest) Validate(dir string) error {
 	}
 	for _, t := range m.Contributes.Triggers {
 		if !triggerKinds[t.Kind] || t.ID == "" {
-			return fmt.Errorf("trigger %q: kind must be email|webhook|file_change|im", t.ID)
+			return fmt.Errorf("trigger %q: kind must be %s", t.ID, TriggerKindList)
 		}
 	}
 	declared := map[string]bool{}
@@ -160,11 +169,13 @@ func (m *Manifest) Validate(dir string) error {
 		declared[s] = true
 	}
 	for _, c := range m.Contributes.Connectors {
-		if c.ID == "" || c.MCP.Command == "" {
-			return errors.New("connector needs id and mcp.command")
+		if c.ID == "" || (c.MCP.Command == "") == (c.MCP.Builtin == "") {
+			return errors.New("connector needs id and exactly one of mcp.command / mcp.builtin")
 		}
-		if err := insideDir(dir, c.MCP.Command); err != nil {
-			return fmt.Errorf("connector %s: %w", c.ID, err)
+		if c.MCP.Command != "" {
+			if err := insideDir(dir, c.MCP.Command); err != nil {
+				return fmt.Errorf("connector %s: %w", c.ID, err)
+			}
 		}
 		for _, v := range c.MCP.Env {
 			for _, mm := range reSecretRef.FindAllStringSubmatch(v, -1) {
@@ -238,4 +249,17 @@ func NewPermissions(prev, next []string) []string {
 		}
 	}
 	return out
+}
+
+// UsesBuiltin reports whether the manifest asks for a runtime compiled into tidebot.
+func (m *Manifest) UsesBuiltin() bool {
+	if m.Runtime.Builtin != "" {
+		return true
+	}
+	for _, c := range m.Contributes.Connectors {
+		if c.MCP.Builtin != "" {
+			return true
+		}
+	}
+	return false
 }

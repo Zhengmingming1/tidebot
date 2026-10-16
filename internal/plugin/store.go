@@ -34,6 +34,7 @@ type Info struct {
 	ID       string        `json:"id"`
 	Name     string        `json:"name"`
 	Enabled  bool          `json:"enabled"`
+	Source   string        `json:"source"` // local | official | ai-generated
 	Current  *VersionInfo  `json:"current,omitempty"`
 	Versions []VersionInfo `json:"versions,omitempty"`
 }
@@ -121,6 +122,23 @@ func copyDir(src, dst string) error {
 // Stage copies a plugin directory into the store as an immutable, unapproved version.
 // expectedHash (optional) must match the package hash. Approval is a separate step.
 func (s *Store) Stage(ctx context.Context, srcDir, expectedHash string) (*VersionInfo, error) {
+	return s.StageSource(ctx, srcDir, expectedHash, SourceLocal)
+}
+
+// Plugin sources.
+const (
+	SourceLocal    = "local"
+	SourceOfficial = "official"
+	SourceAI       = "ai-generated"
+)
+
+// OfficialVerifier reports whether (pluginID, contentHash) is an unmodified official
+// catalog plugin. It is set by the official package; nil means no official plugins.
+var OfficialVerifier func(pluginID, hash string) bool
+
+// StageSource is Stage with an explicit source. Manifests that use a builtin runtime are
+// refused unless they are byte-for-byte an official catalog entry.
+func (s *Store) StageSource(ctx context.Context, srcDir, expectedHash, source string) (*VersionInfo, error) {
 	m, err := ParseManifest(srcDir)
 	if err != nil {
 		return nil, err
@@ -131,6 +149,12 @@ func (s *Store) Stage(ctx context.Context, srcDir, expectedHash string) (*Versio
 	}
 	if expectedHash != "" && !strings.EqualFold(expectedHash, hash) {
 		return nil, errors.New("package hash mismatch")
+	}
+	if m.UsesBuiltin() && (source != SourceOfficial || OfficialVerifier == nil || !OfficialVerifier(m.ID, hash)) {
+		return nil, errors.New("builtin runtimes are reserved for official plugins")
+	}
+	if source == "" {
+		source = SourceLocal
 	}
 	var existing string
 	if err := s.DB.QueryRowContext(ctx, `SELECT id FROM plugin_versions WHERE plugin_id=? AND content_hash=?`, m.ID, hash).Scan(&existing); err == nil {
@@ -144,7 +168,7 @@ func (s *Store) Stage(ctx context.Context, srcDir, expectedHash string) (*Versio
 		return nil, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO plugins(id, name, installed_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name`, m.ID, m.Name, now); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO plugins(id, name, installed_at, source) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, source=excluded.source`, m.ID, m.Name, now, source); err != nil {
 		return nil, err
 	}
 	mj, _ := json.Marshal(m)
@@ -214,7 +238,7 @@ func (s *Store) Get(ctx context.Context, pluginID string) (*Info, error) {
 	var in Info
 	var cur sql.NullString
 	var en int
-	if err := s.DB.QueryRowContext(ctx, `SELECT id, name, enabled, current_version_id FROM plugins WHERE id=?`, pluginID).Scan(&in.ID, &in.Name, &en, &cur); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT id, name, enabled, current_version_id, source FROM plugins WHERE id=?`, pluginID).Scan(&in.ID, &in.Name, &en, &cur, &in.Source); err != nil {
 		return nil, errors.New("plugin not found")
 	}
 	in.Enabled = en == 1
@@ -360,10 +384,25 @@ func (s *Store) MCPConfig(ctx context.Context, sandbox bool) ([]byte, int, error
 			if sandbox && c.SideEffects {
 				continue
 			}
+			cmd, args := filepath.Join(p.Current.Dir, c.MCP.Command), c.MCP.Args
+			if c.MCP.Builtin != "" {
+				if BuiltinExe == "" {
+					continue
+				}
+				cmd, args = BuiltinExe, append([]string{BuiltinArg, c.MCP.Builtin, "mcp"}, c.MCP.Args...)
+			}
+			env := s.ResolveEnv(p.ID, c.MCP.Env)
+			if c.MCP.Builtin != "" {
+				// Official runtimes read their settings (incl. write-only secrets) from here;
+				// the file holding this document is 0600, like ${secret:} refs above.
+				cj, _ := json.Marshal(s.ActivationConfig(ctx, p.ID))
+				env["TIDEBOT_PLUGIN_CONFIG"] = string(cj)
+				env["TIDEBOT_PLUGIN_ID"] = p.ID
+			}
 			servers[p.ID+"__"+c.ID] = map[string]any{
-				"command": filepath.Join(p.Current.Dir, c.MCP.Command),
-				"args":    c.MCP.Args,
-				"env":     s.ResolveEnv(p.ID, c.MCP.Env),
+				"command": cmd,
+				"args":    args,
+				"env":     env,
 			}
 		}
 	}

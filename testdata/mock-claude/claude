@@ -82,6 +82,27 @@ for ((s=1; s<=STEPS; s++)); do
   fi
 done
 
+# AI plugin builder: spec / build / iterate prompts are answered by plugin_ai.py.
+AI_MODE=""
+case "$PROMPT" in
+  TIDEBOT-PLUGIN-SPEC*) AI_MODE=spec ;;
+  TIDEBOT-PLUGIN-BUILD*) AI_MODE=build ;;
+  TIDEBOT-PLUGIN-ITERATE*) AI_MODE=iterate ;;
+esac
+if [[ -n "$AI_MODE" ]]; then
+  HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ "$AI_MODE" != spec ]]; then
+    for f in plugin.yaml main.py README.md; do
+      sleep "${TIDEBOT_MOCK_AI_SLEEP:-0}"
+      printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Write\",\"input\":{\"file_path\":\"$f\"}}]},\"session_id\":\"$SESSION\"}"
+    done
+  fi
+  OUT=$(printf '%s' "$PROMPT" | python3 "$HERE/plugin_ai.py" "$AI_MODE")
+  OUT_JSON=$(printf '%s' "$OUT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"result\":$OUT_JSON,\"session_id\":\"$SESSION\",\"is_error\":false,\"duration_ms\":42,\"num_turns\":3,\"total_cost_usd\":0.0123,\"usage\":{\"input_tokens\":900,\"output_tokens\":400}}"
+  exit 0
+fi
+
 COST="${TIDEBOT_MOCK_COST:-0.00123}"
 if [[ "${TIDEBOT_MOCK_RANDOM_COST:-}" == "1" ]]; then
   COST=$(awk -v s="$$" 'BEGIN{srand(s); printf "%.4f", 0.02 + rand()*0.27}')

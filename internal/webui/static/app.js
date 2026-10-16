@@ -44,6 +44,7 @@
 
   // Icons: Lucide (ISC license, lucide.dev), 24px grid, drawn at 1.5px stroke.
   var P = {
+    rss: '<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>',
     home: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     tasks: '<path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/>',
     skills: '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/>',
@@ -117,15 +118,21 @@
   function btnIcon(b) { return P[b.icon] ? b.icon : "bolt"; }
 
   var markN = 0;
+  // Animated "flowing tide" brand mark (sidebar, login, boot splash). Pure SVG + CSS:
+  // the two wave strokes are drawn wider than the tile with a 24-unit period and slide
+  // left by exactly one period, so the loop is seamless. No JS timers; styles.css pauses
+  // it when the window is hidden (html.tb-hidden) and drops it for prefers-reduced-motion.
+  // The favicon / app icon (branding/mark.svg) stays static.
+  function wavePath(y) { var d = "M-24 " + y; for (var i = 0; i < 5; i++) d += (i ? "s" : "c4-3 8-3 12 0s") + "8 3 12 0" + (i < 4 ? " 8-3 12 0" : ""); return d; }
   function waveMark() {
-    // Same drawing as branding/mark.svg (the app icon at small sizes).
     var g = "tbg" + (markN++), c = "tbc" + markN;
-    return '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#4c8df2"/><stop offset="1" stop-color="#1640a3"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
+    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#4c8df2"/><stop offset="1" stop-color="#1640a3"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
       '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/><circle cx="45" cy="18" r="6" fill="#ffd98a"/>' +
-      '<path d="M10 29c4-3 8-3 12 0s8 3 12 0 8-3 12 0 6 2.6 9 1.2" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="4" stroke-linecap="round"/>' +
-      '<path d="M10 38c4-3 8-3 12 0s8 3 12 0 8-3 12 0 6 2.6 9 1.2" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>' +
-      '<path d="M0 48c8-3.6 16-4 24-2 8 2 16 2.4 40-1.6V64H0z" fill="#efe4cf"/></g></svg>';
+      '<g class="tw-swell s1"><path class="tw tw1" d="' + wavePath(29) + '" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="4" stroke-linecap="round"/></g>' +
+      '<g class="tw-swell s2"><path class="tw tw2" d="' + wavePath(38) + '" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/></g>' +
+      '<path class="tw-sand" d="M0 48c8-3.6 16-4 24-2 8 2 16 2.4 40-1.6V64H0z" fill="#efe4cf"/></g></svg>';
   }
+  document.addEventListener("visibilitychange", function () { document.documentElement.classList.toggle("tb-hidden", document.hidden); });
   function waveArt() {
     return '<svg class="wave" viewBox="0 0 300 170" aria-hidden="true">' +
       '<path d="M0 170V120c40-10 70-40 110-38 30 2 40 26 66 22 22-3 26-36 4-46-16-7-34 4-30 18-14-26 10-56 46-50 44 7 66 54 104 60v84z" fill="#e6eefc"/>' +
@@ -537,6 +544,7 @@
     var box = $("#sys-status");
     if (!box) return;
     var v = ccView();
+    document.documentElement.classList.toggle("tb-busy", v.state === "running");
     box.innerHTML = '<button class="cc-card cc-' + v.state + '" id="cc-btn" aria-haspopup="dialog" aria-expanded="false" title="' + esc(v.head + (v.sub ? " · " + v.sub : "")) + '">' +
       '<span class="dot" aria-hidden="true"></span><span class="cc-txt"><strong>' + esc(v.head) + "</strong>" + (v.sub ? "<small>" + esc(v.sub) + "</small>" : "") + "</span></button>" +
       '<span class="sr-only" aria-live="polite" id="cc-live"></span>';
@@ -624,7 +632,9 @@
   ["mousemove", "click", "scroll", "keydown"].forEach(function (ev) { document.addEventListener(ev, bumpIdle, { passive: true }); });
 
   // ---------- login ----------
+  function dropBoot() { var b = document.getElementById("boot"); if (b) b.remove(); }
   function showLogin(totp) {
+    dropBoot();
     stopStream();
     $("#shell").classList.add("hidden");
     var l = $("#login");
@@ -1928,22 +1938,39 @@
   function triggerModal(plugins) {
     api("/api/tasks").then(function (tasks) {
       var ptrig = [];
-      plugins.forEach(function (p) { ((((p.current || {}).manifest || {}).contributes || {}).triggers || []).forEach(function (t) { if (t.kind === "email" || t.kind === "im") ptrig.push({ plugin: p.id, pname: p.name, t: t }); }); });
+      plugins.forEach(function (p) { ((((p.current || {}).manifest || {}).contributes || {}).triggers || []).forEach(function (t) { if (p.enabled && t.kind !== "webhook" && t.kind !== "file_change") ptrig.push({ plugin: p.id, pname: plName(p), t: t }); }); });
       modal('<div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("tr.new")) + '</h2></div><form id="trf">' +
         fieldHtml(T("tr.kind"), '<select name="kind">' + opt("webhook", T("tr.k_webhook"), true) + opt("file_change", T("tr.k_file")) + (ptrig.length ? opt("plugin", T("tr.k_plugin")) : "") + "</select>") +
         fieldHtml(T("col.task"), '<select name="task_id" required>' + tasks.map(function (t) { return opt(t.id, t.name); }).join("") + "</select>", tasks.length ? "" : T("tr.no_tasks")) +
         '<div data-k="file_change" class="hidden">' + fieldHtml(T("tr.path"), '<input name="path" class="mono" placeholder="/home/me/inbox">', T("tr.path_hint")) + "</div>" +
-        '<div data-k="plugin" class="hidden">' + fieldHtml(T("tr.ptrig"), '<select name="ptrig">' + ptrig.map(function (x, i) { return opt(i, x.pname + " · " + (x.t.title || x.t.id) + " (" + x.t.kind + ")"); }).join("") + "</select>") + "</div>" +
+        '<div data-k="plugin" class="hidden">' + fieldHtml(T("tr.ptrig"), '<select name="ptrig">' + ptrig.map(function (x, i) { return opt(i, x.pname + " · " + (state.dict["tk." + x.plugin + "." + x.t.id] || x.t.title || x.t.id)); }).join("") + "</select>") + '<div id="tr-pf"></div><div class="row-actions"><button type="button" class="btn sm" id="tr-prev">' + ic("eye", "sm") + esc(T("tr.preview")) + '</button></div><div id="tr-prev-out"></div></div>' +
         '<p class="hint" data-k="webhook">' + esc(T("tr.webhook_hint")) + "</p>" +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("tr.create")) + "</button></div></form>", function (root, close) {
         var f = $("#trf", root);
-        var sync = function () { $$("[data-k]", f).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-k") !== f.kind.value); }); };
+        var pfields = [];
+        var loadPF = function () {
+          var x = ptrig[+((f.ptrig || {}).value || 0)]; if (!x) return;
+          $("#tr-prev-out", root).innerHTML = "";
+          rpc("plugins.trigger_fields", { plugin_id: x.plugin, trigger_id: x.t.id }).then(function (fl) { pfields = fl || []; $("#tr-pf", root).innerHTML = schemaForm(pfields, {}, {}, "t-" + x.plugin); }).catch(fail);
+        };
+        var sync = function () { $$("[data-k]", f).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-k") !== f.kind.value); }); if (f.kind.value === "plugin" && !pfields.length) loadPF(); };
         f.kind.addEventListener("change", sync); sync();
+        if (f.ptrig) f.ptrig.addEventListener("change", loadPF);
+        var prevBtn = $("#tr-prev", root);
+        if (prevBtn) prevBtn.addEventListener("click", function () {
+          var x = ptrig[+f.ptrig.value], out = $("#tr-prev-out", root);
+          prevBtn.disabled = true; out.innerHTML = '<p class="muted">' + esc(T("tr.preview_wait")) + "</p>";
+          rpc("triggers.preview", { plugin_id: x.plugin, config: readSchemaForm($("#tr-pf", root), pfields) }).then(function (r) {
+            prevBtn.disabled = false;
+            var items = (r && r.items) || [];
+            out.innerHTML = items.length ? '<ul class="tr-prev">' + items.map(function (it) { return "<li><strong>" + esc(it.title || it.subject || it.url || "") + '</strong> <span class="muted">' + esc(it.published || it.date || it.from || "") + "</span>" + (it.text || it.summary || it.snippet ? '<small class="muted">' + esc(String(it.text || it.summary || it.snippet).slice(0, 220)) + "</small>" : "") + "</li>"; }).join("") + "</ul>" : '<p class="muted">' + esc(T("tr.preview_none")) + "</p>";
+          }).catch(function (e) { prevBtn.disabled = false; out.innerHTML = '<p class="notice bad">' + ic("x", "sm") + esc(e.message) + "</p>"; });
+        });
         f.addEventListener("submit", function (e) {
           e.preventDefault();
           var k = f.kind.value, body = { kind: k, task_id: f.task_id.value, config: {} };
           if (k === "file_change") body.config.path = f.path.value.trim();
-          if (k === "plugin") { var x = ptrig[+f.ptrig.value]; body.kind = x.t.kind; body.plugin_id = x.plugin; body.config.trigger_id = x.t.id; }
+          if (k === "plugin") { var x = ptrig[+f.ptrig.value]; body.kind = x.t.kind; body.plugin_id = x.plugin; body.config = readSchemaForm($("#tr-pf", root), pfields); body.config.trigger_id = x.t.id; }
           rpc("triggers.create", body).then(function (r) {
             close();
             if (r && r.token) {
@@ -1991,13 +2018,16 @@
       }).join("") + "</div>";
     }).join("");
   }
-  function schemaForm(fields, values, secretsSet) {
+  function schemaForm(fields, values, secretsSet, ns) {
     return fields.map(function (f) {
       var v = values[f.key] !== undefined ? values[f.key] : f.default, nm = ' name="' + esc(f.key) + '" data-f="' + esc(f.key) + '" data-t="' + esc(f.type) + '"';
-      var lab = (f.title || f.key) + (f.required ? " *" : ""), inner;
+      var lk = "pf." + (ns || "") + "." + f.key, lab = (ns && state.dict[lk] ? state.dict[lk] : (f.title || f.key)) + (f.required ? " *" : ""), inner;
+      var hk = lk + "_h";
+      if (ns && state.dict[hk]) f = Object.assign({}, f, { description: state.dict[hk] });
       if (f.type === "boolean") return '<label class="check field-check"><input type="checkbox"' + nm + (v ? " checked" : "") + "> " + esc(lab) + (f.description ? '<small class="hint">' + esc(f.description) + "</small>" : "") + "</label>";
       if (f.type === "array") inner = '<div class="multi">' + f.items_enum.map(function (x) { return '<label class="check"><input type="checkbox" data-arr="' + esc(f.key) + '" value="' + esc(x) + '"' + ((v || []).map(String).indexOf(String(x)) >= 0 ? " checked" : "") + "> " + esc(x) + "</label>"; }).join("") + "</div>";
-      else if (f.enum && f.enum.length) inner = "<select" + nm + ">" + (f.required ? "" : opt("", "—", v == null)) + f.enum.map(function (x) { return opt(x, x, String(x) === String(v)); }).join("") + "</select>";
+      else if (f.enum && f.enum.length) inner = "<select" + nm + ">" + (f.required ? "" : opt("", "—", v == null)) + f.enum.map(function (x) { return opt(x, state.dict["pf.e." + x] || x, String(x) === String(v)); }).join("") + "</select>";
+      else if (f.type === "string" && f.max_length >= 2000 && !/url$/.test(f.key)) inner = '<textarea rows="4"' + nm + ' maxlength="' + f.max_length + '"' + (f.required ? " required" : "") + ">" + esc(v == null ? "" : v) + "</textarea>";
       else if (f.write_only) inner = '<input type="password" autocomplete="new-password"' + nm + ' placeholder="' + esc(T(secretsSet[f.key] ? "cfg.secret_keep" : "cfg.secret_new")) + '"' + (f.max_length ? ' maxlength="' + f.max_length + '"' : "") + ">";
       else if (f.type === "number" || f.type === "integer") inner = '<input type="number"' + nm + (f.type === "integer" ? ' step="1"' : ' step="any"') + (f.minimum != null ? ' min="' + f.minimum + '"' : "") + (f.maximum != null ? ' max="' + f.maximum + '"' : "") + ' value="' + esc(v == null ? "" : v) + '"' + (f.required ? " required" : "") + ">";
       else inner = "<input" + nm + ' value="' + esc(v == null ? "" : v) + '"' + (f.max_length ? ' maxlength="' + f.max_length + '"' : ' maxlength="4000"') + (f.required ? " required" : "") + ">";
@@ -2015,17 +2045,211 @@
     });
     return out;
   }
-  function pluginConfigModal(p) {
+  var PL_TESTABLE = { wecom: 1, dingtalk: 1, email: 1 };
+  function pluginConfigModal(p, after) {
     rpc("plugins.config_get", { id: p.id }).then(function (cv) {
-      modal('<div class="card-head"><span class="ico">' + ic("settings") + "</span><h2>" + esc(T("cfg.title", { n: p.name })) + '</h2></div><form id="pcf" novalidate>' + schemaForm(cv.fields || [], cv.values || {}, cv.secrets_set || {}) + '<p class="notice bad hidden" id="pcf-err"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
-        var f = $("#pcf", root);
+      var testable = PL_TESTABLE[p.id] && p.source === "official";
+      modal('<div class="card-head"><span class="ico">' + ic("settings") + "</span><h2>" + esc(T("cfg.title", { n: plName(p) })) + '</h2></div><form id="pcf" novalidate>' + (state.dict["of." + p.id + ".cfg"] ? '<p class="hint">' + esc(T("of." + p.id + ".cfg")) + "</p>" : "") + schemaForm(cv.fields || [], cv.values || {}, cv.secrets_set || {}, p.id) + '<p class="notice bad hidden" id="pcf-err"></p><p class="notice ok hidden" id="pcf-ok"></p><div class="actions">' + (testable ? '<button type="button" class="btn" id="pcf-test">' + ic("send", "sm") + esc(T("of.test_send")) + '</button><span class="grow"></span>' : "") + '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
+        var f = $("#pcf", root), err = $("#pcf-err", root), okm = $("#pcf-ok", root);
+        var showErr = function (e) { okm.classList.add("hidden"); err.textContent = e.message; err.classList.remove("hidden"); };
         f.addEventListener("submit", function (e) {
           e.preventDefault();
           if (!f.reportValidity()) return;
-          rpc("plugins.config_set", { id: p.id, values: readSchemaForm(f, cv.fields || []) }).then(function () { close(); toast(T("cfg.saved")); }).catch(function (err) { var x = $("#pcf-err", root); x.textContent = err.message; x.classList.remove("hidden"); });
+          rpc("plugins.config_set", { id: p.id, values: readSchemaForm(f, cv.fields || []) }).then(function () { close(); toast(T("cfg.saved")); if (after) after(); }).catch(showErr);
+        });
+        if (testable) $("#pcf-test", root).addEventListener("click", function (e) {
+          var b = e.currentTarget; b.disabled = true; err.classList.add("hidden");
+          rpc("plugins.config_set", { id: p.id, values: readSchemaForm(f, cv.fields || []) }).then(function () { return rpc("plugins.test", { id: p.id }); })
+            .then(function () { b.disabled = false; okm.textContent = T("of.test_ok"); okm.classList.remove("hidden"); }).catch(function (x) { b.disabled = false; showErr(x); });
         });
       });
     }).catch(fail);
+  }
+  function plName(p) { return (p && p.source === "official" && state.dict["of." + p.id + ".n"]) ? T("of." + p.id + ".n") : (p.name || p.id); }
+
+  // ---------- official catalog (card wall) ----------
+  var OF_BRAND = { "rss-feed": "br-rss", "web-monitor": "br-web", wecom: "br-wecom", dingtalk: "br-ding", email: "br-mail", "daily-digest": "br-digest" };
+  var catView = { cat: "all" };
+  function catalogWall(cat) {
+    var cats = [["all", "of.c_all"], ["trigger", "of.c_trigger"], ["connector", "of.c_connector"], ["pack", "of.c_pack"]];
+    return '<div class="of-wall"><div class="of-filter seg sm" role="radiogroup">' + cats.map(function (c) { return '<button type="button" role="radio" data-ofc="' + c[0] + '" class="' + (catView.cat === c[0] ? "active" : "") + '" aria-checked="' + (catView.cat === c[0]) + '">' + esc(T(c[1])) + "</button>"; }).join("") + "</div>" +
+      '<div class="of-grid">' + cat.map(function (e) {
+        var hide = catView.cat !== "all" && e.category !== catView.cat;
+        var act = e.installed ? (e.update ? '<button class="btn sm" data-of-install="' + esc(e.id) + '">' + ic("download", "sm") + esc(T("of.update")) + "</button>" : '<span class="pill ok sm">' + ic("check", "sm") + esc(T("of.installed")) + "</span>") : '<button class="btn sm primary" data-of-install="' + esc(e.id) + '">' + ic("plus", "sm") + esc(T("of.install")) + "</button>";
+        return '<div class="ap-tile of-tile' + (hide ? " hidden" : "") + '" data-of="' + esc(e.id) + '"><span class="ap-logo ' + (OF_BRAND[e.id] || "br-other") + '" aria-hidden="true">' + ic(e.icon) + "</span>" +
+          "<strong>" + esc(T("of." + e.id + ".n")) + '</strong><span class="ap-tag">' + esc(T("of.t_" + e.category)) + '</span><small class="muted of-desc">' + esc(T("of." + e.id + ".d")) + '</small><div class="of-foot"><span class="muted sm-t">' + esc(T("of.official")) + " · v" + esc(e.version) + "</span>" + act + "</div></div>";
+      }).join("") + "</div></div>";
+  }
+  function officialInstall(id, entry) {
+    rpc("plugins.install_official", { id: id }).then(function (r) {
+      var ver = r.version || {}, req = ver.requested_permissions || [], fresh = r.new_permissions || [];
+      modal('<div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("of.install_title", { n: T("of." + id + ".n") })) + "</h2></div>" +
+        '<p class="muted">' + esc(T("of." + id + ".d")) + "</p><h4>" + esc(T("pl.perms")) + "</h4>" + (req.length ? permChooser(req, fresh) : '<p class="muted">' + esc(T("pl.no_perms")) + "</p>") +
+        '<p class="hint">' + esc(T("pl.grant_hint")) + '</p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="of-ok">' + ic("shield", "sm") + esc(T("pl.approve")) + "</button></div>", function (root, close) {
+        $("#of-ok", root).addEventListener("click", function (e) {
+          e.currentTarget.disabled = true;
+          var granted = $$("[data-perm]", root).filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+          rpc("plugins.approve", { version_id: ver.id, permissions: granted }).then(function () {
+            close(); toast(T("pl.installed_ok", { n: T("of." + id + ".n") }));
+            var m = ver.manifest || {};
+            if (m.config_schema && m.config_schema.properties) pluginConfigModal({ id: id, name: m.name, source: "official" }, id === "daily-digest" ? function () { applyPack(id); } : refresh);
+            else refresh();
+          }).catch(function (err) { e.target.disabled = false; fail(err); });
+        });
+      });
+    }).catch(fail);
+  }
+  function applyPack(id) {
+    rpc("plugins.apply_pack", { id: id }).then(function (r) {
+      var miss = r.missing_plugins || [];
+      toast(r.duplicate ? T("of.pack_dup") : T("of.pack_done"));
+      if (miss.length) toast(T("of.pack_missing", { p: miss.map(function (x) { return T("of." + x + ".n"); }).join("、") }), true);
+      if (r.task_ids && r.task_ids[0] && !r.duplicate) location.hash = "#/tasks/" + enc(r.task_ids[0]); else refresh();
+    }).catch(fail);
+  }
+
+  // ---------- AI plugin builder ----------
+  var AI_STEPS = ["describe", "spec", "build", "review"];
+  function aiStepBar(cur) {
+    var i = AI_STEPS.indexOf(cur);
+    return '<ol class="ai-steps">' + AI_STEPS.map(function (s, k) { return '<li class="' + (k < i ? "done" : k === i ? "cur" : "") + '"><span>' + (k < i ? ic("check", "sm") : k + 1) + "</span>" + esc(T("ai.s_" + s)) + "</li>"; }).join("") + "</ol>";
+  }
+  function aiSpecCard(sp) {
+    var perms = [].concat((sp.permissions.network || []).map(function (x) { return "network:" + x; }), (sp.permissions.host_api || []).map(function (x) { return "host_api:" + x; }), (sp.permissions.secrets || []).map(function (x) { return "secret:" + x; }));
+    var props = ((sp.config_schema || {}).properties) || {};
+    var items = (sp.triggers || []).map(function (t) { return '<span class="pill plain">' + ic("bolt", "sm") + esc((t.kind || "") + " · " + (t.title || t.id)) + "</span>"; }).concat((sp.tools || []).map(function (t) { return '<span class="pill plain" title="' + esc(t.description || "") + '">' + ic("terminal", "sm") + esc(t.name) + "</span>"; }));
+    return '<div class="ai-spec"><div class="ai-spec-head"><span class="ap-logo br-ai">' + ic("sparkle") + '</span><div class="grow-col"><strong>' + esc(sp.name) + '</strong><small class="mono muted">' + esc(sp.id) + '</small></div><span class="ap-tag">' + esc(T("ai.type_" + sp.type)) + '</span><span class="ap-tag">' + esc(sp.runtime_language) + "</span></div>" +
+      '<p class="ai-sum">' + esc(sp.summary || "") + "</p>" +
+      '<dl class="ai-dl"><dt>' + esc(T("ai.contrib")) + "</dt><dd>" + (items.join(" ") || "—") + "</dd>" +
+      "<dt>" + esc(T("pl.perms")) + "</dt><dd>" + (perms.length ? perms.map(function (p) { var r = permRisk(p), l = permLabel(p); return '<span class="pill plain">' + esc(T("perm.k_" + l.kind.replace(".", "_"))) + " <code>" + esc(l.val) + '</code> <span class="risk ' + r + '">' + esc(T("perm.r_" + r)) + "</span></span>"; }).join(" ") : esc(T("pl.no_perms"))) + "</dd>" +
+      "<dt>" + esc(T("ai.config")) + "</dt><dd>" + (Object.keys(props).length ? Object.keys(props).map(function (k) { var x = props[k]; return '<span class="pill plain">' + (x.writeOnly ? ic("key", "sm") : "") + esc(x.title || k) + "</span>"; }).join(" ") : "—") + "</dd></dl></div>";
+  }
+  function aiLogPane(j) {
+    var lines = (j.log || []).concat((j.run_log || []).map(function (l) { return "  " + l; }));
+    return '<pre class="ai-log" id="ai-log">' + esc(lines.slice(-120).join("\n")) + "</pre>";
+  }
+  function aiReview(j) {
+    var files = (j.files || []).filter(function (f) { return f.status !== "same"; }), all = j.files || [];
+    var checks = '<ul class="ai-checks">' + (j.checks || []).map(function (c) { return '<li class="' + (c.ok ? "ok" : "bad") + '">' + ic(c.ok ? "check" : "x", "sm") + "<strong>" + esc(T("ai.ck_" + c.name)) + "</strong> <span class=\"muted\">" + esc(c.detail || "") + "</span></li>"; }).join("") + "</ul>";
+    var flist = (files.length ? files : all);
+    var fsel = '<div class="ai-files"><nav class="ai-flist">' + flist.map(function (f, i) { return '<button type="button" data-file="' + i + '" class="' + (i ? "" : "active") + '"><span class="fst ' + esc(f.status) + '">' + esc(T("ai.f_" + f.status)) + "</span>" + esc(f.path) + "</button>"; }).join("") + '</nav><pre class="ai-code" id="ai-code"></pre></div>';
+    var perms = (j.permissions || []).length ? '<div class="perm-groups">' + groupPerms(j.permissions).map(function (g) {
+      return '<fieldset class="perm-g"><legend>' + esc(T("perm.g_" + g.key)) + "</legend>" + g.items.map(function (p) { var r = permRisk(p), l = permLabel(p); return '<label class="perm-row"><input type="checkbox" data-perm value="' + esc(p) + '"><span class="grow"><span class="muted">' + esc(T("perm.k_" + l.kind.replace(".", "_"))) + "</span> <code>" + esc(l.val) + "</code>" + ((j.new_permissions || []).indexOf(p) >= 0 && j.kind === "iterate" ? ' <span class="pill warn sm">' + esc(T("pl.new_perm")) + "</span>" : "") + '</span><span class="risk ' + r + '">' + esc(T("perm.r_" + r)) + "</span></label>"; }).join("") + "</fieldset>";
+    }).join("") + '</div><p class="hint">' + esc(T("ai.perm_hint")) + "</p>" : '<p class="muted">' + esc(T("pl.no_perms")) + "</p>";
+    return '<div class="ai-review">' + (j.summary ? '<p class="ai-sum">' + esc(j.summary) + "</p>" : "") + "<h4>" + esc(T("ai.checks")) + (j.passed ? ' <span class="pill ok sm">' + esc(T("ai.passed")) + "</span>" : ' <span class="pill bad sm">' + esc(T("ai.failed_ck")) + "</span>") + "</h4>" + checks +
+      "<h4>" + esc(T("ai.files")) + "</h4>" + fsel + "<h4>" + esc(T("pl.perms")) + "</h4>" + perms + "</div>";
+  }
+  function wireFiles(host, j) {
+    var files = (j.files || []).filter(function (f) { return f.status !== "same"; });
+    if (!files.length) files = j.files || [];
+    var show = function (i) {
+      var f = files[i] || {}, code = $("#ai-code", host); if (!code) return;
+      $$("[data-file]", host).forEach(function (b) { b.classList.toggle("active", +b.getAttribute("data-file") === i); });
+      if (f.binary) { code.textContent = T("ai.binary"); return; }
+      if (f.diff && f.status === "modified") { code.innerHTML = f.diff.split("\n").map(function (l) { var c = l[0] === "+" ? "add" : l[0] === "-" ? "del" : l.indexOf("@@") === 0 ? "hunk" : ""; return '<span class="dl ' + c + '">' + esc(l) + "</span>"; }).join("\n"); }
+      else code.textContent = f.content || "";
+    };
+    $$("[data-file]", host).forEach(function (b) { b.addEventListener("click", function () { show(+b.getAttribute("data-file")); }); });
+    show(0);
+  }
+  // aiPanel renders a builder job into host and keeps it updated until it settles.
+  function aiPanel(host, job, opts) {
+    var timer = null, last = "", dead = false;
+    var stop = function () { dead = true; if (timer) clearTimeout(timer); };
+    var foot = opts.foot;
+    var paint = function (j) {
+      if (dead || !document.contains(host)) { stop(); return; }
+      var key = j.status + "|" + (j.log || []).length + "|" + (j.run_log || []).length + "|" + j.cost_usd;
+      if (key === last) return; last = key;
+      var step = j.status === "drafting" ? "describe" : j.status === "spec_ready" ? "spec" : j.status === "review" || j.status === "installing" || j.status === "installed" ? "review" : "build";
+      var busy = j.status === "drafting" || j.status === "generating" || j.status === "checking";
+      var meta = '<p class="ai-meta muted">' + ic("wallet", "sm") + esc(T("ai.budget", { b: usd(j.budget_usd || 0, 2), c: usd(j.cost_usd || 0, 4) })) + (j.redacted ? " · " + ic("shield", "sm") + esc(T("ai.redacted", { n: j.redacted })) : "") + "</p>";
+      var body;
+      if (j.status === "failed") body = '<p class="notice bad">' + ic("x", "sm") + esc(j.error || "") + "</p>" + aiLogPane(j);
+      else if (j.status === "canceled") body = '<p class="notice">' + ic("info", "sm") + esc(T("ai.canceled")) + "</p>";
+      else if (j.status === "spec_ready") body = '<p class="hint">' + esc(T("ai.spec_hint")) + "</p>" + aiSpecCard(j.spec);
+      else if (j.status === "review" || j.status === "installing") body = aiReview(j);
+      else if (j.status === "installed") body = '<p class="notice ok">' + ic("check", "sm") + esc(T("ai.installed_ok")) + "</p>";
+      else body = '<div class="ai-progress"><span class="spin" aria-hidden="true"></span><strong>' + esc(T("ai.st_" + j.status)) + "</strong></div>" + aiLogPane(j);
+      host.innerHTML = (opts.steps === false ? "" : aiStepBar(step)) + meta + body;
+      var lg = $("#ai-log", host); if (lg) lg.scrollTop = lg.scrollHeight;
+      if (j.status === "review") wireFiles(host, j);
+      var btns = "";
+      if (busy) btns = '<button type="button" class="btn danger" id="ai-cancel">' + ic("x", "sm") + esc(T("ai.cancel")) + "</button>";
+      else if (j.status === "spec_ready") btns = '<button type="button" class="btn ghost" id="ai-back">' + esc(T("ai.back")) + '</button><button type="button" class="btn primary" id="ai-gen">' + ic("sparkle", "sm") + esc(T("ai.generate")) + "</button>";
+      else if (j.status === "review") btns = (j.kind === "create" ? '<button type="button" class="btn" id="ai-gen">' + ic("refresh", "sm") + esc(T("ai.regen")) + "</button>" : "") + '<span class="grow"></span><button type="button" class="btn primary" id="ai-install"' + (j.passed ? "" : " disabled") + ">" + ic("shield", "sm") + esc(T(j.kind === "iterate" ? "ai.install_ver" : "ai.install")) + "</button>";
+      else if (j.status === "failed" || j.status === "canceled") btns = (j.spec && j.kind === "create" && j.spec.type ? '<button type="button" class="btn" id="ai-gen">' + ic("refresh", "sm") + esc(T("ai.retry")) + "</button>" : "") + '<button type="button" class="btn ghost" id="ai-back">' + esc(T("ai.back")) + "</button>";
+      else if (j.status === "installed") btns = '<button type="button" class="btn primary" id="ai-done">' + esc(T("ai.done")) + "</button>";
+      foot.innerHTML = '<span class="muted ai-foot-hint">' + ic("info", "sm") + esc(T("ai.foot")) + '</span><span class="grow"></span>' + btns;
+      var on = function (sel, f) { var b = $(sel, foot); if (b) b.addEventListener("click", f); };
+      on("#ai-cancel", function (e) { e.currentTarget.disabled = true; rpc("plugins.ai.cancel", { job_id: j.id }).then(poll).catch(fail); });
+      on("#ai-back", function () { stop(); opts.back(); });
+      on("#ai-gen", function (e) { e.currentTarget.disabled = true; rpc("plugins.ai.generate", { job_id: j.id }).then(function (x) { last = ""; paint(x); poll(); }).catch(fail); });
+      on("#ai-install", function (e) {
+        var granted = $$("[data-perm]", host).filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+        e.currentTarget.disabled = true;
+        rpc("plugins.ai.install", { job_id: j.id, permissions: granted }).then(function (r) { toast(T("ai.installed_v", { v: r.version })); last = ""; poll(); if (opts.installed) opts.installed(r); }).catch(function (err) { e.currentTarget && (e.currentTarget.disabled = false); fail(err); });
+      });
+      on("#ai-done", function () { stop(); opts.done(); });
+    };
+    var poll = function () {
+      if (dead) return;
+      rpc("plugins.ai.status", { job_id: job.id }).then(function (j) {
+        paint(j);
+        var busy = j.status === "drafting" || j.status === "generating" || j.status === "checking" || j.status === "installing";
+        if (busy && !dead) timer = setTimeout(poll, 700);
+      }).catch(function (e) { if (!dead) { stop(); fail(e); } });
+    };
+    paint(job); poll();
+    return { stop: stop };
+  }
+  function aiCreateModal() {
+    var examples = ["ai.ex1", "ai.ex2", "ai.ex3"];
+    modal('<div class="ai-wiz"><div class="ap-head"><h2>' + ic("sparkle") + esc(T("ai.title")) + '</h2><button type="button" class="icon-btn" data-close aria-label="' + esc(T("btn.close")) + '">' + ic("x") + '</button></div><div class="ai-body" id="ai-body"></div><div class="ap-foot" id="ai-foot"></div></div>', function (root, close) {
+      var body = $("#ai-body", root), foot = $("#ai-foot", root), panel = null, draft = "";
+      var describe = function () {
+        if (panel) panel.stop();
+        body.innerHTML = aiStepBar("describe") + '<label class="field"><span>' + esc(T("ai.describe")) + '</span><textarea id="ai-desc" rows="5" maxlength="4000" placeholder="' + esc(T("ai.describe_ph")) + '">' + esc(draft) + '</textarea><small class="hint">' + esc(T("ai.no_secrets")) + "</small></label>" +
+          '<div class="ai-examples"><span class="muted">' + esc(T("ai.examples")) + "</span>" + examples.map(function (k) { return '<button type="button" class="chip" data-ex="' + k + '">' + esc(T(k)) + "</button>"; }).join("") + "</div>" +
+          '<ul class="ai-promise">' + ["ai.p1", "ai.p2", "ai.p3", "ai.p4"].map(function (k) { return "<li>" + ic("shield", "sm") + esc(T(k)) + "</li>"; }).join("") + "</ul>";
+        foot.innerHTML = '<span class="muted ai-foot-hint">' + ic("wallet", "sm") + esc(T("ai.budget_pre", { b: usd(1.1, 2) })) + '</span><span class="grow"></span><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="ai-next">' + esc(T("ai.draft")) + "</button>";
+        $("[data-close]", foot).addEventListener("click", close);
+        var ta = $("#ai-desc", body); ta.focus();
+        $$("[data-ex]", body).forEach(function (b) { b.addEventListener("click", function () { ta.value = T(b.getAttribute("data-ex")); ta.focus(); }); });
+        $("#ai-next", foot).addEventListener("click", function (e) {
+          draft = ta.value.trim(); if (draft.length < 8) { ta.focus(); toast(T("ai.too_short"), true); return; }
+          e.currentTarget.disabled = true;
+          rpc("plugins.ai.draft", { description: draft }).then(function (j) { panel = aiPanel(body, j, { foot: foot, back: describe, done: function () { close(); refresh(); }, installed: function () {} }); }).catch(function (err) { e.target.disabled = false; fail(err); });
+        });
+      };
+      describe();
+    });
+    var box = $("#modal-root .modal"); if (box) box.classList.add("ap-modal", "ai-modal");
+  }
+  function aiIterateDrawer(p) {
+    openDrawer(function (dw) {
+      var fill = function () {
+        Promise.all([rpc("plugins.ai.messages", { id: p.id }), rpc("plugins.get", { id: p.id })]).then(function (r) {
+          var msgs = r[0] || [], info = (r[1] || {}).plugin || {}, cur = info.current || {}, vers = (info.versions || []).slice().reverse();
+          dw.innerHTML = '<div class="drawer-head"><span class="ap-logo br-ai sm">' + ic("sparkle") + '</span><div class="grow-col"><h2>' + esc(T("ai.iter_title", { n: plName(p) })) + '</h2><small class="muted">' + esc(T("ai.iter_sub")) + '</small></div><button type="button" class="icon-btn" data-drawer-close aria-label="' + esc(T("btn.close")) + '">' + ic("x") + "</button></div>" +
+            '<div class="drawer-body"><h4 class="sec">' + esc(T("ai.versions")) + '</h4><ul class="ai-vers">' + vers.map(function (v) { var isCur = v.id === cur.id; return '<li class="' + (isCur ? "cur" : "") + '"><strong>v' + esc(v.version) + "</strong>" + (isCur ? ' <span class="pill ok sm">' + esc(T("ai.current")) + "</span>" : "") + ' <span class="muted">' + esc(fmtTime(v.created_at)) + '</span><span class="grow"></span>' + (isCur ? "" : '<button class="btn sm" data-rb="' + esc(v.id) + '">' + ic("rollback", "sm") + esc(T("ai.rollback")) + "</button>") + "</li>"; }).join("") + "</ul>" +
+            '<h4 class="sec">' + esc(T("ai.chat")) + '</h4><div class="ai-chat">' + (msgs.length ? msgs.map(function (m) { return '<div class="ai-msg ' + esc(m.role) + '"><div>' + esc(m.body) + '</div><small class="muted">' + (m.version ? "v" + esc(m.version) + " · " : "") + esc(fmtTime(m.created_at)) + "</small></div>"; }).join("") : '<p class="muted">' + esc(T("ai.chat_empty")) + "</p>") + "</div>" +
+            '<div id="ai-iter-panel"></div><label class="field"><span>' + esc(T("ai.iter_ask")) + '</span><textarea id="ai-iter-msg" rows="3" maxlength="4000" placeholder="' + esc(T("ai.iter_ph")) + '"></textarea><small class="hint">' + esc(T("ai.no_secrets")) + "</small></label></div>" +
+            '<div class="drawer-foot" id="ai-iter-foot"><span class="grow"></span><button type="button" class="btn primary" id="ai-iter-go">' + ic("sparkle", "sm") + esc(T("ai.iter_go")) + "</button></div>";
+          $$("[data-drawer-close]", dw).forEach(function (b) { b.addEventListener("click", function () { closeDrawer(); refresh(); }); });
+          $$("[data-rb]", dw).forEach(function (b) { b.addEventListener("click", function () { rpc("plugins.rollback", { id: p.id, version_id: b.getAttribute("data-rb") }).then(function () { toast(T("ai.rolled_back")); fill(); }).catch(fail); }); });
+          $("#ai-iter-go", dw).addEventListener("click", function (e) {
+            var m = $("#ai-iter-msg", dw).value.trim(); if (!m) return;
+            e.currentTarget.disabled = true;
+            rpc("plugins.ai.iterate", { id: p.id, message: m }).then(function (j) {
+              $("#ai-iter-msg", dw).closest(".field").classList.add("hidden");
+              aiPanel($("#ai-iter-panel", dw), j, { steps: false, foot: $("#ai-iter-foot", dw), back: fill, done: fill, installed: function () {} });
+            }).catch(function (err) { e.target.disabled = false; fail(err); });
+          });
+        }).catch(fail);
+      };
+      fill();
+    });
   }
   function copyText(t) { return (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(t) : new Promise(function (ok) { var ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); ok(); })).then(function () { toast(T("tr.copied")); }); }
   function triggerCard(t, tname) {
@@ -2035,7 +2259,7 @@
     return '<div class="card trig' + (t.enabled ? "" : " off") + '"><div class="trig-head"><span class="ico">' + ic(t.kind === "webhook" ? "globe" : t.kind === "file_change" ? "folder" : "bolt") + '</span><div class="grow"><strong>' + esc(T("tr.k_" + (t.kind === "file_change" ? "file" : t.kind === "webhook" ? "webhook" : "plugin"))) + '</strong><small><a href="#/tasks/' + enc(t.task_id) + '">' + esc(tname[t.task_id] || t.task_id) + "</a>" + (t.plugin_id ? " · " + esc(t.plugin_id) : "") + "</small></div>" +
       '<button class="switch' + (t.enabled ? " on" : "") + '" data-trg-en="' + esc(t.id) + '" role="switch" aria-checked="' + !!t.enabled + '" aria-label="' + esc(T("tr.enabled")) + '"></button></div>' +
       '<p class="trig-last">' + (t.last_fired_at ? esc(T("tr.last", { t: ago(t.last_fired_at), n: t.fire_count })) + ' <span class="pill sm ' + (good ? "ok" : "bad") + '">' + esc(good ? T("tr.r_ok") : res) + "</span>" : '<span class="muted">' + esc(T("tr.never")) + "</span>") + "</p>" +
-      (t.kind === "webhook" ? '<div class="copy-row"><code class="grow">' + esc(url) + '</code><button class="btn sm" data-copy="' + esc(url) + '">' + esc(T("tr.copy_url")) + '</button></div><details class="curl"><summary>' + esc(T("tr.curl")) + '</summary><pre class="code">' + esc(curl) + '</pre><button class="btn sm" data-copy="' + esc(curl) + '">' + esc(T("tr.copy_curl")) + '</button><small class="hint">' + esc(T("tr.curl_token")) + "</small></details>" : t.kind === "file_change" ? '<p class="mono muted">' + esc((t.config || {}).path || "") + "</p>" : "") +
+      (t.kind === "webhook" ? '<div class="copy-row"><code class="grow">' + esc(url) + '</code><button class="btn sm" data-copy="' + esc(url) + '">' + esc(T("tr.copy_url")) + '</button></div><details class="curl"><summary>' + esc(T("tr.curl")) + '</summary><pre class="code">' + esc(curl) + '</pre><button class="btn sm" data-copy="' + esc(curl) + '">' + esc(T("tr.copy_curl")) + '</button><small class="hint">' + esc(T("tr.curl_token")) + "</small></details>" : t.kind === "file_change" ? '<p class="mono muted">' + esc((t.config || {}).path || "") + "</p>" : t.plugin_id ? '<p class="mono muted trunc">' + esc((t.config || {}).url || (t.config || {}).folder || (t.config || {}).repo || "") + "</p>" : "") +
       '<div class="row-actions">' + (t.kind === "webhook" || t.kind === "file_change" ? '<button class="btn sm" data-trg-test="' + esc(t.id) + '"' + (t.enabled ? "" : " disabled") + ">" + ic("play", "sm") + esc(T("tr.test")) + "</button>" : "") + '<button class="btn sm ghost danger" data-trg-del="' + esc(t.id) + '">' + esc(T("pl.remove")) + "</button></div></div>";
   }
 
@@ -2044,8 +2268,8 @@
     return api("/api/rpc/" + method, { method: "POST", body: params || {} }).then(function (r) { return r.result; });
   }
   function renderPlugins() {
-    return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; })]).then(function (res) {
-      var d = res[0] || {}, plugins = res[1] || [], trig = res[2] || [], baks = res[3] || [], tname = {};
+    return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; }), rpc("plugins.catalog").catch(function () { return []; })]).then(function (res) {
+      var d = res[0] || {}, plugins = res[1] || [], trig = res[2] || [], baks = res[3] || [], tname = {}, cat = res[5] || [];
       (res[4] || []).forEach(function (t) { tname[t.id] = t.name; });
       var stat = function (label, v) { return '<div class="stat"><span class="muted">' + esc(label) + "</span><strong>" + esc(v) + "</strong></div>"; };
       var r24 = d.runs_24h || {}, n24 = 0; Object.keys(r24).forEach(function (k) { n24 += r24[k]; });
@@ -2056,13 +2280,17 @@
         stat(T("pl.disk"), ((d.disk_bytes || 0) / 1048576).toFixed(1) + " MB") + stat(T("pl.backup"), d.last_backup ? fmtTime(d.last_backup) : T("td.none")) + "</div></section>";
       var prow = plugins.length ? '<div class="grid g2 pl-cards">' + plugins.map(function (p) {
         var cur = p.current || {}, m = cur.manifest || {}, hasCfg = m.config_schema && m.config_schema.properties && Object.keys(m.config_schema.properties).length;
-        return '<div class="card plug' + (p.enabled ? "" : " off") + '"><div class="trig-head"><span class="ico">' + ic("plugins") + '</span><div class="grow"><strong>' + esc(p.name) + ' <span class="tag">' + esc(cur.version || "-") + '</span></strong><small class="mono">' + esc(p.id) + '</small></div><button class="switch' + (p.enabled ? " on" : "") + '" data-pl-en="' + esc(p.id) + '" role="switch" aria-checked="' + !!p.enabled + '" aria-label="' + esc(T("pl.enabled")) + '"></button></div>' +
+        var src = p.source || "local", logo = src === "official" ? '<span class="ap-logo sm ' + (OF_BRAND[p.id] || "br-other") + '">' + ic(((cat.filter(function (e) { return e.id === p.id; })[0]) || {}).icon || "plugins") + "</span>" : src === "ai-generated" ? '<span class="ap-logo sm br-ai">' + ic("sparkle") + "</span>" : '<span class="ico">' + ic("plugins") + "</span>";
+        return '<div class="card plug' + (p.enabled ? "" : " off") + '"><div class="trig-head">' + logo + '<div class="grow"><strong>' + esc(plName(p)) + ' <span class="tag">' + esc(cur.version || "-") + '</span> <span class="pill sm src-' + esc(src) + '">' + esc(T("pl.src_" + src.replace("-", "_"))) + '</span></strong><small class="mono">' + esc(p.id) + '</small></div><button class="switch' + (p.enabled ? " on" : "") + '" data-pl-en="' + esc(p.id) + '" role="switch" aria-checked="' + !!p.enabled + '" aria-label="' + esc(T("pl.enabled")) + '"></button></div>' +
           '<div class="perm-box"><small class="muted">' + esc(T("perm.granted_title")) + "</small>" + permCard(p) + "</div>" +
-          '<div class="row-actions">' + (hasCfg ? '<button class="btn sm" data-pl-cfg="' + esc(p.id) + '">' + ic("settings", "sm") + esc(T("cfg.open")) + "</button>" : '<span class="muted sm-t">' + esc(T("cfg.none")) + "</span>") + '<span class="grow"></span><button class="btn sm ghost danger" data-pl-uninstall="' + esc(p.id) + '">' + esc(T("pl.uninstall")) + "</button></div></div>";
+          '<div class="row-actions">' + (hasCfg ? '<button class="btn sm" data-pl-cfg="' + esc(p.id) + '">' + ic("settings", "sm") + esc(T("cfg.open")) + "</button>" : '<span class="muted sm-t">' + esc(T("cfg.none")) + "</span>") +
+          (p.id === "daily-digest" && src === "official" ? '<button class="btn sm" data-pl-pack="' + esc(p.id) + '">' + ic("calendar", "sm") + esc(T("of.apply_pack")) + "</button>" : "") +
+          (src === "ai-generated" ? '<button class="btn sm" data-pl-ai="' + esc(p.id) + '">' + ic("sparkle", "sm") + esc(T("ai.iterate")) + "</button>" : "") + '<span class="grow"></span><button class="btn sm ghost danger" data-pl-uninstall="' + esc(p.id) + '">' + esc(T("pl.uninstall")) + "</button></div></div>";
       }).join("") + "</div>" : emptyState("plugins", T("pl.empty"), T("pl.empty_sub"));
       var trow = trig.length ? '<div class="grid g2 trig-cards">' + trig.map(function (t) { return triggerCard(t, tname); }).join("") + "</div>" : '<p class="muted">' + esc(T("pl.no_triggers")) + "</p>";
       var brow = '<p class="muted">' + esc(baks.length ? T("pl.backups_n", { n: baks.length }) : T("pl.no_backups")) + "</p>";
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn" id="bk-now">' + esc(T("pl.backup_now")) + '</button><button class="btn primary" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + "</button></div></div>" + health +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn" id="bk-now">' + esc(T("pl.backup_now")) + '</button><button class="btn" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + '</button><button class="btn primary" id="pl-ai">' + ic("sparkle", "sm") + esc(T("ai.title")) + "</button></div></div>" +
+        '<h2 class="sec-h">' + ic("star") + esc(T("of.title")) + '<span class="muted sec-sub">' + esc(T("of.sub")) + "</span></h2>" + catalogWall(cat) +
         '<h2 class="sec-h">' + ic("plugins") + esc(T("pl.installed")) + "</h2>" + prow +
         '<h2 class="sec-h">' + ic("globe") + esc(T("pl.triggers")) + '<span class="grow"></span><button class="btn sm" id="tr-add">' + ic("plus", "sm") + esc(T("tr.new")) + "</button></h2>" + trow +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section>", "plugins", [[T("nav.plugins")]]);
@@ -2078,8 +2306,17 @@
         });
       }); });
       $("#pl-add").addEventListener("click", pluginInstallModal);
+      $("#pl-ai").addEventListener("click", aiCreateModal);
       var byId = {}; plugins.forEach(function (p) { byId[p.id] = p; });
-      $$("[data-pl-cfg]").forEach(function (b) { b.addEventListener("click", function () { pluginConfigModal(byId[b.getAttribute("data-pl-cfg")]); }); });
+      $$("[data-of-install]").forEach(function (b) { b.addEventListener("click", function () { officialInstall(b.getAttribute("data-of-install")); }); });
+      $$("[data-ofc]").forEach(function (b) { b.addEventListener("click", function () {
+        catView.cat = b.getAttribute("data-ofc");
+        $$("[data-ofc]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-checked", x === b); });
+        $$("[data-of]").forEach(function (t) { var e = cat.filter(function (c) { return c.id === t.getAttribute("data-of"); })[0] || {}; t.classList.toggle("hidden", catView.cat !== "all" && e.category !== catView.cat); });
+      }); });
+      $$("[data-pl-pack]").forEach(function (b) { b.addEventListener("click", function () { applyPack(b.getAttribute("data-pl-pack")); }); });
+      $$("[data-pl-ai]").forEach(function (b) { b.addEventListener("click", function () { aiIterateDrawer(byId[b.getAttribute("data-pl-ai")]); }); });
+      $$("[data-pl-cfg]").forEach(function (b) { b.addEventListener("click", function () { var pp = byId[b.getAttribute("data-pl-cfg")]; pluginConfigModal(pp, pp.id === "daily-digest" ? refresh : null); }); });
       $$("[data-pl-en]").forEach(function (b) { b.addEventListener("click", function () { var on = !b.classList.contains("on"); rpc("plugins.enable", { id: b.getAttribute("data-pl-en"), enabled: on }).then(function () { toast(T(on ? "pl.enabled_on" : "pl.enabled_off")); refresh(); }).catch(fail); }); });
       $$("[data-perm-t]").forEach(function (b) { b.addEventListener("click", function () {
         var pid = b.getAttribute("data-perm-t"), perm = b.getAttribute("data-perm-v"), on = !!b.getAttribute("data-on");
@@ -2653,6 +2890,7 @@
       state.version = me.version || "";
       $("#login").classList.add("hidden");
       $("#shell").classList.remove("hidden");
+      dropBoot();
       renderShell();
       route();
     }).catch(function () { showLogin(); });

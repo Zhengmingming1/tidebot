@@ -1,0 +1,21 @@
+id: wecom
+name: WeCom
+version: 1.0.0
+runtime:
+  builtin: wecom
+  lifecycle: lazy
+contributes:
+  connectors:
+    - id: wecom
+      side_effects: true
+      mcp: {builtin: wecom}
+permissions:
+  network: [qyapi.weixin.qq.com]
+config_schema:
+  type: object
+  properties:
+    webhook_url: {type: string, title: Group robot webhook URL, writeOnly: true, maxLength: 500, x-order: 1}
+    corp_id: {type: string, title: Corp ID (app message, optional), maxLength: 64, x-order: 2}
+    agent_id: {type: string, title: Agent ID (app message, optional), maxLength: 32, x-order: 3}
+    app_secret: {type: string, title: App secret (app message, optional), writeOnly: true, maxLength: 128, x-order: 4}
+    to_user: {type: string, title: "App message recipients (user IDs, | separated, default @all)", maxLength: 500, x-order: 5}
