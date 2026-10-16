@@ -1,0 +1,211 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "existing tag to (re)build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 ./...
+      - run: scripts/package-server.sh "${TAG#v}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server
+          path: dist/*
+
+  desktop-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/tidebot-desktop/go.mod
+          cache-dependency-path: cmd/tidebot-desktop/go.sum
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev file libfuse2
+      - run: scripts/package-desktop-linux.sh "${TAG#v}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: dist/*
+
+  desktop-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/tidebot-desktop/go.mod
+          cache-dependency-path: cmd/tidebot-desktop/go.sum
+      - name: import signing certificate (optional)
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        if: env.APPLE_CERT_P12_BASE64 != ''
+        run: |
+          KC="$RUNNER_TEMP/build.keychain"; PW="$(openssl rand -hex 16)"
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$PW" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$PW" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$PW" "$KC"
+          security list-keychains -d user -s "$KC"
+          rm -f "$RUNNER_TEMP/cert.p12"
+      - name: build .app + .dmg
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/package-desktop-macos.sh "${TAG#v}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: dist/*
+
+  desktop-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/tidebot-desktop/go.mod
+          cache-dependency-path: cmd/tidebot-desktop/go.sum
+      - name: build
+        run: |
+          V="${TAG#v}"
+          mkdir -p stage dist
+          (cd cmd/tidebot-desktop && go build -trimpath -ldflags "-s -w -H windowsgui -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V" -o ../../stage/tidebot-desktop.exe .)
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V" -o stage/agentctl.exe ./cmd/agentctl
+      - name: install NSIS if missing
+        run: command -v makensis || choco install nsis -y --no-progress
+      - name: sign binaries (optional)
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        if: env.WINDOWS_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $st = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $st.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:WINDOWS_CERT_PASSWORD" /fd sha256 /tr http://timestamp.digicert.com /td sha256 stage\tidebot-desktop.exe stage\agentctl.exe
+          Remove-Item "$env:RUNNER_TEMP\cert.pfx"
+      - name: installer
+        run: |
+          V="${TAG#v}"
+          NSIS="$(command -v makensis || echo '/c/Program Files (x86)/NSIS/makensis.exe')"
+          "$NSIS" -DVERSION="$V" -DSRC="$(cygpath -w "$PWD/stage")" -DOUTFILE="$(cygpath -w "$PWD/dist/tidebot-desktop_${V}_windows_amd64_setup.exe")" packaging/windows/installer.nsi
+      - name: sign installer (optional)
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        if: env.WINDOWS_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $st = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $st.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:WINDOWS_CERT_PASSWORD" /fd sha256 /tr http://timestamp.digicert.com /td sha256 (Get-ChildItem dist\*.exe).FullName
+          Remove-Item "$env:RUNNER_TEMP\cert.pfx"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist/*
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: |
+          echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/tidebot" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+
+  publish:
+    needs: [server, desktop-linux, desktop-macos, desktop-windows, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+      - name: notes
+        run: |
+          V="${TAG#v}"
+          NOTES="docs/release-notes/${TAG}.md"
+          if [ -f "$NOTES" ]; then cp "$NOTES" notes.md; else echo "tidebot ${TAG}" > notes.md; fi
+          IMG="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/tidebot:${V}"
+          printf '\n## Docker\n\n    docker pull %s\n\n## Checksums\n\nSee `checksums.txt` (sha256).\n' "$IMG" >> notes.md
+      - name: create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" dist/* --title "tidebot $TAG" --notes-file notes.md
+          fi

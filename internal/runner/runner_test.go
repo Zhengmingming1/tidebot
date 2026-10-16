@@ -23,6 +23,7 @@ func mockBin(t *testing.T) string {
 }
 
 func TestRunOnceWithMock(t *testing.T) {
+	skipOnWindows(t)
 	path := filepath.Join(t.TempDir(), "t.db")
 	sqlDB, err := db.Open(path)
 	if err != nil {
@@ -64,6 +65,7 @@ func TestRunOnceWithMock(t *testing.T) {
 }
 
 func TestConcurrencyLimit(t *testing.T) {
+	skipOnWindows(t)
 	path := filepath.Join(t.TempDir(), "t.db")
 	sqlDB, err := db.Open(path)
 	if err != nil {
@@ -100,6 +102,7 @@ func TestConcurrencyLimit(t *testing.T) {
 }
 
 func TestTimeout(t *testing.T) {
+	skipOnWindows(t)
 	path := filepath.Join(t.TempDir(), "t.db")
 	sqlDB, err := db.Open(path)
 	if err != nil {
@@ -117,5 +120,11 @@ func TestTimeout(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected timeout error")
+	}
+}
+
+func skipOnWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mock claude is a shell script")
 	}
 }
