@@ -37,6 +37,21 @@ func main() {
 	defer cli.Close()
 
 	switch cmd {
+	case "call":
+		// Generic escape hatch: agentctl call <method> ['{"json":"params"}']
+		if len(args) == 0 {
+			fatal(fmt.Errorf("%s", i18n.T("cli.usage_line", "agentctl call <method> [json-params]")))
+		}
+		var params any
+		if len(args) > 1 {
+			if err := json.Unmarshal([]byte(args[1]), &params); err != nil {
+				fatal(err)
+			}
+		}
+		var out any
+		must(cli.Call(args[0], params, &out))
+		printJSON(out)
+
 	case "status":
 		var out map[string]any
 		must(cli.Call("status", nil, &out))

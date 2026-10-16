@@ -48,6 +48,7 @@ func (a *App) RegisterRPC(srv *ipc.Server) {
 	srv.Register("auth.set_password", a.rpcAuthSetPassword)
 	srv.Register("auth.totp_setup", a.rpcAuthTOTPSetup)
 	srv.Register("auth.totp_disable", a.rpcAuthTOTPDisable)
+	a.registerRPC2(srv)
 }
 
 func (a *App) rpcStatus(ctx context.Context, _ json.RawMessage) (any, error) {

@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +48,9 @@ type App struct {
 	Auth     *auth.Service
 	WebUI    *webui.Server
 	Events   *Bus
+	Policy   *policy.Store
+
+	retryScale float64
 }
 
 // Open loads config, opens DB, and builds subsystems.
@@ -83,7 +88,12 @@ func Open(cfg config.Config) (*App, error) {
 		Ver:      ver,
 	}
 	a.Runner.LogDir = filepath.Join(cfg.DataDir, "runs")
-	a.Sched = scheduler.New(store, log, cfg.SchedulerTick, a.runTask)
+	a.Policy = &policy.Store{DB: sqlDB}
+	a.Sched = scheduler.New(store, log, cfg.SchedulerTick, a.runTaskScheduled)
+	a.Sched.Catchup = a.catchup
+	if v, err := strconv.ParseFloat(os.Getenv("TIDEBOT_RETRY_SCALE"), 64); err == nil && v > 0 {
+		a.retryScale = v
+	}
 	a.Tasks = tasksvc.New(store, ver, a.Sched)
 	structurer := amend.Structurer(amend.MockStructurer{})
 	if os.Getenv("TIDEBOT_AMEND_AI") == "1" {
@@ -225,6 +235,8 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	ev := Event{Kind: EventRunFinished, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), RunID: res.RunID, CostUSD: res.TotalCostUSD}
 	if err != nil {
 		ev.Kind, ev.Detail = EventRunFailed, err.Error()
+	} else if res.Status != "" && res.Status != "succeeded" {
+		ev.Kind, ev.Detail = EventRunFailed, res.Status+": "+res.ErrorMessage
 	}
 	a.Events.Emit(ev)
 	return res, err
@@ -277,6 +289,12 @@ func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket 
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
+	}
+	if err != nil && res.ErrorMessage != "" && !strings.Contains(err.Error(), res.ErrorMessage) {
+		err = fmt.Errorf("%s: %w", res.ErrorMessage, err)
+	}
+	if err == nil && res.Status != "" && res.Status != "succeeded" {
+		err = fmt.Errorf("run %s: %s", res.Status, res.ErrorMessage)
 	}
 	return err
 }
