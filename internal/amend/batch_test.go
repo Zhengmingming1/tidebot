@@ -84,8 +84,10 @@ func TestBatchCreatesExactlyOneVersion(t *testing.T) {
 	if len(view.Spec.Constraints) != 3 || view.CurrentVersion.ID != res.VersionID {
 		t.Fatalf("spec %+v", view.Spec.Constraints)
 	}
-	if res.Items[3].Status != "scheduled" {
-		t.Fatalf("next-run item %+v", res.Items[3])
+	for _, it := range res.Items {
+		if it.Scope == "next_run" && it.Status != "scheduled" {
+			t.Fatalf("next-run item %+v", it)
+		}
 	}
 }
 

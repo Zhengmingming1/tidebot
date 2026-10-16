@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/notify"
+	"github.com/Zhengmingming1/tidebot/internal/optimize"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"log/slog"
 	"os"
@@ -51,6 +53,7 @@ type App struct {
 	Events   *Bus
 	Policy   *policy.Store
 	Notify   *notify.Service
+	Optimize *optimize.Service
 
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
@@ -111,6 +114,10 @@ func Open(cfg config.Config) (*App, error) {
 		a.Events.Emit(Event{Kind: EventApprovalNeeded, TaskID: taskID, TaskName: a.taskName(taskID), Count: len(items)})
 	}
 	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
+	a.Optimize = optimize.New(sqlDB, a.Skills, ver)
+	a.Optimize.OnEvent = func(kind, skillID, detail string) {
+		a.Events.Emit(Event{Kind: kind, Detail: detail, TaskName: a.skillName(skillID)})
+	}
 	a.Cost = cost.New(sqlDB, log)
 	a.Cost.Loc = cfg.Location()
 	a.Auth = auth.New(sqlDB)
@@ -280,8 +287,20 @@ func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket 
 	if view.Spec != nil && view.Spec.WorkspaceDir != "" {
 		ws = view.Spec.WorkspaceDir
 	}
+	if ws == "" {
+		ws = guard.TaskWorkspace(a.Cfg.HomeDir, task.ID)
+		_ = os.MkdirAll(ws, 0o755)
+	}
+	var choices []skillChoice
 	if view.Spec != nil && len(view.Spec.SkillBindings) > 0 {
-		if err := a.Skills.Materialize(ctx, ws, view.Spec.SkillBindings); err != nil {
+		var bindings []tasksvc.SkillBinding
+		bindings, choices = a.chooseSkillVersions(ctx, task.ID, bucket, view.Spec.SkillBindings)
+		for _, c := range choices {
+			if c.Candidate {
+				bucket = cost.BucketCanary
+			}
+		}
+		if err := a.Skills.Materialize(ctx, ws, bindings); err != nil {
 			a.Log.Warn("materialize skills", "error", err)
 		}
 	}
@@ -299,6 +318,7 @@ func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket 
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
 	}
+	a.recordSkillOutcomes(ctx, choices, res, err, len(nextIDs) > 0)
 	if err != nil && res.ErrorMessage != "" && !strings.Contains(err.Error(), res.ErrorMessage) {
 		err = fmt.Errorf("%s: %w", res.ErrorMessage, err)
 	}

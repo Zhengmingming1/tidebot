@@ -24,6 +24,7 @@ func (a *App) registerRPC2(srv *ipc.Server) {
 	srv.Register("notify.add_rule", a.rpcNotifyAddRule)
 	srv.Register("notify.test", a.rpcNotifyTest)
 	srv.Register("notify.settings", a.rpcNotifySettings)
+	a.registerSkillRPC(func(n string, h func(context.Context, json.RawMessage) (any, error)) { srv.Register(n, h) })
 }
 
 func decode[T any](raw json.RawMessage) (T, error) {

@@ -72,6 +72,8 @@ type CommitInput struct {
 	Actor      string
 	Reason     string
 	BatchID    string
+	// NoMove creates (or finds) the version without moving `current` (skill proposals).
+	NoMove bool
 }
 
 // CommitResult describes what happened.
@@ -118,6 +120,9 @@ func (s *Service) Commit(ctx context.Context, in CommitInput) (CommitResult, err
 	if err != nil && err != sql.ErrNoRows {
 		return CommitResult{}, err
 	}
+	if err == nil && in.NoMove {
+		return CommitResult{Version: existing}, nil
+	}
 	if err == nil {
 		from := ""
 		if cur.Valid {
@@ -153,6 +158,9 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?)`,
 	}
 	if err := s.appendOp(ctx, in.EntityType, in.EntityID, "version_create", "", "", vid, in.Actor, in.Reason, in.BatchID, nil); err != nil {
 		return CommitResult{}, err
+	}
+	if in.NoMove {
+		return CommitResult{Version: ver, Created: true}, nil
 	}
 	if err := s.MovePointer(ctx, in.EntityType, in.EntityID, PointerCurrent, vid, in.Actor, in.Reason, in.BatchID); err != nil {
 		return CommitResult{}, err
