@@ -36,4 +36,7 @@ if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_T
   xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
   xcrun stapler staple "$DMG"
 fi
+# Same signed bundle as a tar.gz for the in-app updater (it swaps the .app in place).
+if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then xcrun stapler staple "$APP" || true; fi
+tar -C "$B" -czf "$OUT/tidebot-desktop-${VER}-macOS-app.tar.gz" tidebot.app
 ls -l "$OUT"

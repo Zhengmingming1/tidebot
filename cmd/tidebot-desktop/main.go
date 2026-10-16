@@ -22,6 +22,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/config"
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
+	"github.com/Zhengmingming1/tidebot/internal/updater"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -92,6 +93,13 @@ func main() {
 		},
 	})
 
+	// Pending self-update: count this start; after too many failed starts the
+	// previous build is restored and we hand over to it.
+	if bs := updater.Boot(cfg.HomeDir); bs.RolledBack {
+		relaunchSelf()
+		return
+	}
+
 	core, err := app.Open(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "open core:", err)
@@ -114,11 +122,17 @@ func main() {
 	if v, _ := core.Auth.GetSetting(ctx, "desktop.scheduler_paused"); v == "true" {
 		core.Sched.SetPaused(true)
 	}
+	core.SetUpdateProduct("desktop")
 	d, err := core.StartDaemon(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start core (is agentd already running?):", err)
+		if updater.RollbackNow(cfg.HomeDir, "start: "+err.Error()) == nil {
+			relaunchSelf()
+		}
 		os.Exit(1)
 	}
+	restartAfterQuit := false
+	core.SetRestartFunc(func() { restartAfterQuit = true; sh.app.Quit() })
 	defer d.Stop()
 
 	startURL := "/"
@@ -151,9 +165,42 @@ func main() {
 	sh.buildTray()
 	go sh.watchEvents(core.Events.Subscribe(32))
 	go sh.pollTray(ctx)
+	// Health check for a fresh update: core up and the UI loop alive for 20s.
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-time.After(20 * time.Second):
+			updater.Confirm(cfg.HomeDir)
+		}
+	}()
 	if err := sh.app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
+	if restartAfterQuit {
+		d.Stop()
+		core.Close()
+		relaunchSelf()
+	}
+}
+
+// relaunchSelf starts whatever is now installed at our path (for an AppImage,
+// the AppImage file; for macOS, the .app via open) and exits.
+func relaunchSelf() {
+	exe := updater.Executable()
+	in := updater.Detect("desktop", exe)
+	var err error
+	switch in.Kind {
+	case "appimage":
+		err = updater.Relaunch(in.Target, os.Args[1:])
+	case "app":
+		err = updater.Relaunch("/usr/bin/open", []string{"-n", in.Target})
+	default:
+		err = updater.Relaunch(exe, os.Args[1:])
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "restart:", err)
+	}
+	os.Exit(0)
 }
 
 func defaultBridge() string {

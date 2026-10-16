@@ -38,6 +38,8 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		m.Title, m.Body = i18n.T("notify.breaker", name), e.Detail
 	case EventConfirmNeeded:
 		m.Title, m.Body = i18n.T("notify.confirm", name), e.Detail
+	case EventUpdateAvailable, EventUpdateRolledBack:
+		m.Title, m.Body = updateMessage(e)
 	default:
 		m.Title, m.Body = e.Kind+": "+name, e.Detail
 	}

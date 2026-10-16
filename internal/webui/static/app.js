@@ -2273,7 +2273,52 @@
         body = '<section class="card">' + head +
           row("version", T("set.version"), T("set.version_sub"), "<code>" + esc(state.version || "dev") + "</code>") +
           row("terms", T("set.terms"), T("set.terms_sub"), "") +
-          row("source", T("set.source"), T("set.source_sub"), '<code>github.com/Zhengmingming1/tidebot</code>') + "</section>";
+          row("source", T("set.source"), T("set.source_sub"), '<code>github.com/Zhengmingming1/tidebot</code>') + "</section>" +
+          '<section class="card" id="set-update"><div class="card-head"><span class="ico">' + ic("refresh") + "</span><h2>" + esc(T("up.title")) + "</h2></div>" +
+          row("up_auto", T("up.auto"), T("up.auto_sub"), '<label class="check"><input type="checkbox" id="up-auto"> ' + esc(T("up.on")) + "</label>") +
+          row("up_every", T("up.every"), T("up.every_sub"), '<select id="up-every"><option value="24">' + esc(T("up.daily")) + '</option><option value="168">' + esc(T("up.weekly")) + "</option></select>") +
+          row("up_channel", T("up.channel"), T("up.channel_sub"), "<code>stable</code>") +
+          '<div id="up-box" class="pad-x" aria-live="polite"><p class="muted">…</p></div></section>';
+        after = function () {
+          var paint = function (st) {
+            var s = st.settings || {}, last = st.last, inst = st.install || {}, res = st.result, h = "";
+            $("#up-auto").checked = !!s.enabled;
+            $("#up-every").value = String(s.interval_hours >= 168 ? 168 : 24);
+            if (res && res.status === "rolled_back") h += '<p class="err">' + esc(T("up.rolled_back", { v: res.to, why: res.detail || "" })) + "</p>";
+            if (st.error) h += '<p class="err">' + esc(T("up.err", { e: st.error })) + "</p>";
+            if (last && last.available) {
+              h += "<h3>" + esc(T("up.avail", { v: last.latest, cur: last.current })) + "</h3>" +
+                (last.date ? '<p class="muted">' + esc(last.date) + "</p>" : "") +
+                (last.notes ? '<pre class="changelog">' + esc(last.notes) + "</pre>" : "") +
+                (last.notes_url ? '<p><a href="' + esc(last.notes_url) + '" target="_blank" rel="noopener">' + esc(T("up.notes")) + "</a></p>" : "");
+              if (last.can_apply) h += '<p><button class="btn primary" id="up-apply">' + esc(T("up.apply")) + '</button> <small class="muted">' + esc(T("up.apply_sub")) + "</small></p>";
+              else h += '<p class="muted">' + esc(T("up.notify_only", { kind: inst.kind || "?" })) + (inst.reason ? " — " + esc(inst.reason) : "") + "</p>";
+            } else if (last) {
+              h += '<p class="muted">' + esc(T("up.none", { v: st.current })) + "</p>";
+            }
+            h += '<p><button class="btn" id="up-check">' + esc(T("up.check")) + '</button> <small class="muted">' + esc(T("up.privacy")) + "</small></p>";
+            $("#up-box").innerHTML = h;
+            $("#up-check").addEventListener("click", function (e) {
+              e.target.disabled = true;
+              rpc("update.check", {}).then(paint).catch(function (err) { fail(err); e.target.disabled = false; });
+            });
+            var ap = $("#up-apply");
+            if (ap) ap.addEventListener("click", function () {
+              if (!confirm(T("up.confirm", { v: last.latest }))) return;
+              ap.disabled = true; ap.textContent = T("up.applying");
+              rpc("update.apply", {}).then(function () {
+                toast(T("up.restarting"));
+                setTimeout(function () { location.reload(); }, 8000);
+              }).catch(function (err) { fail(err); ap.disabled = false; ap.textContent = T("up.apply"); });
+            });
+          };
+          var save = function () {
+            rpc("update.settings", { enabled: $("#up-auto").checked, interval_hours: parseInt($("#up-every").value, 10) }).then(function () { savedMark($("#up-auto")); }).catch(fail);
+          };
+          $("#up-auto").addEventListener("change", save);
+          $("#up-every").addEventListener("change", save);
+          rpc("update.status", {}).then(paint).catch(fail);
+        };
       }
       mount('<div class="page-head"><div><h1>' + esc(T("nav.settings")) + "</h1><p>" + esc(T("set.sub")) + '</p></div></div><div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
         "settings", [[T("nav.settings"), "#/settings"], [T("setnav." + section)]]);
