@@ -98,6 +98,20 @@ flowchart LR
   Runner -- logs / SSE --> Web
 ```
 
+## Install
+
+Prebuilt packages are on the [Releases](https://github.com/Zhengmingming1/tidebot/releases) page, with sha256 sums in `checksums.txt`.
+Whichever you pick, you still need the `claude` CLI installed to actually run tasks.
+
+- **Server (agentd + agentctl)**: grab `tidebot-server_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) and put the two binaries on your PATH.
+  On Debian/Ubuntu there's a `.deb`: `sudo apt install ./tidebot-server_0.1.0_amd64.deb`, then `systemctl --user enable --now tidebot`.
+- **Desktop app**: `.dmg` on macOS (universal, Intel and Apple silicon), `_setup.exe` on Windows (per-user, no admin),
+  `.deb` or `.AppImage` on Linux (the AppImage doesn't bundle WebKitGTK; you need `libwebkit2gtk-4.1` on the system).
+  Unsigned builds: on macOS right-click → Open the first time; Windows shows a SmartScreen prompt.
+- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:0.1.0`. The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
+
+Once installed, `agentctl call update.check` looks for a newer release and `update.apply` swaps the binaries in place after checking the sha256 (the old ones stay as `.prev`).
+
 ## Quick start
 
 You need Go 1.22+. Real runs need the `claude` CLI installed. If you just want to look around, the repo ships a fake `claude` that costs nothing.
@@ -197,7 +211,7 @@ scripts/build-desktop.sh linux        # needs Go 1.25, libgtk-3-dev, libwebkit2g
 bin/tidebot-desktop --autostart enable --hidden   # start on login, hidden in the tray
 ```
 
-Honest status: I've only run it on Linux. The Windows and macOS build scripts exist but are untested.
+Honest status: I've only really used it on Linux. The macOS and Windows builds compile and get packaged in CI, but I haven't run them on real machines.
 It's built on Wails v3 beta, which still moves. It isn't light either: with WebKit it's 400 to 500 MB RSS (the core alone is ~14 MB). Numbers are in docs/phase0-results.md.
 
 ## Status
@@ -206,23 +220,29 @@ This is a personal project maintained by one person, and it's early.
 
 Works today:
 
-- Scheduling, manual runs, concurrency limit, timeouts
+- Scheduling, manual runs, concurrency limit, timeouts; retries with backoff, a breaker after 3 failures in a row, catch-up after downtime, overlap rules
 - Immutable task versions, rollback, version tree
-- Plain-language amendments: structured items, conflict detection, batch confirm
-- Skill import, versions, pinning, rollback
+- Plain-language amendments: structured items, conflict detection, batch confirm; it offers to consolidate once items pile up
+- Skill import, versions, pinning, rollback; auto-optimization (off / suggest / canary), and a canary that does worse gets withdrawn automatically
 - Daily spend caps at global / task / bucket level, reset at local midnight
-- WebUI: home, tasks, live logs, spend, settings, in English and Chinese
-- Multiple model providers, keys only in the child process
+- Execution guard: a workspace per task, tool allow-lists, dangerous commands held until you confirm, external input wrapped as data
+- Plugins: separate processes speaking JSON-RPC over stdio, versioned installs, permissions approved item by item, a breaker after 3 crashes; they can add MCP tools and triggers
+- Triggers: webhook (token or HMAC), file changes, email and IM (via plugins); workflow pack import/export
+- Notifications: email, webhook, Feishu, DingTalk, WeCom, Telegram, with quiet hours and a daily digest
+- Backups (`.agentbak`, secrets only with a passphrase) and restore (`agentd restore`), log cleanup, a health summary and Prometheus `/metrics`
+- Sandbox dry-runs: runs against a copy of the workspace, billed to the dry_run bucket, and tells you which files changed
+- WebUI in English and Chinese; a desktop app (tray + window)
+- CI runs the tests on Linux, macOS and Windows; Windows uses a named pipe for local IPC
 
 Not there yet:
 
 - Requirement splitting uses a local rule by default (split on semicolons). Model-based splitting needs `TIDEBOT_AMEND_AI=1` and is still being tuned.
-- Skill auto-optimization and canary comparison aren't implemented.
-- Plugins are a placeholder page; installing MCP servers and triggers isn't built.
-- Notifications only go to the log.
-- Secrets come from environment variables only; OS keychain support isn't wired up.
-- Mostly used on Linux and macOS. Windows is untested.
-- A CI workflow is written (`docs/ci/`) but not enabled in the repo yet.
+- No CPU limits for plugins; memory is only roughly capped with rlimit on Linux.
+- Secrets live in a local encrypted file; OS keychain support isn't wired up.
+- The guard's path checks assume Unix paths, so the write-outside-workspace check isn't reliable on Windows.
+- I've only installed and run the Linux packages myself. The macOS .dmg and Windows installer come out of CI and nobody has clicked through them yet.
+- Builds are unsigned by default.
+- The repo is still private, so self-update can't see new releases yet.
 
 ## About Anthropic
 
@@ -233,4 +253,5 @@ tidebot drives the Claude Code CLI installed on your machine, with your own API 
 - [Design plan](docs/final-plan.md)
 - [Research report](docs/report.md)
 - [Model providers](docs/providers.md)
+- [Releases and packaging](docs/release.md)
 - [Phase 0 measurements](docs/phase0-results.md)
