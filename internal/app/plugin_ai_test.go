@@ -69,7 +69,7 @@ func TestAIPluginBuilderEndToEnd(t *testing.T) {
 	}
 	v = aiWait(t, a, job, "review")
 	b, _ := os.ReadFile(argsFile)
-	if !strings.Contains(string(b), "--disallowedTools") || !strings.Contains(string(b), "Bash") || !strings.Contains(string(b), "--max-budget-usd") || strings.Contains(string(b), "--mcp-config") {
+	if !strings.Contains(string(b), "--disallowedTools") || !strings.Contains(string(b), "Bash") || strings.Contains(string(b), "--mcp-config") {
 		t.Fatalf("build args %s", b)
 	}
 	if v["passed"] != true {

@@ -216,6 +216,9 @@ func (a *App) extRPC() map[string]rpcFunc {
 	for k, v := range a.officialRPC() {
 		m[k] = v
 	}
+	for k, v := range a.pricingRPC() {
+		m[k] = v
+	}
 	for k, v := range a.networkRPC() {
 		m[k] = v
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Zhengmingming1/tidebot/internal/pricing"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +26,49 @@ type Profile struct {
 	SmallFastModel string            `json:"small_fast_model,omitempty" yaml:"small_fast_model,omitempty"`
 	SubagentModel  string            `json:"subagent_model,omitempty" yaml:"subagent_model,omitempty"`
 	ExtraEnv       map[string]string `json:"extra_env,omitempty" yaml:"extra_env,omitempty"`
+	// Billing and Prices override the preset's (nil = use the preset's official values).
+	Billing *pricing.Billing     `json:"billing,omitempty" yaml:"billing,omitempty"`
+	Prices  []pricing.ModelPrice `json:"prices,omitempty" yaml:"prices,omitempty"`
+}
+
+// Pricing is the effective billing and price list of a profile.
+type Pricing struct {
+	Billing  pricing.Billing      `json:"billing"`
+	Prices   []pricing.ModelPrice `json:"prices"`
+	Origin   string               `json:"origin"`   // official | custom | none
+	Official []pricing.ModelPrice `json:"official"` // the preset's list, for "restore official price"
+	// Anthropic is true for Anthropic's own API (Claude Code's cost figure is valid there).
+	Anthropic bool `json:"anthropic"`
+}
+
+// EffectivePricing resolves a profile's billing and prices against its preset.
+func (p Profile) EffectivePricing() Pricing {
+	out := Pricing{Billing: pricing.Billing{Mode: pricing.ModeMetered}, Prices: []pricing.ModelPrice{}, Official: []pricing.ModelPrice{}, Origin: "none"}
+	var preset Preset
+	if p.Preset != "" {
+		preset, _ = LookupPreset(p.Preset)
+	}
+	if preset.Billing != nil {
+		out.Billing = *preset.Billing
+	}
+	if len(preset.Prices) > 0 {
+		out.Official = preset.Prices
+		out.Prices, out.Origin = preset.Prices, "official"
+	}
+	if p.Billing != nil {
+		out.Billing = *p.Billing
+		if out.Billing.Mode == "" {
+			out.Billing.Mode = pricing.ModeMetered
+		}
+	}
+	if p.Prices != nil {
+		out.Prices, out.Origin = p.Prices, "custom"
+		if len(p.Prices) == 0 && len(out.Official) == 0 {
+			out.Origin = "none"
+		}
+	}
+	out.Anthropic = p.Preset == "anthropic" && (p.BaseURL == "" || strings.Contains(p.BaseURL, "api.anthropic.com"))
+	return out
 }
 
 // FileDocument is the on-disk providers.yaml shape.

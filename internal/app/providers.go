@@ -197,6 +197,14 @@ func (pa providerAdmin) SaveProvider(ctx context.Context, in webui.ProviderInput
 		pre, _ := provider.LookupPreset(in.Preset)
 		p.SecretEnv = provider.FromPreset(pre).SecretEnv
 	}
+	// pricing is edited separately (pricing.set); keep it across saves
+	oldName := in.OriginalName
+	if oldName == "" {
+		oldName = in.Name
+	}
+	if old, ok := a.Registry.Get(oldName); ok && old.Preset == p.Preset {
+		p.Billing, p.Prices = old.Billing, old.Prices
+	}
 	// key first, so a failing secret store doesn't leave a provider without its key
 	if in.APIKey != nil && strings.TrimSpace(*in.APIKey) != "" {
 		k := strings.TrimSpace(*in.APIKey)

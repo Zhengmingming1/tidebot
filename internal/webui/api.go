@@ -149,17 +149,27 @@ type runDTO struct {
 	Prompt       string  `json:"prompt"`
 	VersionNo    int     `json:"version_no"`
 	Bucket       string  `json:"bucket"`
+	// tidebot's own pricing (native currency); CostUSD above is in the display currency.
+	CostAmount   float64 `json:"cost_amount"`
+	CostCurrency string  `json:"cost_currency"`
+	CostSource   string  `json:"cost_source"`
+	CacheRead    int64   `json:"cache_read_tokens"`
+	CacheWrite   int64   `json:"cache_write_tokens"`
+	Requests     int64   `json:"requests"`
 }
 
-const runSelect = `SELECT r.id, COALESCE(r.task_id,''), COALESCE(t.name,''), r.status, r.trigger_kind,
- COALESCE(r.provider_name,''), COALESCE(r.model,''), COALESCE(r.total_cost_usd,0),
+func (s *Server) runSelect() string {
+	return `SELECT r.id, COALESCE(r.task_id,''), COALESCE(t.name,''), r.status, r.trigger_kind,
+ COALESCE(r.provider_name,''), COALESCE(r.model,''), ` + s.runAmt("r.") + `,
  COALESCE(r.input_tokens,0), COALESCE(r.output_tokens,0), COALESCE(r.duration_ms,0),
  COALESCE(r.started_at,''), COALESCE(r.finished_at,''), r.created_at, COALESCE(r.error_message,''),
- r.prompt, COALESCE(v.version_no,0), COALESCE(r.cost_bucket,'production')
+ r.prompt, COALESCE(v.version_no,0), COALESCE(r.cost_bucket,'production'),
+ r.cost_amount, r.cost_currency, r.cost_source, r.cache_read_tokens, r.cache_write_tokens, r.requests
 FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN versions v ON v.id = r.task_version_id`
+}
 
 func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]runDTO, error) {
-	rows, err := s.deps.DB.QueryContext(ctx, runSelect+" "+where, args...)
+	rows, err := s.deps.DB.QueryContext(ctx, s.runSelect()+" "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +179,8 @@ func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]ru
 		var d runDTO
 		if err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
 			&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
-			&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket); err != nil {
+			&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
+			&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests); err != nil {
 			return nil, err
 		}
 		if len(d.Prompt) > 300 {
@@ -412,7 +423,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"schedule": sched,
 		"runs":     runs,
 		"spend": map[string]any{
-			"used_usd": sum.TotalUSD, "max_usd": maxUSD, "tokens": sum.TotalTokens,
+			"used_usd": sum.TotalUSD, "max_usd": maxUSD, "currency": sum.Currency, "tokens": sum.TotalTokens,
 			"by_bucket": sum.ByBucket, "resets_at": reset.UTC().Format(time.RFC3339), "timezone": sum.Timezone,
 		},
 		"active_runs": active,
@@ -840,7 +851,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		args = append(args, like, like, like, like)
 	}
 	order := map[string]string{"": "r.created_at DESC", "new": "r.created_at DESC", "old": "r.created_at ASC",
-		"cost": "COALESCE(r.total_cost_usd,0) DESC, r.created_at DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC",
+		"cost": s.runAmt("r.") + " DESC, r.created_at DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC",
 		"duration": "COALESCE(r.duration_ms,0) DESC, r.created_at DESC"}[q.Get("sort")]
 	if order == "" {
 		writeErr(w, 400, "sort must be new, old, cost, tokens or duration")
@@ -877,7 +888,18 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 404, "run not found")
 			return
 		}
-		writeJSON(w, 200, runs[0])
+		// cost_detail: the calculation (tokens × price snapshot) for the run detail page
+		var detail string
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail FROM runs WHERE id=?`, id).Scan(&detail)
+		out := struct {
+			runDTO
+			CostDetail json.RawMessage `json:"cost_detail"`
+			Currency   string          `json:"currency"`
+		}{runs[0], nil, s.fx().Display}
+		if json.Valid([]byte(detail)) {
+			out.CostDetail = json.RawMessage(detail)
+		}
+		writeJSON(w, 200, out)
 		return
 	}
 	if parts[1] == "rerun" && r.Method == http.MethodPost {
@@ -1037,7 +1059,7 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 	for i := 13; i >= 0; i-- {
 		d := dayRow{Day: today.AddDate(0, 0, -i).Format("2006-01-02")}
 		if st, en, err := s.deps.Cost.DayRange(d.Day); err == nil {
-			_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(usd),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE created_at >= ? AND created_at < ?`, st, en).Scan(&d.USD, &d.Tokens)
+			_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(`+s.ledgerAmt("")+`),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE created_at >= ? AND created_at < ?`, st, en).Scan(&d.USD, &d.Tokens)
 		}
 		if d.USD > 0 || d.Tokens > 0 {
 			days = append(days, d)
@@ -1084,8 +1106,8 @@ FROM budget_events e LEFT JOIN tasks t ON e.scope='task' AND t.id=e.scope_id ORD
 	}
 	top := []taskSpend{}
 	dst, den, _ := s.deps.Cost.DayRange(sum.Day)
-	rows, err = s.deps.DB.QueryContext(ctx, `SELECT COALESCE(c.task_id,''), COALESCE(t.name,'(ad-hoc)'), SUM(c.usd), COUNT(1)
-FROM cost_ledger c LEFT JOIN tasks t ON t.id=c.task_id WHERE c.created_at >= ? AND c.created_at < ? GROUP BY c.task_id ORDER BY SUM(c.usd) DESC LIMIT 8`, dst, den)
+	rows, err = s.deps.DB.QueryContext(ctx, `SELECT COALESCE(c.task_id,''), COALESCE(t.name,'(ad-hoc)'), SUM(`+s.ledgerAmt("c.")+`), COUNT(1)
+FROM cost_ledger c LEFT JOIN tasks t ON t.id=c.task_id WHERE c.created_at >= ? AND c.created_at < ? GROUP BY c.task_id ORDER BY SUM(`+s.ledgerAmt("c.")+`) DESC LIMIT 8`, dst, den)
 	if err == nil {
 		for rows.Next() {
 			var t taskSpend
@@ -1189,6 +1211,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"providers":        providers,
 		"default_provider": s.deps.Cfg.DefaultProvider,
 		"budgets":          sum.Budgets,
+		"fx":               s.fx(),
 		"totp_enabled":     totp,
 		"timezone":         s.loc().String(),
 		"version":          Version,
@@ -1303,14 +1326,18 @@ func (s *Server) handleLanguage(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	reUSDCap   = regexp.MustCompile(`daily USD cap reached \(([\d.]+)/([\d.]+)\)`)
+	reUSDCap   = regexp.MustCompile(`daily (USD|CNY) cap reached \(([\d.]+)/([\d.]+)\)`)
 	reTokenCap = regexp.MustCompile(`daily token cap reached \((\d+)/(\d+)\)`)
 )
 
 // parseBudgetDetail turns the stored English breach text into a code + numbers.
 func parseBudgetDetail(d string) (code, used, limit string) {
 	if m := reUSDCap.FindStringSubmatch(d); m != nil {
-		return "usd_cap", m[1], m[2]
+		sym := "$"
+		if m[1] == "CNY" {
+			sym = "¥"
+		}
+		return "usd_cap", sym + m[2], sym + m[3]
 	}
 	if m := reTokenCap.FindStringSubmatch(d); m != nil {
 		return "token_cap", m[1], m[2]

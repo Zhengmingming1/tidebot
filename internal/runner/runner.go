@@ -20,6 +20,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
+	"github.com/Zhengmingming1/tidebot/internal/pricing"
 	"github.com/Zhengmingming1/tidebot/internal/provider"
 )
 
@@ -46,6 +47,8 @@ type Options struct {
 	OnStart func(runID string)
 	// NoPluginMCP keeps the owner's plugin connectors out of this run (AI plugin builder).
 	NoPluginMCP bool
+	// Cost prices the run from token usage and enforces caps mid-run (nil = no pricing).
+	Cost *CostControl
 }
 
 // Result is the outcome of one run.
@@ -61,6 +64,8 @@ type Result struct {
 	DurationMS   int64
 	Events       []Event
 	ResultText   string
+	// Cost is tidebot's own pricing of the run (zero when Options.Cost is nil).
+	Cost pricing.Cost
 }
 
 // Runner manages concurrency and persists runs to SQLite.
@@ -220,8 +225,17 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	if dbErr := r.store.UpdateRunFinish(context.Background(), finish); dbErr != nil {
 		log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
 	}
+	if opts.Cost != nil {
+		if dbErr := r.store.UpdateRunCost(context.Background(), runID, res.Cost); dbErr != nil {
+			log.Error("persist run cost failed", "error", dbErr, "run_id", runID)
+		}
+	}
 
-	fmt.Fprintf(logW, "[%s] run finished: %s (cost $%.4f, %d ms)\n[[end]]\n", time.Now().Format("15:04:05"), status, res.TotalCostUSD, res.DurationMS)
+	if opts.Cost != nil {
+		fmt.Fprintf(logW, "[%s] run finished: %s (cost %.4f %s [%s], %d ms)\n[[end]]\n", time.Now().Format("15:04:05"), status, res.Cost.Amount, res.Cost.Currency, res.Cost.Source, res.DurationMS)
+	} else {
+		fmt.Fprintf(logW, "[%s] run finished: %s (cost $%.4f, %d ms)\n[[end]]\n", time.Now().Format("15:04:05"), status, res.TotalCostUSD, res.DurationMS)
+	}
 	log.Info("run finished",
 		"run_id", runID,
 		"status", status,
@@ -278,6 +292,16 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 		args = append(args, "--bare")
 	}
 	args = append(args, opts.ExtraArgs...)
+
+	// budgetStop kills the run when CostControl says the caps are exceeded.
+	ctx, budgetStop := context.WithCancel(ctx)
+	defer budgetStop()
+	var meter *pricing.Meter
+	if opts.Cost != nil {
+		meter = pricing.NewMeter(opts.Cost.Calc)
+	}
+	budgetMsg := ""
+	var resultEv *Event
 
 	cmd := exec.CommandContext(ctx, bin, args...)
 	if opts.WorkspaceDir != "" {
@@ -339,7 +363,19 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 			}
 			mu.Lock()
 			events = append(events, ev)
+			if meter != nil && budgetMsg == "" {
+				if mid, u, ok := assistantUsage(ev); ok {
+					meter.Add(mid, u)
+					if msg := opts.Cost.exceeded(meter.Now()); msg != "" {
+						budgetMsg = msg
+						fmt.Fprintf(logW, "[%s] %s — stopping run\n", time.Now().Format("15:04:05"), msg)
+						budgetStop()
+					}
+				}
+			}
 			if ev.IsResult() {
+				evc := ev
+				resultEv = &evc
 				result.SessionID = ev.SessionID
 				result.TotalCostUSD = ev.TotalCostUSD
 				result.ResultText = ev.Result
@@ -370,6 +406,18 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 	result.Events = events
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	if meter != nil {
+		var totals map[string]pricing.Usage
+		if resultEv != nil {
+			totals = resultTotals(*resultEv, opts.Profile.Model)
+		}
+		result.Cost = opts.Cost.Calc.Compute(meter.Requests(), totals, result.TotalCostUSD)
+	}
+	if budgetMsg != "" {
+		result.Status = "canceled"
+		result.ErrorMessage = budgetMsg
+		return result, errors.New(budgetMsg)
 	}
 
 	if ctx.Err() != nil {

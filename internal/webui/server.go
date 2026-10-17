@@ -345,5 +345,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "csrf_token": sess.CSRFToken, "totp_enabled": totp, "user": "owner",
 		"timezone": s.loc().String(), "version": Version, "language": s.language(r.Context()), "os_language": osLang(r.Context()),
+		"currency": s.fx().Display,
 	})
 }

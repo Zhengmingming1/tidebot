@@ -59,7 +59,7 @@ func (a *App) recordSkillOutcomes(ctx context.Context, ch []skillChoice, res run
 		}
 		_ = a.Optimize.Record(ctx, optimize.Outcome{RunID: res.RunID + ":" + c.SkillID, SkillID: c.SkillID, VersionID: c.VersionID,
 			Candidate: c.Candidate, OK: err == nil, Blocked: class == "budget" || class == "danger_blocked",
-			CostUSD: res.TotalCostUSD, DurationMS: res.DurationMS})
+			CostUSD: a.RunCostUSD(res), DurationMS: res.DurationMS})
 	}
 }
 

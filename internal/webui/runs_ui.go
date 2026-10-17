@@ -48,7 +48,7 @@ type beat struct {
 
 // heartbeats returns the last n runs per active/paused task, oldest first.
 func (s *Server) heartbeats(ctx context.Context, n int) (map[string][]beat, error) {
-	rows, err := s.deps.DB.QueryContext(ctx, `SELECT task_id, id, status, created_at, COALESCE(duration_ms,0), COALESCE(total_cost_usd,0) FROM (
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT task_id, id, status, created_at, COALESCE(duration_ms,0), `+s.runAmt("")+` FROM (
 		SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.task_id ORDER BY r.created_at DESC) AS rn
 		FROM runs r JOIN tasks t ON t.id = r.task_id WHERE t.status IN ('active','paused')) WHERE rn <= ? ORDER BY created_at ASC`, n)
 	if err != nil {

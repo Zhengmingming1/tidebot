@@ -207,7 +207,7 @@ func (a *App) aiRun(ctx context.Context, j *AIJob, prompt, ws string, budget flo
 		Prompt: prompt, WorkspaceDir: ws, TriggerKind: "plugin_ai", CostBucket: cost.BucketAssist, ExtraArgs: args, NoPluginMCP: true,
 		OnStart: func(rid string) { a.aiUpdate(j, func(j *AIJob) { j.RunID = rid }) },
 	}, "", 15*time.Minute)
-	a.aiUpdate(j, func(j *AIJob) { j.CostUSD += res.TotalCostUSD })
+	a.aiUpdate(j, func(j *AIJob) { j.CostUSD += a.RunCostUSD(res) })
 	if err == nil && res.Status != "" && res.Status != "succeeded" {
 		err = fmt.Errorf("%s: %s", res.Status, res.ErrorMessage)
 	}
