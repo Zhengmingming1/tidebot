@@ -39,6 +39,7 @@ jobs:
         run: |
           CGO_ENABLED=0 go build -o bin/ ./cmd/agentd ./cmd/agentctl
           ls -l bin
+          PY=$(command -v python3 || command -v python); "$PY" scripts/check-no-private-url.py bin
 
   desktop:
     strategy:
@@ -62,3 +63,4 @@ jobs:
           go vet $TAGS ./...
           go test $TAGS ./...
           go build $TAGS -o /tmp/tidebot-desktop-ci .
+          [ "$RUNNER_OS" = Windows ] || python3 ../../scripts/check-no-private-url.py /tmp/tidebot-desktop-ci

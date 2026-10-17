@@ -112,16 +112,16 @@ flowchart LR
 
 ## Download
 
-[![macOS (Apple Silicon / Intel)](https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-black?logo=apple)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg) [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?logo=windows)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-Windows-x64-Setup.exe) [![Linux x64 (AppImage)](https://img.shields.io/badge/Linux-AppImage-FCC624?logo=linux&logoColor=black)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-Linux-x64.AppImage) [![Linux x64 (.deb)](https://img.shields.io/badge/Debian%2FUbuntu-.deb-A81D33?logo=debian)](https://github.com/Zhengmingming1/tidebot/releases/latest/download/tidebot-desktop-Linux-x64.deb)
+[![macOS (Apple Silicon / Intel)](https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-black?logo=apple)](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg) [![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?logo=windows)](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-Windows-x64-Setup.exe) [![Linux x64 (AppImage)](https://img.shields.io/badge/Linux-AppImage-FCC624?logo=linux&logoColor=black)](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-Linux-x64.AppImage) [![Linux x64 (.deb)](https://img.shields.io/badge/Debian%2FUbuntu-.deb-A81D33?logo=debian)](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-Linux-x64.deb)
 
-Pick your OS. On a Mac the chip doesn't matter: Apple Silicon and Intel use the same .dmg. Server builds, ARM and Docker are on the [Releases page](https://github.com/Zhengmingming1/tidebot/releases/latest), which starts with a "Which file do I download?" table.
+Pick your OS. On a Mac the chip doesn't matter: Apple Silicon and Intel use the same .dmg. Server builds, ARM and Docker are on the [Releases page](https://github.com/Zhengmingming1/tidebot-releases/releases/latest), which starts with a "Which file do I download?" table.
 A GitHub README can't detect your OS, so this is a plain list. These links work from v0.1.1 on; for v0.1.0 use the Releases page.
 
 Builds aren't signed yet: on macOS right-click → Open the first time (or `xattr -dr com.apple.quarantine /Applications/tidebot.app`); on Windows click "More info → Run anyway" in SmartScreen.
 
 ## Install
 
-Prebuilt packages are on the [Releases](https://github.com/Zhengmingming1/tidebot/releases) page, with sha256 sums in `checksums.txt`.
+Prebuilt packages are on the [Releases](https://github.com/Zhengmingming1/tidebot-releases/releases) page, with sha256 sums in `checksums.txt`.
 Whichever you pick, you still need the `claude` CLI installed to actually run tasks.
 
 - **Server (agentd + agentctl)**: grab `tidebot-server_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) and put the two binaries on your PATH.

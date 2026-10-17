@@ -1077,3 +1077,23 @@ html.tb-hidden .tide * { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .tide * { animation: none !important; } }
 .boot { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 50; }
 .boot-mark svg { width: 72px; height: 72px; display: block; filter: drop-shadow(0 8px 24px rgba(22,64,163,.18)); }
+
+/* ---- settings → network ---- */
+.net-manual { padding-top: 4px; }
+.net-mlist { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: m; }
+.net-mlist li { display: flex; align-items: center; gap: 8px; }
+.net-mlist li::before { counter-increment: m; content: counter(m); width: 20px; height: 20px; border-radius: 50%; background: var(--bg-sunk); color: var(--text-3); font-size: 11px; display: grid; place-items: center; flex: none; }
+.net-mlist li.fixed { padding: 6px 0; }
+.net-mlist input { flex: 1; min-width: 0; }
+.net-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.net-presets .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-pill); padding: 3px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.net-presets .chip:disabled { opacity: .5; cursor: default; }
+.net-res, .net-att { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.net-res li { display: flex; align-items: center; gap: 6px; }
+.net-res li.ok .i { color: var(--ok); } .net-res li.bad .i { color: var(--danger); }
+.net-err { border: 1px solid var(--danger-50); background: var(--danger-50); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0; }
+.net-err p { margin: 4px 0; }
+.net-err pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 6px 0 0; }
+.net-fix { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg#net-mode { display: inline-flex; width: max-content; }
+.net-mlist input { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: 13px; }

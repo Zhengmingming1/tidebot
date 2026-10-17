@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/netproxy"
+
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/provider"
@@ -285,7 +287,7 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 	if baseEnv == nil {
 		baseEnv = os.Environ()
 	}
-	cmd.Env = provider.ChildEnv(baseEnv, opts.Profile, opts.APIKey)
+	cmd.Env = withProxyEnv(provider.ChildEnv(baseEnv, opts.Profile, opts.APIKey))
 	// Own process group (unix) / job object (windows) so the whole tree dies on cancel.
 	setupProcess(cmd)
 
@@ -405,4 +407,21 @@ func drainMasked(r io.Reader, secret string) error {
 		_ = provider.MaskSecret(sc.Text(), secret) // discard; available for future log hooks
 	}
 	return sc.Err()
+}
+
+// withProxyEnv adds tidebot's resolved proxy (Settings → 网络 or the OS proxy)
+// to Claude Code's environment, unless the variables are already set there.
+func withProxyEnv(env []string) []string {
+	have := map[string]bool{}
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		have[k] = true
+	}
+	for _, kv := range netproxy.Env() {
+		k, _, _ := strings.Cut(kv, "=")
+		if !have[k] {
+			env = append(env, kv)
+		}
+	}
+	return env
 }

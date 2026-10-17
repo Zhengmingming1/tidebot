@@ -6,6 +6,3 @@ var Version = "dev"
 
 // Commit is the git commit the binary was built from.
 var Commit = ""
-
-// Repo is the GitHub repository used for self-update.
-const Repo = "Zhengmingming1/tidebot"

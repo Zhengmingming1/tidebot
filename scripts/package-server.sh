@@ -35,7 +35,7 @@ Architecture: $arch
 Maintainer: Zhengmingming1 <noreply@github.com>
 Section: utils
 Priority: optional
-Homepage: https://github.com/Zhengmingming1/tidebot
+Homepage: https://github.com/Zhengmingming1/tidebot-releases
 Description: tidebot scheduler daemon (agentd) and CLI (agentctl)
  Runs Claude Code tasks on a schedule. Needs the claude CLI installed separately.
 CTL

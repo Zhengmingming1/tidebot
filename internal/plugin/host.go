@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 )
 
 // Protocol: JSON-RPC 2.0, one JSON object per line on the plugin's stdin/stdout.
@@ -173,7 +175,7 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 			env = append(env, "TIDEBOT_SECRET_"+strings.ToUpper(sname)+"="+v)
 		}
 	}
-	cmd.Env = env
+	cmd.Env = append(env, netproxy.Env()...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

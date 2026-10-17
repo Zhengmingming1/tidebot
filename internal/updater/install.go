@@ -164,15 +164,45 @@ const MaxAttempts = 2
 // backup) and writes the pending marker. For nsis it only stages the installer
 // and returns its path; the caller runs it.
 func Apply(ctx context.Context, hc *http.Client, c *Check, stateDir string) (installer string, err error) {
+	return ApplyFrom(ctx, hc, c, stateDir, nil)
+}
+
+// ApplyFrom is Apply with a list of sources tried in order for the download;
+// a file that fails the sha256 check counts as a failed source.
+func ApplyFrom(ctx context.Context, hc *http.Client, c *Check, stateDir string, srcs []Source) (installer string, err error) {
 	if !c.CanApply || c.asset == nil {
 		return "", errors.New("no applicable update")
 	}
-	data, err := get(ctx, hc, c.asset.URL, 400<<20)
-	if err != nil {
-		return "", err
+	if len(srcs) == 0 {
+		srcs = []Source{Direct}
 	}
-	if err := checkSum(data, c.asset.SHA256); err != nil {
-		return "", err
+	var data []byte
+	var lastErr error
+	fe := &FetchError{}
+	for _, s := range srcs {
+		u := s.AssetURL(c.asset.URL, c.Latest)
+		if s.Name == "env" {
+			u = c.asset.URL
+		}
+		b, gerr := get(ctx, hc, u, 400<<20)
+		if gerr == nil {
+			gerr = checkSum(b, c.asset.SHA256)
+		}
+		if gerr == nil {
+			data = b
+			break
+		}
+		lastErr = gerr
+		fe.Attempts = append(fe.Attempts, Attempt{Source: s.Name, Code: Classify(gerr), Error: gerr.Error()})
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if data == nil {
+		if len(fe.Attempts) == 1 {
+			return "", lastErr
+		}
+		return "", fe
 	}
 	in := c.Install
 	var swaps []Swap
