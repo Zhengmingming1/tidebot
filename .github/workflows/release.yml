@@ -181,7 +181,7 @@ jobs:
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
             ${{ steps.meta.outputs.image }}:latest
           labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/Zhengmingming1/tidebot-releases
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
 
   publish:

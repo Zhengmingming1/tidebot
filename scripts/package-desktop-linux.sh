@@ -23,7 +23,7 @@ Maintainer: Zhengmingming1 <noreply@github.com>
 Depends: libgtk-3-0, libwebkit2gtk-4.1-0
 Section: utils
 Priority: optional
-Homepage: https://github.com/Zhengmingming1/tidebot
+Homepage: https://github.com/Zhengmingming1/tidebot-releases
 Description: tidebot desktop app (tray + window, embeds the scheduler)
  Needs the claude CLI installed separately.
 CTL

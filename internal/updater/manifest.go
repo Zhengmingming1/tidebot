@@ -4,8 +4,8 @@
 // and a boot-time marker that rolls back when the new build doesn't come up.
 //
 // Nothing is sent to anyone except plain HTTPS GETs for the manifest and the
-// asset (no telemetry, no identifiers). The default HTTP client honours
-// HTTPS_PROXY / HTTP_PROXY / NO_PROXY.
+// asset (no telemetry, no identifiers). The default HTTP client follows tidebot's
+// proxy setting (see internal/netproxy).
 package updater
 
 import (
@@ -16,11 +16,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"strings"
-	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 )
 
 // ReleasesRepo is the public repo that carries release files and latest.json.
@@ -83,18 +83,9 @@ func ManifestBase() string {
 	return "https://github.com/" + ReleasesRepo + "/releases/latest/download"
 }
 
-// Client is proxy-aware with sane timeouts. Downloads use the request context
-// for the overall deadline.
-func Client() *http.Client {
-	tr := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		IdleConnTimeout:       60 * time.Second,
-	}
-	return &http.Client{Transport: tr}
-}
+// Client uses tidebot's proxy choice (Settings → 网络 > env > OS settings) with
+// sane timeouts. Downloads use the request context for the overall deadline.
+func Client() *http.Client { return netproxy.Client(0) }
 
 // Fetch downloads and verifies latest.json.
 func Fetch(ctx context.Context, hc *http.Client, base, pub string) (*Manifest, error) {
@@ -131,7 +122,7 @@ func get(ctx context.Context, hc *http.Client, url string, max int64) ([]byte, e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+		return nil, &HTTPError{URL: url, Status: resp.StatusCode, Text: resp.Status}
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
 	if err != nil {

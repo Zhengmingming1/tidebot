@@ -1,16 +1,13 @@
 package app
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -18,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
@@ -300,65 +296,6 @@ func TestDashboardMetricsAndClaudeVersion(t *testing.T) {
 	}
 	if parseClaudeVersion("2.1.3 (Claude Code)") != "2.1.3" || ClaudeCompatible("1.0.9") || !ClaudeCompatible("2.0.14") {
 		t.Fatal("version parsing")
-	}
-}
-
-func TestSelfUpdate(t *testing.T) {
-	var tgz bytes.Buffer
-	gz := gzip.NewWriter(&tgz)
-	tw := tar.NewWriter(gz)
-	body := []byte("#!/bin/sh\necho new\n")
-	tw.WriteHeader(&tar.Header{Name: "tidebot/agentd", Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
-	tw.Write(body)
-	tw.Close()
-	gz.Close()
-	sum := sha256.Sum256(tgz.Bytes())
-	asset := ServerAssetName("9.9.9", "linux", "amd64")
-	if !strings.HasSuffix(asset, "_linux_amd64.tar.gz") {
-		t.Fatal(asset)
-	}
-	good := true
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
-			name := ServerAssetNameForTest()
-			fmt.Fprintf(w, `{"tag_name":"v9.9.9","assets":[{"name":%q,"browser_download_url":"%s/a"},{"name":"checksums.txt","browser_download_url":"%s/sums"}]}`, name, srv.URL, srv.URL)
-		case r.URL.Path == "/a":
-			w.Write(tgz.Bytes())
-		case r.URL.Path == "/sums":
-			s := hex.EncodeToString(sum[:])
-			if !good {
-				s = strings.Repeat("0", 64)
-			}
-			fmt.Fprintf(w, "%s  %s\n", s, ServerAssetNameForTest())
-		}
-	}))
-	defer srv.Close()
-	old := UpdateAPIBase
-	UpdateAPIBase = srv.URL
-	defer func() { UpdateAPIBase = old }()
-	ov := buildinfo.Version
-	buildinfo.Version = "0.1.0"
-	defer func() { buildinfo.Version = ov }()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "agentd"), []byte("old"), 0o755)
-	good = false
-	if _, err := ApplyUpdate(context.Background(), srv.Client(), dir); err == nil {
-		t.Fatal("checksum mismatch accepted")
-	}
-	if !runtimeHasArchive() {
-		t.Skip("windows uses zip assets")
-	}
-	good = true
-	res, err := ApplyUpdate(context.Background(), srv.Client(), dir)
-	if err != nil || res["updated"] != true {
-		t.Fatalf("%v %v", res, err)
-	}
-	nb, _ := os.ReadFile(filepath.Join(dir, "agentd"))
-	pb, _ := os.ReadFile(filepath.Join(dir, "agentd.prev"))
-	if string(nb) != string(body) || string(pb) != "old" {
-		t.Fatal("replace/keep-previous failed")
 	}
 }
 

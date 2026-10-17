@@ -15,6 +15,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
+	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 	"github.com/Zhengmingming1/tidebot/internal/updater"
 )
 
@@ -42,6 +43,9 @@ type selfUpdate struct {
 	mu        sync.Mutex
 	last      *updater.Check
 	lastErr   string
+	lastCode  string
+	attempts  []updater.Attempt
+	srcs      []updater.Source // order that worked last, served source first
 	notified  string
 	restartFn func() // set by the daemon; nil in tests
 	client    *http.Client
@@ -90,13 +94,20 @@ func (a *App) CheckForUpdate(ctx context.Context) (*updater.Check, error) {
 	s := a.su()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	m, err := updater.Fetch(ctx, s.client, updater.ManifestBase(), s.pubKey)
+	srcs := updater.Sources(a.NetworkSettings(ctx).Mirrors)
+	m, used, err := updater.FetchFrom(ctx, s.client, srcs, s.pubKey)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
-		s.lastErr = err.Error()
+		var fe *updater.FetchError
+		s.lastErr, s.lastCode, s.attempts = err.Error(), updater.Classify(err), nil
+		if errors.As(err, &fe) {
+			s.lastCode, s.attempts = fe.Code(), fe.Attempts
+		}
 		return nil, err
 	}
+	s.srcs = append([]updater.Source{srcs[used]}, append(append([]updater.Source{}, srcs[:used]...), srcs[used+1:]...)...)
+	s.lastCode, s.attempts = "", nil
 	c := updater.Evaluate(m, strings.TrimPrefix(buildinfo.Version, "v"), a.updateInstall(), runtime.GOOS, runtime.GOARCH)
 	s.last, s.lastErr = c, ""
 	return c, nil
@@ -108,13 +119,17 @@ func (a *App) UpdateStatus(ctx context.Context) map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return map[string]any{
-		"current":  buildinfo.Version,
-		"settings": a.UpdateSettings(ctx),
-		"install":  a.updateInstall(),
-		"last":     s.last,
-		"error":    s.lastErr,
-		"result":   updater.LastResult(a.Cfg.HomeDir),
-		"source":   updater.ManifestBase(),
+		"current":       buildinfo.Version,
+		"settings":      a.UpdateSettings(ctx),
+		"install":       a.updateInstall(),
+		"last":          s.last,
+		"error":         s.lastErr,
+		"error_code":    s.lastCode,
+		"attempts":      s.attempts,
+		"result":        updater.LastResult(a.Cfg.HomeDir),
+		"source":        updater.ManifestBase(),
+		"releases_page": updater.ReleasesPage,
+		"proxy":         netproxy.Resolve(),
 	}
 }
 
@@ -132,7 +147,10 @@ func (a *App) ApplyUpdateNow(ctx context.Context) (map[string]any, error) {
 	}
 	dctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	installer, err := updater.Apply(dctx, a.su().client, c, a.Cfg.HomeDir)
+	a.su().mu.Lock()
+	srcs := a.su().srcs
+	a.su().mu.Unlock()
+	installer, err := updater.ApplyFrom(dctx, a.su().client, c, a.Cfg.HomeDir, srcs)
 	if err != nil {
 		return nil, err
 	}

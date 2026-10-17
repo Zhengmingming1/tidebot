@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/netproxy"
+
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/secrets"
 )
@@ -398,6 +400,11 @@ func (s *Store) MCPConfig(ctx context.Context, sandbox bool) ([]byte, int, error
 				cj, _ := json.Marshal(s.ActivationConfig(ctx, p.ID))
 				env["TIDEBOT_PLUGIN_CONFIG"] = string(cj)
 				env["TIDEBOT_PLUGIN_ID"] = p.ID
+				for _, kv := range netproxy.Env() {
+					if k, v, ok := strings.Cut(kv, "="); ok {
+						env[k] = v
+					}
+				}
 			}
 			servers[p.ID+"__"+c.ID] = map[string]any{
 				"command": cmd,

@@ -21,6 +21,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	if err := a.SeedBuiltinProviders(ctx); err != nil {
 		a.Log.Error("seed providers", "error", err)
 	}
+	a.LoadNetwork(ctx)
 	ln, err := ipc.Listen(a.Cfg.IPCPath)
 	if err != nil {
 		return nil, err

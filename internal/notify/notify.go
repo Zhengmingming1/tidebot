@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/netproxy"
+
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/secrets"
 )
@@ -61,7 +63,7 @@ type Service struct {
 
 // New creates a Service.
 func New(db *sql.DB, sec secrets.Backend) *Service {
-	return &Service{DB: db, Secrets: sec, HTTP: &http.Client{Timeout: 15 * time.Second}, Loc: time.Local, Now: time.Now}
+	return &Service{DB: db, Secrets: sec, HTTP: netproxy.Client(15 * time.Second), Loc: time.Local, Now: time.Now}
 }
 
 // AddChannel validates and stores a channel. secretValue (optional) is stored in the secret

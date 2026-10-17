@@ -2583,8 +2583,23 @@
   // Left nav + one section at a time. Every row has an id, so #/settings/<section>/<item>
   // scrolls to it. Autosaved fields show "Saved ✓" next to them. Dangerous actions
   // live in the danger zone at the bottom of General.
-  var SET_SECTIONS = ["general", "providers", "budgets", "security", "notifications", "data", "about"];
-  var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", security: "shield", notifications: "bell", data: "folder", about: "info" };
+  var SET_SECTIONS = ["general", "providers", "budgets", "security", "notifications", "network", "data", "about"];
+  var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", security: "shield", notifications: "bell", network: "globe", data: "folder", about: "info" };
+  var RELEASES_PAGE = "https://github.com/Zhengmingming1/tidebot-releases/releases/latest";
+  var NET_CODES = ["timeout", "dns", "tls", "proxy", "refused", "http_404", "http", "signature", "checksum", "unknown"];
+  // Classified network error with a "how to fix" hint and the manual download link.
+  function netErrHtml(code, detail, attempts) {
+    code = NET_CODES.indexOf(code) >= 0 ? code : "unknown";
+    var h = '<div class="net-err" role="alert"><p class="err"><strong>' + esc(T("net.e." + code)) + "</strong></p>" +
+      '<p class="muted">' + esc(T("net.h." + code)) + "</p>";
+    if (attempts && attempts.length > 1) h += '<ul class="net-att">' + attempts.map(function (a) { return "<li><code>" + esc(a.source) + "</code> " + esc(T("net.e." + (NET_CODES.indexOf(a.code) >= 0 ? a.code : "unknown"))) + "</li>"; }).join("") + "</ul>";
+    if (detail) h += '<details><summary>' + esc(T("net.detail")) + '</summary><pre class="mono">' + esc(detail) + "</pre></details>";
+    return h + '<p class="net-fix"><a class="btn sm" href="#/settings/network">' + ic("globe", "sm") + esc(T("net.set_proxy")) + '</a> <a class="btn sm ghost" href="' + esc(RELEASES_PAGE) + '" target="_blank" rel="noopener">' + ic("download", "sm") + esc(T("net.manual")) + "</a></p></div>";
+  }
+  function proxyLabel(e) {
+    if (!e || e.source === "none") return T(e && e.note === "pac" ? "net.eff_pac" : "net.eff_direct");
+    return T("net.eff_" + (e.source.indexOf("system") === 0 ? "system" : e.source), { p: e.https || e.http || "", s: e.source.replace("system:", "") });
+  }
   function savedMark(el) {
     if (!el) return;
     var host = el.closest(".set-row, .field") || el.parentNode, m = $(".saved-mark", host);
@@ -2707,11 +2722,70 @@
             rpc("backups.create", {}).then(function () { toast(T("set.bk_done")); return load(); }).catch(fail).then(function () { e.target.disabled = false; });
           });
         };
+      } else if (section === "network") {
+        body = '<section class="card" id="set-net">' + head +
+          row("proxy", T("net.proxy"), T("net.proxy_sub"), '<div class="seg" id="net-mode" role="radiogroup" aria-label="' + esc(T("net.proxy")) + '">' + [["auto", T("net.m_auto")], ["manual", T("net.m_manual")], ["off", T("net.m_off")]].map(function (m) { return '<button type="button" role="radio" data-m="' + m[0] + '">' + esc(m[1]) + "</button>"; }).join("") + "</div>") +
+          '<div class="pad-x net-manual hidden" id="net-man">' + fieldHtml(T("net.url"), '<input id="net-url" class="mono" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:7890">', T("net.url_hint")) +
+          fieldHtml(T("net.bypass"), '<input id="net-bypass" class="mono" autocomplete="off" spellcheck="false" placeholder="localhost, 127.0.0.1, .corp.example">', T("net.bypass_hint")) + "</div>" +
+          '<div class="pad-x"><p class="muted" id="net-eff"></p><p><button class="btn" id="net-test">' + ic("pulse", "sm") + esc(T("net.test")) + '</button> <button class="btn primary" id="net-save">' + esc(T("btn.save")) + '</button></p><div id="net-out" aria-live="polite"></div></div></section>' +
+          '<section class="card" id="set-mirrors"><div class="card-head"><span class="ico">' + ic("download") + "</span><h2>" + esc(T("net.mirrors")) + '</h2></div><div class="pad-x"><p class="muted">' + esc(T("net.mirrors_sub")) + '</p><div id="net-mlist"></div>' +
+          '<p class="net-presets" id="net-presets"></p><p><button class="btn sm" id="net-madd">' + ic("plus", "sm") + esc(T("net.m_add")) + "</button></p></div></section>";
+        after = function () {
+          var cur = null, view = null;
+          var paintMode = function () {
+            $$("#net-mode button").forEach(function (b) { var on = b.getAttribute("data-m") === cur.proxy.mode; b.classList.toggle("active", on); b.setAttribute("aria-checked", on); });
+            $("#net-man").classList.toggle("hidden", cur.proxy.mode !== "manual");
+          };
+          var paintMirrors = function () {
+            var ms = cur.mirrors || [];
+            $("#net-mlist").innerHTML = '<ol class="net-mlist"><li class="fixed"><code>github.com</code> <span class="muted">' + esc(T("net.m_direct")) + "</span></li>" + ms.map(function (m, i) {
+              return '<li><input class="mono" data-mi="' + i + '" value="' + esc(m.prefix || m.manifest || "") + '" aria-label="' + esc(T("net.m_url")) + '"><button type="button" class="icon-btn" data-mdel="' + i + '" aria-label="' + esc(T("btn.remove")) + '">' + ic("x") + "</button></li>";
+            }).join("") + "</ol>";
+            $$("[data-mi]").forEach(function (inp) { inp.addEventListener("change", function () { var m = cur.mirrors[+inp.getAttribute("data-mi")], v = inp.value.trim(); if (m.manifest) m.manifest = v; else m.prefix = v; m.name = hostOf(v); }); });
+            $$("[data-mdel]").forEach(function (b) { b.addEventListener("click", function () { cur.mirrors.splice(+b.getAttribute("data-mdel"), 1); paintMirrors(); }); });
+            $("#net-presets").innerHTML = '<span class="muted">' + esc(T("net.presets")) + "</span> " + (view.presets || []).map(function (p, i) {
+              var used = ms.some(function (m) { return m.prefix === p.prefix; });
+              return '<button type="button" class="chip" data-pre="' + i + '"' + (used ? " disabled" : "") + ">" + ic("plus", "sm") + esc(p.name) + "</button>";
+            }).join(" ") + ' <small class="muted">' + esc(T("net.presets_note")) + "</small>";
+            $$("[data-pre]").forEach(function (b) { b.addEventListener("click", function () { var p = view.presets[+b.getAttribute("data-pre")]; cur.mirrors.push({ name: p.name, prefix: p.prefix }); paintMirrors(); }); });
+          };
+          var hostOf = function (v) { try { return new URL(v).host; } catch (e) { return v; } };
+          var read = function () {
+            cur.proxy.url = $("#net-url").value.trim(); cur.proxy.bypass = $("#net-bypass").value.trim();
+            cur.mirrors = (cur.mirrors || []).filter(function (m) { return (m.prefix || m.manifest || "").trim(); });
+            return cur;
+          };
+          var paint = function (v) {
+            view = v; cur = JSON.parse(JSON.stringify(v.settings));
+            $("#net-url").value = cur.proxy.url || ""; $("#net-bypass").value = cur.proxy.bypass || "";
+            $("#net-eff").textContent = T("net.now", { p: proxyLabel(v.effective) });
+            paintMode(); paintMirrors();
+          };
+          $$("#net-mode button").forEach(function (b) { b.addEventListener("click", function () { cur.proxy.mode = b.getAttribute("data-m"); paintMode(); if (cur.proxy.mode === "manual") $("#net-url").focus(); }); });
+          $("#net-madd").addEventListener("click", function () { cur.mirrors.push({ name: "", prefix: "" }); paintMirrors(); var l = $$("[data-mi]"); if (l.length) l[l.length - 1].focus(); });
+          $("#net-save").addEventListener("click", function (e) {
+            e.currentTarget.disabled = true; var btn = e.currentTarget;
+            rpc("network.set", read()).then(function (v) { paint(v); savedMark(btn); }).catch(fail).then(function () { btn.disabled = false; });
+          });
+          $("#net-test").addEventListener("click", function (e) {
+            var btn = e.currentTarget; btn.disabled = true; $("#net-out").innerHTML = '<p class="muted"><span class="spin"></span> ' + esc(T("net.testing")) + "</p>";
+            rpc("network.test", { settings: read() }).then(function (r) {
+              btn.disabled = false;
+              var ok = (r.results || []).filter(function (x) { return x.ok; })[0];
+              var h = '<p class="muted">' + esc(T("net.used", { p: proxyLabel(r.effective) })) + '</p><ul class="net-res">' + (r.results || []).map(function (x) {
+                return '<li class="' + (x.ok ? "ok" : "bad") + '">' + ic(x.ok ? "check" : "x", "sm") + "<code>" + esc(x.source) + "</code> " + (x.ok ? esc(T("net.ok", { v: x.version, ms: x.ms })) : esc(T("net.e." + (NET_CODES.indexOf(x.code) >= 0 ? x.code : "unknown")))) + "</li>";
+              }).join("") + "</ul>";
+              if (!ok) { var f = (r.results || [])[0] || {}; h += netErrHtml(f.code, (r.results || []).map(function (x) { return x.source + ": " + (x.error || "ok"); }).join("\n")); }
+              $("#net-out").innerHTML = h;
+            }).catch(function (err) { btn.disabled = false; $("#net-out").innerHTML = '<p class="err">' + esc(err.message) + "</p>"; });
+          });
+          rpc("network.get", {}).then(paint).catch(fail);
+        };
       } else if (section === "about") {
         body = '<section class="card">' + head +
           row("version", T("set.version"), T("set.version_sub"), "<code>" + esc(state.version || "dev") + "</code>") +
           row("terms", T("set.terms"), T("set.terms_sub"), "") +
-          row("source", T("set.source"), T("set.source_sub"), '<code>github.com/Zhengmingming1/tidebot</code>') + "</section>" +
+          row("source", T("set.source"), T("set.source_sub"), '<a href="' + esc(RELEASES_PAGE) + '" target="_blank" rel="noopener"><code>github.com/Zhengmingming1/tidebot-releases</code></a>') + "</section>" +
           '<section class="card" id="set-update"><div class="card-head"><span class="ico">' + ic("refresh") + "</span><h2>" + esc(T("up.title")) + "</h2></div>" +
           row("up_auto", T("up.auto"), T("up.auto_sub"), '<label class="check"><input type="checkbox" id="up-auto"> ' + esc(T("up.on")) + "</label>") +
           row("up_every", T("up.every"), T("up.every_sub"), '<select id="up-every"><option value="24">' + esc(T("up.daily")) + '</option><option value="168">' + esc(T("up.weekly")) + "</option></select>") +
@@ -2723,7 +2797,7 @@
             $("#up-auto").checked = !!s.enabled;
             $("#up-every").value = String(s.interval_hours >= 168 ? 168 : 24);
             if (res && res.status === "rolled_back") h += '<p class="err">' + esc(T("up.rolled_back", { v: res.to, why: res.detail || "" })) + "</p>";
-            if (st.error) h += '<p class="err">' + esc(T("up.err", { e: st.error })) + "</p>";
+            if (st.error) h += netErrHtml(st.error_code, st.error, st.attempts);
             if (last && last.available) {
               h += "<h3>" + esc(T("up.avail", { v: last.latest, cur: last.current })) + "</h3>" +
                 (last.date ? '<p class="muted">' + esc(last.date) + "</p>" : "") +
@@ -2734,11 +2808,11 @@
             } else if (last) {
               h += '<p class="muted">' + esc(T("up.none", { v: st.current })) + "</p>";
             }
-            h += '<p><button class="btn" id="up-check">' + esc(T("up.check")) + '</button> <small class="muted">' + esc(T("up.privacy")) + "</small></p>";
+            h += '<p><button class="btn" id="up-check">' + esc(T("up.check")) + '</button> <small class="muted">' + esc(T("up.privacy")) + " " + esc(T("net.via", { p: proxyLabel(st.proxy) })) + "</small></p>";
             $("#up-box").innerHTML = h;
             $("#up-check").addEventListener("click", function (e) {
               e.target.disabled = true;
-              rpc("update.check", {}).then(paint).catch(function (err) { fail(err); e.target.disabled = false; });
+              rpc("update.check", {}).then(paint).catch(function () { return rpc("update.status", {}).then(paint); }).catch(function (err) { fail(err); e.target.disabled = false; });
             });
             var ap = $("#up-apply");
             if (ap) ap.addEventListener("click", function () {

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/netproxy"
+
 	"github.com/Zhengmingming1/tidebot/internal/provider"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
@@ -293,7 +295,7 @@ func (pa providerAdmin) SetDefaultProvider(ctx context.Context, name string) err
 }
 
 // providerTestURL lets tests point at a fake endpoint.
-var providerTestClient = &http.Client{Timeout: 20 * time.Second}
+var providerTestClient = netproxy.Client(20 * time.Second)
 
 // TestProvider sends a 1-token Messages request to the provider's Anthropic-compatible endpoint.
 func (pa providerAdmin) TestProvider(ctx context.Context, name, onlyModel string) (map[string]any, error) {
