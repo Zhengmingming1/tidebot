@@ -233,6 +233,7 @@ jobs:
         if: env.UPDATE_SIGNING_KEY != ''
         run: |
           bash scripts/release-notes.sh "$TAG" Zhengmingming1/tidebot-releases > public-notes.md
+          python3 scripts/check-no-private-url.py public-notes.md  # public page must not link the private repo
           go run ./tools/relsign manifest "$TAG" dist public-notes.md
       - name: publish to tidebot-releases
         env:
