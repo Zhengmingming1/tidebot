@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/guard"
@@ -19,6 +20,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/optimize"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
+	"github.com/Zhengmingming1/tidebot/internal/pricing"
 
 	"github.com/Zhengmingming1/tidebot/internal/amend"
 	"github.com/Zhengmingming1/tidebot/internal/auth"
@@ -43,6 +45,7 @@ type App struct {
 	Log        *slog.Logger
 	DB         *sql.DB
 	suOnce     sync.Once
+	fxCache    atomic.Pointer[pricing.FX]
 	suState    *selfUpdate
 	Store      *db.Store
 	Registry   *provider.Registry
@@ -131,6 +134,7 @@ func Open(cfg config.Config) (*App, error) {
 	a.initPlugins()
 	a.Cost = cost.New(sqlDB, log)
 	a.Cost.Loc = cfg.Location()
+	a.Cost.FX = a.cachedFX
 	a.Auth = auth.New(sqlDB)
 	if mk, err := secrets.NewFileBackend(cfg.HomeDir).MasterKey(); err != nil {
 		log.Error("2fa key unavailable", "error", err)
@@ -259,23 +263,43 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			a.Log.Warn("budget warning", "detail", chk.WarnDetail)
 			a.warnOnce(chk.WarnDetail)
 		}
-		runMax = chk.RunMaxUSD
+		runMax = chk.RunMaxUSD // display currency
+		f := a.cachedFX()
 		if runMax <= 0 {
-			runMax = 0.01
+			runMax = f.Convert(0.01, pricing.USD, f.Display)
 		}
-		if bucket == cost.BucketDryRun && runMax > DryRunBudgetUSD {
-			runMax = DryRunBudgetUSD
+		if dr := f.Convert(DryRunBudgetUSD, pricing.USD, f.Display); bucket == cost.BucketDryRun && runMax > dr {
+			runMax = dr
+		}
+	} else {
+		f := a.cachedFX()
+		runMax = f.Convert(runMax, pricing.USD, f.Display)
+	}
+	if c := callerCapUSD(opts.ExtraArgs); c > 0 {
+		f := a.cachedFX()
+		if v := f.Convert(c, pricing.USD, f.Display); v < runMax {
+			runMax = v
 		}
 	}
+	cc, err := a.costControl(ctx, prof, runMax)
+	if err != nil {
+		if a.Cost != nil {
+			_ = a.Cost.LogBreach(ctx, "provider", prof.Name, bucket, "quota", err.Error(), "skip")
+		}
+		a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), Detail: err.Error()})
+		return runner.Result{}, fmt.Errorf("budget blocked: %w", err)
+	}
+	opts.Cost = cc
 	if len(opts.ExtraArgs) == 0 {
 		opts.ExtraArgs = []string{
 			"--permission-mode", "dontAsk",
 			"--permission-prompts", "none",
 			"--restricted",
-			"--max-budget-usd", fmt.Sprintf("%.4f", runMax),
+			"--max-budget-usd", "0",
 			"--effort", "low",
 		}
 	}
+	opts.ExtraArgs = a.budgetArgs(opts.ExtraArgs, prof, runMax)
 	if !opts.NoPluginMCP {
 		opts.ExtraArgs = append(opts.ExtraArgs, a.mcpArgs(ctx, bucket)...)
 	}
@@ -286,10 +310,12 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
 	res, err := a.Runner.RunOnce(ctx, opts)
 	a.recordRunMeta(ctx, res.RunID)
-	if err == nil && a.Cost != nil {
-		_ = a.Cost.Record(ctx, res.RunID, opts.TaskID, bucket, res.TotalCostUSD, res.InputTokens, res.OutputTokens)
+	// failed / stopped runs still spent tokens: record them too
+	if res.RunID != "" && a.Cost != nil {
+		_ = a.Cost.RecordEntry(ctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
 	}
-	ev := Event{Kind: EventRunFinished, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), RunID: res.RunID, CostUSD: res.TotalCostUSD}
+	ev := Event{Kind: EventRunFinished, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), RunID: res.RunID,
+		CostUSD: a.RunCostUSD(res)}
 	if err != nil {
 		ev.Kind, ev.Detail = EventRunFailed, err.Error()
 	} else if res.Status != "" && res.Status != "succeeded" {

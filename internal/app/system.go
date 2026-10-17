@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
+	"github.com/Zhengmingming1/tidebot/internal/cost"
 )
 
 // --- retention ---------------------------------------------------------------
@@ -196,8 +197,8 @@ func (a *App) BuildDashboard(ctx context.Context) Dashboard {
 		d.SuccessRate7d = float64(ok) / float64(total)
 	}
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, a.Cfg.Location())
-	_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(total_cost_usd),0) FROM runs WHERE created_at >= ?`, day.UTC().Format(time.RFC3339)).Scan(&d.CostTodayUSD)
-	_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(total_cost_usd),0) FROM runs WHERE created_at >= ?`, now.Add(-7*24*time.Hour).UTC().Format(time.RFC3339)).Scan(&d.Cost7dUSD)
+	_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(`+cost.AmountExpr(a.cachedFX(), a.cachedFX().Display, "")+`),0) FROM cost_ledger WHERE created_at >= ?`, day.UTC().Format(time.RFC3339)).Scan(&d.CostTodayUSD)
+	_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(`+cost.AmountExpr(a.cachedFX(), a.cachedFX().Display, "")+`),0) FROM cost_ledger WHERE created_at >= ?`, now.Add(-7*24*time.Hour).UTC().Format(time.RFC3339)).Scan(&d.Cost7dUSD)
 	var durs []int64
 	if rows, err := a.DB.QueryContext(ctx, `SELECT duration_ms FROM runs WHERE duration_ms IS NOT NULL AND created_at >= ?`, now.Add(-7*24*time.Hour).UTC().Format(time.RFC3339)); err == nil {
 		for rows.Next() {

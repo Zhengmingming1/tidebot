@@ -2,6 +2,8 @@
 // Preset base URLs are taken from official vendor docs — see docs/providers.md.
 package provider
 
+import "github.com/Zhengmingming1/tidebot/internal/pricing"
+
 // Preset is a built-in, verified Anthropic-compatible provider profile.
 type Preset struct {
 	ID             string
@@ -19,6 +21,9 @@ type Preset struct {
 	ExtraEnv       map[string]string // non-secret Claude Code env (effort, context window, …)
 	Notes          string
 	SourceURL      string
+	// Billing defaults to metered; Prices are official, see prices.go.
+	Billing *pricing.Billing
+	Prices  []pricing.ModelPrice
 }
 
 // BuiltIn returns verified presets. Base URLs must match official documentation.
@@ -29,6 +34,7 @@ func BuiltIn() []Preset {
 			BaseURL: "", AuthEnv: "ANTHROPIC_API_KEY",
 			Notes:     "Official Anthropic API. Leave base URL empty so Claude Code uses its default endpoint.",
 			SourceURL: "https://docs.anthropic.com/en/docs/claude-code",
+			Prices:    anthropicPrices(),
 		},
 		{
 			ID: "kimi", DisplayName: "Kimi / Moonshot (global)",
@@ -37,6 +43,7 @@ func BuiltIn() []Preset {
 			HaikuModel: "kimi-k2.7-code", FableModel: "kimi-k3[1m]", SubagentModel: "kimi-k3[1m]",
 			Notes:     "Moonshot Open Platform Anthropic Messages API (global).",
 			SourceURL: "https://platform.kimi.ai/docs/guide/claude-code-kimi",
+			Prices:    kimiPrices(false),
 		},
 		{
 			ID: "kimi-cn", DisplayName: "Kimi / Moonshot (China)",
@@ -45,6 +52,7 @@ func BuiltIn() []Preset {
 			HaikuModel: "kimi-k2.7-code", FableModel: "kimi-k3[1m]", SubagentModel: "kimi-k3[1m]",
 			Notes:     "Mainland China endpoint; key must be created on the .cn platform.",
 			SourceURL: "https://platform.kimi.ai/docs/guide/claude-code-kimi",
+			Prices:    kimiPrices(true),
 		},
 		{
 			// Kimi Coding Plan (membership) — NOT the pay-as-you-go Moonshot Open Platform.
@@ -60,6 +68,7 @@ func BuiltIn() []Preset {
 			},
 			Notes:     "Kimi Code membership Anthropic-compatible endpoint (China). Uses ANTHROPIC_API_KEY per official docs.",
 			SourceURL: "https://www.kimi.com/code/docs/third-party-tools/claude-code",
+			Billing:   subscription,
 		},
 		{
 			ID: "kimi-coding-intl", DisplayName: "Kimi Code / Coding Plan (intl)",
@@ -74,6 +83,7 @@ func BuiltIn() []Preset {
 			},
 			Notes:     "Kimi Code membership Anthropic-compatible endpoint (overseas).",
 			SourceURL: "https://www.kimi.com/code/docs/en/third-party-tools/claude-code",
+			Billing:   subscription,
 		},
 		{
 			ID: "deepseek", DisplayName: "DeepSeek",
@@ -82,6 +92,7 @@ func BuiltIn() []Preset {
 			HaikuModel: "deepseek-flash", SubagentModel: "deepseek-flash",
 			Notes:     "DeepSeek Anthropic-compatible endpoint. Model ids may change; check official docs.",
 			SourceURL: "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/",
+			Prices:    deepseekPrices(),
 		},
 		{
 			ID: "zhipu", DisplayName: "Zhipu GLM (bigmodel.cn)",
@@ -89,6 +100,7 @@ func BuiltIn() []Preset {
 			DefaultModel: "glm-5.3", OpusModel: "glm-5.3", SonnetModel: "glm-5.3", HaikuModel: "glm-5.3",
 			Notes:     "Zhipu Open Platform Claude API compatibility (China).",
 			SourceURL: "https://docs.bigmodel.cn/cn/guide/develop/claude/introduction",
+			Prices:    zhipuPrices(),
 		},
 		{
 			ID: "zai", DisplayName: "Z.AI GLM (international)",
@@ -97,6 +109,7 @@ func BuiltIn() []Preset {
 			HaikuModel: "glm-5.3-flash",
 			Notes:      "Z.AI international Anthropic-compatible endpoint for Claude Code.",
 			SourceURL:  "https://docs.z.ai/devpack/tool/claude",
+			Prices:     zaiPrices(),
 		},
 		{
 			ID: "qwen", DisplayName: "Qwen / DashScope (Beijing pay-as-you-go)",
@@ -105,6 +118,7 @@ func BuiltIn() []Preset {
 			HaikuModel: "qwen3.7-plus", SubagentModel: "qwen3.7-plus",
 			Notes:     "Alibaba Cloud Model Studio Anthropic-compatible Messages API (Beijing).",
 			SourceURL: "https://www.alibabacloud.com/help/en/model-studio/claude-code",
+			Prices:    qwenPrices(),
 		},
 		{
 			ID: "qwen-coding", DisplayName: "Qwen / DashScope Coding Plan (CN)",
@@ -113,6 +127,7 @@ func BuiltIn() []Preset {
 			HaikuModel: "qwen3.7-plus", SubagentModel: "qwen3.7-plus",
 			Notes:     "Coding Plan dedicated endpoint; requires Coding Plan API key.",
 			SourceURL: "https://www.alibabacloud.com/help/en/model-studio/claude-code",
+			Billing:   subscription,
 		},
 		{
 			ID: "qwen-coding-intl", DisplayName: "Qwen / DashScope Coding Plan (intl)",
@@ -121,6 +136,7 @@ func BuiltIn() []Preset {
 			HaikuModel: "qwen3.7-plus", SubagentModel: "qwen3.7-plus",
 			Notes:     "International Coding Plan Anthropic-compatible endpoint.",
 			SourceURL: "https://www.alibabacloud.com/help/en/model-studio/claude-code",
+			Billing:   subscription,
 		},
 		{
 			ID: "magpie", DisplayName: "Magpie local gateway",

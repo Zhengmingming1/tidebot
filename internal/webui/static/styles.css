@@ -1097,3 +1097,27 @@ html.tb-hidden .tide * { animation-play-state: paused; }
 .net-fix { display: flex; gap: 8px; flex-wrap: wrap; }
 .seg#net-mode { display: inline-flex; width: max-content; }
 .net-mlist input { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: 13px; }
+
+/* provider pricing editor + cost calculation */
+.pr-box { display: flex; flex-direction: column; gap: 10px; }
+.pr-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pr-table { display: flex; flex-direction: column; gap: 8px; }
+.pr-table.dim { opacity: .55; }
+.pr-cur { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.pr-cur select { width: auto; }
+.pr-cur .hint { flex-basis: 100%; }
+.pr-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.pr-name { display: flex; gap: 6px; align-items: center; }
+.pr-name input { flex: 1; min-width: 0; font-family: var(--mono, monospace); font-size: 12px; height: 30px; }
+.pr-cells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.pr-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pr-cell small { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-cell input { width: 100%; min-width: 0; height: 30px; padding: 0 6px; font-size: 12px; }
+.pr-meta small { display: block; font-size: 11px; }
+.pill.sm { font-size: 11px; padding: 1px 7px; vertical-align: middle; }
+td.calc { font-size: 12px; line-height: 1.6; }
+.sp-body .table td small.muted { display: block; }
+.in-pre { flex: none; color: var(--text-2); font-size: 12px; }
+.pr-sub .in-group input { flex: 1; min-width: 0; }
+.pr-sub .in-group select { flex: none; width: auto; }
+#set-fx { margin-bottom: 14px; }

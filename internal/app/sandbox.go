@@ -87,7 +87,7 @@ func (a *App) StartDryRun(taskID string) (*DryRun, error) {
 		after := hashTree(box)
 		dryRuns.Lock()
 		defer dryRuns.Unlock()
-		dr.RunID, dr.CostUSD, dr.Result = res.RunID, res.TotalCostUSD, res.ResultText
+		dr.RunID, dr.CostUSD, dr.Result = res.RunID, a.RunCostUSD(res), res.ResultText
 		dr.Added, dr.Modified, dr.Deleted = diffTrees(before, after)
 		dr.Status = "done"
 		if err != nil {

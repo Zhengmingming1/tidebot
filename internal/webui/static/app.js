@@ -179,10 +179,21 @@
     if (s < 60) return T("time.sec", { n: s });
     return T("time.min_sec", { m: Math.floor(s / 60), s: String(s % 60).padStart(2, "0") });
   }
-  function usd(v, d) {
-    d = d == null ? 2 : d;
-    try { return new Intl.NumberFormat(state.lang, { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", minimumFractionDigits: d, maximumFractionDigits: d }).format(Number(v || 0)); }
-    catch (e) { return "$" + Number(v || 0).toFixed(d); }
+  // usd() formats an amount in the display currency (field names say "usd" for
+  // API compatibility; the server converts at the user's fixed rate).
+  function usd(v, d) { return money(v, state.currency || "USD", d); }
+  function money(v, cur, d) {
+    d = d == null ? 2 : d; cur = cur || "USD";
+    try { return new Intl.NumberFormat(state.lang, { style: "currency", currency: cur, currencyDisplay: "narrowSymbol", minimumFractionDigits: d, maximumFractionDigits: d }).format(Number(v || 0)); }
+    catch (e) { return (cur === "CNY" ? "¥" : "$") + Number(v || 0).toFixed(d); }
+  }
+  function curSym(cur) { return cur === "CNY" ? "¥" : "$"; }
+  // cost source badge: priced runs need none; estimates / legacy / subscription get one
+  function costBadge(src) {
+    if (src === "estimate" || src === "claude" || src === "legacy") return ' <span class="pill warn sm" title="' + esc(T("cost.src_" + src + "_tip")) + '">' + esc(T("cost.est")) + "</span>";
+    if (src === "subscription") return ' <span class="pill info sm">' + esc(T("cost.src_subscription")) + "</span>";
+    if (src === "free") return ' <span class="pill sm">' + esc(T("cost.src_free")) + "</span>";
+    return "";
   }
   function num(v) { return new Intl.NumberFormat(state.lang).format(Number(v || 0)); }
   function shortId(id) { var s = String(id || ""); return s.slice(-4).toUpperCase(); }
@@ -1713,6 +1724,7 @@
       (!creating && v.key_source === "store" ? '<label class="check"><input type="checkbox" name="clear_key"> ' + esc(T("pv.clear_key")) + "</label>" : "") +
       '<h4 class="sec">' + esc(T("pv.models")) + "</h4>" +
       '<div class="model-list">' + models.map(function (m) { return '<div class="model-row"><label for="pm-' + m[0] + '">' + esc(m[1]) + '</label><div class="in-group"><input id="pm-' + m[0] + '" name="' + m[0] + '" value="' + esc(v[m[0]] || "") + '" maxlength="128" spellcheck="false"><button type="button" class="btn ghost" data-check="' + m[0] + '"' + (creating ? " disabled" : "") + ">" + esc(T("pv.check")) + '</button></div><span class="mres" data-res="' + m[0] + '"></span></div>'; }).join("") + "</div>" + (creating ? '<small class="hint">' + esc(T("pv.check_after_save")) + "</small>" : "") +
+      (!creating ? '<h4 class="sec" id="pd-price-h">' + esc(T("pr.sec")) + '</h4><div id="pd-price" class="pr-box"><p class="muted">…</p></div>' : "") +
       '<details class="sec-adv"><summary class="sec">' + esc(T("pv.sec_adv")) + "</summary>" +
       fieldHtml(T("pv.extra_env"), '<textarea name="extra_env" rows="3" placeholder="API_TIMEOUT_MS=600000">' + esc(envText) + "</textarea>", T("pv.extra_hint")) +
       (!creating ? '<div class="row-actions">' + (v.default ? "" : '<button type="button" class="btn" id="pd-def">' + esc(T("pv.make_default")) + "</button>") + '<button type="button" class="btn" id="pd-dup">' + esc(T("pv.dup")) + "</button></div>" : "") + "</details>" +
@@ -1721,6 +1733,7 @@
       (creating ? "" : '<button type="button" class="btn" id="pd-test-btn">' + ic("pulse", "sm") + esc(T("pv.test")) + "</button>") + '<button type="submit" class="btn" data-mode="save">' + esc(T("btn.save")) + '</button><button type="submit" class="btn primary" data-mode="test">' + ic("check", "sm") + esc(T("pv.save_test")) + "</button></div></form>";
     $$("[data-drawer-close]", host).forEach(function (b) { b.addEventListener("click", closeDrawer); });
     var f = $("#pvf", host), out = $("#pd-test", host), mode = "save";
+    if (!creating) pricingEditor($("#pd-price", host), v.name);
     var runTest = function (name, model, el) {
       el.innerHTML = '<span class="muted">' + esc(T("pv.testing")) + "</span>";
       return api("/api/providers/" + enc(name) + "/test", { method: "POST", body: { model: model || "" } }).then(function (r) {
@@ -1750,6 +1763,77 @@
         return done(saved.name).then(function () { if (testAfter) { var el = $("#pd-test"); if (el) runTest(saved.name, "", el); } });
       }).catch(fail);
     });
+  }
+
+  // ---------- provider pricing (drawer section) ----------
+  // Per-model prices per 1M tokens + billing mode. Official prices ship with the
+  // presets (source URL + date); editing makes them "custom"; restore drops edits.
+  function pricingEditor(box, name) {
+    var nf = function (v) { return v == null ? "" : String(v); };
+    var paint = function (d) {
+      var P = d.pricing, b = P.billing || { mode: "metered" }, q = b.quota || {};
+      var prices = (P.prices || []).map(function (x) { return JSON.parse(JSON.stringify(x)); });
+      var origin = b.mode !== "metered" ? '<span class="pill info sm">' + esc(T("pr.m_" + b.mode)) + "</span>" : P.origin === "official" ? '<span class="pill ok sm">' + esc(T("pr.o_official")) + "</span>" : P.origin === "custom" ? '<span class="pill info sm">' + esc(T("pr.o_custom")) + "</span>" : '<span class="pill warn sm">' + esc(T("pr.o_none")) + "</span>";
+      var src = {}; (P.official || []).forEach(function (x) { if (x.source) src[x.source] = x.fetched; });
+      var srcHtml = Object.keys(src).map(function (u) { return '<a class="link" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + ic("globe", "sm") + esc(T("pr.src", { d: src[u] })) + "</a>"; }).join(" ");
+      var sub = b.mode === "subscription";
+      var row = function (x, i) {
+        var inp = function (k, ph) { return '<label class="pr-cell"><small>' + esc(T("pr.c_" + k)) + '</small><input type="number" min="0" step="any" data-pi="' + i + '" data-pk="' + k + '" value="' + esc(nf(x[k])) + '" placeholder="' + esc(ph || "—") + '"></label>'; };
+        var tiers = x.tiers && x.tiers.length ? '<small class="muted" title="' + esc(x.tiers.map(function (t) { return (t.up_to ? "< " + num(t.up_to) : "≥") + ": " + t.input + " / " + t.output; }).join("\n")) + '">' + esc(T("pr.tiered", { n: x.tiers.length })) + "</small>" : "";
+        return '<div class="pr-row"><div class="pr-name"><input data-pi="' + i + '" data-pk="model" value="' + esc(x.model || "") + '" maxlength="128" spellcheck="false" placeholder="model-id" aria-label="' + esc(T("f.model")) + '">' +
+          '<button type="button" class="icon-btn sm" data-pdel="' + i + '" aria-label="' + esc(T("btn.remove")) + '">' + ic("x", "sm") + "</button></div>" +
+          '<div class="pr-cells">' + inp("input") + inp("output") + inp("cache_write", T("pr.same_in")) + inp("cache_read", T("pr.same_in")) + "</div>" +
+          (tiers || x.note ? '<div class="pr-meta">' + tiers + (x.note ? '<small class="muted">' + esc(x.note) + "</small>" : "") + "</div>" : "") + "</div>";
+      };
+      var cur0 = (prices[0] || {}).currency || "USD";
+      var subField = function (inner) { return '<div class="pr-sub' + (sub ? "" : " hidden") + '">' + inner + "</div>"; };
+      box.innerHTML = '<div class="pr-head">' + origin + " " + srcHtml + "</div>" +
+        '<div class="grid g2"><label class="field"><span>' + esc(T("pr.mode")) + '</span><select id="pr-mode">' + opt("metered", T("pr.m_metered"), b.mode === "metered") + opt("subscription", T("pr.m_subscription"), sub) + opt("free", T("pr.m_free"), b.mode === "free") + "</select></label>" +
+        subField('<label class="field"><span>' + esc(T("pr.q_window")) + '</span><select id="pr-qw">' + opt("", T("pr.q_none"), !q.window) + ["5h", "day", "week", "month"].map(function (w) { return opt(w, T("pr.w_" + w), q.window === w); }).join("") + "</select></label>") +
+        subField('<label class="field"><span>' + esc(T("pr.q_tokens")) + '</span><input id="pr-qt" type="number" min="0" step="1000" value="' + esc(q.max_tokens || "") + '"></label>') +
+        subField('<label class="field"><span>' + esc(T("pr.q_reqs")) + '</span><input id="pr-qr" type="number" min="0" step="1" value="' + esc(q.max_requests || "") + '"></label>') +
+        subField('<label class="field"><span>' + esc(T("pr.fee")) + '</span><div class="in-group"><input id="pr-fee" type="number" min="0" step="any" value="' + esc(b.monthly_fee || "") + '"><select id="pr-feec">' + opt("CNY", "CNY", b.fee_currency !== "USD") + opt("USD", "USD", b.fee_currency === "USD") + '</select></div><small class="hint">' + esc(T("pr.fee_hint")) + "</small></label>") + "</div>" +
+        '<p class="hint">' + esc(T(sub ? "pr.sub_hint" : b.mode === "free" ? "pr.free_hint" : P.anthropic ? "pr.anth_hint" : "pr.metered_hint")) + "</p>" +
+        '<div class="pr-table' + (b.mode === "metered" ? "" : " dim") + '"><div class="pr-cur"><span>' + esc(T("pr.c_currency")) + '</span><select id="pr-cur">' + opt("USD", "USD ($)", cur0 !== "CNY") + opt("CNY", "CNY (¥)", cur0 === "CNY") + '</select><small class="hint">' + esc(T("pr.unit_hint")) + "</small></div>" +
+        (prices.length ? prices.map(row).join("") : '<p class="muted">' + esc(T(b.mode === "metered" ? "pr.unset" : "pr.unset_ok")) + "</p>") + "</div>" +
+        '<div class="row-actions"><button type="button" class="btn sm" id="pr-add">' + ic("plus", "sm") + esc(T("pr.add")) + "</button>" + ((P.official || []).length && P.origin === "custom" ? '<button type="button" class="btn sm" id="pr-restore">' + ic("rollback", "sm") + esc(T("pr.restore")) + "</button>" : "") + '<span class="grow"></span><button type="button" class="btn sm primary" id="pr-save">' + esc(T("pr.save")) + "</button></div>";
+      var collect = function () {
+        $$("[data-pi]", box).forEach(function (el) {
+          var x = prices[+el.getAttribute("data-pi")], k = el.getAttribute("data-pk"), v = el.value.trim();
+          if (k === "model") { x[k] = v; return; }
+          var old = x[k] == null ? null : x[k], nv = v === "" ? null : parseFloat(v);
+          x[k] = nv;
+          if (x.tiers && old !== nv) delete x.tiers; // edited base price: the bands no longer apply
+        });
+        var c = $("#pr-cur", box).value;
+        prices.forEach(function (x) { x.currency = c; });
+        return prices.filter(function (x) { return x.model; });
+      };
+      var billing = function () {
+        var m = $("#pr-mode", box).value, out = { mode: m };
+        if (m === "subscription") {
+          var w = $("#pr-qw", box).value;
+          if (w) out.quota = { window: w, max_tokens: parseInt($("#pr-qt", box).value, 10) || 0, max_requests: parseInt($("#pr-qr", box).value, 10) || 0 };
+          out.monthly_fee = parseFloat($("#pr-fee", box).value) || 0; out.fee_currency = $("#pr-feec", box).value;
+        }
+        return out;
+      };
+      var repaint = function (list) { P.prices = list; P.billing = billing(); paint(d); };
+      $("#pr-mode", box).addEventListener("change", function (e) { var s2 = e.target.value === "subscription"; $$(".pr-sub", box).forEach(function (x) { x.classList.toggle("hidden", !s2); }); $(".pr-table", box).classList.toggle("dim", e.target.value !== "metered"); });
+      $("#pr-add", box).addEventListener("click", function () {
+        var cur = collect(); cur.push({ model: "", currency: (cur[0] || {}).currency || "USD", input: null, output: null }); prices = cur;
+        P.prices = cur; P.billing = billing(); paint(d);
+        var ins = $$('[data-pk="model"]', box); if (ins.length) ins[ins.length - 1].focus();
+      });
+      $$("[data-pdel]", box).forEach(function (bt) { bt.addEventListener("click", function () { var cur = collect(); cur.splice(+bt.getAttribute("data-pdel"), 1); repaint(cur); }); });
+      $("#pr-save", box).addEventListener("click", function () {
+        var list = collect(), bad = list.filter(function (x) { return x.input == null || x.output == null; })[0];
+        if (bad && billing().mode === "metered") { toast(T("pr.need_io", { m: bad.model }), true); return; }
+        rpc("pricing.set", { provider: name, billing: billing(), prices: list }).then(function (r) { toast(T("pr.saved")); paint(r); }).catch(fail);
+      });
+      var rs = $("#pr-restore", box); if (rs) rs.addEventListener("click", function () { rpc("pricing.set", { provider: name, billing: billing(), restore: true }).then(function (r) { toast(T("pr.restored")); paint(r); }).catch(fail); });
+    };
+    return rpc("pricing.get", { provider: name }).then(paint).catch(function (e) { box.innerHTML = '<p class="err">' + esc(e.message) + "</p>"; });
   }
 
   // ---------- task form ----------
@@ -2502,8 +2586,9 @@
       mount('<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status) + "</strong><span>" + esc(triggerText(r.trigger)) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(live ? T("rd.running") : dur(r.duration_ms)) + "</strong><span>" + esc(T("rd.started", { t: when(r.started_at || r.created_at) })) + "</span></div>" +
-        '<div class="card stat"><small>' + esc(T("col.cost")) + "</small><strong>" + esc(usd(r.cost_usd, 4)) + "</strong><span>" + esc(T("rd.bucket", { b: r.bucket })) + "</span></div>" +
-        '<div class="card stat"><small>Tokens</small><strong>' + esc(num(r.input_tokens + r.output_tokens)) + "</strong><span>" + esc(T("rd.in_out", { i: num(r.input_tokens), o: num(r.output_tokens) })) + "</span></div></div>" +
+        '<div class="card stat"><small>' + esc(T("col.cost")) + "</small><strong>" + esc(r.cost_source && r.cost_currency && r.cost_currency !== state.currency ? money(r.cost_amount, r.cost_currency, 4) : usd(r.cost_usd, 4)) + costBadge(r.cost_source) + "</strong><span>" + esc(r.cost_source && r.cost_currency && r.cost_currency !== state.currency ? T("rd.approx_in", { v: usd(r.cost_usd, 4) }) : T("rd.bucket", { b: r.bucket })) + "</span></div>" +
+        '<div class="card stat"><small>Tokens</small><strong>' + esc(num(r.input_tokens + r.output_tokens + (r.cache_read_tokens || 0) + (r.cache_write_tokens || 0))) + "</strong><span>" + esc(T("rd.in_out", { i: num(r.input_tokens), o: num(r.output_tokens) }) + (r.cache_read_tokens || r.cache_write_tokens ? " · " + T("rd.cache_rw", { r: num(r.cache_read_tokens || 0), w: num(r.cache_write_tokens || 0) }) : "")) + "</span></div></div>" +
+        costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + '</h3></div><dl class="kv"><dt>' + esc(T("col.run")) + "</dt><dd><code>" + esc(r.id) + "</code></dd><dt>" + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
         "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(r.error) + "</dd>" : "") + "</dl></section></div>",
@@ -2514,6 +2599,29 @@
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);
       });
     });
+  }
+  // Run detail: how the cost was computed (tokens × price per 1M, per model).
+  function costCalcHtml(r) {
+    var c = r.cost_detail, src = r.cost_source;
+    var head = '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h3>' + esc(T("cost.calc")) + "</h3>" + costBadge(src) + "</div>";
+    if (!src) return "";
+    if (src === "legacy") return head + '<p class="muted pad-x">' + esc(T("cost.legacy_note")) + "</p></section>";
+    if (!c || !c.lines) return "";
+    var parts = function (l) {
+      var R = l.rates || {}, cur = l.currency || c.currency, x = [];
+      [["input", "input", T("cost.in")], ["output", "output", T("cost.out")], ["cache_write", "cache_write", T("cost.cw")], ["cache_read", "cache_read", T("cost.cr")]].forEach(function (k) {
+        if (l[k[0]]) x.push(esc(k[2]) + " " + esc(num(l[k[0]])) + " × " + esc(money(R[k[1]] || 0, cur, R[k[1]] < 0.1 ? 3 : 2)) + "/M");
+      });
+      return x.join("<br>");
+    };
+    var rows = c.lines.map(function (l) {
+      var note = l.missing ? '<span class="pill warn sm">' + esc(T("cost.no_price")) + "</span>" : (l.approx ? '<span class="pill warn sm" title="' + esc(T("cost.approx_tip")) + '">' + esc(T("cost.est")) + "</span>" : "") + (l.tiered ? ' <span class="pill sm">' + esc(T("cost.tiered")) + "</span>" : "");
+      return "<tr><td><code>" + esc(l.model || "—") + "</code> " + note + '<small class="muted">' + esc(T("cost.reqs", { n: l.requests || 0 })) + "</small></td><td class=\"mono calc\">" + (c.mode === "metered" && !l.missing ? parts(l) : esc(T("rd.in_out", { i: num(l.input), o: num(l.output) }))) + '</td><td class="right"><strong>' + esc(c.mode === "metered" && !l.missing ? money(l.amount, l.currency || c.currency, 4) : "—") + "</strong></td></tr>";
+    }).join("");
+    var foot = src === "claude" ? T("cost.claude_note") : src === "subscription" ? T("cost.sub_note") : src === "free" ? T("cost.free_note") : T("cost.snapshot_note");
+    return head + '<table class="table"><thead><tr><th>' + esc(T("f.model")) + "</th><th>" + esc(T("cost.formula")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows +
+      '<tr><td colspan="2"><strong>' + esc(T("cost.total")) + '</strong></td><td class="right"><strong>' + esc(money(c.amount, c.currency, 4)) + "</strong></td></tr></tbody></table>" +
+      '<p class="hint pad-x">' + esc(foot) + "</p></section>";
   }
   // ---------- SPEND ----------
   var taskNames = {};
@@ -2542,7 +2650,7 @@
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(s.total_tokens)) + "</strong><span>" + esc(global.max_tokens ? T("sp.tok_cap", { n: num(global.max_tokens) }) : T("sp.no_tok_cap")) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.runs_today")) + "</small><strong>" + esc(runsToday) + "</strong><span>" + esc(plural(d.top_tasks.length, "sp.sources_one", "sp.sources_many")) + "</span></div></div>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div></div>" +
-        '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
+        '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["provider_model", T("sp.by_provider_model")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
         '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + '</h2></div><div class="grow">' + budgets.map(function (b, k) {
           var p = pct(b.used_usd, b.max_usd);
           return '<div class="budget-row"><div><strong>' + esc(bucketName(b)) + '</strong> <span class="muted">· ' + esc(T("sp.per_" + b.period)) + '</span></div><div class="right">' + esc(usd(b.used_usd, 4)) + ' <span class="muted">/ ' + (b.max_usd ? esc(usd(b.max_usd)) : "∞") + '</span></div><div class="progress' + cls(p) + '" role="progressbar" aria-valuenow="' + Math.round(p) + '" aria-valuemin="0" aria-valuemax="100"><span data-w="' + p + '"></span></div>' +
@@ -2554,11 +2662,13 @@
       var paintBody = function (r) {
         var rows = r.rows || [], mxd = Math.max.apply(null, (r.days || []).map(function (x) { return x.usd; }).concat([0.0001]));
         var nm = function (x) { return spendView.by === "task" ? (x.key ? (x.name || taskNames[x.key] || x.key) : T("run.adhoc_paren")) : (x.key || T("sp.unknown")); };
-        $("#sp-body").innerHTML = '<div class="sp-total"><strong>' + esc(usd(r.total_usd || 0, 4)) + '</strong> <span class="muted">' + esc(T("sp.since", { d: spendView.range === "all" ? T("sp.rall") : r.since })) + "</span></div>" +
+        $("#sp-body").innerHTML = '<div class="sp-total"><strong>' + esc(usd(r.total_usd || 0, 4)) + "</strong>" + (r.estimated_runs ? costBadge("estimate") : "") + ' <span class="muted">' + esc(T("sp.since", { d: spendView.range === "all" ? T("sp.rall") : r.since })) + (r.estimated_runs ? " · " + T("sp.est_runs", { n: r.estimated_runs }) : "") + "</span></div>" +
           ((r.days || []).length ? '<div class="bars sp-bars">' + r.days.map(function (x) { return '<div class="bar" title="' + esc(x.day + " · " + usd(x.usd, 4)) + '"><span data-h="' + (x.usd / mxd * 100) + '"></span><small>' + esc(x.day.slice(5)) + "</small></div>"; }).join("") + "</div>" : "") +
           (rows.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.col_" + spendView.by)) + "</th><th>" + esc(T("nav.runs")) + "</th><th>Tokens</th><th>" + esc(T("sp.share")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows.map(function (x) {
             var sh = r.total_usd ? x.usd / r.total_usd * 100 : 0;
-            return "<tr><td><strong>" + esc(nm(x)) + "</strong></td><td>" + esc(x.runs) + "</td><td>" + esc(num(x.tokens)) + '</td><td><div class="progress thin"><span data-w="' + sh + '"></span></div></td><td class="right"><strong>' + esc(usd(x.usd, 4)) + "</strong></td></tr>";
+            var tokTip = T("sp.tok_tip", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0), r: num(x.cache_read_tokens || 0), w: num(x.cache_write_tokens || 0), q: num(x.requests || 0) });
+            var badge = x.estimated_runs || x.legacy_runs ? costBadge(x.estimated_runs ? "estimate" : "legacy") : (x.subscription_runs === x.runs ? costBadge("subscription") : "");
+            return "<tr><td><strong>" + esc(nm(x)) + "</strong>" + badge + "</td><td>" + esc(x.runs) + '</td><td title="' + esc(tokTip) + '">' + esc(num(x.tokens)) + '<small class="muted">' + esc(T("rd.in_out", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0) })) + (x.cache_read_tokens ? " · " + esc(T("sp.cache_n", { n: num(x.cache_read_tokens) })) : "") + '</small></td><td><div class="progress thin"><span data-w="' + sh + '"></span></div></td><td class="right"><strong>' + esc(usd(x.usd, 4)) + "</strong></td></tr>";
           }).join("") + "</tbody></table>" : emptyState("receipt", T("sp.none_range"), ""));
         applySizes($("#sp-body"));
       };
@@ -2646,12 +2756,21 @@
       } else if (section === "budgets") {
         var g = (st.budgets || []).filter(function (x) { return x.scope === "global" && x.period === "day"; })[0] || {};
         var buckets = (st.budgets || []).filter(function (x) { return x.scope === "bucket"; });
-        body = '<section class="card">' + head + '<p class="muted pad-x">' + esc(T("set.bud_auto")) + '</p><div class="grid g3 pad-x" id="bud">' +
-          '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd")) + '</span><input data-bud="g_usd" type="number" step="0.01" min="0" value="' + esc(g.max_usd || "") + '"></label>' +
+        var fx = st.fx || { display: "USD", usd_cny: 7.1 };
+        body = '<section class="card">' + head + '<p class="muted pad-x">' + esc(T("set.bud_auto")) + '</p>' +
+          '<div class="grid g3 pad-x" id="set-fx"><label class="field"><span>' + esc(T("set.fx_cur")) + '</span><select id="fx-cur">' + opt("USD", T("set.fx_usd"), fx.display === "USD") + opt("CNY", T("set.fx_cny"), fx.display === "CNY") + '</select><small class="hint">' + esc(T("set.fx_cur_hint")) + '</small></label>' +
+          '<label class="field"><span>' + esc(T("set.fx_rate")) + '</span><div class="in-group"><span class="in-pre">1 USD =</span><input id="fx-rate" type="number" step="0.01" min="0.1" max="100" value="' + esc(fx.usd_cny) + '"><span class="in-pre">CNY</span></div><small class="hint">' + esc(T("set.fx_rate_hint")) + "</small></label></div>" +
+          '<div class="grid g3 pad-x" id="bud">' +
+          '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd") + " (" + curSym(fx.display) + ")") + '</span><input data-bud="g_usd" type="number" step="0.01" min="0" value="' + esc(g.max_usd || "") + '"></label>' +
           '<label class="field" id="set-g_tok"><span>' + esc(T("set.g_tok")) + '</span><input data-bud="g_tok" type="number" step="1000" min="0" value="' + esc(g.max_tokens || "") + '"></label>' +
-          buckets.map(function (x) { return '<label class="field" id="set-b_' + esc(x.scope_id) + '"><span>' + esc(T("set.b_usd", { b: bucketName(x) })) + '</span><input data-bud="b" data-sid="' + esc(x.scope_id) + '" type="number" step="0.01" min="0" value="' + esc(x.max_usd || "") + '"></label>'; }).join("") +
+          buckets.map(function (x) { return '<label class="field" id="set-b_' + esc(x.scope_id) + '"><span>' + esc(T("set.b_usd", { b: bucketName(x) }) + " (" + curSym(fx.display) + ")") + '</span><input data-bud="b" data-sid="' + esc(x.scope_id) + '" type="number" step="0.01" min="0" value="' + esc(x.max_usd || "") + '"></label>'; }).join("") +
           '</div><p class="pad-x"><a href="#/spend">' + esc(T("set.bud_more")) + " " + ic("arrow", "sm") + "</a></p></section>";
         after = function () {
+          var saveFx = function (el) {
+            rpc("pricing.fx.set", { display: $("#fx-cur").value, usd_cny: parseFloat($("#fx-rate").value) || 0 }).then(function (f) { state.currency = f.display; savedMark(el); setTimeout(refresh, 400); }).catch(fail);
+          };
+          $("#fx-cur").addEventListener("change", function (e) { saveFx(e.target); });
+          $("#fx-rate").addEventListener("change", function (e) { saveFx(e.target); });
           $$("[data-bud]").forEach(function (inp) {
             inp.addEventListener("change", function () {
               var k = inp.getAttribute("data-bud"), v = inp.value, req;
@@ -2962,6 +3081,7 @@
     }).then(function (me) {
       state.tz = me.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
       state.version = me.version || "";
+      state.currency = me.currency || "USD";
       $("#login").classList.add("hidden");
       $("#shell").classList.remove("hidden");
       dropBoot();
