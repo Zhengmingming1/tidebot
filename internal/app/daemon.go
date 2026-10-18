@@ -36,6 +36,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 			a.Log.Error("webui start", "error", err)
 		}
 	}
+	a.LoadPriceCatalog()
 	a.Sched.Start(ctx)
 	go a.runNotifier(ctx)
 	go a.runOptimizer(ctx)
@@ -43,6 +44,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	go a.runFileWatcher(ctx, 0)
 	go a.runRetention(ctx)
 	go a.runUpdateChecker(ctx)
+	go a.runPriceCatalog(ctx)
 	if os.Getenv("TIDEBOT_NO_AUTO_BACKUP") != "1" {
 		go a.runAutoBackup(ctx)
 	}

@@ -330,7 +330,8 @@
   function setNav(name) { $$("#nav a").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-nav") === name); }); }
 
   function renderTopbar(crumbs) {
-    var c = crumbs && crumbs.length ? '<div class="crumbs">' + crumbs.map(function (x, i) {
+    // A single crumb repeats the page title right below it: only detail pages get a trail.
+    var c = crumbs && crumbs.length > 1 ? '<div class="crumbs">' + crumbs.map(function (x, i) {
       return (i ? '<span class="sep">' + ic("chev", "sm") + "</span>" : "") + (x[1] ? '<a href="' + esc(x[1]) + '">' + esc(x[0]) + "</a>" : "<span>" + esc(x[0]) + "</span>");
     }).join("") + "</div>" : "";
     var mac = /Mac|iPhone|iPad/.test(navigator.platform || "");
@@ -412,8 +413,11 @@
   function palCommands() {
     var go = function (h) { return function () { location.hash = h; }; };
     return [
-      { kind: "cmd", icon: "plus", label: T("pal.new_task"), run: function () { taskFormModal(null); } },
-      { kind: "cmd", icon: "sparkle", label: T("home.quick"), run: function () { quickRunModal(); } },
+      { kind: "cmd", icon: "plus", label: T("pal.new_task"), keys: "n t", run: function () { taskFormModal(null); } },
+      { kind: "cmd", icon: "sparkle", label: T("home.quick"), keys: "n q", run: function () { quickRunModal(); } },
+      { kind: "cmd", icon: "upload", label: T("sk.import"), keys: "n s", run: function () { skillImportModal(function () { location.hash = "#/skills"; refresh(); }); } },
+      { kind: "cmd", icon: "key", label: T("pv.add"), keys: "n p", run: function () { goClick("#/settings/providers", "#pv-add"); } },
+      { kind: "cmd", icon: "bolt", label: T("bt.new"), keys: "n b", run: function () { goClick("#/buttons", "#b-add"); } },
       { kind: "cmd", icon: "globe", label: T("pal.lang_to", { l: state.lang === "zh-CN" ? "English" : "简体中文" }), run: function () { setLanguage(state.lang === "zh-CN" ? "en" : "zh-CN"); } },
       { kind: "cmd", icon: "bell", label: T("pal.notifications"), run: function () { setTimeout(toggleNotif, 0); } },
       { kind: "cmd", icon: "more", label: T("pal.shortcuts"), run: function () { shortcutsHelp(); } },
@@ -485,7 +489,7 @@
     var ul = $("#pal-list");
     if (!ul) return;
     ul.innerHTML = pal.items.length ? pal.items.map(function (it, i) {
-      return '<li role="option" id="pal-o' + i + '" data-i="' + i + '" aria-selected="' + (i === pal.sel) + '" class="' + (i === pal.sel ? "sel" : "") + '">' + ic(it.icon, "sm") + '<span class="kind">' + esc(T("pal.kind." + it.kind)) + "</span><span class=\"lbl\">" + esc(it.label) + "</span>" + (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "") + "</li>";
+      return '<li role="option" id="pal-o' + i + '" data-i="' + i + '" aria-selected="' + (i === pal.sel) + '" class="' + (i === pal.sel ? "sel" : "") + '">' + ic(it.icon, "sm") + '<span class="kind">' + esc(T("pal.kind." + it.kind)) + "</span><span class=\"lbl\">" + esc(it.label) + "</span>" + (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "") + (it.keys ? '<span class="pal-keys">' + it.keys.split(" ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join("") + "</span>" : "") + "</li>";
     }).join("") : '<li class="none muted">' + esc(T("search.none")) + "</li>";
     $$("li[data-i]", ul).forEach(function (li) {
       li.addEventListener("mousemove", function () { if (pal.sel !== +li.getAttribute("data-i")) palSelect(+li.getAttribute("data-i")); });
@@ -507,10 +511,15 @@
   }
   function shortcutsHelp() {
     var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
-    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r", T("sc.goto")]];
+    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r / g c", T("sc.goto")], ["n t / n s / n p / n b / n q", T("sc.create")], ["r / e", T("sc.task_keys")]];
     modal('<div class="card-head"><span class="ico">' + ic("more") + "</span><h2>" + esc(T("sc.title")) + '</h2></div><table class="tbl sc-table"><tbody>' +
       rows.map(function (r) { return "<tr><td>" + r[0].split(" / ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join(" / ") + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") +
       '</tbody></table><div class="actions"><button class="btn" id="sc-close">' + esc(T("btn.close")) + "</button></div>", function (r, close) { $("#sc-close").addEventListener("click", close); });
+  }
+  // Navigate, then press a button on the new page once it has rendered.
+  function goClick(hash, sel) {
+    if (location.hash !== hash) location.hash = hash;
+    var n = 0, t = setInterval(function () { var b = $(sel); if (b || ++n > 40) { clearInterval(t); if (b) b.click(); } }, 50);
   }
   var gPending = 0;
   document.addEventListener("keydown", function (e) {
@@ -519,12 +528,23 @@
     var t = e.target, typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
     if (typing || e.metaKey || e.ctrlKey || e.altKey || $("#modal-root").innerHTML || ($("#pal-root") && $("#pal-root").innerHTML)) return;
     if (e.key === "?") { e.preventDefault(); shortcutsHelp(); return; }
-    if (e.key === "g") { gPending = Date.now(); return; }
     if (gPending && Date.now() - gPending < 1000) {
-      var dest = { h: "#/", t: "#/tasks", r: "#/runs", s: "#/skills", b: "#/buttons" }[e.key];
+      var lead = gPending.k;
       gPending = 0;
-      if (dest) { e.preventDefault(); location.hash = dest; }
+      if (lead === "g") {
+        var dest = { h: "#/", t: "#/tasks", r: "#/runs", s: "#/skills", b: "#/buttons", p: "#/plugins", c: "#/spend", ",": "#/settings" }[e.key];
+        if (dest) { e.preventDefault(); location.hash = dest; }
+      } else {
+        // "n x" creates (same scheme as Plane's Power K: n i / n p …).
+        var mk = { t: function () { taskFormModal(null); }, s: function () { skillImportModal(function () { location.hash = "#/skills"; refresh(); }); }, p: function () { goClick("#/settings/providers", "#pv-add"); }, b: function () { goClick("#/buttons", "#b-add"); }, q: function () { quickRunModal(); } }[e.key];
+        if (mk) { e.preventDefault(); mk(); }
+      }
+      return;
     }
+    if (e.key === "g" || e.key === "n") { gPending = { k: e.key, valueOf: function () { return this.t; }, t: Date.now() }; return; }
+    // page-level single keys
+    var act = { r: "#t-run", e: "#t-edit" }[e.key];
+    if (act && $(act)) { e.preventDefault(); $(act).click(); }
   });
 
   // ---------- sidebar: Claude Code status ----------
@@ -774,17 +794,22 @@
   function errorState(msg, retry) {
     return '<section class="card"><div class="empty">' + ic("info") + "<strong>" + esc(T("err.generic")) + "</strong>" + esc(msg || "") + '<div class="mt"><button class="btn primary" id="err-retry">' + ic("refresh", "sm") + esc(T("err.retry")) + "</button></div></div></section>";
   }
+  // One-click "run now" from any list; the toast links to the live run.
+  function runTaskNow(id, btn) {
+    if (btn) btn.disabled = true;
+    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); setTimeout(function () { if (/^#\/tasks$/.test(location.hash)) refresh(); }, 800); }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+  }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 
   function runsTable(runs, rerun) {
     if (!runs.length) return emptyState("runs", T("runs.none"), T("runs.none_sub"));
-    return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.agent_task")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + "</th><th>" + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th></th></tr></thead><tbody>' +
+    return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.agent_task")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
       runs.map(function (r) {
         var running = r.status === "running";
-        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div><strong>" + esc(runTitle(r)) + "</strong><small>" + esc(triggerText(r.trigger)) + "</small></div></div></td>" +
+        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong>' + esc(runTitle(r)) + "</strong></a><small>" + esc(triggerText(r.trigger)) + "</small></div></div></td>" +
           "<td><strong>" + esc(r.task_name || T("run.adhoc")) + "</strong><small>" + esc(r.provider || "—") + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small></td>" +
-          "<td>" + statusPill(r.status) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
-          '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="btn sm" data-rerun="' + esc(r.id) + '">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button> " : "") + '<a class="icon-btn" href="#/runs/' + enc(r.id) + '" aria-label="' + esc(T("run.open")) + '">' + ic("more", "sm") + "</a></td></tr>";
+          "<td>" + statusPill(r.status) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
+          '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
   // ---------- HOME ----------
@@ -917,13 +942,13 @@
         version: function (t) { return t.version_no; }, last: function (t) { return t.last_status || ""; }, today: function (t) { return t.runs_today; }
       };
       var th = function (k, label) { return '<th><button class="th-sort' + (v.sort === k ? " on" : "") + '" data-sort="' + k + '" aria-sort="' + (v.sort === k ? (v.dir > 0 ? "ascending" : "descending") : "none") + '">' + esc(label) + (v.sort === k ? '<span class="arr">' + (v.dir > 0 ? "↑" : "↓") + "</span>" : "") + "</button></th>"; };
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many") + " · " + T("tasks.sub")) + '</p></div><div class="actions"><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
         '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '"></label>' +
         '<div class="filters" role="group">' + [["", T("runs.all_f")], ["active", T("task.active")], ["paused", T("task.paused")]].map(function (x) { return '<button data-st="' + x[0] + '" class="' + (x[0] === v.status ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
         '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
-        '<table class="table"><thead><tr><th class="ck"><input type="checkbox" id="tall" aria-label="' + esc(T("tl.select_all")) + '"></th>' + th("name", T("col.task")) + th("schedule", T("col.schedule")) + th("status", T("col.status")) + th("version", T("col.version")) + th("last", T("col.last_run")) + th("today", T("col.runs_today")) + '<th></th></tr></thead><tbody id="tbody"></tbody></table></section>', "tasks", [[T("nav.tasks")]]);
+        '<table class="table"><thead><tr><th class="ck"><input type="checkbox" id="tall" aria-label="' + esc(T("tl.select_all")) + '"></th>' + th("name", T("col.task")) + th("schedule", T("col.schedule")) + th("status", T("col.status")) + th("version", T("col.version")).replace("<th>", '<th class="c-opt">') + th("last", T("col.last_run")) + th("today", T("col.runs_today")).replace("<th>", '<th class="c-opt">') + '<th class="c-act"></th></tr></thead><tbody id="tbody"></tbody></table></section>', "tasks", [[T("nav.tasks")]]);
       var body = $("#tbody");
       function rows() {
         var q = v.q.trim().toLowerCase(), key = sorters[v.sort];
@@ -932,10 +957,11 @@
         }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
-          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + "</span><div><strong>" + esc(t.name) + "</strong><small>" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
-            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + esc(T("tl.next", { t: when(t.next_run_at) })) + "</small>" : "") + "</td><td>" + taskPill(t.status) + '</td><td><span class="tag">v' + esc(t.version_no) + "</span></td><td>" + (t.last_status ? statusPill(t.last_status) : '<span class="muted">' + esc(T("tasks.never")) + "</span>") + '</td><td class="num">' + esc(t.runs_today) + '</td><td class="right"><span class="muted">' + ic("chev", "sm") + "</span></td></tr>";
+          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
+            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + esc(T("tl.next", { t: when(t.next_run_at) })) + "</small>" : "") + "</td><td>" + taskPill(t.status) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td>" + (t.last_status ? statusPill(t.last_status) : '<span class="muted">' + esc(T("tasks.never")) + "</span>") + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? emptyState("search", T("tl.no_match"), T("tl.no_match_sub")) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
+        $$("[data-runnow]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); runTaskNow(b.getAttribute("data-runnow"), b); }); });
         $$("[data-pick]", body).forEach(function (c) {
           c.addEventListener("click", function (e) { e.stopPropagation(); });
           c.addEventListener("change", function () { if (c.checked) v.sel[c.getAttribute("data-pick")] = 1; else delete v.sel[c.getAttribute("data-pick")]; batch(); });
@@ -960,7 +986,10 @@
         var act = b.getAttribute("data-batch"), ids = Object.keys(v.sel);
         var go = function () {
           api("/api/tasks/batch", { method: "POST", body: { ids: ids, action: act } }).then(function (r) {
-            if (r.failed && r.failed.length) toast(T("tl.batch_partial", { n: r.done, f: r.failed.length }), true); else toast(T("tl.batch_done_" + act, { n: r.done }));
+            var inv = { pause: "resume", resume: "pause" }[act];
+            if (r.failed && r.failed.length) toast(T("tl.batch_partial", { n: r.done, f: r.failed.length }), true);
+            else if (inv) toastUndo(T("tl.batch_done_" + act, { n: r.done }), function () { api("/api/tasks/batch", { method: "POST", body: { ids: ids, action: inv } }).then(function () { refresh(); }).catch(fail); });
+            else toast(T("tl.batch_done_" + act, { n: r.done }));
             v.sel = {}; refresh();
           }).catch(fail);
         };
@@ -1136,11 +1165,10 @@
       }).join("") + "</ul>" : emptyState("runs", T("runs.none"), "");
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" title="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1><p>" + esc(t.goal || t.prompt) + "</p>" +
-        '<div class="chips"><span class="chip">' + ic("user", "sm") + esc(T("td.owned")) + "</span><span class=\"chip\">" + ic("clock", "sm") + esc(cronHuman(t.cron)) + "</span>" +
-        '<span class="chip">' + ic("calendar", "sm") + esc(T("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }), u: ago(t.updated_at) })) + "</span>" + taskPill(t.status) + "</div></div>" +
+        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
+        '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + esc(T("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }), u: ago(t.updated_at) })) + "</span></div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause">' + ic("pause", "sm") + esc(T("td.pause")) + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
-        '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="btn danger" id="t-del">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
+        '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
         taskTab(tab, t, items, vers, runs) + "</section>" +
         '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
@@ -1335,13 +1363,13 @@
         var sub = b.description || (b.task_id ? T("bt.runs_task", { name: tname[b.task_id] || b.task_id }) : b.skill_id ? T("bt.runs_skill", { name: sname[b.skill_id] || b.skill_id }) : T("bt.prompt", { p: b.prompt }));
         return '<div class="card qa fill' + (b.color ? " colored" : "") + '" draggable="true" tabindex="0" data-idx="' + i + '" aria-roledescription="' + esc(T("bt.sortable")) + '" aria-label="' + esc(b.label) + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '"><span class="grip qa-grip" aria-hidden="true" title="' + esc(T("bt.sort_hint")) + '">⋮⋮</span><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(sub) + '</small><div class="req-actions"><button class="btn sm" data-edit="' + i + '">' + esc(T("btn.edit")) + '</button><button class="btn sm danger" data-del="' + i + '">' + esc(T("btn.remove")) + '</button></div></div>';
       });
-      cards.push('<button class="card qa tint" id="b-add"><span class="qa-ico">' + ic("plus", "lg") + "</span><strong>" + esc(T("bt.new")) + "</strong><small>" + esc(T("bt.new_sub")) + " " + ic("arrow", "sm") + "</small></button>");
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + '</p></div></div><p class="hint">' + esc(T("bt.sort_hint")) + '</p><div class="grid g4" id="bt-grid">' + cards.join("") + '</div><div class="sr-only" aria-live="polite" id="bt-live"></div>', "buttons", [[T("nav.buttons")]]);
+      if (!list.length) cards.push('<div class="bt-empty">' + emptyState("bolt", T("bt.none"), T("bt.new_sub")) + "</div>");
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + tip(T("bt.sort_hint")) + '</p></div><div class="actions"><button class="btn primary" id="b-add">' + ic("plus", "sm") + esc(T("bt.new")) + '</button></div></div><div class="grid g4" id="bt-grid">' + cards.join("") + '</div><div class="sr-only" aria-live="polite" id="bt-live"></div>', "buttons", [[T("nav.buttons")]]);
       applyColors(page());
-      var save = function (nl) { return api("/api/buttons", { method: "PUT", body: nl }).then(function () { toast(T("toast.buttons_saved")); renderButtons(); }); };
+      var save = function (nl, quiet) { return api("/api/buttons", { method: "PUT", body: nl }).then(function () { if (!quiet) toast(T("toast.buttons_saved")); renderButtons(); }); };
       $("#b-add").addEventListener("click", function () { buttonModal(list, null, tasks, skills, save); });
       $$("[data-edit]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); buttonModal(list, +b.getAttribute("data-edit"), tasks, skills, save); }); });
-      $$("[data-del]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); var k = +b.getAttribute("data-del"); confirmDialog({ title: T("bt.rm_title", { n: list[k].label }), body: T("bt.confirm_rm"), ok: T("btn.remove"), danger: true }).then(function (y) { if (!y) return; var nl = list.slice(); nl.splice(k, 1); save(nl).catch(fail); }); }); });
+      $$("[data-del]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); var k = +b.getAttribute("data-del"); var before = list.slice(), nl = list.slice(), gone = nl.splice(k, 1)[0]; save(nl, true).then(function () { toastUndo(T("bt.removed", { n: gone.label }), function () { save(before, true).catch(fail); }); }).catch(fail); }); });
       $$("[data-run]").forEach(function (c) { c.addEventListener("click", function (e) { if (e.target.closest("button")) return; runButton(c.getAttribute("data-run"), c); }); });
       // ordering: drag with the mouse, or focus a card and press Alt+←/→ (Alt+↑/↓)
       var grid = $("#bt-grid"), order = function () { return $$("[data-idx]", grid).map(function (c) { return list[+c.getAttribute("data-idx")]; }); };
@@ -1374,7 +1402,7 @@
         var drag = $(".dragging", grid); if (!drag) return;
         e.preventDefault();
         var after = $$("[data-idx]:not(.dragging)", grid).filter(function (x) { var r = x.getBoundingClientRect(); return e.clientY < r.bottom && e.clientX < r.left + r.width / 2 || e.clientY < r.top; })[0];
-        if (after) grid.insertBefore(drag, after); else grid.insertBefore(drag, $("#b-add"));
+        if (after) grid.insertBefore(drag, after); else grid.appendChild(drag);
       });
     });
   }
@@ -1392,7 +1420,9 @@
   // Colors go through CSSOM (CSP blocks inline style attributes).
   function applyColors(root) { $$("[data-color]", root).forEach(function (el) { var c = el.getAttribute("data-color"); if (/^#[0-9a-fA-F]{6}$/.test(c)) el.style.setProperty("--qa-color", c); }); }
   var SWATCHES = ["", "#2f6fed", "#0f9d8a", "#7b5cd6", "#d9822b", "#d64545", "#3b8b3b", "#5a6b7d"];
-  function fieldHtml(label, inner, hint) { return '<label class="field"><span>' + esc(label) + "</span>" + inner + (hint ? '<small class="hint">' + esc(hint) + "</small>" : "") + "</label>"; }
+  // Secondary help lives in a tooltip next to the label (hover or keyboard focus), not under every field.
+  function tip(text) { return text ? '<span class="info-tip" tabindex="0" role="img" aria-label="' + esc(text) + '" data-tip="' + esc(text) + '">' + ic("info", "sm") + "</span>" : ""; }
+  function fieldHtml(label, inner, hint) { return '<label class="field"><span>' + esc(label) + tip(hint) + "</span>" + inner + "</label>"; }
   function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (sel ? " selected" : "") + ">" + esc(label) + "</option>"; }
   // Collect dropped files; folders are walked so the server sees relative paths.
   function droppedFiles(dt) {
@@ -1594,7 +1624,7 @@
           '<small class="pv-meta"><code>' + esc((p.base_url || "https://api.anthropic.com").replace(/^https?:\/\//, "")) + "</code>" + (p.model ? " · " + esc(p.model) : "") + "</small></div>" +
           '<span class="pv-key ' + (p.key_set ? "ok" : "") + '"><span class="dot ' + (p.key_set ? "ok" : "") + '"></span>' + esc(T(p.key_set ? "pv.key_ok" : "pv.key_none")) + "</span>" + ic("chev", "sm") + "</li>";
       };
-      box.innerHTML = '<div class="pv-toolbar"><p class="muted">' + esc(T("pv.sub")) + '</p><button class="btn primary" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + "</button></div>" +
+      box.innerHTML = '<div class="pv-toolbar"><p class="muted">' + tip(T("pv.sub")) + '</p><button class="btn primary" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + "</button></div>" +
         (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
         (hidden.length ? '<details class="pv-more"><summary>' + esc(T("pv.more", { n: hidden.length })) + '</summary><ul class="pv-cards">' + hidden.map(card).join("") + "</ul></details>" : "") +
         '<small class="hint">' + esc(T("pv.sort_hint")) + "</small>";
@@ -1717,10 +1747,10 @@
       '<form id="pvf" class="drawer-body" autocomplete="off">' +
       '<h4 class="sec">' + esc(T("pv.sec_basic")) + "</h4>" +
       fieldHtml(T("set.name"), inp("name", v.name, ' required maxlength="40" pattern="[a-z0-9][a-z0-9._\\-]{0,39}"'), T("pv.name_hint")) +
-      '<label class="field"><span>Base URL</span><div class="in-group">' + inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"') + (base && base.base_url !== undefined ? '<button type="button" class="btn ghost" id="pd-reset" title="' + esc(base.base_url || "https://api.anthropic.com") + '">' + ic("rollback", "sm") + esc(T("pv.reset_url")) + "</button>" : "") + '</div><small class="hint">' + esc(T("pv.url_hint")) + "</small></label>" +
+      '<label class="field"><span>Base URL' + tip(T("pv.url_hint")) + '</span><div class="in-group">' + inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"') + (base && base.base_url !== undefined ? '<button type="button" class="btn ghost" id="pd-reset" title="' + esc(base.base_url || "https://api.anthropic.com") + '">' + ic("rollback", "sm") + esc(T("pv.reset_url")) + "</button>" : "") + "</div></label>" +
       '<h4 class="sec">' + esc(T("pv.sec_auth")) + " " + link + "</h4>" +
       '<div class="field"><span>' + esc(T("pv.auth")) + '</span><div class="seg" role="radiogroup" aria-label="' + esc(T("pv.auth")) + '">' + seg("ANTHROPIC_AUTH_TOKEN", "Bearer", "ANTHROPIC_AUTH_TOKEN") + seg("ANTHROPIC_API_KEY", "x-api-key", "ANTHROPIC_API_KEY") + "</div></div>" +
-      '<label class="field"><span>' + esc(T("pv.api_key")) + '</span><div class="in-group"><input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(!creating && v.key_set && v.key_source === "store" ? T("pv.key_keep", { l: v.key_last4 || "" }) : !creating && v.key_source === "env" ? T("pv.key_env") : T("pv.key_new")) + '"><button type="button" class="btn ghost" id="pd-eye" aria-pressed="false" aria-label="' + esc(T("pv.show_key")) + '">' + esc(T("pv.show")) + '</button></div><small class="hint">' + esc(T("pv.key_hint")) + "</small></label>" +
+      '<label class="field"><span>' + esc(T("pv.api_key")) + tip(T("pv.key_hint")) + '</span><div class="in-group"><input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(!creating && v.key_set && v.key_source === "store" ? T("pv.key_keep", { l: v.key_last4 || "" }) : !creating && v.key_source === "env" ? T("pv.key_env") : T("pv.key_new")) + '"><button type="button" class="btn ghost" id="pd-eye" aria-pressed="false" aria-label="' + esc(T("pv.show_key")) + '">' + esc(T("pv.show")) + "</button></div></label>" +
       (!creating && v.key_source === "store" ? '<label class="check"><input type="checkbox" name="clear_key"> ' + esc(T("pv.clear_key")) + "</label>" : "") +
       '<h4 class="sec">' + esc(T("pv.models")) + "</h4>" +
       '<div class="model-list">' + models.map(function (m) { return '<div class="model-row"><label for="pm-' + m[0] + '">' + esc(m[1]) + '</label><div class="in-group"><input id="pm-' + m[0] + '" name="' + m[0] + '" value="' + esc(v[m[0]] || "") + '" maxlength="128" spellcheck="false"><button type="button" class="btn ghost" data-check="' + m[0] + '"' + (creating ? " disabled" : "") + ">" + esc(T("pv.check")) + '</button></div><span class="mres" data-res="' + m[0] + '"></span></div>'; }).join("") + "</div>" + (creating ? '<small class="hint">' + esc(T("pv.check_after_save")) + "</small>" : "") +
@@ -1729,8 +1759,8 @@
       fieldHtml(T("pv.extra_env"), '<textarea name="extra_env" rows="3" placeholder="API_TIMEOUT_MS=600000">' + esc(envText) + "</textarea>", T("pv.extra_hint")) +
       (!creating ? '<div class="row-actions">' + (v.default ? "" : '<button type="button" class="btn" id="pd-def">' + esc(T("pv.make_default")) + "</button>") + '<button type="button" class="btn" id="pd-dup">' + esc(T("pv.dup")) + "</button></div>" : "") + "</details>" +
       '<div class="pv-test" id="pd-test" aria-live="polite"></div>' +
-      '<div class="drawer-foot">' + (!creating && !v.default ? '<button type="button" class="btn danger" id="pd-del">' + ic("trash", "sm") + esc(T("btn.remove")) + "</button>" : "") + '<span class="grow"></span>' +
-      (creating ? "" : '<button type="button" class="btn" id="pd-test-btn">' + ic("pulse", "sm") + esc(T("pv.test")) + "</button>") + '<button type="submit" class="btn" data-mode="save">' + esc(T("btn.save")) + '</button><button type="submit" class="btn primary" data-mode="test">' + ic("check", "sm") + esc(T("pv.save_test")) + "</button></div></form>";
+      '<div class="drawer-foot">' + (!creating && !v.default ? '<button type="button" class="btn ghost danger-text" id="pd-del">' + ic("trash", "sm") + esc(T("btn.remove")) + "</button>" : "") + '<span class="grow"></span>' +
+      '<button type="submit" class="btn" data-mode="save">' + esc(T("btn.save")) + '</button><button type="submit" class="btn primary" data-mode="test">' + ic("check", "sm") + esc(T("pv.save_test")) + "</button></div></form>";
     $$("[data-drawer-close]", host).forEach(function (b) { b.addEventListener("click", closeDrawer); });
     var f = $("#pvf", host), out = $("#pd-test", host), mode = "save";
     if (!creating) pricingEditor($("#pd-price", host), v.name);
@@ -1773,30 +1803,37 @@
     var paint = function (d) {
       var P = d.pricing, b = P.billing || { mode: "metered" }, q = b.quota || {};
       var prices = (P.prices || []).map(function (x) { return JSON.parse(JSON.stringify(x)); });
-      var origin = b.mode !== "metered" ? '<span class="pill info sm">' + esc(T("pr.m_" + b.mode)) + "</span>" : P.origin === "official" ? '<span class="pill ok sm">' + esc(T("pr.o_official")) + "</span>" : P.origin === "custom" ? '<span class="pill info sm">' + esc(T("pr.o_custom")) + "</span>" : '<span class="pill warn sm">' + esc(T("pr.o_none")) + "</span>";
+      var mode = b.mode || "metered", sub = mode === "subscription";
+      // Drawer shows numbers + one pill; where the numbers come from lives in the ⓘ popover.
+      var pill = mode !== "metered" ? "" :
+        P.origin === "official" ? '<span class="pill ok sm">' + esc(T("pr.o_official")) + "</span>" :
+        P.origin === "custom" ? '<span class="pill info sm">' + esc(T("pr.o_custom")) + "</span>" : '<span class="pill warn sm">' + esc(T("pr.o_none")) + "</span>";
       var src = {}; (P.official || []).forEach(function (x) { if (x.source) src[x.source] = x.fetched; });
-      var srcHtml = Object.keys(src).map(function (u) { return '<a class="link" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + ic("globe", "sm") + esc(T("pr.src", { d: src[u] })) + "</a>"; }).join(" ");
-      var sub = b.mode === "subscription";
+      var fb = d.fallback;
+      var info = '<details class="pop-info"><summary class="info-tip" aria-label="' + esc(T("pr.info")) + '">' + ic("info", "sm") + '</summary><div class="pop-body">' +
+        (Object.keys(src).length ? "<strong>" + esc(T("pr.src_h")) + "</strong>" + Object.keys(src).map(function (u) { return '<a class="link" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(u.replace(/^https?:\/\//, "").split("/")[0]) + '</a><small class="muted">' + esc(T("pr.src", { d: src[u] })) + "</small>"; }).join("") : "") +
+        (fb ? "<p>" + esc(T("pr.fallback", { m: d.model, i: fb.input, o: fb.output, c: fb.currency })) + "</p>" : "") +
+        "<p>" + esc(T(sub ? "pr.sub_hint" : mode === "free" ? "pr.free_hint" : P.anthropic ? "pr.anth_hint" : "pr.metered_hint")) + "</p>" +
+        "<p>" + esc(T("pr.unit_hint")) + '</p><a class="link" href="#/settings/pricing">' + esc(T("pr.catalog_link")) + " →</a></div></details>";
       var row = function (x, i) {
-        var inp = function (k, ph) { return '<label class="pr-cell"><small>' + esc(T("pr.c_" + k)) + '</small><input type="number" min="0" step="any" data-pi="' + i + '" data-pk="' + k + '" value="' + esc(nf(x[k])) + '" placeholder="' + esc(ph || "—") + '"></label>'; };
-        var tiers = x.tiers && x.tiers.length ? '<small class="muted" title="' + esc(x.tiers.map(function (t) { return (t.up_to ? "< " + num(t.up_to) : "≥") + ": " + t.input + " / " + t.output; }).join("\n")) + '">' + esc(T("pr.tiered", { n: x.tiers.length })) + "</small>" : "";
-        return '<div class="pr-row"><div class="pr-name"><input data-pi="' + i + '" data-pk="model" value="' + esc(x.model || "") + '" maxlength="128" spellcheck="false" placeholder="model-id" aria-label="' + esc(T("f.model")) + '">' +
-          '<button type="button" class="icon-btn sm" data-pdel="' + i + '" aria-label="' + esc(T("btn.remove")) + '">' + ic("x", "sm") + "</button></div>" +
-          '<div class="pr-cells">' + inp("input") + inp("output") + inp("cache_write", T("pr.same_in")) + inp("cache_read", T("pr.same_in")) + "</div>" +
-          (tiers || x.note ? '<div class="pr-meta">' + tiers + (x.note ? '<small class="muted">' + esc(x.note) + "</small>" : "") + "</div>" : "") + "</div>";
+        var inp = function (k, ph) { return '<input type="number" min="0" step="any" inputmode="decimal" data-pi="' + i + '" data-pk="' + k + '" value="' + esc(nf(x[k])) + '" placeholder="' + esc(ph || "—") + '" aria-label="' + esc((x.model || "") + " " + T("pr.c_" + k)) + '">'; };
+        var meta = [];
+        if (x.tiers && x.tiers.length) meta.push(x.tiers.map(function (t) { return (t.up_to ? "< " + num(t.up_to) : "≥") + ": " + t.input + " / " + t.output; }).join(" · "));
+        if (x.note) meta.push(x.note);
+        return '<div class="pr-row"><input class="pr-model" data-pi="' + i + '" data-pk="model" value="' + esc(x.model || "") + '" maxlength="128" spellcheck="false" placeholder="model-id" aria-label="' + esc(T("f.model")) + '">' +
+          inp("input") + inp("output") + inp("cache_write", "=" + T("pr.c_input")) + inp("cache_read", "—") +
+          '<span class="pr-x">' + (meta.length ? '<span class="tag sm" tabindex="0" data-tip="' + esc(meta.join("\n")) + '">' + esc(x.tiers && x.tiers.length ? T("pr.tiered", { n: x.tiers.length }) : "i") + "</span>" : "") +
+          '<button type="button" class="icon-btn sm" data-pdel="' + i + '" aria-label="' + esc(T("btn.remove")) + '">' + ic("x", "sm") + "</button></span></div>";
       };
       var cur0 = (prices[0] || {}).currency || "USD";
-      var subField = function (inner) { return '<div class="pr-sub' + (sub ? "" : " hidden") + '">' + inner + "</div>"; };
-      box.innerHTML = '<div class="pr-head">' + origin + " " + srcHtml + "</div>" +
-        '<div class="grid g2"><label class="field"><span>' + esc(T("pr.mode")) + '</span><select id="pr-mode">' + opt("metered", T("pr.m_metered"), b.mode === "metered") + opt("subscription", T("pr.m_subscription"), sub) + opt("free", T("pr.m_free"), b.mode === "free") + "</select></label>" +
-        subField('<label class="field"><span>' + esc(T("pr.q_window")) + '</span><select id="pr-qw">' + opt("", T("pr.q_none"), !q.window) + ["5h", "day", "week", "month"].map(function (w) { return opt(w, T("pr.w_" + w), q.window === w); }).join("") + "</select></label>") +
-        subField('<label class="field"><span>' + esc(T("pr.q_tokens")) + '</span><input id="pr-qt" type="number" min="0" step="1000" value="' + esc(q.max_tokens || "") + '"></label>') +
-        subField('<label class="field"><span>' + esc(T("pr.q_reqs")) + '</span><input id="pr-qr" type="number" min="0" step="1" value="' + esc(q.max_requests || "") + '"></label>') +
-        subField('<label class="field"><span>' + esc(T("pr.fee")) + '</span><div class="in-group"><input id="pr-fee" type="number" min="0" step="any" value="' + esc(b.monthly_fee || "") + '"><select id="pr-feec">' + opt("CNY", "CNY", b.fee_currency !== "USD") + opt("USD", "USD", b.fee_currency === "USD") + '</select></div><small class="hint">' + esc(T("pr.fee_hint")) + "</small></label>") + "</div>" +
-        '<p class="hint">' + esc(T(sub ? "pr.sub_hint" : b.mode === "free" ? "pr.free_hint" : P.anthropic ? "pr.anth_hint" : "pr.metered_hint")) + "</p>" +
-        '<div class="pr-table' + (b.mode === "metered" ? "" : " dim") + '"><div class="pr-cur"><span>' + esc(T("pr.c_currency")) + '</span><select id="pr-cur">' + opt("USD", "USD ($)", cur0 !== "CNY") + opt("CNY", "CNY (¥)", cur0 === "CNY") + '</select><small class="hint">' + esc(T("pr.unit_hint")) + "</small></div>" +
-        (prices.length ? prices.map(row).join("") : '<p class="muted">' + esc(T(b.mode === "metered" ? "pr.unset" : "pr.unset_ok")) + "</p>") + "</div>" +
-        '<div class="row-actions"><button type="button" class="btn sm" id="pr-add">' + ic("plus", "sm") + esc(T("pr.add")) + "</button>" + ((P.official || []).length && P.origin === "custom" ? '<button type="button" class="btn sm" id="pr-restore">' + ic("rollback", "sm") + esc(T("pr.restore")) + "</button>" : "") + '<span class="grow"></span><button type="button" class="btn sm primary" id="pr-save">' + esc(T("pr.save")) + "</button></div>";
+      box.innerHTML = '<div class="pr-head"><div class="seg sm" role="radiogroup" aria-label="' + esc(T("pr.mode")) + '">' + ["metered", "subscription", "free"].map(function (m) { return '<button type="button" role="radio" data-pm="' + m + '" aria-checked="' + (m === mode) + '" class="' + (m === mode ? "active" : "") + '">' + esc(T("pr.m_" + m)) + "</button>"; }).join("") + '</div><span class="grow"></span>' + pill + info + "</div>" +
+        (sub ? '<div class="pr-sub"><label class="field"><span>' + esc(T("pr.q_window")) + '</span><select id="pr-qw">' + opt("", T("pr.q_none"), !q.window) + ["5h", "day", "week", "month"].map(function (w) { return opt(w, T("pr.w_" + w), q.window === w); }).join("") + "</select></label>" +
+          '<label class="field"><span>' + esc(T("pr.q_tokens")) + '</span><input id="pr-qt" type="number" min="0" step="1000" value="' + esc(q.max_tokens || "") + '"></label>' +
+          '<label class="field"><span>' + esc(T("pr.q_reqs")) + '</span><input id="pr-qr" type="number" min="0" step="1" value="' + esc(q.max_requests || "") + '"></label>' +
+          '<label class="field"><span>' + esc(T("pr.fee")) + tip(T("pr.fee_hint")) + '</span><div class="in-group"><input id="pr-fee" type="number" min="0" step="any" value="' + esc(b.monthly_fee || "") + '"><select id="pr-feec">' + opt("CNY", "¥", b.fee_currency !== "USD") + opt("USD", "$", b.fee_currency === "USD") + "</select></div></label></div>" : "") +
+        (mode === "metered" ? '<div class="pr-table"><div class="pr-row pr-th"><select id="pr-cur" aria-label="' + esc(T("pr.c_currency")) + '">' + opt("USD", "USD $", cur0 !== "CNY") + opt("CNY", "CNY ¥", cur0 === "CNY") + "</select><span>" + esc(T("pr.c_input")) + "</span><span>" + esc(T("pr.c_output")) + "</span><span>" + esc(T("pr.c_cache_write")) + "</span><span>" + esc(T("pr.c_cache_read")) + "</span><span></span></div>" +
+          (prices.length ? prices.map(row).join("") : '<p class="muted pr-empty">' + esc(T("pr.unset")) + "</p>") + "</div>" : "") +
+        '<div class="row-actions">' + (mode === "metered" ? '<button type="button" class="btn ghost sm" id="pr-add">' + ic("plus", "sm") + esc(T("pr.add")) + "</button>" : "") + ((P.official || []).length && P.origin === "custom" ? '<button type="button" class="btn ghost sm" id="pr-restore">' + ic("rollback", "sm") + esc(T("pr.restore")) + "</button>" : "") + '<span class="grow"></span><button type="button" class="btn sm" id="pr-save">' + esc(T("pr.save")) + "</button></div>";
       var collect = function () {
         $$("[data-pi]", box).forEach(function (el) {
           var x = prices[+el.getAttribute("data-pi")], k = el.getAttribute("data-pk"), v = el.value.trim();
@@ -1805,33 +1842,32 @@
           x[k] = nv;
           if (x.tiers && old !== nv) delete x.tiers; // edited base price: the bands no longer apply
         });
-        var c = $("#pr-cur", box).value;
-        prices.forEach(function (x) { x.currency = c; });
+        var c = $("#pr-cur", box);
+        if (c) prices.forEach(function (x) { x.currency = c.value; });
         return prices.filter(function (x) { return x.model; });
       };
       var billing = function () {
-        var m = $("#pr-mode", box).value, out = { mode: m };
-        if (m === "subscription") {
-          var w = $("#pr-qw", box).value;
-          if (w) out.quota = { window: w, max_tokens: parseInt($("#pr-qt", box).value, 10) || 0, max_requests: parseInt($("#pr-qr", box).value, 10) || 0 };
-          out.monthly_fee = parseFloat($("#pr-fee", box).value) || 0; out.fee_currency = $("#pr-feec", box).value;
-        }
+        var out = { mode: mode };
+        if (mode === "subscription") {
+          var w = $("#pr-qw", box) ? $("#pr-qw", box).value : (q.window || "");
+          if (w) out.quota = { window: w, max_tokens: parseInt(($("#pr-qt", box) || {}).value, 10) || 0, max_requests: parseInt(($("#pr-qr", box) || {}).value, 10) || 0 };
+          out.monthly_fee = parseFloat(($("#pr-fee", box) || {}).value) || 0; out.fee_currency = ($("#pr-feec", box) || {}).value || "CNY";
+        } else if (b.quota || b.monthly_fee) { out.quota = b.quota; out.monthly_fee = b.monthly_fee; out.fee_currency = b.fee_currency; } // keep plan details when switching back and forth
         return out;
       };
       var repaint = function (list) { P.prices = list; P.billing = billing(); paint(d); };
-      $("#pr-mode", box).addEventListener("change", function (e) { var s2 = e.target.value === "subscription"; $$(".pr-sub", box).forEach(function (x) { x.classList.toggle("hidden", !s2); }); $(".pr-table", box).classList.toggle("dim", e.target.value !== "metered"); });
-      $("#pr-add", box).addEventListener("click", function () {
-        var cur = collect(); cur.push({ model: "", currency: (cur[0] || {}).currency || "USD", input: null, output: null }); prices = cur;
-        P.prices = cur; P.billing = billing(); paint(d);
+      $$("[data-pm]", box).forEach(function (bt) { bt.addEventListener("click", function () { var list = $("#pr-cur", box) ? collect() : prices; P.billing = billing(); P.billing.mode = bt.getAttribute("data-pm"); if (P.billing.mode === "subscription") { P.billing.quota = P.billing.quota || b.quota; } P.prices = list; paint(d); var nb = $('[data-pm="' + P.billing.mode + '"]', box); if (nb) nb.focus(); }); });
+      var add = $("#pr-add", box); if (add) add.addEventListener("click", function () {
+        var cur = collect(); cur.push({ model: "", currency: (cur[0] || {}).currency || cur0, input: null, output: null }); repaint(cur);
         var ins = $$('[data-pk="model"]', box); if (ins.length) ins[ins.length - 1].focus();
       });
       $$("[data-pdel]", box).forEach(function (bt) { bt.addEventListener("click", function () { var cur = collect(); cur.splice(+bt.getAttribute("data-pdel"), 1); repaint(cur); }); });
       $("#pr-save", box).addEventListener("click", function () {
-        var list = collect(), bad = list.filter(function (x) { return x.input == null || x.output == null; })[0];
-        if (bad && billing().mode === "metered") { toast(T("pr.need_io", { m: bad.model }), true); return; }
+        var list = $("#pr-cur", box) ? collect() : prices, bad = list.filter(function (x) { return x.input == null || x.output == null; })[0];
+        if (bad && mode === "metered") { toast(T("pr.need_io", { m: bad.model }), true); return; }
         rpc("pricing.set", { provider: name, billing: billing(), prices: list }).then(function (r) { toast(T("pr.saved")); paint(r); }).catch(fail);
       });
-      var rs = $("#pr-restore", box); if (rs) rs.addEventListener("click", function () { rpc("pricing.set", { provider: name, billing: billing(), restore: true }).then(function (r) { toast(T("pr.restored")); paint(r); }).catch(fail); });
+      var rs = $("#pr-restore", box); if (rs) rs.addEventListener("click", function () { var prev = { billing: billing(), prices: collect() }; rpc("pricing.set", { provider: name, billing: billing(), restore: true }).then(function (r) { paint(r); toastUndo(T("pr.restored"), function () { rpc("pricing.set", { provider: name, billing: prev.billing, prices: prev.prices }).then(paint).catch(fail); }); }).catch(fail); });
     };
     return rpc("pricing.get", { provider: name }).then(paint).catch(function (e) { box.innerHTML = '<p class="err">' + esc(e.message) + "</p>"; });
   }
@@ -2159,7 +2195,7 @@
     return '<div class="of-wall"><div class="of-filter seg sm" role="radiogroup">' + cats.map(function (c) { return '<button type="button" role="radio" data-ofc="' + c[0] + '" class="' + (catView.cat === c[0] ? "active" : "") + '" aria-checked="' + (catView.cat === c[0]) + '">' + esc(T(c[1])) + "</button>"; }).join("") + "</div>" +
       '<div class="of-grid">' + cat.map(function (e) {
         var hide = catView.cat !== "all" && e.category !== catView.cat;
-        var act = e.installed ? (e.update ? '<button class="btn sm" data-of-install="' + esc(e.id) + '">' + ic("download", "sm") + esc(T("of.update")) + "</button>" : '<span class="pill ok sm">' + ic("check", "sm") + esc(T("of.installed")) + "</span>") : '<button class="btn sm primary" data-of-install="' + esc(e.id) + '">' + ic("plus", "sm") + esc(T("of.install")) + "</button>";
+        var act = e.installed ? (e.update ? '<button class="btn sm" data-of-install="' + esc(e.id) + '">' + ic("download", "sm") + esc(T("of.update")) + "</button>" : '<span class="pill ok sm">' + ic("check", "sm") + esc(T("of.installed")) + "</span>") : '<button class="btn sm" data-of-install="' + esc(e.id) + '">' + ic("plus", "sm") + esc(T("of.install")) + "</button>";
         return '<div class="ap-tile of-tile' + (hide ? " hidden" : "") + '" data-of="' + esc(e.id) + '"><span class="ap-logo ' + (OF_BRAND[e.id] || "br-other") + '" aria-hidden="true">' + ic(e.icon) + "</span>" +
           "<strong>" + esc(T("of." + e.id + ".n")) + '</strong><span class="ap-tag">' + esc(T("of.t_" + e.category)) + '</span><small class="muted of-desc">' + esc(T("of." + e.id + ".d")) + '</small><div class="of-foot"><span class="muted sm-t">' + esc(T("of.official")) + " · v" + esc(e.version) + "</span>" + act + "</div></div>";
       }).join("") + "</div></div>";
@@ -2373,7 +2409,7 @@
       }).join("") + "</div>" : emptyState("plugins", T("pl.empty"), T("pl.empty_sub"));
       var trow = trig.length ? '<div class="grid g2 trig-cards">' + trig.map(function (t) { return triggerCard(t, tname); }).join("") + "</div>" : '<p class="muted">' + esc(T("pl.no_triggers")) + "</p>";
       var brow = '<p class="muted">' + esc(baks.length ? T("pl.backups_n", { n: baks.length }) : T("pl.no_backups")) + "</p>";
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn" id="bk-now">' + esc(T("pl.backup_now")) + '</button><button class="btn" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + '</button><button class="btn primary" id="pl-ai">' + ic("sparkle", "sm") + esc(T("ai.title")) + "</button></div></div>" +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn ghost" id="bk-now">' + ic("download", "sm") + esc(T("pl.backup_now")) + '</button><button class="btn" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + '</button><button class="btn primary" id="pl-ai">' + ic("sparkle", "sm") + esc(T("ai.title")) + "</button></div></div>" +
         '<h2 class="sec-h">' + ic("star") + esc(T("of.title")) + '<span class="muted sec-sub">' + esc(T("of.sub")) + "</span></h2>" + catalogWall(cat) +
         '<h2 class="sec-h">' + ic("plugins") + esc(T("pl.installed")) + "</h2>" + prow +
         '<h2 class="sec-h">' + ic("globe") + esc(T("pl.triggers")) + '<span class="grow"></span><button class="btn sm" id="tr-add">' + ic("plus", "sm") + esc(T("tr.new")) + "</button></h2>" + trow +
@@ -2424,11 +2460,12 @@
     var url = function () { return "/api/runs?limit=200&sort=" + enc(v.sort) + (st ? "&status=" + enc(st) : "") + (task ? "&task_id=" + enc(task) : "") + (v.q ? "&q=" + enc(v.q) : ""); };
     return api(url()).then(function (runs) {
       var f = [["", T("runs.all_f")], ["running", T("st.running")], ["succeeded", T("st.succeeded")], ["failed", T("st.failed")]];
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + esc(T("runs.sub")) + "</p></div></div>" +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + esc(T("runs.times_in", { tz: tzLabel() })) + '</p></div><div class="actions"><button class="btn primary" id="r-quick">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div></div>" +
         '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="rq" type="search" maxlength="100" placeholder="' + esc(T("runs.search")) + '" value="' + esc(v.q) + '"></label>' +
         '<div class="filters">' + f.map(function (x) { return '<button data-f="' + x[0] + '" class="' + (x[0] === st ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" +
-        '<label class="inl">' + esc(T("runs.sort")) + ' <select id="rsort">' + [["new", T("runs.s_new")], ["old", T("runs.s_old")], ["cost", T("runs.s_cost")], ["tokens", T("runs.s_tokens")], ["duration", T("runs.s_duration")]].map(function (x) { return opt(x[0], x[1], x[0] === v.sort); }).join("") + "</select></label>" +
-        '<span class="grow"></span><span class="muted">' + esc(task && runs[0] ? T("runs.for", { name: runs[0].task_name }) + " · " : "") + esc(T("runs.times_in", { tz: tzLabel() })) + '</span></div><div id="rtable"></div></section>', "runs", [[T("nav.runs")]]);
+        '<select id="rsort" aria-label="' + esc(T("runs.sort")) + '">' + [["new", T("runs.s_new")], ["old", T("runs.s_old")], ["cost", T("runs.s_cost")], ["tokens", T("runs.s_tokens")], ["duration", T("runs.s_duration")]].map(function (x) { return opt(x[0], x[1], x[0] === v.sort); }).join("") + "</select>" +
+        '<span class="grow"></span><span class="muted">' + esc(task && runs[0] ? T("runs.for", { name: runs[0].task_name }) : "") + '</span></div><div id="rtable"></div></section>', "runs", [[T("nav.runs")]]);
+      $("#r-quick").addEventListener("click", function () { quickRunModal(); });
       var paint = function (list) {
         $("#rtable").innerHTML = list.length || !v.q ? runsTable(list, true) : emptyState("search", T("runs.no_match"), "");
         wireRows($("#rtable"));
@@ -2693,8 +2730,8 @@
   // Left nav + one section at a time. Every row has an id, so #/settings/<section>/<item>
   // scrolls to it. Autosaved fields show "Saved ✓" next to them. Dangerous actions
   // live in the danger zone at the bottom of General.
-  var SET_SECTIONS = ["general", "providers", "budgets", "security", "notifications", "network", "data", "about"];
-  var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", security: "shield", notifications: "bell", network: "globe", data: "folder", about: "info" };
+  var SET_SECTIONS = ["general", "providers", "budgets", "pricing", "security", "notifications", "network", "data", "about"];
+  var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", pricing: "receipt", security: "shield", notifications: "bell", network: "globe", data: "folder", about: "info" };
   var RELEASES_PAGE = "https://github.com/Zhengmingming1/tidebot-releases/releases/latest";
   var NET_CODES = ["timeout", "dns", "tls", "proxy", "refused", "http_404", "http", "signature", "checksum", "unknown"];
   // Classified network error with a "how to fix" hint and the manual download link.
@@ -2757,9 +2794,9 @@
         var g = (st.budgets || []).filter(function (x) { return x.scope === "global" && x.period === "day"; })[0] || {};
         var buckets = (st.budgets || []).filter(function (x) { return x.scope === "bucket"; });
         var fx = st.fx || { display: "USD", usd_cny: 7.1 };
-        body = '<section class="card">' + head + '<p class="muted pad-x">' + esc(T("set.bud_auto")) + '</p>' +
-          '<div class="grid g3 pad-x" id="set-fx"><label class="field"><span>' + esc(T("set.fx_cur")) + '</span><select id="fx-cur">' + opt("USD", T("set.fx_usd"), fx.display === "USD") + opt("CNY", T("set.fx_cny"), fx.display === "CNY") + '</select><small class="hint">' + esc(T("set.fx_cur_hint")) + '</small></label>' +
-          '<label class="field"><span>' + esc(T("set.fx_rate")) + '</span><div class="in-group"><span class="in-pre">1 USD =</span><input id="fx-rate" type="number" step="0.01" min="0.1" max="100" value="' + esc(fx.usd_cny) + '"><span class="in-pre">CNY</span></div><small class="hint">' + esc(T("set.fx_rate_hint")) + "</small></label></div>" +
+        body = '<section class="card">' + head.replace("</h2>", "</h2>" + tip(T("set.bud_auto"))) +
+          '<div class="grid g3 pad-x" id="set-fx"><label class="field"><span>' + esc(T("set.fx_cur")) + tip(T("set.fx_cur_hint")) + '</span><select id="fx-cur">' + opt("USD", T("set.fx_usd"), fx.display === "USD") + opt("CNY", T("set.fx_cny"), fx.display === "CNY") + '</select></label>' +
+          '<label class="field"><span>' + esc(T("set.fx_rate")) + tip(T("set.fx_rate_hint")) + '</span><div class="in-group"><span class="in-pre">1 USD =</span><input id="fx-rate" type="number" step="0.01" min="0.1" max="100" value="' + esc(fx.usd_cny) + '"><span class="in-pre">CNY</span></div></label></div>' +
           '<div class="grid g3 pad-x" id="bud">' +
           '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd") + " (" + curSym(fx.display) + ")") + '</span><input data-bud="g_usd" type="number" step="0.01" min="0" value="' + esc(g.max_usd || "") + '"></label>' +
           '<label class="field" id="set-g_tok"><span>' + esc(T("set.g_tok")) + '</span><input data-bud="g_tok" type="number" step="1000" min="0" value="' + esc(g.max_tokens || "") + '"></label>' +
@@ -2840,6 +2877,36 @@
             e.target.disabled = true;
             rpc("backups.create", {}).then(function () { toast(T("set.bk_done")); return load(); }).catch(fail).then(function () { e.target.disabled = false; });
           });
+        };
+      } else if (section === "pricing") {
+        body = '<section class="card" id="set-pcat">' + head +
+          row("pcat-auto", T("pc.auto"), T("pc.auto_sub"), '<button class="switch" id="pc-auto" role="switch" aria-checked="false" aria-label="' + esc(T("pc.auto")) + '"></button>') +
+          '<div class="pad-x" id="pc-body"><p class="muted">…</p></div></section>';
+        after = function () {
+          var paint = function (st) {
+            var a = st.active, s0 = st.state || {}, on = !!(st.settings && st.settings.auto);
+            var sw = $("#pc-auto"); sw.classList.toggle("on", on); sw.setAttribute("aria-checked", on);
+            var res = s0.result ? '<span class="pill sm ' + (s0.result === "error" ? "bad" : s0.result === "installed" ? "ok" : "plain") + '">' + esc(T("pc.r_" + s0.result)) + "</span>" : '<span class="muted">' + esc(T("pc.never")) + "</span>";
+            $("#pc-body").innerHTML = '<dl class="kv">' +
+              "<dt>" + esc(T("pc.in_use")) + "</dt><dd>" + '<span class="pill sm ' + (st.origin === "remote" ? "info" : "plain") + '">' + esc(T("pc.o_" + st.origin)) + "</span> " + esc(when(a.generated)) + "</dd>" +
+              "<dt>" + esc(T("pc.count")) + "</dt><dd>" + esc(T("pc.count_v", { p: a.presets, m: a.models })) + "</dd>" +
+              "<dt>" + esc(T("pc.last")) + "</dt><dd>" + res + (s0.checked ? ' <span class="muted">' + esc(when(s0.checked)) + (s0.from ? " · " + esc(s0.from) : "") + "</span>" : "") + (s0.error ? '<small class="err">' + esc(s0.error) + "</small>" : "") + "</dd>" +
+              "<dt>" + esc(T("pc.order")) + "</dt><dd>" + esc(T("pc.order_v")) + "</dd></dl>" +
+              '<table class="table compact mt"><thead><tr><th>' + esc(T("pc.src")) + "</th><th>" + esc(T("pc.fetched")) + "</th></tr></thead><tbody>" +
+              (a.sources || []).map(function (x) { return '<tr><td><a class="link" href="' + esc(x.url) + '" target="_blank" rel="noopener noreferrer">' + esc(x.id === "models.dev" ? "models.dev" : x.name) + "</a>" + (x.id === "official" ? ' <span class="pill sm ok plain">' + esc(T("pr.o_official")) + "</span>" : "") + "</td><td>" + esc(x.fetched) + "</td></tr>"; }).join("") + "</tbody></table>" +
+              '<p class="row-actions"><button class="btn" id="pc-check">' + ic("refresh", "sm") + esc(T("pc.check")) + '</button><span class="muted sm-t">' + esc(T("pc.privacy")) + "</span></p>";
+            $("#pc-check").addEventListener("click", function (e) {
+              var b = e.currentTarget; b.disabled = true;
+              rpc("pricing.catalog.check", {}).then(function (r) { var x = (r.state || {}).result; toast(T("pc.r_" + (x || "error")), x === "error"); paint(r); }).catch(fail).then(function () { if (document.contains(b)) b.disabled = false; });
+            });
+          };
+          rpc("pricing.catalog.get", {}).then(function (st) {
+            paint(st);
+            $("#pc-auto").addEventListener("click", function (e) {
+              var on = !e.currentTarget.classList.contains("on");
+              rpc("pricing.catalog.set", { auto: on }).then(function (r) { paint(r); savedMark($("#pc-auto")); }).catch(fail);
+            });
+          }).catch(fail);
         };
       } else if (section === "network") {
         body = '<section class="card" id="set-net">' + head +
@@ -2951,7 +3018,7 @@
           rpc("update.status", {}).then(paint).catch(fail);
         };
       }
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.settings")) + "</h1><p>" + esc(T("set.sub")) + '</p></div></div><div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.settings")) + "</h1></div></div>" + '<div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
         "settings", [[T("nav.settings"), "#/settings"], [T("setnav." + section)]]);
       after();
       jumpTo(item);

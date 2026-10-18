@@ -1,0 +1,37 @@
+name: price catalog
+# Builds prices.json from models.dev + our verified official prices
+# (internal/provider/prices.go), signs it with the update key and publishes it
+# on the public releases repo under the "price-catalog" tag (a prerelease, so
+# it never becomes "latest" for the app updater). Clients check it weekly.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build catalog
+        run: |
+          mkdir -p out
+          go run ./tools/pricecat gen -out out/prices.json
+      - name: sign
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: go run ./tools/pricecat sign out/prices.json
+      - name: publish to tidebot-releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        if: env.GH_TOKEN != ''
+        run: |
+          R=Zhengmingming1/tidebot-releases
+          if gh release view price-catalog -R "$R" >/dev/null 2>&1; then
+            gh release upload price-catalog out/prices.json out/prices.json.sig -R "$R" --clobber
+          else
+            gh release create price-catalog out/prices.json out/prices.json.sig -R "$R" --prerelease --latest=false \
+              --title "price catalog" --notes "Signed model price catalog for tidebot (models.dev + verified vendor prices). Not an app release."
+          fi

@@ -133,3 +133,8 @@ func get(ctx context.Context, hc *http.Client, url string, max int64) ([]byte, e
 	}
 	return b, nil
 }
+
+// Get downloads one small file (same client headers and size cap as the manifest).
+func Get(ctx context.Context, hc *http.Client, url string, max int64) ([]byte, error) {
+	return get(ctx, hc, url, max)
+}

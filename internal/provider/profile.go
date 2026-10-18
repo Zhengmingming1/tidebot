@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
+	"github.com/Zhengmingming1/tidebot/internal/pricing/catalog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,9 +52,13 @@ func (p Profile) EffectivePricing() Pricing {
 	if preset.Billing != nil {
 		out.Billing = *preset.Billing
 	}
-	if len(preset.Prices) > 0 {
-		out.Official = preset.Prices
-		out.Prices, out.Origin = preset.Prices, "official"
+	official := catalog.Active().Preset(preset.ID) // a verified refresh may carry newer official prices
+	if len(official) == 0 {
+		official = preset.Prices
+	}
+	if len(official) > 0 {
+		out.Official = official
+		out.Prices, out.Origin = official, "official"
 	}
 	if p.Billing != nil {
 		out.Billing = *p.Billing
