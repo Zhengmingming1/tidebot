@@ -207,7 +207,8 @@ type Line struct {
 	Amount   float64 `json:"amount"`
 	Missing  bool    `json:"missing,omitempty"`
 	Approx   bool    `json:"approx,omitempty"`
-	Tiered   bool    `json:"tiered,omitempty"` // several bands were used
+	Tiered   bool    `json:"tiered,omitempty"`  // several bands were used
+	Catalog  bool    `json:"catalog,omitempty"` // priced from the catalog's generic list price
 }
 
 // Cost is the money side of a run.
@@ -292,6 +293,9 @@ type Calculator struct {
 	// Official is true for Anthropic's own API: if a price is missing there,
 	// Claude Code's figure (Anthropic's table) is a sound fallback.
 	Official bool
+	// Lookup is the per-model fallback (price catalog) for models missing
+	// from Prices. Its prices are list prices, so the run is an estimate.
+	Lookup func(model string) *ModelPrice
 }
 
 // Compute returns the run cost.
@@ -366,6 +370,11 @@ func (c Calculator) Compute(requests []Usage, totals map[string]Usage, claudeUSD
 		}
 		line.Model = m
 		p := Find(c.Prices, m)
+		if p == nil && mode == ModeMetered && c.Lookup != nil && !c.Official {
+			if p = c.Lookup(m); p != nil {
+				line.Catalog, line.Approx = true, true
+			}
+		}
 		if mode != ModeMetered || p == nil {
 			line.Missing = mode == ModeMetered
 			missing = missing || line.Missing

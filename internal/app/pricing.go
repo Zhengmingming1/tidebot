@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
+	"github.com/Zhengmingming1/tidebot/internal/pricing/catalog"
 	"github.com/Zhengmingming1/tidebot/internal/provider"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
@@ -67,7 +68,7 @@ func officialAnthropic(p provider.Profile) bool {
 // calculator builds the pricing calculator for a profile.
 func calculator(p provider.Profile) pricing.Calculator {
 	ep := p.EffectivePricing()
-	return pricing.Calculator{Billing: ep.Billing, Prices: ep.Prices, Fallback: p.Model, Official: officialAnthropic(p)}
+	return pricing.Calculator{Billing: ep.Billing, Prices: ep.Prices, Fallback: p.Model, Official: officialAnthropic(p), Lookup: catalog.Active().Lookup}
 }
 
 // costControl builds the run's pricing + mid-run caps. runMax is in the
@@ -161,7 +162,12 @@ func (a *App) pricingView(name string) (map[string]any, error) {
 	}
 	ep := p.EffectivePricing()
 	ep.Anthropic = officialAnthropic(p)
-	return map[string]any{"provider": name, "pricing": ep, "model": p.Model}, nil
+	// Fallback: what an unpriced default model would be estimated at (catalog list price).
+	var fb *pricing.ModelPrice
+	if ep.Billing.Mode == pricing.ModeMetered && !ep.Anthropic && pricing.Find(ep.Prices, p.Model) == nil {
+		fb = catalog.Active().Lookup(p.Model)
+	}
+	return map[string]any{"provider": name, "pricing": ep, "model": p.Model, "fallback": fb, "catalog": catalog.Active().Generated}, nil
 }
 
 type pricingSetInput struct {
