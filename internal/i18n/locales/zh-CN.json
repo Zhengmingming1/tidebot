@@ -17,6 +17,8 @@
   "desktop.n.failed": "运行失败：%s",
   "desktop.n.finished": "运行完成：%s",
   "desktop.n.finished_body": "花费 $%.4f",
+  "desktop.n.interrupted": "运行中断：%s",
+  "desktop.n.interrupted_body": "这次运行还没结束 tidebot 就退出了（崩溃、强制退出或断电），已标记为取消，可在“运行”里重跑。",
   "desktop.n.lan_fail": "无法开启局域网访问：%s",
   "desktop.n.lan_on": "WebUI 已对局域网开放：%s",
   "desktop.n.running": "正在运行 %d 个任务",

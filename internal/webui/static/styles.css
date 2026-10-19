@@ -1355,3 +1355,7 @@ tr:hover .row-act, .row-act:focus-visible, tr:focus-within .row-act { opacity: 1
 .card-head .info-tip { margin-left: 2px; }
 .card.palette { padding: 0; }
 .card.modal, .card.login-card { padding: var(--sp-6); }
+
+/* relative times ("5 min ago") with the full local date in the tooltip; app.js keeps the text current */
+time.ago { font-variant-numeric: tabular-nums; }
+time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }

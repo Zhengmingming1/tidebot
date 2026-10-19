@@ -337,5 +337,57 @@ func (s *Store) CountActiveRuns(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// RunInterruptedMsg is the error_message of runs closed by RecoverInterruptedRuns.
+// The "interrupted:" prefix is stable; the WebUI and notifications localize it.
+const RunInterruptedMsg = "interrupted: tidebot stopped before this run finished"
+
+// InterruptedRun is a run a previous core left queued/running.
+type InterruptedRun struct {
+	ID, TaskID, StartedAt string
+}
+
+// RecoverInterruptedRuns closes runs that a previous core left queued or running
+// (crash, force quit, power loss, OS restart). Left alone they show as running
+// forever and, with the default overlap policy "skip", stop their task from ever
+// firing again. Each row moves to canceled with RunInterruptedMsg; the status guard
+// in the UPDATE keeps a row that finished meanwhile untouched.
+// Call it only while holding the single-instance IPC listener and before the
+// scheduler starts, when no run of this process can exist yet.
+func (s *Store) RecoverInterruptedRuns(ctx context.Context, now time.Time) ([]InterruptedRun, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT id, COALESCE(task_id,''), COALESCE(started_at,'') FROM runs
+WHERE status IN ('queued','running') ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	var cand []InterruptedRun
+	for rows.Next() {
+		var r InterruptedRun
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.StartedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		cand = append(cand, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	fin := now.UTC().Format(time.RFC3339)
+	var out []InterruptedRun
+	for _, r := range cand {
+		res, err := s.DB.ExecContext(ctx, `
+UPDATE runs SET status='canceled', error_message=?, finished_at=COALESCE(NULLIF(finished_at,''), ?)
+WHERE id=? AND status IN ('queued','running')`, RunInterruptedMsg, fin, r.ID)
+		if err != nil {
+			return out, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 // ErrNotFound is returned when a row is missing.
 var ErrNotFound = fmt.Errorf("not found")

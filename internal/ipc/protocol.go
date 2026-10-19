@@ -1,8 +1,14 @@
 package ipc
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
 
 const JSONRPCVersion = "2.0"
+
+// ErrInUse means another tidebot core is already serving this IPC path.
+var ErrInUse = errors.New("another tidebot core is already running")
 
 // Request is a JSON-RPC 2.0 request.
 type Request struct {
