@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/notify"
 )
@@ -17,7 +18,7 @@ var urgentEvents = map[string]bool{EventConfirmNeeded: true, EventBudgetBreached
 // NotificationKeys are the structured message keys stored with each notification.
 // The WebUI renders "ntf.<key>.t" / "ntf.<key>.b" from its own i18n files
 // (scripts/check-i18n.py checks every key here has both).
-var NotificationKeys = []string{"run_finished", "run_failed", "approval_needed", "budget_breached", "budget_warning",
+var NotificationKeys = []string{"run_finished", "run_failed", "run_interrupted", "approval_needed", "budget_breached", "budget_warning",
 	"breaker_tripped", "confirm_needed", "update_available", "update_rolled_back", "plugin_notify", "generic", "test"}
 
 // EventToMessage renders an event in the configured language (channels, tray) and
@@ -40,6 +41,11 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		m.Title, m.Body = i18n.T("desktop.n.finished", shown), i18n.T("desktop.n.finished_body", e.CostUSD)
 	case EventRunFailed:
 		m.Title, m.Body = i18n.T("desktop.n.failed", shown), e.Detail
+		if strings.HasPrefix(e.Detail, db.RunInterruptedMsg) {
+			// routed like a failure (same rules), shown as "didn't finish, rerun it"
+			m.Key = "run_interrupted"
+			m.Title, m.Body = i18n.T("desktop.n.interrupted", shown), i18n.T("desktop.n.interrupted_body")
+		}
 	case EventApprovalNeeded:
 		m.Params["count"] = strconv.Itoa(e.Count)
 		m.Title, m.Body = i18n.T("desktop.n.approval", shown), i18n.T("desktop.n.approval_body", e.Count)

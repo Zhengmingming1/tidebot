@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
@@ -24,6 +25,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/config"
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
+	"github.com/Zhengmingming1/tidebot/internal/ipc"
 	"github.com/Zhengmingming1/tidebot/internal/updater"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -156,7 +158,8 @@ func main() {
 	d, err := core.StartDaemon(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start core (is agentd already running?):", err)
-		if updater.RollbackNow(cfg.HomeDir, "start: "+err.Error()) == nil {
+		// Another core already serving (agentd) is not this build's fault: no rollback.
+		if !errors.Is(err, ipc.ErrInUse) && updater.RollbackNow(cfg.HomeDir, "start: "+err.Error()) == nil {
 			relaunchSelf()
 		}
 		os.Exit(1)

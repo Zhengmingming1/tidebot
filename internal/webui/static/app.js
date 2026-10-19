@@ -166,6 +166,33 @@
     if (s < 86400) return T("time.hour_ago", { n: Math.floor(s / 3600) });
     return T("time.day_ago", { n: Math.floor(s / 86400) });
   }
+  // Relative times that stay true and explain themselves: the text reads "5 min ago",
+  // the tooltip carries the full local date and zone (Open WebUI wraps dayjs fromNow()
+  // in a Tooltip showing LLLL the same way), and one shared ticker rewrites every
+  // [data-ago] once a minute while the window is visible, so a page left open never
+  // says "just now" an hour later.
+  function fullTime(iso) {
+    var d = new Date(iso);
+    if (!iso || isNaN(d)) return "";
+    try { return new Intl.DateTimeFormat(state.lang, { timeZone: state.tz, dateStyle: "full", timeStyle: "short" }).format(d) + " · " + state.tz; }
+    catch (e) { return fmtTime(iso) + " · " + state.tz; }
+  }
+  function agoHtml(iso) {
+    var full = fullTime(iso);
+    if (!full) return esc(ago(iso));
+    return '<time class="ago" datetime="' + esc(new Date(iso).toISOString()) + '" data-ago="' + esc(iso) + '" data-tip="' + esc(full) + '">' + esc(ago(iso)) + "</time>";
+  }
+  // T() with one placeholder rendered as agoHtml(); everything else is escaped as usual.
+  function tAgo(key, vars, name, iso) {
+    var mark = "\u0001ago\u0001", v = Object.assign({}, vars || {});
+    v[name] = mark;
+    return esc(T(key, v)).split(mark).join(agoHtml(iso));
+  }
+  function tickAgo(root) {
+    $$("[data-ago]", root).forEach(function (el) { var t = ago(el.getAttribute("data-ago")); if (el.textContent !== t) el.textContent = t; });
+  }
+  setInterval(function () { if (!document.hidden) tickAgo(); }, 30000);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) tickAgo(); });
   function tzLabel() {
     try {
       var parts = new Intl.DateTimeFormat("en-US", { timeZone: state.tz, timeZoneName: "short" }).formatToParts(new Date());
@@ -285,6 +312,8 @@
     var m = map[st] || ["", st || "—"];
     return '<span class="pill ' + m[0] + '">' + esc(m[1]) + "</span>";
   }
+  // Stable error codes from the core, shown in the viewer's language; anything else as-is.
+  function runErr(msg) { return /^interrupted:/.test(msg || "") ? T("rd.err_interrupted") : msg; }
   function taskPill(st) {
     var m = { active: ["ok", T("task.active")], paused: ["warn", T("task.paused")], archived: ["", T("task.archived")] }[st] || ["", st];
     return '<span class="pill ' + m[0] + '">' + esc(m[1]) + "</span>";
@@ -576,6 +605,7 @@
     if (!box) return;
     var v = ccView();
     document.documentElement.classList.toggle("tb-busy", v.state === "running");
+    setDocTitle({ running: v.state === "running" && cc.st ? cc.st.sessions.length : 0, alert: v.state === "warning" || v.state === "missing" || v.state === "down" });
     box.innerHTML = '<button class="cc-card cc-' + v.state + '" id="cc-btn" aria-haspopup="dialog" aria-expanded="false" title="' + esc(v.head + (v.sub ? " · " + v.sub : "")) + '">' +
       '<span class="dot" aria-hidden="true"></span><span class="cc-txt"><strong>' + esc(v.head) + "</strong>" + (v.sub ? "<small>" + esc(v.sub) + "</small>" : "") + "</span></button>" +
       '<span class="sr-only" aria-live="polite" id="cc-live"></span>';
@@ -583,6 +613,21 @@
     cc.prevState = v.state;
     $("#cc-btn").addEventListener("click", function (e) { e.stopPropagation(); toggleCCPop(); });
     if ($("#cc-pop")) fillCCPop();
+  }
+  // ---------- tab title ----------
+  // "<status> <page> – tidebot", the shape of n8n's useDocumentTitle (status prefix +
+  // name + product): a background tab or taskbar entry shows that runs are going
+  // ("▶ 2 running") or that Claude Code / the provider needs a look ("⚠").
+  // Fed by the Claude Code status poll and, on Home, by the live run list.
+  var docTitle = { page: "", running: 0, alert: false };
+  function setDocTitle(o) {
+    o = o || {};
+    if (o.page != null) docTitle.page = o.page;
+    if (o.running != null) docTitle.running = o.running;
+    if (o.alert != null) docTitle.alert = o.alert;
+    var pre = docTitle.running > 0 ? "▶ " + T("home.n_running", { n: docTitle.running }) + " · " : docTitle.alert ? "⚠ " : "";
+    var t = pre + (docTitle.page ? docTitle.page + " – " : "") + "tidebot";
+    if (document.title !== t) document.title = t;
   }
   function toggleCCPop() {
     var old = $("#cc-pop");
@@ -667,6 +712,7 @@
   function showLogin(totp) {
     dropBoot();
     stopStream();
+    setDocTitle({ page: T("login.submit"), running: 0, alert: false });
     $("#shell").classList.add("hidden");
     var l = $("#login");
     l.classList.remove("hidden");
@@ -737,6 +783,8 @@
     mountSeq++;
     setNav(nav);
     renderTopbar(crumbs);
+    var leaf = crumbs && crumbs.length ? crumbs[crumbs.length - 1][0] : "";
+    setDocTitle({ page: leaf || (nav ? T("nav." + nav) : "") });
     var pg = page();
     pg.removeAttribute("aria-busy");
     pg.innerHTML = html;
@@ -878,8 +926,9 @@
           return '<div class="card stat"><small>' + esc(x[0]) + '</small><div class="stat-v"><strong class="num">' + esc(x[1]) + "</strong><span>" + esc(x[2]) + "</span></div>" + (i === 3 && k.budget_usd ? '<div class="progress' + (bp >= 100 ? " bad" : bp >= 80 ? " warn" : "") + '"><span data-w="' + bp + '"></span></div>' : "") + "</div>";
         }).join("");
         $("#run-n").textContent = d.running.length ? T("home.n_running", { n: d.running.length }) : "";
+        setDocTitle({ running: d.running.filter(function (x) { return x.status === "running"; }).length });
         $("#running").innerHTML = d.running.length ? '<ul class="live-list">' + d.running.map(function (x) {
-          return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + esc(x.status === "queued" ? T("st.queued") : T("home.started_ago", { t: ago(x.started_at || x.created_at) })) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
+          return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + (x.status === "queued" ? esc(T("st.queued")) : tAgo("home.started_ago", null, "t", x.started_at || x.created_at)) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
         }).join("") + "</ul>" : '<p class="hc-empty">' + ic("checkc", "sm") + "<span><strong>" + esc(T("home.idle")) + "</strong> · " + esc(T("home.idle_sub")) + "</span></p>";
         $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.slice(0, 4).map(function (s) {
           return '<li><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
@@ -1027,10 +1076,10 @@
     });
     vers.forEach(function (v) {
       var p = pos[v.id], cur = v.id === current;
-      s += '<g class="node' + (cur ? " cur" : "") + '" data-ver="' + esc(v.id) + '" data-no="' + esc(v.no) + '"><title>' + esc((v.message || v.source) + (cur ? " " + T("ver.cur_paren") : " — " + T("ver.click_rb"))) + "</title>" +
+      s += '<g class="node' + (cur ? " cur" : "") + '" data-ver="' + esc(v.id) + '" data-no="' + esc(v.no) + '"><title>' + esc((v.message || v.source) + (cur ? " " + T("ver.cur_paren") : " — " + T("ver.click_rb")) + (v.created_at ? "\n" + fullTime(v.created_at) : "")) + "</title>" +
         '<rect x="' + (p.x - NW / 2) + '" y="' + p.y + '" width="' + NW + '" height="' + NH + '" rx="8"/>' +
         '<text x="' + p.x + '" y="' + (p.y + 19) + '" text-anchor="middle" font-size="13" font-weight="600">v' + esc(v.no) + "</text>" +
-        '<text class="sub" x="' + p.x + '" y="' + (p.y + 34) + '" text-anchor="middle">' + esc(ago(v.created_at)) + "</text></g>";
+        '<text class="sub" x="' + p.x + '" y="' + (p.y + 34) + '" text-anchor="middle" data-ago="' + esc(v.created_at || "") + '">' + esc(ago(v.created_at)) + "</text></g>";
       if (cur) {
         var right = p.x + NW / 2 + 56 <= W, tx = right ? p.x + NW / 2 + 8 : p.x - NW / 2 - 8;
         s += '<text class="ptr" x="' + tx + '" y="' + (p.y + 26) + '" text-anchor="' + (right ? "start" : "end") + '">' + esc(T("ver.current")) + "</text>";
@@ -1082,8 +1131,8 @@
         : all(function (i) { return i.status === "rejected"; }) ? "thread.r_discarded"
         : scope === "next" ? "thread.r_scheduled" : "thread.r_done");
       var impact = pending.length ? impactHtml(impactLines(tk, pending)) : "";
-      return '<div class="msg"><span class="avatar">' + esc(T("thread.me")) + '</span><div><div class="msg-meta"><strong>' + esc(T("thread.you")) + '</strong><small>' + esc(ago(g.at)) + '</small></div><div class="msg-body">' + esc(g.utter || T("thread.amendment")) + "</div></div></div>" +
-        '<div class="msg"><span class="avatar bot">' + waveMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + esc(ago(g.at)) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
+      return '<div class="msg"><span class="avatar">' + esc(T("thread.me")) + '</span><div><div class="msg-meta"><strong>' + esc(T("thread.you")) + '</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(g.utter || T("thread.amendment")) + "</div></div></div>" +
+        '<div class="msg"><span class="avatar bot">' + waveMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
         '<div class="req-card"><div class="req-card-head">' + esc(T("req.structured")) +
         (scope === "next" ? '<span class="tag next">' + esc(T("req.next_only")) + "</span>" : scope === "perm" ? '<span class="tag perm">' + esc(T("req.permanent")) + "</span>" : '<span class="tag">' + esc(T("req.mixed")) + "</span>") + "</div>" +
         g.items.map(function (i) {
@@ -1166,7 +1215,7 @@
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="grid g-detail">' +
         '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
-        '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + esc(T("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }), u: ago(t.updated_at) })) + "</span></div></div>" +
+        '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span></div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause">' + ic("pause", "sm") + esc(T("td.pause")) + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
@@ -1309,7 +1358,7 @@
       var propHtml = props.length ? props.slice().reverse().map(function (p) {
         var live = p.status === "pending" || p.status === "canary";
         var v = byId[p.version_id];
-        return '<div class="prop' + (live ? "" : " done") + '"><div class="prop-head"><strong>' + esc(v ? "v" + v.no : shortId(p.version_id)) + '</strong><span class="pill sm ' + (p.status === "canary" ? "info" : p.status === "promoted" ? "ok" : live ? "warn" : "") + '">' + esc(T("opt.st_" + p.status)) + '</span><span class="tag">' + esc(T("opt.risk_" + (p.risk || "low"))) + '</span><small class="muted grow right">' + esc(ago(p.created_at)) + "</small></div>" +
+        return '<div class="prop' + (live ? "" : " done") + '"><div class="prop-head"><strong>' + esc(v ? "v" + v.no : shortId(p.version_id)) + '</strong><span class="pill sm ' + (p.status === "canary" ? "info" : p.status === "promoted" ? "ok" : live ? "warn" : "") + '">' + esc(T("opt.st_" + p.status)) + '</span><span class="tag">' + esc(T("opt.risk_" + (p.risk || "low"))) + '</span><small class="muted grow right">' + agoHtml(p.created_at) + "</small></div>" +
           (p.rationale ? '<p class="prop-why">' + esc(p.rationale) + "</p>" : "") +
           (p.checks && p.checks.length ? '<ul class="checks">' + p.checks.map(function (c) { return '<li class="' + (c.ok ? "ok" : "bad") + '">' + ic(c.ok ? "check" : "x", "sm") + esc(c.name) + "</li>"; }).join("") + "</ul>" : "") +
           (p.status === "canary" && cmp && cmp.proposal_id === p.id ? cmpTable(cmp) : "") +
@@ -2378,7 +2427,7 @@
     var res = t.last_result || "", good = res === "accepted";
     return '<div class="card trig' + (t.enabled ? "" : " off") + '"><div class="trig-head"><span class="ico">' + ic(t.kind === "webhook" ? "globe" : t.kind === "file_change" ? "folder" : "bolt") + '</span><div class="grow"><strong>' + esc(T("tr.k_" + (t.kind === "file_change" ? "file" : t.kind === "webhook" ? "webhook" : "plugin"))) + '</strong><small><a href="#/tasks/' + enc(t.task_id) + '">' + esc(tname[t.task_id] || t.task_id) + "</a>" + (t.plugin_id ? " · " + esc(t.plugin_id) : "") + "</small></div>" +
       '<button class="switch' + (t.enabled ? " on" : "") + '" data-trg-en="' + esc(t.id) + '" role="switch" aria-checked="' + !!t.enabled + '" aria-label="' + esc(T("tr.enabled")) + '"></button></div>' +
-      '<p class="trig-last">' + (t.last_fired_at ? esc(T("tr.last", { t: ago(t.last_fired_at), n: t.fire_count })) + ' <span class="pill sm ' + (good ? "ok" : "bad") + '">' + esc(good ? T("tr.r_ok") : res) + "</span>" : '<span class="muted">' + esc(T("tr.never")) + "</span>") + "</p>" +
+      '<p class="trig-last">' + (t.last_fired_at ? tAgo("tr.last", { n: t.fire_count }, "t", t.last_fired_at) + ' <span class="pill sm ' + (good ? "ok" : "bad") + '">' + esc(good ? T("tr.r_ok") : res) + "</span>" : '<span class="muted">' + esc(T("tr.never")) + "</span>") + "</p>" +
       (t.kind === "webhook" ? '<div class="copy-row"><code class="grow">' + esc(url) + '</code><button class="btn sm" data-copy="' + esc(url) + '">' + esc(T("tr.copy_url")) + '</button></div><details class="curl"><summary>' + esc(T("tr.curl")) + '</summary><pre class="code">' + esc(curl) + '</pre><button class="btn sm" data-copy="' + esc(curl) + '">' + esc(T("tr.copy_curl")) + '</button><small class="hint">' + esc(T("tr.curl_token")) + "</small></details>" : t.kind === "file_change" ? '<p class="mono muted">' + esc((t.config || {}).path || "") + "</p>" : t.plugin_id ? '<p class="mono muted trunc">' + esc((t.config || {}).url || (t.config || {}).folder || (t.config || {}).repo || "") + "</p>" : "") +
       '<div class="row-actions">' + (t.kind === "webhook" || t.kind === "file_change" ? '<button class="btn sm" data-trg-test="' + esc(t.id) + '"' + (t.enabled ? "" : " disabled") + ">" + ic("play", "sm") + esc(T("tr.test")) + "</button>" : "") + '<button class="btn sm ghost danger" data-trg-del="' + esc(t.id) + '">' + esc(T("pl.remove")) + "</button></div></div>";
   }
@@ -2628,7 +2677,7 @@
         costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + '</h3></div><dl class="kv"><dt>' + esc(T("col.run")) + "</dt><dd><code>" + esc(r.id) + "</code></dd><dt>" + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
-        "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(r.error) + "</dd>" : "") + "</dl></section></div>",
+        "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();
       logView($("#lv"), id, live, function (why) {

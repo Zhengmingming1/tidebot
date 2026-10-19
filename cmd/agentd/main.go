@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
@@ -68,7 +69,8 @@ func main() {
 	d, err := a.StartDaemon(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start: %v\n", err)
-		if updater.RollbackNow(cfg.HomeDir, "start: "+err.Error()) == nil {
+		// Another core already serving is not this build's fault: no rollback.
+		if !errors.Is(err, ipc.ErrInUse) && updater.RollbackNow(cfg.HomeDir, "start: "+err.Error()) == nil {
 			a.Close()
 			reexec()
 		}

@@ -17,6 +17,8 @@
   "desktop.n.failed": "Run failed: %s",
   "desktop.n.finished": "Run finished: %s",
   "desktop.n.finished_body": "Cost $%.4f",
+  "desktop.n.interrupted": "Run interrupted: %s",
+  "desktop.n.interrupted_body": "tidebot quit before this run finished (crash, force quit or power loss). It is marked canceled; rerun it from Runs.",
   "desktop.n.lan_fail": "Could not enable LAN: %s",
   "desktop.n.lan_on": "WebUI on LAN: %s",
   "desktop.n.running": "Running %d task(s)",
