@@ -36,6 +36,7 @@
   "bt.rm_title": "Remove “{n}”?",
   "bt.runs_skill": "Runs skill {name}",
   "bt.runs_task": "Runs task · {name}",
+  "bt.run": "Run",
   "bt.skill": "Skill",
   "bt.skill_ver": "Skill version",
   "bt.sort_hint": "Drag to reorder, or focus a button and press Alt + arrow keys. The home page uses the same order.",

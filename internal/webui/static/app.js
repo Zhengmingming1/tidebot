@@ -1436,8 +1436,15 @@
       tasks.forEach(function (t) { tname[t.id] = t.name; });
       skills.forEach(function (x) { sname[x.id] = x.name; });
       var cards = list.map(function (b, i) {
-        var sub = b.description || (b.task_id ? T("bt.runs_task", { name: tname[b.task_id] || b.task_id }) : b.skill_id ? T("bt.runs_skill", { name: sname[b.skill_id] || b.skill_id }) : T("bt.prompt", { p: b.prompt }));
-        return '<div class="card qa fill' + (b.color ? " colored" : "") + '" draggable="true" tabindex="0" data-idx="' + i + '" aria-roledescription="' + esc(T("bt.sortable")) + '" aria-label="' + esc(b.label) + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '"><span class="grip qa-grip" aria-hidden="true" title="' + esc(T("bt.sort_hint")) + '">⋮⋮</span><span class="qa-ico">' + ic(btnIcon(b), "lg") + "</span><strong>" + esc(b.label) + "</strong><small>" + esc(sub) + '</small><div class="req-actions"><button class="btn sm" data-edit="' + i + '">' + esc(T("btn.edit")) + '</button><button class="btn sm danger" data-del="' + i + '">' + esc(T("btn.remove")) + '</button></div></div>';
+        var target = b.task_id ? T("bt.runs_task", { name: tname[b.task_id] || b.task_id }) : b.skill_id ? T("bt.runs_skill", { name: sname[b.skill_id] || b.skill_id }) : T("bt.prompt", { p: b.prompt });
+        var tIco = b.task_id ? "tasks" : b.skill_id ? "skills" : "chat";
+        var tName = b.task_id ? tname[b.task_id] || b.task_id : b.skill_id ? sname[b.skill_id] || b.skill_id : b.prompt;
+        return '<div class="card qa bt-card' + (b.color ? " colored" : "") + '" draggable="true" tabindex="0" data-idx="' + i + '" aria-roledescription="' + esc(T("bt.sortable")) + '" aria-label="' + esc(b.label) + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '">' +
+          '<div class="bt-top"><span class="qa-ico">' + ic(btnIcon(b)) + '</span><div class="bt-acts"><span class="grip qa-grip" aria-hidden="true" data-tip="' + esc(T("bt.sort_hint")) + '">⋮⋮</span>' +
+          '<button class="icon-btn sm" data-edit="' + i + '" data-tip="' + esc(T("btn.edit")) + '" aria-label="' + esc(T("btn.edit")) + '">' + ic("edit", "sm") + '</button>' +
+          '<button class="icon-btn sm danger-text" data-del="' + i + '" data-tip="' + esc(T("btn.remove")) + '" aria-label="' + esc(T("btn.remove")) + '">' + ic("trash", "sm") + "</button></div></div>" +
+          "<strong>" + esc(b.label) + "</strong>" + (b.description ? '<small class="bt-sub">' + esc(b.description) + "</small>" : "") +
+          '<div class="bt-foot"><span class="bt-target" data-tip="' + esc(target) + '">' + ic(tIco, "sm") + "<span>" + esc(tName) + '</span></span><span class="bt-go">' + ic("play", "sm") + esc(T("bt.run")) + "</span></div></div>";
       });
       if (!list.length) cards.push('<div class="bt-empty">' + emptyState("bolt", T("bt.none"), T("bt.new_sub")) + "</div>");
       mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + tip(T("bt.sort_hint")) + '</p></div><div class="actions"><button class="btn primary" id="b-add">' + ic("plus", "sm") + esc(T("bt.new")) + '</button></div></div><div class="grid g4" id="bt-grid">' + cards.join("") + '</div><div class="sr-only" aria-live="polite" id="bt-live"></div>', "buttons", [[T("nav.buttons")]]);

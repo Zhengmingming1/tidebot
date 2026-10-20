@@ -1361,3 +1361,30 @@ time.ago { font-variant-numeric: tabular-nums; }
 time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 /* Tooltip on the last control of a card header sits at the right edge: open it leftwards. */
 .card-head > [data-tip]:last-child:hover::after, .card-head > [data-tip]:last-child:focus-visible::after { left: auto; right: -4px; transform: none; }
+
+/* ---- Buttons page cards (2026-10-20): left-aligned, fixed rhythm, actions on hover ---- */
+#bt-grid { align-items: stretch; }
+.qa.bt-card { align-items: stretch; justify-content: flex-start; text-align: left; gap: 4px; min-height: 144px; padding: 16px; }
+.qa.bt-card:hover { transform: none; }
+.bt-card .bt-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bt-card .qa-ico { margin: 0; width: 36px; height: 36px; border-radius: 8px; background: var(--accent-50); display: grid; place-items: center; }
+.bt-card .bt-acts { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity .15s; }
+.bt-card:hover .bt-acts, .bt-card:focus-within .bt-acts { opacity: 1; }
+@media (hover: none) { .bt-card .bt-acts { opacity: 1; } }
+.bt-card .qa-grip { position: static; opacity: 1; padding: 0 6px; line-height: 28px; }
+.bt-card strong { font-size: var(--fs-md, 14px); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt-card .bt-sub { font-size: 12px; line-height: 18px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bt-card .bt-foot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 16px; color: var(--text-3); }
+.bt-card .bt-target { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.bt-card .bt-target span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt-card .bt-target .i { flex: none; }
+.bt-card .bt-go { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 500; opacity: 0; transition: opacity .15s; flex: none; }
+.bt-card:hover .bt-go, .bt-card:focus-visible .bt-go { opacity: 1; }
+.bt-card.colored { border-top: 1px solid var(--border); box-shadow: inset 0 3px 0 var(--qa-color), var(--shadow, none); }
+.bt-card.colored .qa-ico { color: var(--qa-color); }
+.bt-card.colored:hover { box-shadow: inset 0 3px 0 var(--qa-color), var(--shadow-hover); }
+.bt-card .bt-target { flex: 1 1 auto; }
+.bt-card .bt-foot { position: relative; }
+.bt-card .bt-go { position: absolute; right: 0; bottom: 0; height: 24px; padding-left: 12px; background: linear-gradient(90deg, transparent, var(--surface, #fff) 12px); }
+.bt-card .bt-target[data-tip]:hover::after { left: 0; transform: none; }
+.bt-card .bt-go { top: 8px; bottom: auto; height: 17px; }
