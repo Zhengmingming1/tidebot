@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"sync"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
+	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
 
 // EventBreakerTripped: a task was paused after consecutive failures.
@@ -28,6 +30,9 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 	mu.(*sync.Mutex).Lock()
 	err := a.runTaskTrigger(ctx, task, trigger, bucket)
 	mu.(*sync.Mutex).Unlock()
+	if errors.Is(err, runner.ErrShuttingDown) {
+		return // quitting is not the task's fault: no retry, no breaker strike
+	}
 	if a.Policy == nil {
 		return
 	}

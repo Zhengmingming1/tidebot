@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -176,8 +177,11 @@ func (a *App) Close() error {
 	if a.Sched != nil {
 		a.Sched.Stop()
 	}
+	a.drainRuns()
 	if a.WebUI != nil {
-		_ = a.WebUI.Stop(context.Background())
+		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = a.WebUI.Stop(sctx)
+		cancel()
 	}
 	if a.DB != nil {
 		return a.DB.Close()
@@ -313,6 +317,10 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	// failed / stopped runs still spent tokens: record them too
 	if res.RunID != "" && a.Cost != nil {
 		_ = a.Cost.RecordEntry(ctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
+	}
+	if errors.Is(err, runner.ErrShuttingDown) {
+		// The user (or the OS) is quitting: the run row says so, no "failed" notice.
+		return res, err
 	}
 	ev := Event{Kind: EventRunFinished, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), RunID: res.RunID,
 		CostUSD: a.RunCostUSD(res)}

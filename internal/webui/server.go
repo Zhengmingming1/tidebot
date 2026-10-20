@@ -160,6 +160,10 @@ func (s *Server) Stop(ctx context.Context) error {
 		defer cancel()
 	}
 	err := srv.Shutdown(ctx)
+	if err != nil {
+		// Long-lived streams (live run logs) don't finish by themselves; cut them.
+		_ = srv.Close()
+	}
 	s.mu.Lock()
 	s.srv = nil
 	s.ln = nil

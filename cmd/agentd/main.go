@@ -81,7 +81,11 @@ func main() {
 	go confirmWhenHealthy(cfg, a)
 	select {
 	case <-ctx.Done():
-		a.Log.Info("agentd shutting down")
+		// Restore default signal handling: a second Ctrl+C / SIGTERM quits at once
+		// (runs left behind are closed by the next start's recovery).
+		cancel()
+		a.Log.Info("agentd shutting down", "running_runs", a.Runner.Active(),
+			"grace", cfg.ShutdownGrace.String(), "hint", "send the signal again to quit now")
 	case <-restart:
 		a.Log.Info("agentd restarting into the new version")
 		d.Stop()

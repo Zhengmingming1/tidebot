@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
@@ -14,6 +15,7 @@ type Daemon struct {
 	a     *App
 	Errs  <-chan error
 	close func()
+	once  sync.Once
 }
 
 // StartDaemon seeds providers, starts IPC, the WebUI listener (if enabled) and the scheduler.
@@ -53,18 +55,53 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	if v := a.claudeVersion(); !ClaudeCompatible(v) {
 		a.Log.Warn("claude code is older than tested", "version", v, "min", MinClaudeVersion)
 	}
+	// IPC requests (e.g. a blocking `agentctl tasks run`) must not be canceled the
+	// moment agentd gets SIGTERM: Stop drains runs first, then closes IPC.
+	serveCtx, stopServe := context.WithCancel(context.WithoutCancel(ctx))
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(ctx, ln) }()
+	go func() { errCh <- srv.Serve(serveCtx, ln) }()
 	return &Daemon{a: a, Errs: errCh, close: func() {
+		stopServe()
 		_ = ln.Close()
 		_ = os.Remove(a.Cfg.IPCPath)
 	}}, nil
 }
 
-// Stop shuts the core down.
+// Stop shuts the core down: no new scheduled runs, then running runs get
+// Cfg.ShutdownGrace to finish (see drainRuns), then the WebUI and IPC close.
+// IPC stays up while draining so a second core can't start and "recover" runs
+// that are still writing. Safe to call more than once.
 func (d *Daemon) Stop() {
-	d.a.Sched.Stop()
-	_ = d.a.WebUI.Stop(context.Background())
-	d.close()
-	time.Sleep(100 * time.Millisecond)
+	d.once.Do(func() {
+		d.a.Sched.Stop()
+		d.a.drainRuns()
+		// Bounded: an open live-log stream (SSE) never goes idle on its own.
+		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = d.a.WebUI.Stop(sctx)
+		cancel()
+		d.close()
+		time.Sleep(100 * time.Millisecond)
+	})
+}
+
+// shutdownWriteWait bounds how long canceled runs get to record their final
+// state, so a stalled child or disk can't hold up quitting (n8n bounds its
+// "record as cancelled" write the same way).
+const shutdownWriteWait = 3 * time.Second
+
+// drainRuns lets in-flight runs finish or records them as stopped-on-quit with
+// the tokens they used so far, instead of leaving them "running" for the next
+// start to clean up. Bounded by ShutdownGrace + shutdownWriteWait.
+func (a *App) drainRuns() {
+	if a.Runner == nil {
+		return
+	}
+	n := a.Runner.Active()
+	if n > 0 {
+		a.Log.Info("waiting for running runs before quitting", "count", n, "grace", a.Cfg.ShutdownGrace.String())
+	}
+	res := a.Runner.Drain(a.Cfg.ShutdownGrace, shutdownWriteWait)
+	if len(res.Stopped) > 0 {
+		a.Log.Warn("stopped runs that were still going at quit", "count", len(res.Stopped), "timed_out", res.TimedOut)
+	}
 }

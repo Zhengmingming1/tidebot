@@ -13,6 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DefaultShutdownGrace: see Config.ShutdownGrace.
+const DefaultShutdownGrace = 5 * time.Second
+
 // Config is the runtime configuration for agentd / agentctl.
 type Config struct {
 	HomeDir          string        `json:"home_dir" yaml:"home_dir"`
@@ -37,6 +40,10 @@ type Config struct {
 	SchedulerTick    time.Duration `json:"scheduler_tick" yaml:"scheduler_tick"`
 	GuardDisabled    bool          `json:"guard_disabled" yaml:"guard_disabled"` // skip the PreToolUse danger hook
 	IPCPath          string        `json:"ipc_path" yaml:"ipc_path"`
+	// ShutdownGrace is how long quitting waits for running runs to finish on
+	// their own before stopping them (they're recorded as canceled either way).
+	// The default keeps grace + the 3s write wait under Docker's 10s stop timeout.
+	ShutdownGrace time.Duration `json:"shutdown_grace" yaml:"shutdown_grace"`
 }
 
 // Default returns a Config with sensible Phase-0 defaults.
@@ -61,6 +68,7 @@ func Default() Config {
 		WebUIAddr:        "127.0.0.1:7420",
 		WebUIIdleMinutes: 30,
 		SchedulerTick:    15 * time.Second,
+		ShutdownGrace:    DefaultShutdownGrace,
 		IPCPath:          filepath.Join(appHome, "agentd.sock"),
 	}
 }
@@ -90,6 +98,9 @@ func Load(path string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	if cfg.ShutdownGrace < 0 {
+		cfg.ShutdownGrace = 0
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -167,6 +178,11 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("TIDEBOT_SCHEDULER_TICK"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.SchedulerTick = d
+		}
+	}
+	if v := os.Getenv("TIDEBOT_SHUTDOWN_GRACE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.ShutdownGrace = d
 		}
 	}
 	if v := os.Getenv("TIDEBOT_WEBUI"); v != "" {
