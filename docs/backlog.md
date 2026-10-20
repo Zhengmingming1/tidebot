@@ -68,6 +68,38 @@ and ideas for later. Releases are cut weekly; these entries feed the notes.
 4. Docker/compose docs: `stop_grace_period` when raising `shutdown_grace` above 5s.
 5. Favicon badge; refresh README screenshots at the Friday release (carried over).
 
+### 2026-10-20 (second pass): duplicate a task
+
+**Done**
+
+- **Duplicate task.** There's a copy icon next to delete on task detail; hovering it explains
+  what's copied. It makes "Daily Report 副本" (or "Daily Report (copy)" in English) and opens it.
+  Undo in the toast archives the copy again. The copy keeps the full current spec
+  (prompt, goal, amended constraints, skill binding, allowed tools, budget cap,
+  timeout), the schedule, task budgets and the run policy. It **starts paused**, so a
+  scheduled task never fires twice by accident. It gets a fresh v1. Runs, version
+  history, triggers/webhooks (their tokens must stay unique) and per-task notification
+  rules are not copied. The name is made unique on the server ("副本 2", "副本 3", …,
+  cut to 80 characters with the number kept), and archived tasks don't block a name.
+- API: `POST /api/tasks/{id}/duplicate {name?}` (session + CSRF like the rest of
+  `/api/tasks/`), `tasksvc.Duplicate`, `tasksvc.UniqueName`.
+
+**Learned**
+
+- n8n `packages/frontend/editor-ui/src/features/workflows/components/DuplicateWorkflowDialog.vue`
+  strips `active`/`activeVersion`/ids before `saveAsNewWorkflow`, so a copy is never
+  live. The name comes from `getDuplicateCurrentWorkflowName` in
+  `packages/frontend/editor-ui/src/app/stores/workflows.store.ts`: it asks the server
+  for a free name. We do the same: paused copy, server-side unique name.
+- Uptime Kuma `src/pages/EditMonitor.vue` (`isClone`) clears the push token and
+  other per-instance fields and names the clone `$t("cloneOf", [name])`. That's
+  why we don't copy webhook triggers.
+
+**Ideas for later**
+
+1. "Duplicate" in the task list row menu and the command palette (`d` on task detail).
+2. Optionally copy triggers too, with new webhook tokens.
+
 ## 2026-10-19
 
 **Done**

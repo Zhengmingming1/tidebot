@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
@@ -321,4 +323,92 @@ func (s *Service) SetSchedule(ctx context.Context, taskID, cronExpr string) erro
 func (s *Service) Rename(ctx context.Context, taskID, name string) error {
 	_, err := s.Store.DB.ExecContext(ctx, `UPDATE tasks SET name=?, updated_at=? WHERE id=?`, name, nowUTC(), taskID)
 	return err
+}
+
+// Duplicate copies a task's current spec, schedule and settings into a new task.
+// The copy starts paused so a scheduled task never fires twice by accident, and gets
+// a fresh v1 (no version history, runs or triggers carry over). name must be unique
+// among live tasks; UniqueName helps pick one.
+func (s *Service) Duplicate(ctx context.Context, srcID, name, actor string) (TaskView, error) {
+	src, err := s.Get(ctx, srcID)
+	if err != nil || src.Spec == nil || src.Task.Status == "archived" {
+		return TaskView{}, fmt.Errorf("task not found")
+	}
+	if name == "" {
+		return TaskView{}, fmt.Errorf("name required")
+	}
+	if actor == "" {
+		actor = "user"
+	}
+	spec := *src.Spec
+	spec.Constraints = append([]SpecConstraint(nil), spec.Constraints...)
+	spec.SkillBindings = append([]SkillBinding(nil), spec.SkillBindings...)
+	spec.AllowedTools = append([]string(nil), spec.AllowedTools...)
+	var next sql.NullString
+	if src.Task.CronExpr != "" && s.Sched != nil {
+		if t, err := s.Sched.ComputeInitialNext(src.Task.CronExpr); err == nil {
+			next = sql.NullString{String: t.UTC().Format(time.RFC3339), Valid: true}
+		}
+	}
+	now := nowUTC()
+	task := db.Task{
+		ID: id.New("task"), UserID: src.Task.UserID, Name: name, Status: "paused", Prompt: spec.Prompt,
+		WorkspaceDir: src.Task.WorkspaceDir, ProviderID: src.Task.ProviderID, CronExpr: src.Task.CronExpr,
+		OverlapPolicy: src.Task.OverlapPolicy, TimeoutMinutes: src.Task.TimeoutMinutes,
+		NextRunAt: next, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.Store.InsertTask(ctx, task); err != nil {
+		return TaskView{}, err
+	}
+	res, err := s.Ver.Commit(ctx, version.CommitInput{
+		EntityType: version.EntityTask, EntityID: task.ID,
+		Content: spec, Source: "user_edit", Actor: actor, Reason: "duplicate of " + src.Task.ID, Message: "v1",
+	})
+	if err != nil {
+		return TaskView{}, err
+	}
+	return TaskView{Task: task, CurrentVersion: res.Version, Spec: &spec}, nil
+}
+
+// UniqueName returns base, or base followed by " 2", " 3", … when a live task already
+// uses it. The result is cut to max runes (base shortened first, the number kept).
+func (s *Service) UniqueName(ctx context.Context, base string, max int) (string, error) {
+	base = strings.TrimSpace(base)
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT name FROM tasks WHERE status != 'archived'`)
+	if err != nil {
+		return "", err
+	}
+	taken := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return "", err
+		}
+		taken[n] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	fit := func(b, suffix string) string {
+		r := []rune(b)
+		if keep := max - utf8.RuneCountInString(suffix); len(r) > keep {
+			if keep < 0 {
+				keep = 0
+			}
+			r = r[:keep]
+		}
+		return strings.TrimSpace(string(r)) + suffix
+	}
+	for i := 1; i < 1000; i++ {
+		suffix := ""
+		if i > 1 {
+			suffix = " " + strconv.Itoa(i)
+		}
+		if n := fit(base, suffix); !taken[n] {
+			return n, nil
+		}
+	}
+	return "", fmt.Errorf("no free name")
 }
