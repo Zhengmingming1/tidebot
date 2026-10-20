@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
@@ -297,4 +298,84 @@ func (s *Server) handleTaskBatch(w http.ResponseWriter, r *http.Request) {
 		done++
 	}
 	writeJSON(w, 200, map[string]any{"ok": len(failed) == 0, "done": done, "failed": failed})
+}
+
+// duplicateTask: POST /api/tasks/{id}/duplicate {name?} → the new task (paused).
+// Copies the current spec (prompt, constraints, skill binding, tools, budget cap),
+// schedule, task budgets and run policy. Not copied: history, runs, triggers/webhooks
+// (their tokens must stay unique) and per-task notification rules.
+func (s *Server) duplicateTask(w http.ResponseWriter, r *http.Request, id string) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body); err != nil {
+			writeErr(w, 400, "bad json")
+			return
+		}
+	}
+	ctx := r.Context()
+	src, err := s.deps.Tasks.Get(ctx, id)
+	if err != nil || src.Spec == nil || src.Task.Status == "archived" {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	base := strings.TrimSpace(body.Name)
+	if base == "" {
+		base = src.Task.Name + " (copy)"
+	}
+	name, err := s.deps.Tasks.UniqueName(ctx, base, 80)
+	if err != nil || name == "" {
+		writeErr(w, 400, "name is required (max 80 characters)")
+		return
+	}
+	tv, err := s.deps.Tasks.Duplicate(ctx, id, name, "user")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if err := s.copyTaskSettings(ctx, id, tv.Task.ID); err != nil {
+		if s.deps.Log != nil {
+			s.deps.Log.Warn("duplicate: budgets/policy not copied", "task", tv.Task.ID, "err", err)
+		}
+	}
+	v, _ := s.deps.Tasks.Get(ctx, tv.Task.ID)
+	writeJSON(w, 201, toTaskDTO(v))
+}
+
+func (s *Server) copyTaskSettings(ctx context.Context, from, to string) error {
+	if s.deps.Cost != nil {
+		rows, err := s.deps.DB.QueryContext(ctx, `SELECT period, max_usd, max_tokens, action, warn_at_pct, bucket, currency
+FROM budgets WHERE scope='task' AND scope_id=?`, from)
+		if err != nil {
+			return err
+		}
+		var list []cost.Budget
+		for rows.Next() {
+			b := cost.Budget{Scope: "task", ScopeID: to}
+			if err := rows.Scan(&b.Period, &b.MaxUSD, &b.MaxTokens, &b.Action, &b.WarnAtPct, &b.Bucket, &b.Currency); err != nil {
+				rows.Close()
+				return err
+			}
+			list = append(list, b)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, b := range list {
+			if err := s.deps.Cost.UpsertBudget(ctx, b); err != nil {
+				return err
+			}
+		}
+	}
+	var n int
+	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM task_policies WHERE task_id=?`, from).Scan(&n)
+	if n > 0 {
+		ps := &policy.Store{DB: s.deps.DB}
+		p := ps.Get(ctx, from)
+		p.TaskID, p.ConsecutiveFailures = to, 0
+		return ps.Put(ctx, p)
+	}
+	return nil
 }

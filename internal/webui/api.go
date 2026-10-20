@@ -502,6 +502,10 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
+	if len(parts) == 2 && parts[1] == "duplicate" && r.Method == http.MethodPost {
+		s.duplicateTask(w, r, id)
+		return
+	}
 	if len(parts) == 2 && parts[1] == "form" {
 		f, err := s.taskFormOf(ctx, id)
 		if err != nil {
