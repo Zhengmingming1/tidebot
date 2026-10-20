@@ -195,3 +195,31 @@ and ideas for later. Releases are cut weekly; these entries feed the notes.
 4. Favicon badge (dot) for failures/needs-confirmation, alongside the title prefix.
 5. Refresh README screenshots (the task status pill now reads 已启用) at the Friday
    release.
+
+## 2026-10-20 (UI pass): five visible fixes, two of them auto-fill
+
+I audited every page at 1024×655 and 1440×900 in zh-CN. I picked the five weak spots
+that showed up most, plus two smaller fixes I made along the way. Before/after shots
+are kept outside the repo.
+
+| # | Kind | What changed | Borrowed idea from |
+|---|------|--------------|--------------------|
+| 1 | visual | **Buttons page cards**: left-aligned on a fixed rhythm. Each card has a tinted icon tile, a title with a 2-line description, and a footer naming the target. Edit, delete and run show on hover (always on touch). | Open WebUI `src/lib/components/workspace/Models.svelte` (`group-hover` actions, `line-clamp`/`truncate`) |
+| 2 | visual | **Spend chart**: every day of the range is on the axis, zero days show as grey stubs and today is highlighted. The scale is rounded to $top/$mid/$0 with gridlines. Each bar has a tooltip with date + amount, and an all-zero range shows an empty state. | Uptime Kuma `src/components/HeartbeatBar.vue` (fixed slots with empty placeholders, per-beat tooltip) |
+| 3 | visual | **Log viewer**: a one-row icon toolbar with tooltips. Rows read like a transcript: repeated timestamps are muted, and `assistant:` is dropped. Tool calls show as a chip with a one-line input preview (command / file / pattern) and expand on click. | opcode `src/components/ToolWidgets.tsx` (`BashWidget`, `ReadWidget`) and `src/components/StreamMessage.tsx` |
+| 4 | auto-fill | **New task**: the instruction comes first. Writing "每个工作日早上 9 点半汇总…" or "every Monday at 9:30am…" fills the name and the schedule (`POST /api/tasks/infer`, zh+en rules). A schedule is only filled when a frequency word is there. Fields the user has edited are never overwritten, and an 自动 pill plus a note say what was filled. The default provider falls back to one with a key, and choosing a skill names the task. | Open WebUI `backend/open_webui/utils/task.py` (`title_generation_template`: name a chat from its first message). Here it's done with deterministic rules, no model call. |
+| 5 | auto-fill | **Add provider**: paste a Base URL, an `export ANTHROPIC_…` block, or a Claude Code `settings.json` env object. That picks the preset and completes a bare host to the official endpoint (also stripping `/v1/messages`). It fills a free name (`deepseek-2` if taken), the auth header, models and extra env. A URL pasted into the key box moves to Base URL. Only the first 7 key characters go to the server, which is enough to spot `sk-ant-`. | Cherry Studio `src/shared/utils/api/format.ts` (`formatApiHost`: normalize what users paste as the API host) |
+| + | visual | Runs table: one line per row, with a provider/model column instead of repeating the task name. | — |
+| + | usability | Dialogs: sticky header with a close button (Esc in its tooltip), sticky action bar, and edge shadows while scrolled, so long forms fit 1024×655. | shadcn/ui `apps/v4/registry/new-york-v4/ui/dialog.tsx` (`showCloseButton`, `DialogHeader`/`DialogFooter`) |
+
+Ideas only, no code copied. Every new string is escaped, nothing is inline (CSP), and
+the infer endpoints are POST + CSRF so prompts stay out of URLs and logs.
+
+**Ideas for later**
+
+1. Task auto-fill could also suggest a budget from the provider's recent per-run cost
+   (the spend data is already there) and a timeout from the skill's past durations.
+2. Plugin config forms: prefill from the manifest's examples and remember the last
+   values per plugin.
+3. Button form: suggest an icon from the label and target ("备份" → database, "报告" → doc).
+4. Provider auto-fill: offer "check models" right after a paste once the key is saved.
