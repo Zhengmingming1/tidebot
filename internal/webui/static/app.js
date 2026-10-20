@@ -836,8 +836,15 @@
     };
     document.addEventListener("keydown", onKey, true);
     $(".modal-bg", root).addEventListener("mousedown", function (e) { if (e.target.classList.contains("modal-bg")) close(); });
+    // Standard dialogs: a close button in the header, and header/footer shadows only while
+    // there is content scrolled under them (the header and actions are sticky in CSS).
+    var head = box.firstElementChild;
+    if (head && head.classList.contains("card-head") && !$("[data-close]", head)) head.insertAdjacentHTML("beforeend", '<button type="button" class="icon-btn sm modal-x" data-close aria-label="' + esc(T("btn.close")) + '" data-tip="' + esc(T("btn.close")) + ' · Esc">' + ic("x", "sm") + "</button>");
+    var edges = function () { box.classList.toggle("sc-top", box.scrollTop > 0); box.classList.toggle("sc-bot", box.scrollTop + box.clientHeight < box.scrollHeight - 1); };
+    box.addEventListener("scroll", edges, { passive: true });
     $$("[data-close]", root).forEach(function (b) { b.addEventListener("click", close); });
     if (onMount) onMount(root, close);
+    requestAnimationFrame(edges);
     var first = $("[autofocus]", box) || $("input:not([type=hidden]):not(.hidden),textarea,select", box);
     (first && first.offsetParent !== null ? first : box).focus();
   }
