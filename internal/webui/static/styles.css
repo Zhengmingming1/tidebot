@@ -1388,3 +1388,22 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .bt-card .bt-go { position: absolute; right: 0; bottom: 0; height: 24px; padding-left: 12px; background: linear-gradient(90deg, transparent, var(--surface, #fff) 12px); }
 .bt-card .bt-target[data-tip]:hover::after { left: 0; transform: none; }
 .bt-card .bt-go { top: 8px; bottom: auto; height: 17px; }
+
+/* ---- Spend chart (2026-10-20): full day axis, gridlines, per-day tooltip ---- */
+.spc { display: grid; grid-template-columns: 56px 1fr; gap: 8px; margin: 8px 0 16px; }
+.spc-y { display: flex; flex-direction: column; justify-content: space-between; height: 120px; font-size: 12px; line-height: 12px; color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; margin-top: -6px; }
+.spc-plot { position: relative; display: flex; align-items: flex-end; gap: 4px; height: 120px; border-bottom: 1px solid var(--border-strong, #d9d2c3);
+  background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(var(--border) 1px, transparent 1px);
+  background-size: 100% 1px, 100% 1px; background-position: 0 0, 0 50%; background-repeat: no-repeat; }
+.spc-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; cursor: default; }
+.spc-bar { display: block; width: 100%; max-width: 28px; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--accent-100, #cfe0fb); transition: background .15s; }
+.spc-col.zero .spc-bar { background: var(--border); }
+.spc-col.today .spc-bar { background: var(--accent); }
+.spc-col:hover .spc-bar { background: var(--accent); }
+.spc-col small { position: absolute; top: calc(100% + 6px); font-size: 12px; line-height: 12px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.spc-col small.off { visibility: hidden; }
+.spc-col.today small { color: var(--text); font-weight: 500; }
+.spc.dense .spc-plot { gap: 2px; }
+.spc { padding-bottom: 20px; }
+.spc-empty { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; font-size: 12px; color: var(--text-3); pointer-events: none; }
+.spc-y { height: 132px; }

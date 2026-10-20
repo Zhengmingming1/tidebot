@@ -2747,6 +2747,25 @@
   var taskNames = {};
   function bucketName(b) { return b.scope === "global" ? T("sp.global") : b.scope === "bucket" ? (T("bucket." + b.scope_id) === "bucket." + b.scope_id ? cap(b.scope_id) : T("bucket." + b.scope_id)) : (taskNames[b.scope_id] || T("col.task") + " " + String(b.scope_id).slice(0, 12)); }
   var spendView = { range: "7d", by: "task" }, spendCache = {};
+  // Daily spend columns: every day of the range (empty days included, so the axis never
+  // jumps), a rounded top value + mid gridline, the date and amount in each bar's tooltip.
+  function spendChart(days, range) {
+    var by = {}, keys = [], today = dayKey(new Date());
+    days.forEach(function (x) { by[x.day] = x.usd; });
+    var n = range === "7d" ? 7 : range === "30d" ? 30 : 0;
+    if (!n) { var first = days.length ? days[0].day : today; n = Math.min(90, Math.max(7, Math.round((Date.parse(today) - Date.parse(first)) / 864e5) + 1)); }
+    for (var i = n - 1; i >= 0; i--) keys.push(dayKey(new Date(Date.now() - i * 864e5)));
+    var mx = Math.max.apply(null, keys.map(function (k) { return by[k] || 0; }).concat([0]));
+    var top = 0;
+    if (mx > 0) { var e = Math.pow(10, Math.floor(Math.log10(mx))), f = mx / e; top = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; }
+    var dec = top / 2 >= 1 && (top / 2) % 1 === 0 ? 0 : top < 0.02 ? 4 : 2, step = n <= 7 ? 1 : n <= 31 ? 5 : 10;
+    var cols = keys.map(function (k, idx) {
+      var v = by[k] || 0, lab = (n - 1 - idx) % step === 0;
+      var tipTxt = fmtTime(k + "T12:00:00Z", { month: "short", day: "numeric", weekday: "short" }) + " · " + (v ? usd(v, 4) : T("sp.no_spend_day"));
+      return '<div class="spc-col' + (k === today ? " today" : "") + (v ? "" : " zero") + '" data-tip="' + esc(tipTxt) + '"><span class="spc-bar" data-h="' + (top ? v / top * 100 : 0) + '"></span><small' + (lab ? "" : ' class="off"') + ">" + esc(k.slice(5).replace("-", "/")) + "</small></div>";
+    }).join("");
+    return '<div class="spc' + (n > 31 ? " dense" : "") + '" role="img" aria-label="' + esc(T("sp.chart_aria", { n: n })) + '"><div class="spc-y" aria-hidden="true"><span>' + esc(top ? usd(top, dec) : "") + "</span><span>" + esc(top ? usd(top / 2, dec) : "") + "</span><span>" + esc(usd(0, 0)) + '</span></div><div class="spc-plot">' + cols + (top ? "" : '<p class="spc-empty">' + esc(T("sp.no_spend_range")) + "</p>") + "</div></div>";
+  }
   function renderSpend() {
     spendCache = {};
     var spendP = api("/api/spend"); // start all while the route's cache window is open
@@ -2783,7 +2802,7 @@
         var rows = r.rows || [], mxd = Math.max.apply(null, (r.days || []).map(function (x) { return x.usd; }).concat([0.0001]));
         var nm = function (x) { return spendView.by === "task" ? (x.key ? (x.name || taskNames[x.key] || x.key) : T("run.adhoc_paren")) : (x.key || T("sp.unknown")); };
         $("#sp-body").innerHTML = '<div class="sp-total"><strong>' + esc(usd(r.total_usd || 0, 4)) + "</strong>" + (r.estimated_runs ? costBadge("estimate") : "") + ' <span class="muted">' + esc(T("sp.since", { d: spendView.range === "all" ? T("sp.rall") : r.since })) + (r.estimated_runs ? " · " + T("sp.est_runs", { n: r.estimated_runs }) : "") + "</span></div>" +
-          ((r.days || []).length ? '<div class="bars sp-bars">' + r.days.map(function (x) { return '<div class="bar" title="' + esc(x.day + " · " + usd(x.usd, 4)) + '"><span data-h="' + (x.usd / mxd * 100) + '"></span><small>' + esc(x.day.slice(5)) + "</small></div>"; }).join("") + "</div>" : "") +
+          spendChart(r.days || [], spendView.range) +
           (rows.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.col_" + spendView.by)) + "</th><th>" + esc(T("nav.runs")) + "</th><th>Tokens</th><th>" + esc(T("sp.share")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows.map(function (x) {
             var sh = r.total_usd ? x.usd / r.total_usd * 100 : 0;
             var tokTip = T("sp.tok_tip", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0), r: num(x.cache_read_tokens || 0), w: num(x.cache_write_tokens || 0), q: num(x.requests || 0) });
