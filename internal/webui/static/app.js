@@ -1515,7 +1515,7 @@
   var SWATCHES = ["", "#2f6fed", "#0f9d8a", "#7b5cd6", "#d9822b", "#d64545", "#3b8b3b", "#5a6b7d"];
   // Secondary help lives in a tooltip next to the label (hover or keyboard focus), not under every field.
   function tip(text) { return text ? '<span class="info-tip" tabindex="0" role="img" aria-label="' + esc(text) + '" data-tip="' + esc(text) + '">' + ic("info", "sm") + "</span>" : ""; }
-  function fieldHtml(label, inner, hint) { return '<label class="field"><span>' + esc(label) + tip(hint) + "</span>" + inner + "</label>"; }
+  function fieldHtml(label, inner, hint, extra) { return '<label class="field"><span>' + esc(label) + tip(hint) + (extra || "") + "</span>" + inner + "</label>"; }
   function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (sel ? " selected" : "") + ">" + esc(label) + "</option>"; }
   // Collect dropped files; folders are walked so the server sees relative paths.
   function droppedFiles(dt) {
@@ -2015,7 +2015,7 @@
   }
   var previewCache = {};
   function scheduleEditor(host, cron, serverTz) {
-    var s = parseSched(cron), tz = serverTz || state.tz || "", timer = null, seq = 0;
+    var s = parseSched(cron), tz = serverTz || state.tz || "", timer = null, seq = 0, touched = false;
     var dowName = function (d) { return new Intl.DateTimeFormat(state.lang, { weekday: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2023, 0, 1 + d))); };
     var browserTz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || "";
     var tzs = [serverTz, browserTz, "UTC", "Asia/Shanghai", "America/Los_Angeles", "America/New_York", "Europe/London", "Europe/Berlin", "Asia/Tokyo"].filter(function (x, i, a) { return x && a.indexOf(x) === i; });
@@ -2065,7 +2065,10 @@
         }).catch(function (e) { if (my === seq) { err.textContent = e.message; list.innerHTML = ""; host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); } });
       }, 300);
     }
-    $$("[data-mode]", host).forEach(function (b) { b.addEventListener("click", function () {
+    host.addEventListener("input", function (e) { if (e.isTrusted) touched = true; });
+    host.addEventListener("change", function (e) { if (e.isTrusted && e.target.getAttribute("data-k") !== "tz") touched = true; });
+    $$("[data-mode]", host).forEach(function (b) { b.addEventListener("click", function (e) {
+      if (e.isTrusted) touched = true;
       var to = b.getAttribute("data-mode");
       if (to === s.mode) return;
       if (to === "simple") {
@@ -2080,16 +2083,67 @@
     ["kind", "every", "minute", "dow", "dom", "time", "tz"].forEach(function (k) { $k(k).addEventListener("input", preview); $k(k).addEventListener("change", preview); });
     $k("cron").addEventListener("input", function () { s.unconvertible = parseSched($k("cron").value).mode === "cron"; preview(); });
     preview();
-    return { value: value, valid: function () { return !err.textContent; } };
+    // set: apply a cron from code (auto-fill) without marking the editor as touched.
+    function set(c) {
+      var p = parseSched(c);
+      if (p.mode === "simple") { ["kind", "every", "minute", "dow", "dom", "time"].forEach(function (k) { $k(k).value = p[k]; }); }
+      s.unconvertible = p.mode === "cron";
+      $k("cron").value = c; s.mode = p.mode === "manual" ? "manual" : p.mode;
+      preview();
+      var ed = $(".sched-ed", host); ed.classList.remove("af-flash"); void ed.offsetWidth; ed.classList.add("af-flash");
+    }
+    return { value: value, valid: function () { return !err.textContent; }, set: set, touched: function () { return touched; } };
+  }
+  // Default provider: the configured default when it has a key, else the first one that does.
+  function smartProvider(st) {
+    var ps = st.providers || [], d = ps.filter(function (p) { return p.name === st.default_provider; })[0];
+    if (d && d.key_set) return d.name;
+    var k = ps.filter(function (p) { return p.key_set; })[0];
+    return (k || d || ps[0] || {}).name || st.default_provider;
+  }
+  // New-task auto-fill: as the instruction is typed, the server guesses a name and a schedule
+  // (POST /api/tasks/infer). A field is only filled while the user hasn't edited it themselves.
+  function wireTaskAutofill(root, f, se, skills) {
+    var lastName = "", timer = null, seq = 0, note = $("#af-note", root), pill = $("#af-name", root), filled = {};
+    var nameMine = function () { var v = f.name.value.trim(); return v !== "" && v !== lastName; };
+    var setName = function (v) { if (!v || nameMine()) return; f.name.value = v; lastName = v; pill.classList.remove("hidden"); filled.name = 1; };
+    var paint = function (cron) {
+      var bits = [];
+      if (filled.name) bits.push(T("af.f_name"));
+      if (cron) bits.push(T("af.f_sched", { s: cronHuman(cron) }));
+      note.classList.toggle("on", bits.length > 0);
+      $("span", note).textContent = bits.length ? T("af.filled", { list: bits.join(T("af.sep")) }) : T("af.hint");
+    };
+    f.name.addEventListener("input", function (e) { if (e.isTrusted && f.name.value.trim() !== lastName) { pill.classList.add("hidden"); delete filled.name; paint(""); } });
+    f.prompt.addEventListener("input", function () {
+      clearTimeout(timer);
+      var my = ++seq, text = f.prompt.value;
+      if (text.trim().length < 4) return;
+      timer = setTimeout(function () {
+        apiRaw("/api/tasks/infer", { method: "POST", body: { prompt: text } }).then(function (g) {
+          if (my !== seq || !g) return;
+          setName(g.name);
+          var cron = "";
+          if (g.cron && !se.touched() && se.value() !== g.cron) { se.set(g.cron); cron = g.cron; }
+          else if (g.cron && se.value() === g.cron) cron = g.cron;
+          paint(cron);
+        }).catch(function () {});
+      }, 350);
+    });
+    f.skill_id.addEventListener("change", function () {
+      var sk = skills.filter(function (x) { return x.id === f.skill_id.value; })[0];
+      if (sk && !f.prompt.value.trim()) setName(sk.name), paint("");
+    });
   }
   function taskFormModal(taskId) {
     var reqs = [api("/api/skills"), api("/api/settings")];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
     Promise.all(reqs).then(function (r) {
-      var skills = r[0] || [], st = r[1], tf = taskId ? r[2].form : { name: "", prompt: "", skill_id: "", skill_version_id: "", provider: st.default_provider, cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], tf = taskId ? r[2].form : { name: "", prompt: "", skill_id: "", skill_version_id: "", provider: smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
+      var promptF = fieldHtml(T("tf.prompt"), '<textarea name="prompt" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>"));
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
-        fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T("tf.name_ph")) + '">') +
-        fieldHtml(T("tf.prompt"), '<textarea name="prompt" required maxlength="32000" rows="5" placeholder="' + esc(T("tf.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>") +
+        (taskId ? nameF + promptF : promptF + nameF) +
         '<div class="form-row">' + fieldHtml(T("bt.skill"), '<select name="skill_id"><option value="">' + esc(T("tf.no_skill")) + "</option>" + skills.map(function (s) { return opt(s.id, s.name, s.id === tf.skill_id); }).join("") + "</select>") +
         fieldHtml(T("bt.skill_ver"), '<select name="skill_version_id"><option value="">' + esc(T("bt.latest")) + "</option></select>") + "</div>" +
         fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
@@ -2108,6 +2162,7 @@
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         loadVers();
         f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
+        if (!taskId) wireTaskAutofill(root, f, se, skills);
         f.addEventListener("submit", function (e) {
           e.preventDefault();
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
