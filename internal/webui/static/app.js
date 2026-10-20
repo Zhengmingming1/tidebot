@@ -298,6 +298,22 @@
     if (!bad) setTimeout(close, undo ? 10000 : 3000);
     return close;
   }
+  // GET a server-made file (CSV export…) and save it under the server's filename.
+  // Blob keeps the bytes as sent (a UTF-8 BOM survives; res.text() would strip it).
+  function downloadFile(path, fallback, btn) {
+    if (btn) btn.disabled = true;
+    return fetch(path, { credentials: "same-origin" }).then(function (res) {
+      if (res.status === 401) { showLogin(); throw new Error(T("err.sign_in")); }
+      if (!res.ok) return res.json().catch(function () { return {}; }).then(function (d) { throw new Error(d.error || res.statusText); });
+      var m = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "");
+      return res.blob().then(function (b) {
+        var a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = m ? m[1] : fallback;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+        toast(T("dl.saved", { n: a.download }));
+      });
+    }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+  }
   function toastUndo(msg, undo) { return toast(msg, false, undo); }
   function fail(e) { toast(e.message, true); }
   // CSP forbids inline style attributes; sizes are applied through CSSOM.
@@ -2746,7 +2762,7 @@
         '<div class="card stat"><small>' + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd)) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(s.total_tokens)) + "</strong><span>" + esc(global.max_tokens ? T("sp.tok_cap", { n: num(global.max_tokens) }) : T("sp.no_tok_cap")) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.runs_today")) + "</small><strong>" + esc(runsToday) + "</strong><span>" + esc(plural(d.top_tasks.length, "sp.sources_one", "sp.sources_many")) + "</span></div></div>" +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div></div>" +
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" + '<button class="icon-btn" id="sp-export" data-tip="' + esc(T("sp.export_tip")) + '" aria-label="' + esc(T("sp.export")) + '">' + ic("download", "sm") + "</button></div>" +
         '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["provider_model", T("sp.by_provider_model")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
         '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + '</h2></div><div class="grow">' + budgets.map(function (b, k) {
           var p = pct(b.used_usd, b.max_usd);
@@ -2775,6 +2791,7 @@
         if (spendCache[key]) paintBody(spendCache[key]); else if (!$("#sp-body").innerHTML) $("#sp-body").innerHTML = skeleton("list");
         return api("/api/spend/breakdown?range=" + spendView.range + "&by=" + spendView.by).then(function (r) { spendCache[key] = r; if (key === spendView.range + "|" + spendView.by) paintBody(r); }).catch(function (e) { $("#sp-body").innerHTML = errorState(e.message); });
       };
+      $("#sp-export").addEventListener("click", function () { downloadFile("/api/spend/export?range=" + enc(spendView.range) + "&lang=" + enc(state.lang), "tidebot-spend.csv", $("#sp-export")); });
       $$("[data-r]").forEach(function (b) { b.addEventListener("click", function () { spendView.range = b.getAttribute("data-r"); $$("[data-r]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-checked", x === b); }); load(); }); });
       $$("[data-by]").forEach(function (b) { b.addEventListener("click", function () { spendView.by = b.getAttribute("data-by"); $$("[data-by]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-selected", x === b); }); load(); }); });
       var saveBudget = function (k) {

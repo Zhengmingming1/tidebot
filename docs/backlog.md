@@ -68,6 +68,44 @@ and ideas for later. Releases are cut weekly; these entries feed the notes.
 4. Docker/compose docs: `stop_grace_period` when raising `shutdown_grace` above 5s.
 5. Favicon badge; refresh README screenshots at the Friday release (carried over).
 
+### 2026-10-20 (third pass): export spend as CSV
+
+**Done**
+
+- **Spend → 花在哪了 has a download button** (next to 7 天 / 30 天 / 全部). It saves
+  `tidebot-spend_<first day>_to_<today>.csv` with one row per run in the selected range:
+  date, time (server zone), task (快速运行 for ad-hoc runs), run id, bucket, provider,
+  model, status, requests, input / output / cache read / cache write tokens, amount
+  in the display currency, currency, pricing source (按单价计算 / 估算 / 订阅套餐 …).
+  The header and labels follow the UI language. A UTF-8 BOM is added so Excel shows Chinese
+  task names correctly. Details are in the button's tooltip.
+- **Safety:** same session auth as the rest of `/api/` (GET only). Free-text cells
+  (task names, provider/model ids) that start with `= + - @`, tab or CR get a leading `'`
+  so a spreadsheet won't run them as formulas (OWASP CSV injection). Every value comes from
+  parameterized SQL. The response is `no-store`. The file is capped at 100k rows.
+- **Resource use:** the CSV is built in memory and written after the query finishes. The
+  store has a single connection, so streaming to a slow client would block the scheduler.
+  The all-time first-day lookup also runs before the cursor opens. The first version
+  deadlocked on exactly this, and the test caught it.
+- Tooltips on the last control of a card header now open leftwards instead of being cut off
+  at the window edge.
+
+**Learned**
+
+- LiteLLM `ui/litellm-dashboard/src/app/(dashboard)/usage/_components/components/EntityUsage/teamUserSpend.ts`:
+  `Papa.unparse(…, { escapeFormulae: true })`, and the file name carries the range
+  (`team_user_spend_<start>_to_<end>.csv`). `TeamUserSpendCard.tsx` puts a small
+  "Download CSV" button on the usage card. `src/components/TeamsPage/teamsCsvExport.ts`
+  does the same for the teams table. We borrowed formula escaping, the range in the filename
+  and the button on the card itself.
+- `fetch().text()` drops a UTF-8 BOM. Download through `res.blob()` to keep the
+  bytes as the server sent them.
+
+**Ideas for later**
+
+1. Export the current breakdown (grouped rows) as well as per-run rows.
+2. Report the silent warning when a task duplicate couldn't copy budgets/policy (from the second pass).
+
 ### 2026-10-20 (second pass): duplicate a task
 
 **Done**
