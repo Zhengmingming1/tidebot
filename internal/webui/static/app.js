@@ -1823,6 +1823,96 @@
     });
     var box = $("#modal-root .modal"); if (box) box.classList.add("ap-modal");
   }
+  // Parse a pasted env block: `export ANTHROPIC_BASE_URL=…`, `set K=V`, `$env:K="V"`, `K: V`,
+  // or JSON ({"env": {...}} from a Claude Code settings.json, or a flat object).
+  function parseEnvPaste(text) {
+    var out = {}, t = String(text || "").trim();
+    try { var j = JSON.parse(t); if (j && typeof j === "object") { var o = j.env && typeof j.env === "object" ? j.env : j; Object.keys(o).forEach(function (k) { if (/^[A-Z_][A-Z0-9_]*$/.test(k) && (typeof o[k] === "string" || typeof o[k] === "number")) out[k] = String(o[k]); }); return out; } } catch (e) { /* not JSON */ }
+    t.split(/\r?\n/).forEach(function (l) {
+      var m = l.trim().replace(/^(export|set|setx)\s+/i, "").replace(/^\$env:/i, "").replace(/[,;]$/, "").match(/^"?([A-Z_][A-Z0-9_]*)"?\s*(?:=|:)\s*(.*)$/);
+      if (m) out[m[1]] = m[2].trim().replace(/^(["'])(.*)\1$/, "$2");
+    });
+    return out;
+  }
+  // Add-provider auto-fill: a pasted Base URL (or a whole env block) picks the matching preset
+  // (POST /api/providers/infer) and fills name, auth header and models. Only the first 7 key
+  // characters are ever sent, and only fields the user hasn't typed into are filled.
+  var PV_MODEL_ENV = { ANTHROPIC_MODEL: "model", ANTHROPIC_SMALL_FAST_MODEL: "small_fast_model", ANTHROPIC_DEFAULT_OPUS_MODEL: "opus_model", ANTHROPIC_DEFAULT_SONNET_MODEL: "sonnet_model", ANTHROPIC_DEFAULT_HAIKU_MODEL: "haiku_model" };
+  function wireProviderAutofill(host, f, v, presetById) {
+    var det = $("#pd-detect", host), auto = {}, mine = {}, models = {}, timer = null, seq = 0, startPreset = v.preset;
+    var zh = (state.lang || "").indexOf("zh") === 0;
+    ["name", "model", "small_fast_model", "opus_model", "sonnet_model", "haiku_model"].forEach(function (n) {
+      f[n].addEventListener("input", function (e) { if (e.isTrusted) mine[n] = f[n].value !== auto[n]; });
+    });
+    $$('[name="auth_env"]', f).forEach(function (r) { r.addEventListener("change", function (e) { if (e.isTrusted) mine.auth_env = true; }); });
+    var flash = function (el) { el.classList.remove("af-flash"); void el.offsetWidth; el.classList.add("af-flash"); };
+    var put = function (n, val) {
+      if (!val || mine[n]) return 0;
+      if (f[n].value && f[n].value !== auto[n] && f[n].value !== (v[n] || "")) return 0;
+      if (f[n].value === val) return 0;
+      f[n].value = val; auto[n] = val; flash(f[n]); return 1;
+    };
+    var setAuth = function (a) {
+      if (!a || mine.auth_env) return 0;
+      var r = $('[name="auth_env"][value="' + a + '"]', f); if (!r || r.checked) return 0;
+      r.checked = true; flash(r.closest(".seg")); return 1;
+    };
+    var paint = function (g) {
+      if (!g || !g.preset) { det.classList.remove("on"); det.innerHTML = ic("sparkle", "sm") + "<span>" + esc(g && g.name ? T("pv.af_detected", { n: g.name }) : T("pv.af_paste_hint")) + "</span>"; return; }
+      var m = PV_BRAND[g.preset] || { b: "br-other", m: (g.display || "?").slice(0, 1), zh: g.display, en: g.display };
+      det.classList.add("on");
+      det.innerHTML = '<span class="ap-logo ' + m.b + '" aria-hidden="true">' + esc(m.m) + '</span><span class="af-pill" data-tip="' + esc(T("pv.af_tip")) + '">' + ic("sparkle", "sm") + esc(T("pv.af_detected", { n: (zh ? m.zh : m.en) || g.display })) + "</span>" + (g.fixed && g.base_url ? '<span class="muted">' + esc(T("pv.af_completed")) + "</span>" : "");
+    };
+    var infer = function (quiet) {
+      var my = ++seq, url = f.base_url.value.trim(), key = f.api_key.value.trim();
+      if (!url && !key) { paint(null); return Promise.resolve(0); }
+      return apiRaw("/api/providers/infer", { method: "POST", body: { base_url: url, key_prefix: key.slice(0, 7), env: models } }).then(function (g) {
+        if (my !== seq || !g) return 0;
+        var n = 0;
+        if (g.fixed && url && g.base_url && g.base_url !== url && (quiet === "paste" || document.activeElement !== f.base_url)) { f.base_url.value = g.base_url; flash(f.base_url); n++; }
+        if (startPreset === "custom" && v.preset !== (g.preset || "custom")) {
+          v.preset = g.preset || "custom";
+          var av = $(".drawer-head > :first-child", host), h2 = $(".drawer-head h2", host), pr = presetById[v.preset];
+          if (av) av.outerHTML = pvAvatar(v, presetById);
+          if (h2 && pr) h2.textContent = T("pv.add_named", { n: pr.name });
+        }
+        n += put("name", g.name) + setAuth(g.auth_env);
+        Object.keys(g.models || {}).forEach(function (k) { n += put(k, g.models[k]); });
+        paint(g);
+        return n;
+      }).catch(function () { return 0; });
+    };
+    f.base_url.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(infer, 400); });
+    f.base_url.addEventListener("blur", function () { clearTimeout(timer); infer(); });
+    // A pasted env block anywhere in the basics fills every field it names; a URL pasted
+    // into the key box moves to Base URL; an sk-ant- key selects x-api-key.
+    var onPaste = function (e) {
+      var text = (e.clipboardData || window.clipboardData).getData("text") || "", env = parseEnvPaste(text);
+      var target = e.target.name, filled = 0;
+      if (!Object.keys(env).length) {
+        if (target === "api_key" && /^\s*(https?:\/\/|[\w-]+(\.[\w-]+)+\/)/i.test(text)) { e.preventDefault(); f.base_url.value = text.trim(); toast(T("pv.af_url_moved")); infer("paste"); return; }
+        if (target === "api_key") setTimeout(function () { if (/^sk-ant-/.test(f.api_key.value.trim())) setAuth("ANTHROPIC_API_KEY"); if (!f.base_url.value.trim()) infer(); }, 0);
+        if (target === "base_url") { e.preventDefault(); f.base_url.value = text.trim(); infer("paste"); }
+        return;
+      }
+      e.preventDefault();
+      var extra = [];
+      Object.keys(env).forEach(function (k) {
+        var val = env[k];
+        if (k === "ANTHROPIC_BASE_URL") { f.base_url.value = val; filled++; }
+        else if (k === "ANTHROPIC_AUTH_TOKEN" || k === "ANTHROPIC_API_KEY") { f.api_key.value = val; filled++; mine.auth_env = false; setAuth(k); }
+        else if (PV_MODEL_ENV[k]) { models[k] = val; }
+        else extra.push(k + "=" + val);
+      });
+      if (extra.length) {
+        var have = f.extra_env.value.split("\n").map(function (l) { return l.split("=")[0].trim(); });
+        var add = extra.filter(function (l) { return have.indexOf(l.split("=")[0]) < 0; });
+        if (add.length) { f.extra_env.value = (f.extra_env.value.trim() ? f.extra_env.value.trim() + "\n" : "") + add.join("\n"); filled += add.length; var adv = f.querySelector(".sec-adv"); if (adv) adv.open = true; }
+      }
+      infer("paste").then(function (n) { toast(T("pv.af_filled", { n: filled + n })); });
+    };
+    ["name", "base_url", "api_key"].forEach(function (n) { f[n].addEventListener("paste", onPaste); });
+  }
   function providerDetail(host, p, preset, presetById, done) {
     var creating = !p || p.dup;
     var base = p ? (presetById[p.preset] || null) : preset;
@@ -1841,6 +1931,7 @@
       '<h4 class="sec">' + esc(T("pv.sec_basic")) + "</h4>" +
       fieldHtml(T("set.name"), inp("name", v.name, ' required maxlength="40" pattern="[a-z0-9][a-z0-9._\\-]{0,39}"'), T("pv.name_hint")) +
       '<label class="field"><span>Base URL' + tip(T("pv.url_hint")) + '</span><div class="in-group">' + inp("base_url", v.base_url, ' type="url" placeholder="https://api.anthropic.com"') + (base && base.base_url !== undefined ? '<button type="button" class="btn ghost" id="pd-reset" title="' + esc(base.base_url || "https://api.anthropic.com") + '">' + ic("rollback", "sm") + esc(T("pv.reset_url")) + "</button>" : "") + "</div></label>" +
+      (creating && !p ? '<div class="pv-detect" id="pd-detect" aria-live="polite">' + ic("sparkle", "sm") + "<span>" + esc(T("pv.af_paste_hint")) + "</span></div>" : "") +
       '<h4 class="sec">' + esc(T("pv.sec_auth")) + " " + link + "</h4>" +
       '<div class="field"><span>' + esc(T("pv.auth")) + '</span><div class="seg" role="radiogroup" aria-label="' + esc(T("pv.auth")) + '">' + seg("ANTHROPIC_AUTH_TOKEN", "Bearer", "ANTHROPIC_AUTH_TOKEN") + seg("ANTHROPIC_API_KEY", "x-api-key", "ANTHROPIC_API_KEY") + "</div></div>" +
       '<label class="field"><span>' + esc(T("pv.api_key")) + tip(T("pv.key_hint")) + '</span><div class="in-group"><input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(!creating && v.key_set && v.key_source === "store" ? T("pv.key_keep", { l: v.key_last4 || "" }) : !creating && v.key_source === "env" ? T("pv.key_env") : T("pv.key_new")) + '"><button type="button" class="btn ghost" id="pd-eye" aria-pressed="false" aria-label="' + esc(T("pv.show_key")) + '">' + esc(T("pv.show")) + "</button></div></label>" +
@@ -1865,6 +1956,7 @@
     };
     $("#pd-eye", host).addEventListener("click", function (e) { var k = f.api_key, on = k.type === "password"; k.type = on ? "text" : "password"; e.currentTarget.setAttribute("aria-pressed", on); e.currentTarget.textContent = T(on ? "pv.hide" : "pv.show"); });
     var rs = $("#pd-reset", host); if (rs) rs.addEventListener("click", function () { f.base_url.value = base.base_url || ""; f.base_url.focus(); });
+    if (creating && !p) wireProviderAutofill(host, f, v, presetById);
     $$("[data-check]", host).forEach(function (b) { b.addEventListener("click", function () { var k = b.getAttribute("data-check"); if (!f[k].value.trim()) { toast(T("pv.model_empty"), true); return; } runTest(v.name, f[k].value.trim(), $('[data-res="' + k + '"]', host)); }); });
     var tb = $("#pd-test-btn", host); if (tb) tb.addEventListener("click", function () { runTest(v.name, "", out); });
     $$("[data-mode]", f).forEach(function (b) { b.addEventListener("click", function () { mode = b.getAttribute("data-mode"); }); });

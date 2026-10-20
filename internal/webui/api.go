@@ -39,6 +39,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/skills/import", s.withAuthCSRF(s.handleSkillsImport))
 	mux.HandleFunc("/api/skills/upload", s.withAuthCSRF(s.handleSkillUpload))
 	mux.HandleFunc("/api/providers", s.withAuthCSRF(s.handleProviders))
+	mux.HandleFunc("/api/providers/infer", s.withAuthCSRF(postOnly(s.handleProviderInfer)))
 	mux.HandleFunc("/api/tasks/infer", s.withAuthCSRF(postOnly(s.handleTaskInfer)))
 	mux.HandleFunc("/api/plugins/upload", s.withAuthCSRF(s.handlePluginUpload))
 	mux.HandleFunc("/api/providers/", s.withAuthCSRF(s.handleProviderSub))
