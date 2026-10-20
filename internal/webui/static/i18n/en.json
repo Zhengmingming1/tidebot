@@ -96,6 +96,7 @@
   "cfg.secret_new": "Not set",
   "cfg.title": "{n} settings",
   "col.agent_task": "Agent / Task",
+  "col.provider": "Provider",
   "col.cost": "Cost",
   "col.created": "Created",
   "col.current": "Current",

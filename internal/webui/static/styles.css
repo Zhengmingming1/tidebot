@@ -1407,3 +1407,11 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .spc { padding-bottom: 20px; }
 .spc-empty { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; font-size: 12px; color: var(--text-3); pointer-events: none; }
 .spc-y { height: 132px; }
+
+/* ---- Runs table (2026-10-20): one line per row, no repeated task column ---- */
+.table .ell { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.table .cell-main > div { min-width: 0; }
+.table td:first-child .cell-main { max-width: 360px; }
+.table td.run-prov { max-width: 180px; }
+.table td.run-prov small { color: var(--text-3); }
+@media (max-width: 1279px) { .table td:first-child .cell-main { max-width: 280px; } .table td.run-prov { max-width: 140px; } }
