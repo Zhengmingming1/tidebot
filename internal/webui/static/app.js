@@ -871,11 +871,11 @@
 
   function runsTable(runs, rerun) {
     if (!runs.length) return emptyState("runs", T("runs.none"), T("runs.none_sub"));
-    return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.agent_task")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
+    return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.provider")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
       runs.map(function (r) {
         var running = r.status === "running";
-        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong>' + esc(runTitle(r)) + "</strong></a><small>" + esc(triggerText(r.trigger)) + "</small></div></div></td>" +
-          "<td><strong>" + esc(r.task_name || T("run.adhoc")) + "</strong><small>" + esc(r.provider || "—") + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small></td>" +
+        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + esc(runTitle(r)) + '</strong></a><small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small></div></div></td>" +
+          '<td class="run-prov"><span class="ell">' + esc(r.provider || "—") + "</span>" + (r.model ? '<small class="ell">' + esc(r.model) + "</small>" : "") + "</td>" +
           "<td>" + statusPill(r.status) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
           '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
       }).join("") + "</tbody></table>";

@@ -96,6 +96,7 @@
   "cfg.secret_new": "未设置",
   "cfg.title": "{n} 设置",
   "col.agent_task": "智能体 / 任务",
+  "col.provider": "服务商",
   "col.cost": "花费",
   "col.created": "创建时间",
   "col.current": "当前",
