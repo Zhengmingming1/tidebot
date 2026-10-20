@@ -66,3 +66,22 @@ func TestEffectiveWebUI(t *testing.T) {
 		t.Fatal("--no-webui should win")
 	}
 }
+
+func TestShutdownGraceDefaultAndEnv(t *testing.T) {
+	t.Setenv("TIDEBOT_HOME", t.TempDir())
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShutdownGrace != DefaultShutdownGrace {
+		t.Fatalf("default grace %v", cfg.ShutdownGrace)
+	}
+	t.Setenv("TIDEBOT_SHUTDOWN_GRACE", "20s")
+	if cfg, _ = Load(""); cfg.ShutdownGrace != 20*time.Second {
+		t.Fatalf("env grace %v", cfg.ShutdownGrace)
+	}
+	t.Setenv("TIDEBOT_SHUTDOWN_GRACE", "-1s")
+	if cfg, _ = Load(""); cfg.ShutdownGrace != 0 {
+		t.Fatalf("negative grace %v", cfg.ShutdownGrace)
+	}
+}

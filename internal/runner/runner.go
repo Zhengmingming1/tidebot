@@ -68,13 +68,26 @@ type Result struct {
 	Cost pricing.Cost
 }
 
+// ErrShuttingDown is returned for runs refused or stopped because the core is
+// quitting (Drain). Callers treat it as "not a failure": no retry, no breaker
+// strike, no "run failed" notice.
+var ErrShuttingDown = errors.New("tidebot is shutting down")
+
 // Runner manages concurrency and persists runs to SQLite.
 type Runner struct {
 	store   *db.Store
 	log     *slog.Logger
 	sem     chan struct{}
 	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	cancels map[string]context.CancelCauseFunc
+	// Drain state: once closing is set, RunOnce refuses new work and queued runs
+	// stop waiting for a slot. active counts RunOnce calls in flight; idle is
+	// closed when it drops to zero while a Drain is waiting.
+	closing  bool
+	stopping bool // grace period over: runs registered from now on are canceled at once
+	quit     chan struct{}
+	active   int
+	idle     chan struct{}
 	// LogDir, when set, receives a human-readable log per run (<LogDir>/<run_id>.log)
 	// that the WebUI tails for live SSE output. Secrets are masked before writing.
 	LogDir string
@@ -100,17 +113,120 @@ func New(store *db.Store, log *slog.Logger, maxConcurrency int) *Runner {
 		store:   store,
 		log:     log,
 		sem:     make(chan struct{}, maxConcurrency),
-		cancels: map[string]context.CancelFunc{},
+		cancels: map[string]context.CancelCauseFunc{},
+		quit:    make(chan struct{}),
+	}
+}
+
+// enter registers a RunOnce call; false once Drain has started.
+func (r *Runner) enter() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closing {
+		return false
+	}
+	r.active++
+	return true
+}
+
+func (r *Runner) leave() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.active--
+	if r.active == 0 && r.idle != nil {
+		close(r.idle)
+		r.idle = nil
+	}
+}
+
+// Active reports how many runs are queued or running in this process.
+func (r *Runner) Active() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.active
+}
+
+// DrainResult says how a Drain went.
+type DrainResult struct {
+	Active   int      // runs in flight when Drain started
+	Stopped  []string // run ids canceled after the grace period
+	TimedOut bool     // some run still hadn't written its final state at the end
+}
+
+// Drain prepares the runner for exit. It refuses new runs, releases runs still
+// waiting for a concurrency slot, gives running ones up to grace to finish on
+// their own, then cancels the rest (status canceled, partial token usage kept)
+// and waits up to writeWait for them to record that. It never blocks longer
+// than grace+writeWait, so a stuck child can't hold up quitting. Safe to call
+// more than once.
+func (r *Runner) Drain(grace, writeWait time.Duration) DrainResult {
+	r.mu.Lock()
+	if !r.closing {
+		r.closing = true
+		close(r.quit)
+	}
+	res := DrainResult{Active: r.active}
+	if r.active == 0 {
+		r.mu.Unlock()
+		return res
+	}
+	if r.idle == nil {
+		r.idle = make(chan struct{})
+	}
+	idle := r.idle
+	r.mu.Unlock()
+
+	if waitClosed(idle, grace) {
+		return res
+	}
+	r.mu.Lock()
+	r.stopping = true
+	for runID, c := range r.cancels {
+		c(ErrShuttingDown)
+		res.Stopped = append(res.Stopped, runID)
+	}
+	r.mu.Unlock()
+	res.TimedOut = !waitClosed(idle, writeWait)
+	return res
+}
+
+func waitClosed(ch <-chan struct{}, d time.Duration) bool {
+	if d <= 0 {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ch:
+		return true
+	case <-t.C:
+		return false
 	}
 }
 
 // RunOnce executes a prompt under the concurrency limit and records the run.
 func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
+	if !r.enter() {
+		return Result{}, ErrShuttingDown
+	}
+	defer r.leave()
 	select {
 	case r.sem <- struct{}{}:
 		defer func() { <-r.sem }()
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
+	case <-r.quit:
+		return Result{}, ErrShuttingDown
+	}
+	select { // both cases may have been ready above; quitting wins
+	case <-r.quit:
+		return Result{}, ErrShuttingDown
+	default:
 	}
 
 	runID := id.New("run")
@@ -142,18 +258,21 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		opts.OnStart(runID)
 	}
 
-	runCtx := ctx
-	var cancel context.CancelFunc
+	// The cause tells execute why it was canceled (user, or Drain on quit).
+	runCtx, cancel := context.WithCancelCause(ctx)
 	if opts.Timeout > 0 {
-		runCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
-	} else {
-		runCtx, cancel = context.WithCancel(ctx)
+		var stop context.CancelFunc
+		runCtx, stop = context.WithTimeout(runCtx, opts.Timeout)
+		defer stop()
 	}
 	r.mu.Lock()
 	r.cancels[runID] = cancel
+	if r.stopping { // Drain already canceled the others
+		cancel(ErrShuttingDown)
+	}
 	r.mu.Unlock()
 	defer func() {
-		cancel()
+		cancel(nil)
 		r.mu.Lock()
 		delete(r.cancels, runID)
 		r.mu.Unlock()
@@ -253,7 +372,7 @@ func (r *Runner) Cancel(runID string) bool {
 	defer r.mu.Unlock()
 	c, ok := r.cancels[runID]
 	if ok {
-		c()
+		c(nil)
 	}
 	return ok
 }
@@ -421,6 +540,12 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 	}
 
 	if ctx.Err() != nil {
+		if errors.Is(context.Cause(ctx), ErrShuttingDown) {
+			fmt.Fprintf(logW, "[%s] tidebot is quitting — run stopped\n", time.Now().Format("15:04:05"))
+			result.Status = "canceled"
+			result.ErrorMessage = db.RunStoppedOnQuitMsg
+			return result, ErrShuttingDown
+		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			result.Status = "timeout"
 			result.ErrorMessage = "run timed out"

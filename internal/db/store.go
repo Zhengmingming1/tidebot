@@ -341,6 +341,11 @@ func (s *Store) CountActiveRuns(ctx context.Context) (int, error) {
 // The "interrupted:" prefix is stable; the WebUI and notifications localize it.
 const RunInterruptedMsg = "interrupted: tidebot stopped before this run finished"
 
+// RunStoppedOnQuitMsg is the error_message of runs the core canceled itself while
+// quitting (desktop Quit, SIGTERM) after the grace period. Same stable
+// "interrupted:" prefix; the WebUI matches "interrupted: quit" for its own text.
+const RunStoppedOnQuitMsg = "interrupted: quit: tidebot was quitting and stopped this run"
+
 // InterruptedRun is a run a previous core left queued/running.
 type InterruptedRun struct {
 	ID, TaskID, StartedAt string

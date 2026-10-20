@@ -3,6 +3,71 @@
 One small round a day: what shipped, what we learned (and from which project),
 and ideas for later. Releases are cut weekly; these entries feed the notes.
 
+## 2026-10-20
+
+**Done**
+
+- **Quitting no longer abandons running runs.** Desktop Quit, Ctrl+C and SIGTERM
+  (systemd, Docker, logout) used to end the process with runs still going. Each run
+  stayed "running" until the next start closed it as interrupted, with $0 spend, and
+  Claude Code's process group could outlive the core. Now quitting stops the
+  scheduler, refuses new runs (retries, webhooks, buttons) and releases runs still
+  waiting for a slot. Running runs get `shutdown_grace` (default 5s,
+  `TIDEBOT_SHUTDOWN_GRACE`) to finish on their own. Anything still going after that is
+  stopped: its process tree is killed, the row is closed as `canceled` with the
+  tokens used so far, and the run log ends with "tidebot is quitting — run stopped".
+  The final write gets at most 3s, so quitting always takes under ~8s, which stays
+  inside Docker's 10s stop timeout. Run detail shows the reason in your language:
+  「已停止：tidebot 退出时这次运行还没结束…」 (`Runner.Drain`, `App.drainRuns`).
+- A run stopped this way is not a failure. There's no "run failed" notice, no retry,
+  and it doesn't count toward the circuit breaker (before, three quits in a row could
+  pause a task).
+- **agentd:** a second Ctrl+C / SIGTERM quits right away, and the log says so.
+  A blocking `agentctl tasks run` is no longer canceled the moment the signal arrives.
+  IPC stays up while runs drain, so a second core can't start and "recover" runs that
+  are still writing.
+- **Desktop on macOS:** Wails ends the process inside `[NSApp terminate:]`, so
+  nothing after `app.Run()` ever ran on Mac: no core shutdown and no relaunch after a
+  self-update. Core shutdown (and the relaunch) now runs from `PostShutdown`, which
+  fires on all three platforms after the window, tray and single-instance lock are
+  gone. It's guarded so it only runs once.
+- WebUI shutdown is bounded at 2s. An open live-log stream (SSE) never goes idle, and
+  before this `http.Server.Shutdown` waited on it with no deadline.
+
+**Learned**
+
+- n8n `packages/cli/src/active-executions.ts`: `shutdown()` first disables
+  concurrency control "so that throttled executions cannot resume during shutdown",
+  then waits for active executions. `cancelRunningExecutions()` /
+  `recordAsCancelled()` record the cancel under a write deadline "so a stalling
+  database cannot hold up shutdown". `Runner.Drain` follows the same shape: release
+  the queue → grace → cancel → bounded write.
+- n8n `packages/cli/src/commands/base-command.ts` `onTerminationSignal()`: a
+  force-shutdown timer (`gracefulShutdownTimeoutInS`) and "Already shutting down" on a
+  repeat signal. `start.ts` `stopProcess()` stops triggers before
+  `ActiveExecutions.shutdown()`. We use Go's `signal.NotifyContext` stop func, which
+  restores the default handler so a second signal kills the process.
+- Uptime Kuma `server/server.js` `shutdownFunction()`: stop the server, stop each
+  monitor, then close the database. It runs under `http-graceful-shutdown` with a 30s
+  timeout and `forceExit`. Same order as ours: scheduler → runs → WebUI → IPC → DB.
+- Wails v3 beta.30 `pkg/application/application_darwin_delegate.m`
+  (`applicationShouldTerminate` returns `NSTerminateNow` after `cleanup()`) and
+  `application_options.go` (`PostShutdown`: "on platforms where the Run() method does
+  not return"). That's why the Mac path never reached the code after `Run()`.
+- Reproduce: `scripts/demo-webui.sh`, restart agentd with
+  `TIDEBOT_MOCK_STEPS=60 TIDEBOT_SHUTDOWN_GRACE=2s`, start a task, open its live log,
+  `kill -TERM`. It exits in ~2.6s with the row `canceled` and no orphaned children.
+
+**Ideas for later**
+
+1. Tray Quit while runs are going: show "退出并停止 2 个运行？" via Wails `ShouldQuit`,
+   or put the count in the menu item label.
+2. Save partial token usage during a run, every N requests (still open). Quit now
+   records usage, but a crash or power loss still records $0.
+3. Optional "rerun runs stopped by quit/crash on next start" per task, off by default.
+4. Docker/compose docs: `stop_grace_period` when raising `shutdown_grace` above 5s.
+5. Favicon badge; refresh README screenshots at the Friday release (carried over).
+
 ## 2026-10-19
 
 **Done**

@@ -415,6 +415,7 @@
   "rd.details": "详情",
   "rd.error": "错误",
   "rd.err_interrupted": "已中断：运行还没结束 tidebot 就退出了（崩溃、强制退出或断电）。如仍需要结果，请重跑。",
+  "rd.err_quit": "已停止：tidebot 退出时这次运行还没结束。已用的 token 已计入花费，如仍需要结果，请重跑。",
   "rd.finished": "已结束",
   "rd.idle": "已暂停（空闲）",
   "rd.in_out": "输入 {i} · 输出 {o}",

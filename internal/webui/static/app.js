@@ -313,7 +313,11 @@
     return '<span class="pill ' + m[0] + '">' + esc(m[1]) + "</span>";
   }
   // Stable error codes from the core, shown in the viewer's language; anything else as-is.
-  function runErr(msg) { return /^interrupted:/.test(msg || "") ? T("rd.err_interrupted") : msg; }
+  function runErr(msg) {
+    msg = msg || "";
+    if (/^interrupted: quit/.test(msg)) return T("rd.err_quit");
+    return /^interrupted:/.test(msg) ? T("rd.err_interrupted") : msg;
+  }
   function taskPill(st) {
     var m = { active: ["ok", T("task.active")], paused: ["warn", T("task.paused")], archived: ["", T("task.archived")] }[st] || ["", st];
     return '<span class="pill ' + m[0] + '">' + esc(m[1]) + "</span>";

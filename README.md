@@ -191,6 +191,7 @@ default_provider: kimi-coding
 max_concurrency: 2
 timezone: Asia/Shanghai      # 显示时间和每日预算重置都用它，不填就跟随系统
 webui_addr: 127.0.0.1:7420
+shutdown_grace: 5s           # 退出时等正在跑的任务收尾多久，超时就停下并记为「已停止」
 ```
 
 任务、技能、按钮、插件和触发器现在都能在 WebUI 里建：技能直接拖 zip 或文件夹进去，任务的定时可以选「每天 / 工作日 / 每周」，会列出接下来几次在本地时区的运行时间。下面的命令行照样能用。

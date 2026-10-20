@@ -415,6 +415,7 @@
   "rd.details": "Details",
   "rd.error": "Error",
   "rd.err_interrupted": "Interrupted: tidebot quit before this run finished (crash, force quit or power loss). Rerun it if you still need the result.",
+  "rd.err_quit": "Stopped: tidebot was quitting while this run was still going. Tokens used so far are counted in spend. Rerun it if you still need the result.",
   "rd.finished": "Finished",
   "rd.idle": "Paused (idle)",
   "rd.in_out": "{i} in · {o} out",

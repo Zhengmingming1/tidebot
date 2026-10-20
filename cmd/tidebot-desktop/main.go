@@ -105,6 +105,10 @@ func main() {
 		Services:    []application.Service{application.NewService(sh.notifier)},
 		Mac:         application.MacOptions{ActivationPolicy: application.ActivationPolicyAccessory, ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Linux:       application.LinuxOptions{ProgramName: "tidebot"},
+		// macOS ends the process inside [NSApp terminate:], so Run() never returns
+		// there and code after it doesn't run. PostShutdown runs on every platform
+		// after the windows, tray and single-instance lock are gone.
+		PostShutdown: func() { sh.shutdownCore() },
 		Assets: application.AssetOptions{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if h := handler.Load(); h != nil {
 				(*h).ServeHTTP(w, r)
@@ -164,9 +168,17 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	restartAfterQuit := false
-	core.SetRestartFunc(func() { restartAfterQuit = true; sh.app.Quit() })
-	defer d.Stop()
+	var restartAfterQuit atomic.Bool
+	core.SetRestartFunc(func() { restartAfterQuit.Store(true); sh.app.Quit() })
+	sh.setShutdown(func() {
+		// Running runs get a few seconds to finish, then are recorded as stopped.
+		d.Stop()
+		core.Close()
+		if restartAfterQuit.Load() {
+			relaunchSelf()
+		}
+	})
+	defer sh.shutdownCore()
 
 	startURL := "/"
 	if *bridge == "loopback" {
@@ -209,11 +221,7 @@ func main() {
 	if err := sh.app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
-	if restartAfterQuit {
-		d.Stop()
-		core.Close()
-		relaunchSelf()
-	}
+	sh.shutdownCore() // no-op if PostShutdown already ran
 }
 
 // relaunchSelf starts whatever is now installed at our path (for an AppImage,
@@ -255,12 +263,32 @@ type shell struct {
 	hintOnce sync.Once
 	mu       sync.Mutex
 
+	stopMu     sync.Mutex // own lock: Quit can fire while s.mu is held (menu rebuild)
+	stopCore   func()     // set once the core is up; run by shutdownCore
 	daemonErrs <-chan error
 	daemonDead error
 	status     app.TrayStatus
 	lastSig    string
 	lastLang   string
 	lastIcon   string
+}
+
+// setShutdown installs the one-time core shutdown (drain runs, close, maybe relaunch).
+func (s *shell) setShutdown(f func()) {
+	s.stopMu.Lock()
+	s.stopCore = f
+	s.stopMu.Unlock()
+}
+
+// shutdownCore runs the installed shutdown once; later calls do nothing.
+func (s *shell) shutdownCore() {
+	s.stopMu.Lock()
+	f := s.stopCore
+	s.stopCore = nil
+	s.stopMu.Unlock()
+	if f != nil {
+		f()
+	}
 }
 
 func (s *shell) open() {

@@ -193,6 +193,7 @@ default_provider: kimi-coding
 max_concurrency: 2
 timezone: Asia/Shanghai      # used for displayed times and the daily budget reset; empty = system
 webui_addr: 127.0.0.1:7420
+shutdown_grace: 5s           # how long quitting waits for running runs before stopping them
 ```
 
 Tasks, skills, buttons, plugins and triggers can all be created in the WebUI now. Drop a skill zip or folder on the import dialog; schedules come with presets (daily, weekdays, weekly) and show the next few runs in your timezone. The CLI below still works.
