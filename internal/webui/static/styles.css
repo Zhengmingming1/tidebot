@@ -1415,3 +1415,30 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .table td.run-prov { max-width: 180px; }
 .table td.run-prov small { color: var(--text-3); }
 @media (max-width: 1279px) { .table td:first-child .cell-main { max-width: 280px; } .table td.run-prov { max-width: 140px; } }
+
+/* ---- Log viewer (2026-10-20): one-row toolbar, transcript-like rows ---- */
+.lv-bar { flex-wrap: nowrap; gap: 4px; }
+.lv-bar .lv-f { flex: none; }
+.lv-f button { padding: 0 8px; }
+.lv-bar .search-in.sm { min-width: 120px; flex: 0 1 200px; }
+.lv-bar #lv-pos { min-width: 0; font-size: 12px; }
+.lv-sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; flex: none; }
+.lv-bar > [data-tip]:last-child:hover::after, .lv-bar > [data-tip]:last-child:focus-visible::after { left: auto; right: -4px; transform: none; }
+.log { line-height: 20px; }
+.log .ln { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: 12px; padding: 1px 8px 1px 6px; border-left: 2px solid transparent; }
+.log .ln .ts { margin: 0; font-variant-numeric: tabular-nums; }
+.log .ln .ts.same { color: transparent; }
+.log .ln.k-tool { border-left-color: #a58ae0; }
+.log .ln.k-err { border-left-color: var(--danger); background: #fdf2f1; }
+.log .ln.k-text .tx { color: var(--text); }
+.log .ln.k-tool .tx { display: flex; align-items: baseline; min-width: 0; color: var(--text-2); }
+.log .tool-chip { flex: none; font: 500 12px/18px var(--font); padding: 0 6px; border-radius: 4px; background: #f1ebfb; color: #6a3fbf; margin-right: 8px; }
+.log .args-pre { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.log .ln.fold::after { content: none; }
+.log .ln.fold .tx::after { content: "▸"; flex: none; margin-left: 8px; color: var(--text-3); }
+.log .ln.fold:hover { background: var(--surface-2, #f4f1ea); }
+.log .ln.fold.open .tx { display: block; }
+.log .ln.fold.open .tx::after { content: none; }
+.log .ln.fold.open .args-pre { display: none; }
+.log .ln.fold.open .args { display: block; margin: 2px 0 4px; padding: 6px 8px; border-radius: 4px; background: var(--surface); border: 1px solid var(--border); white-space: pre-wrap; color: var(--text-2); }
+.log .ln.fold.open::after { content: none; }

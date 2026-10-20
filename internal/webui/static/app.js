@@ -103,6 +103,9 @@
     image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     download: '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+    chevUp: '<path d="m18 15-6-6-6 6"/>',
+    chevDown: '<path d="m6 9 6 6 6-6"/>',
+    maximize: '<path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/>',
     copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
     star: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
     flag: '<path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/>',
@@ -2591,19 +2594,29 @@
     var lines = [], view = [], filter = "all", q = "", matches = [], cur = -1, start = 0, unseen = 0, pending = false, lastId = "", ended = false, retry = 0;
     host.innerHTML = '<div class="lv-bar"><div class="filters lv-f">' + KINDS.map(function (k) { return '<button data-k="' + k + '" class="' + (k === "all" ? "active" : "") + '">' + esc(T("lv.k_" + k)) + ' <span class="cnt" data-c="' + k + '">0</span></button>'; }).join("") + "</div>" +
       '<span class="grow"></span><label class="search-in sm">' + ic("search", "sm") + '<input id="lv-q" type="search" maxlength="200" placeholder="' + esc(T("lv.search")) + '" aria-label="' + esc(T("lv.search")) + '"></label><span class="muted num" id="lv-pos"></span>' +
-      '<button class="icon-btn" id="lv-prev" aria-label="' + esc(T("lv.prev")) + '" title="' + esc(T("lv.prev")) + ' (N)">↑</button><button class="icon-btn" id="lv-next" aria-label="' + esc(T("lv.next")) + '" title="' + esc(T("lv.next")) + ' (n)">↓</button>' +
-      '<button class="btn sm" id="lv-copy">' + esc(T("lv.copy")) + '</button><button class="btn sm" id="lv-dl">' + esc(T("lv.download")) + '</button><button class="icon-btn" id="lv-full" aria-label="' + esc(T("lv.full")) + '" title="' + esc(T("lv.full")) + '">⤢</button></div>' +
+      '<button class="icon-btn sm" id="lv-prev" aria-label="' + esc(T("lv.prev")) + '" data-tip="' + esc(T("lv.prev")) + ' · N">' + ic("chevUp", "sm") + '</button><button class="icon-btn sm" id="lv-next" aria-label="' + esc(T("lv.next")) + '" data-tip="' + esc(T("lv.next")) + ' · n">' + ic("chevDown", "sm") + '</button><span class="lv-sep"></span>' +
+      '<button class="icon-btn sm" id="lv-copy" aria-label="' + esc(T("lv.copy")) + '" data-tip="' + esc(T("lv.copy")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn sm" id="lv-dl" aria-label="' + esc(T("lv.download")) + '" data-tip="' + esc(T("lv.download")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" id="lv-full" aria-label="' + esc(T("lv.full")) + '" data-tip="' + esc(T("lv.full")) + '">' + ic("maximize", "sm") + "</button></div>" +
       '<div class="lv-wrap"><div class="log" id="log" aria-live="off" tabindex="0"><button class="lv-more hidden" id="lv-more"></button><div id="lv-rows"></div></div><button class="lv-new hidden" id="lv-new"></button></div>';
     var log = $("#log", host), rows = $("#lv-rows", host), more = $("#lv-more", host), newBtn = $("#lv-new", host);
     var atBottom = function () { return log.scrollTop + log.clientHeight >= log.scrollHeight - 24; };
+    // Rows read like a transcript: the "assistant:" / "user:" prefixes become the left
+    // marker, a timestamp repeated from the line above is dimmed out, and a tool call shows
+    // its tool as a chip plus a one-line preview of the input (click for the full input).
+    var lastTs = "";
+    var toolPreview = function (raw) {
+      try { var o = JSON.parse(raw); if (o && typeof o === "object") return String(o.command || o.file_path || o.path || o.pattern || o.url || o.query || o.description || raw); } catch (e) {}
+      return raw;
+    };
     var rowHtml = function (l, idx) {
-      var body = l.text, extra = "";
+      var body = l.text, extra = "", tool = "";
       if (l.kind === "tool") {
         var mm = /^assistant: tool (\S+)\s?(.*)$/.exec(body) || [null, "", body];
-        body = "tool " + mm[1]; extra = mm[2];
-      }
-      return '<div class="ln k-' + l.kind + (idx === matches[cur] ? " cur" : "") + (extra ? " fold" : "") + '" data-i="' + idx + '">' + (l.ts ? '<span class="ts">' + esc(l.ts) + "</span>" : "") +
-        '<span class="tx">' + hlText(body, q) + (extra ? '<span class="args">' + hlText(extra, q) + "</span>" : "") + "</span></div>";
+        tool = mm[1]; extra = mm[2]; body = "";
+      } else if (l.kind === "text") body = body.replace(/^assistant: /, "");
+      else if (l.kind === "result") body = "↳ " + body.replace(/^user: /, "");
+      var same = l.ts && l.ts === lastTs; lastTs = l.ts || lastTs;
+      return '<div class="ln k-' + l.kind + (idx === matches[cur] ? " cur" : "") + (extra ? " fold" : "") + '" data-i="' + idx + '">' + '<span class="ts' + (same ? " same" : "") + '">' + esc(l.ts || "") + "</span>" +
+        '<span class="tx">' + (tool ? '<span class="tool-chip">' + esc(tool) + "</span>" + (extra ? '<span class="args-pre">' + hlText(toolPreview(extra), q) + '</span><span class="args">' + hlText(extra, q) + "</span>" : "") : hlText(body, q)) + "</span></div>";
     };
     var counts = function () {
       var c = { all: lines.length, text: 0, tool: 0, result: 0, sys: 0, err: 0 };
@@ -2621,6 +2634,7 @@
       computeMatches();
       if (start > Math.max(0, view.length - LOG_WINDOW)) start = Math.max(0, view.length - LOG_WINDOW);
       var end = Math.min(view.length, start + LOG_WINDOW);
+      lastTs = "";
       rows.innerHTML = view.slice(start, end).map(function (li) { return rowHtml(lines[li], li); }).join("") || '<div class="muted ln">' + esc(T(lines.length ? "lv.empty_filter" : "lv.waiting")) + "</div>";
       more.classList.toggle("hidden", start === 0);
       more.textContent = T("lv.earlier", { n: Math.min(start, LOG_WINDOW) });
