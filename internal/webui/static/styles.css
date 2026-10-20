@@ -1359,3 +1359,5 @@ tr:hover .row-act, .row-act:focus-visible, tr:focus-within .row-act { opacity: 1
 /* relative times ("5 min ago") with the full local date in the tooltip; app.js keeps the text current */
 time.ago { font-variant-numeric: tabular-nums; }
 time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
+/* Tooltip on the last control of a card header sits at the right edge: open it leftwards. */
+.card-head > [data-tip]:last-child:hover::after, .card-head > [data-tip]:last-child:focus-visible::after { left: auto; right: -4px; transform: none; }
