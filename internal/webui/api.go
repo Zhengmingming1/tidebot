@@ -725,6 +725,9 @@ type skillDTO struct {
 	UpdatedAt string `json:"updated_at"`
 	Files     int    `json:"files"`
 	UsedBy    int    `json:"used_by"`
+	// Description is SKILL.md's frontmatter description (first 200 characters); the
+	// button form uses it to prefill a button's subtitle.
+	Description string `json:"description,omitempty"`
 }
 
 func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
@@ -741,6 +744,7 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 			d.VersionNo = sk.CurrentVersion.VersionNo
 			d.UpdatedAt = sk.CurrentVersion.CreatedAt
 			_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM version_files WHERE version_id=?`, d.VersionID).Scan(&d.Files)
+			d.Description = s.skillDescription(r.Context(), d.VersionID)
 		}
 		out = append(out, d)
 	}
