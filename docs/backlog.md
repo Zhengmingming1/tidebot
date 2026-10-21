@@ -223,3 +223,66 @@ the infer endpoints are POST + CSRF so prompts stay out of URLs and logs.
    values per plugin.
 3. Button form: suggest an icon from the label and target ("备份" → database, "报告" → doc).
 4. Provider auto-fill: offer "check models" right after a paste once the key is saved.
+
+## 2026-10-21 (10:00): storage settings — see what the data folder takes and clean it from the WebUI
+
+Category: **resource usage** (disk). The last two rounds were reliability (graceful quit)
+and UI/auto-fill, so this one goes to resources.
+
+**Done**
+
+- **Settings › Data › Storage card.** A stacked bar plus legend shows how much space run
+  logs, artifacts, the database (incl. WAL) and backups take. File counts are in the
+  hover tooltips, and the total sits in the card header. Hovering the ⓘ next to the
+  total shows what lives there and the last cleanup (automatic or manual, time + amount
+  freed), so none of that meta info sits inline.
+- **Retention is now a setting instead of a hard-coded constant.** You can set how long
+  to keep run logs and artifacts (7 days up to 365, or forever), how many of each task's
+  latest runs to always keep, and a size cap (1–50 GB or no cap). All four are dropdowns
+  with no typing, and they autosave with 已保存 ✓. The 6-hourly background job and
+  `retention.run` use the stored policy. A corrupt or out-of-range stored value falls back
+  to the defaults (30 d / 90 d / 20 / 10 GB) rather than deleting more than expected.
+- **立即清理 / Clean up now with a preview.** The row says what the current rules would
+  delete ("可删除 31 个文件，释放 28.3 MB"), and the preview follows any dropdown change
+  immediately. The button is disabled when there's nothing to delete. The confirm dialog
+  repeats the numbers and what's kept (important runs, the latest N per task, run history
+  and spend).
+- **压缩数据库 / Shrink database.** `VACUUM` + `wal_checkpoint(TRUNCATE)`. The button only
+  enables when at least 1 MB of SQLite free pages (`freelist_count × page_size`) can be
+  returned to the disk. Otherwise the row says the database is already compact.
+- **Fix:** the size cap could delete the log of a run that was **still running**. Queued
+  and running runs are now protected like important ones. Also `LogDays/ArtifactDays = 0`
+  now means "forever" (before, 0 would have deleted everything on the next tick).
+- The command palette has "设置 › 存储空间", which jumps to `#/settings/data/storage`.
+- New RPCs (WebUI via `/api/rpc/`, CSRF + session like the rest): `storage.get`,
+  `storage.settings` (partial update, range-checked), `storage.cleanup`, `storage.vacuum`.
+  Responses carry sizes and counts only, never paths or file names.
+- Tests: `internal/app/storage_test.go` covers the preview not touching files, running
+  runs being protected, forever=0, partial updates and validation, the corrupt-setting
+  fallback, the auto tick using the stored policy and recording only when it freed
+  something, and VACUUM returning space.
+
+**Inspiration**
+
+- Uptime Kuma `src/components/settings/MonitorHistory.vue`: "keep data for N days, 0 =
+  infinite", with the SQLite size shown right on the "Shrink Database" (VACUUM) button.
+  `server/jobs/clear-old-data.js` re-reads the setting on every run, falls back to the
+  default when it can't be parsed, and treats < 1 as "don't delete". tidebot uses the
+  same semantics. What tidebot adds: per-kind usage, a dry-run preview before deleting,
+  and the cleanup record in a tooltip.
+
+**Learned**
+
+- In WAL mode a `VACUUM` alone doesn't shrink the files on disk until a checkpoint runs.
+  `PRAGMA wal_checkpoint(TRUNCATE)` right after makes the saving visible immediately.
+- Splitting retention into plan + apply made the preview free. The same plan drives
+  the button state, the confirm text and the actual delete, so they can't disagree.
+
+**Ideas for later**
+
+1. Per-task retention override (e.g. keep a noisy "every 5 min" task's logs for 3 days only).
+2. Show the biggest tasks by log size in the storage tooltip/drawer so users know which task
+   to tune.
+3. Warn (notification) when free disk space on the data volume drops under ~1 GB, with a
+   link to this card.
+4. Let backups have their own "keep last N manual backups" setting next to the auto ones.

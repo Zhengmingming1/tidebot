@@ -47,29 +47,96 @@ type runFile struct {
 }
 
 // ApplyRetention deletes old transcripts/artifacts. Run metadata rows stay in the DB.
+// A zero LogDays/ArtifactDays keeps that kind forever; a zero MaxTotalBytes means no cap.
 func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Time) (RetentionReport, error) {
-	var rep RetentionReport
+	plan, err := a.planRetention(ctx, p, now)
+	if err != nil {
+		return RetentionReport{}, err
+	}
+	rep := RetentionReport{TotalBytes: plan.TotalBytes}
+	for _, f := range plan.del {
+		if os.RemoveAll(f.path) == nil {
+			rep.DeletedFiles++
+			rep.FreedBytes += f.size
+		} else {
+			rep.TotalBytes += f.size
+		}
+	}
+	return rep, nil
+}
+
+type retentionPlan struct {
+	del        []runFile
+	FreeBytes  int64
+	TotalBytes int64 // logs+artifacts left after the plan runs
+}
+
+// planRetention decides what ApplyRetention would delete, without touching anything.
+// Important runs, the newest KeepPerTask runs of each task and runs still queued or
+// running are never selected.
+func (a *App) planRetention(ctx context.Context, p RetentionPolicy, now time.Time) (retentionPlan, error) {
+	var plan retentionPlan
 	protected := map[string]bool{}
-	rows, err := a.DB.QueryContext(ctx, `SELECT run_id FROM run_flags WHERE important=1`)
-	if err != nil {
-		return rep, err
+	addIDs := func(q string, args ...any) error {
+		rows, err := a.DB.QueryContext(ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r string
+			if rows.Scan(&r) == nil {
+				protected[r] = true
+			}
+		}
+		return rows.Err()
 	}
-	for rows.Next() {
-		var r string
-		_ = rows.Scan(&r)
-		protected[r] = true
+	if err := addIDs(`SELECT run_id FROM run_flags WHERE important=1`); err != nil {
+		return plan, err
 	}
-	rows.Close()
-	rows, err = a.DB.QueryContext(ctx, `SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY COALESCE(task_id,'') ORDER BY created_at DESC) AS rn FROM runs) WHERE rn <= ?`, p.KeepPerTask)
-	if err != nil {
-		return rep, err
+	if err := addIDs(`SELECT id FROM runs WHERE status IN ('queued','running')`); err != nil {
+		return plan, err
 	}
-	for rows.Next() {
-		var r string
-		_ = rows.Scan(&r)
-		protected[r] = true
+	if p.KeepPerTask > 0 {
+		if err := addIDs(`SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY COALESCE(task_id,'') ORDER BY created_at DESC) AS rn FROM runs) WHERE rn <= ?`, p.KeepPerTask); err != nil {
+			return plan, err
+		}
 	}
-	rows.Close()
+	files := a.runFiles()
+	var kept []runFile
+	for _, f := range files {
+		days := p.LogDays
+		if f.kind == "artifact" {
+			days = p.ArtifactDays
+		}
+		if !protected[f.runID] && days > 0 && now.Sub(f.mod) > time.Duration(days)*24*time.Hour {
+			plan.del = append(plan.del, f)
+			plan.FreeBytes += f.size
+			continue
+		}
+		kept = append(kept, f)
+		plan.TotalBytes += f.size
+	}
+	if p.MaxTotalBytes > 0 && plan.TotalBytes > p.MaxTotalBytes {
+		sort.Slice(kept, func(i, j int) bool { return kept[i].mod.Before(kept[j].mod) })
+		for _, f := range kept {
+			if plan.TotalBytes <= p.MaxTotalBytes {
+				break
+			}
+			if protected[f.runID] {
+				continue
+			}
+			plan.del = append(plan.del, f)
+			plan.FreeBytes += f.size
+			plan.TotalBytes -= f.size
+		}
+	}
+	return plan, nil
+}
+
+// runFiles lists run transcripts (<data>/runs/<id>.log) and artifact folders
+// (<data>/artifacts/<id>/) with their size and newest modification time.
+func (a *App) runFiles() []runFile {
 	var files []runFile
 	logDir := filepath.Join(a.Cfg.DataDir, "runs")
 	if ents, err := os.ReadDir(logDir); err == nil {
@@ -82,64 +149,31 @@ func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Ti
 	artDir := filepath.Join(a.Cfg.DataDir, "artifacts")
 	if ents, err := os.ReadDir(artDir); err == nil {
 		for _, e := range ents {
-			var size int64
-			var mod time.Time
-			_ = filepath.Walk(filepath.Join(artDir, e.Name()), func(_ string, fi os.FileInfo, err error) error {
-				if err == nil && fi.Mode().IsRegular() {
-					size += fi.Size()
-					if fi.ModTime().After(mod) {
-						mod = fi.ModTime()
-					}
-				}
-				return nil
-			})
+			size, mod := dirSize(filepath.Join(artDir, e.Name()))
 			files = append(files, runFile{runID: e.Name(), path: filepath.Join(artDir, e.Name()), size: size, mod: mod, kind: "artifact"})
 		}
 	}
-	del := func(f runFile) {
-		if os.RemoveAll(f.path) == nil {
-			rep.DeletedFiles++
-			rep.FreedBytes += f.size
-		}
-	}
-	var kept []runFile
-	for _, f := range files {
-		days := p.LogDays
-		if f.kind == "artifact" {
-			days = p.ArtifactDays
-		}
-		if !protected[f.runID] && now.Sub(f.mod) > time.Duration(days)*24*time.Hour {
-			del(f)
-			continue
-		}
-		kept = append(kept, f)
-		rep.TotalBytes += f.size
-	}
-	if p.MaxTotalBytes > 0 && rep.TotalBytes > p.MaxTotalBytes {
-		sort.Slice(kept, func(i, j int) bool { return kept[i].mod.Before(kept[j].mod) })
-		for _, f := range kept {
-			if rep.TotalBytes <= p.MaxTotalBytes {
-				break
+	return files
+}
+
+func dirSize(root string) (size int64, mod time.Time) {
+	_ = filepath.Walk(root, func(_ string, fi os.FileInfo, err error) error {
+		if err == nil && fi.Mode().IsRegular() {
+			size += fi.Size()
+			if fi.ModTime().After(mod) {
+				mod = fi.ModTime()
 			}
-			if protected[f.runID] {
-				continue
-			}
-			del(f)
-			rep.TotalBytes -= f.size
 		}
-	}
-	return rep, nil
+		return nil
+	})
+	return size, mod
 }
 
 func (a *App) runRetention(ctx context.Context) {
 	t := time.NewTicker(6 * time.Hour)
 	defer t.Stop()
 	for {
-		if rep, err := a.ApplyRetention(ctx, DefaultRetention, time.Now()); err != nil {
-			a.Log.Warn("retention", "error", err)
-		} else if rep.DeletedFiles > 0 {
-			a.Log.Info("retention", "deleted", rep.DeletedFiles, "freed_bytes", rep.FreedBytes)
-		}
+		a.retentionTick(ctx, time.Now())
 		select {
 		case <-ctx.Done():
 			return
@@ -364,7 +398,7 @@ func (a *App) systemRPC() map[string]rpcFunc {
 		},
 		"backup.list": func(ctx context.Context, _ json.RawMessage) (any, error) { return a.ListBackups(ctx) },
 		"retention.run": func(ctx context.Context, _ json.RawMessage) (any, error) {
-			return a.ApplyRetention(ctx, DefaultRetention, time.Now())
+			return a.ApplyRetention(ctx, a.RetentionSettings(ctx), time.Now())
 		},
 		"runs.mark_important": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			p, _ := decode[struct {
