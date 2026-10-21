@@ -1,6 +1,5 @@
 ---
 title: "基于 Claude Code 的轻量 Agent 工作台：功能调研与可行性研究报告"
-author: "为 明明 准备 · Grok Bot 调研"
 date: "2026-10-16"
 lang: zh-CN
 ---

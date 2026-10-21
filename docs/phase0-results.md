@@ -128,7 +128,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/agentctl ./cmd/agentctl
 
 ### 截图（未入库）
 
-保存在 `/workspace/tidebot-shots/*.png`（login / home / tasks / task-detail / skills / runs / spend / settings）。
+截图在本地生成、未入库（login / home / tasks / task-detail / skills / runs / spend / settings）。
 
 ## 桌面壳（cmd/tidebot-desktop，Wails v3.0.0-beta.30）
 

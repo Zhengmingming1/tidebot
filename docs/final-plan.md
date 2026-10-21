@@ -1,6 +1,5 @@
 ---
 title: "基于 Claude Code 的轻量 Agent 工作台：最终方案（v3）"
-author: "为 明明 准备 · Grok Bot"
 date: "2026-10-16"
 lang: zh-CN
 ---
@@ -59,7 +58,7 @@ lang: zh-CN
 ## 2. 产品定位与范围
 
 - **是什么**：Claude Code 的"长期任务调度器 + 版本化资产管理器 + 触发器面板 + 技能持续改进器"。**不另造 Agent**（与 BaoCode 的思路一致），Claude Code 就是 Agent。
-- **用户**：单个用户（明明本人或任何自用的开发者），在自己的电脑或服务器上运行，使用自己的 Anthropic API Key、在官方 Claude Code 中完成的订阅登录，或 Bedrock/Vertex/Foundry 凭据。
+- **用户**：单个用户（作者本人或任何自用的开发者），在自己的电脑或服务器上运行，使用自己的 Anthropic API Key、在官方 Claude Code 中完成的订阅登录，或 Bedrock/Vertex/Foundry 凭据。
 - **形态**：桌面版（macOS / Windows / Linux）与无头服务器版（Linux，systemd 或 Docker），同一个核心，同一套 Web UI。
 - **明确不做**：多用户/团队共享；代用户购买或中转 Claude 用量；修改或重新打包 Claude Code 二进制；自研模型协议转换（如需国产模型降本，对接 magpie 一类网关）。
 
