@@ -350,3 +350,62 @@ disk under the data folder is about to fill up, on all three platforms.
    skipped with a clear reason, so they don't fail half-way and corrupt artifacts.
 3. A desktop-only "open data folder" button on the storage card (Finder/Explorer/xdg-open).
 4. Show the biggest tasks by log size in the storage tooltip (from the 10:00 run's list).
+
+## 2026-10-21: deferred ideas from the 10-20 UI round
+
+All four "ideas for later" from the 10-20 round are done, plus a desktop download check.
+
+**Done**
+
+- **Budget suggestion.** The new-task form fills a *daily* budget with the "自动" tag. Basis,
+  in order: similar past runs on that provider (P90 × 1.5), any runs on that provider
+  (P75 × 1.5), or the catalog price of a typical run (×3, ×6 for heavy work like refactors).
+  Then × runs per day from the schedule. Subscription/free providers get "no cap". The
+  tooltip says which basis was used. Typing your own number stops the updates.
+- **Button icon and text.** A zh+en keyword map picks the icon from the label, then from the
+  target (日报/report → doc, 同步/sync → refresh, 部署/deploy → rocket, 邮件 → mail…). Picking a
+  task or skill fills the label and the first sentence of its prompt/description. Each stays
+  automatic until you touch it.
+- **Plugin prefill** (`internal/prefill`, `POST /api/plugins/prefill`). Email: SMTP/IMAP
+  from the address domain, then from MX for company domains (exmail, Feishu, Aliyun,
+  M365, Google Workspace…). WeCom/DingTalk: paste a webhook URL or just the key/token; the
+  type is detected and the token shown masked. RSS: a site URL is turned into its feed
+  (`<link rel=alternate>`, then common paths). Web monitor: a content selector guess.
+  Daily digest: timezone, a configured connector, site URLs → feeds. Fetches go through an
+  SSRF guard: private/loopback/link-local refused unless you click "仍要检测", proxy-aware,
+  redirects re-checked, 1 MB / 15 s caps.
+- **Provider paste.** After saving a new provider the drawer offers "检测全部模型". This also
+  fixed a crash: the drawer reopened through a stale closure and hit `preset.id` of null.
+- Trigger forms remember the last numbers/switches/choices per trigger kind (never URLs,
+  text or secrets). Inferred English names no longer end on "…into a".
+- **Desktop downloads.** Wails v3 installs no download handler. Under Xvfb, WebKitGTK saved
+  `<a download>` blobs silently into the download folder. WKWebView on macOS ignores them
+  without a delegate (not verified here). Exports, run logs and recovery codes now go through
+  the native Save dialog (`/api/desktop/save`, desktop only). Verified on Linux (WebKitGTK
+  2.54, Xvfb): the dialog, the bytes (with BOM), cancel. The new task, button and plugin
+  dialogs also worked in the webview.
+
+**Inspiration**
+
+- Thunderbird ISPDB (`thunderbird/autoconfig` `ispdb/qq.com.xml`, `163.com.xml`,
+  `googlemail.com.xml`): the domain → host/port/socketType table and the MX fallback idea.
+  Values re-checked against provider docs; no XML copied.
+- Miniflux `internal/reader/subscription/finder.go`: `<link>` types
+  (rss/atom/feed+json) first, then well-known paths (`atom.xml`, `rss.xml`, `feed.xml`…).
+- n8n `packages/nodes-base/credentials/Imap.credentials.ts` / `Smtp.credentials.ts`: the
+  host/port/secure/user field set the email form maps onto.
+
+**Learned**
+
+- The box resolves every host to 198.18.0.1 (fake-IP proxy), so the SSRF guard must not
+  treat 198.18.0.0/15 as private. When going through a proxy, check the *target* host.
+- Store budgets are daily, so a per-run estimate needs × runs/day from the cron.
+- Under Xvfb the Wails window takes about 10 s to paint; clicks before that are lost.
+
+**Ideas for later**
+
+1. Remember the plugin trigger memory server-side, so it works across browsers and the app.
+2. For company domains with no MX match, try Thunderbird's own autoconfig URL
+   (`autoconfig.<domain>/mail/config-v1.1.xml`) through the same SSRF guard.
+3. "Open folder" after a desktop save (reveal in Finder/Explorer/xdg-open).
+4. Verify the macOS/Windows save paths on real machines (CI only builds them).
