@@ -2200,35 +2200,62 @@
   // New-task auto-fill: as the instruction is typed, the server guesses a name and a schedule
   // (POST /api/tasks/infer). A field is only filled while the user hasn't edited it themselves.
   function wireTaskAutofill(root, f, se, skills) {
-    var lastName = "", timer = null, seq = 0, note = $("#af-note", root), pill = $("#af-name", root), filled = {};
+    var lastName = "", timer = null, seq = 0, note = $("#af-note", root), pill = $("#af-name", root), filled = {}, lastCron = "";
+    var bPill = $("#af-budget", root), lastBudget = "", budgetMine = false;
+    f.budget_usd.addEventListener("input", function (e) { if (e.isTrusted) { budgetMine = f.budget_usd.value !== lastBudget; bPill.classList.toggle("hidden", budgetMine); if (budgetMine) { delete filled.budget; paint(lastCron); } } });
+    var why = function (b) {
+      var m = function (v) { return money(v, b.currency); }, heavy = b.heavy ? T("af.b_heavy") : "";
+      if (b.basis === "similar") return T("af.b_similar", { n: b.runs, names: (b.similar || []).join("、"), p90: m(b.p90), max: m(b.max) });
+      if (b.basis === "provider") return T("af.b_provider", { n: b.runs, p90: m(b.p90), max: m(b.max) }) + heavy;
+      if (b.basis === "price") return T("af.b_price", { model: b.model || "—", est: m(b.estimate) }) + heavy;
+      if (b.basis === "subscription") return T("af.b_sub");
+      if (b.basis === "free") return T("af.b_free");
+      return "";
+    };
+    var whyAll = function (b) { return why(b) + (b.amount > 0 && b.per_day > 1 ? T("af.b_perday", { n: b.per_day, run: money(b.per_run, b.currency), amt: money(b.amount, b.currency) }) : ""); };
+    var setBudget = function (b) {
+      if (!b || b.basis === "none" || budgetMine) return;
+      var v = b.amount > 0 ? String(b.amount) : "";
+      bPill.setAttribute("data-tip", whyAll(b));
+      bPill.classList.remove("hidden"); filled.budget = b.amount > 0 ? money(b.amount, b.currency) : T("tf.no_cap");
+      if (f.budget_usd.value !== v) { f.budget_usd.value = v; f.budget_usd.classList.remove("af-flash"); void f.budget_usd.offsetWidth; f.budget_usd.classList.add("af-flash"); }
+      lastBudget = v;
+    };
+    var ask = function (delay) {
+      clearTimeout(timer);
+      var my = ++seq;
+      timer = setTimeout(function () {
+        var text = f.prompt.value;
+        apiRaw("/api/tasks/infer", { method: "POST", body: { prompt: text.trim().length >= 4 ? text : "", name: f.name.value.trim(), provider: f.provider.value, cron: se.touched() ? se.value() : "" } }).then(function (g) {
+          if (my !== seq || !g) return;
+          if (text.trim().length >= 4) {
+            setName(g.name);
+            if (g.cron && !se.touched() && se.value() !== g.cron) { se.set(g.cron); lastCron = g.cron; }
+            else if (g.cron && se.value() === g.cron) lastCron = g.cron;
+          }
+          setBudget(g.budget);
+          paint(lastCron);
+        }).catch(function () {});
+      }, delay);
+    };
     var nameMine = function () { var v = f.name.value.trim(); return v !== "" && v !== lastName; };
     var setName = function (v) { if (!v || nameMine()) return; f.name.value = v; lastName = v; pill.classList.remove("hidden"); filled.name = 1; };
     var paint = function (cron) {
       var bits = [];
       if (filled.name) bits.push(T("af.f_name"));
       if (cron) bits.push(T("af.f_sched", { s: cronHuman(cron) }));
+      if (filled.budget) bits.push(T("af.f_budget", { s: filled.budget }));
       note.classList.toggle("on", bits.length > 0);
       $("span", note).textContent = bits.length ? T("af.filled", { list: bits.join(T("af.sep")) }) : T("af.hint");
     };
-    f.name.addEventListener("input", function (e) { if (e.isTrusted && f.name.value.trim() !== lastName) { pill.classList.add("hidden"); delete filled.name; paint(""); } });
-    f.prompt.addEventListener("input", function () {
-      clearTimeout(timer);
-      var my = ++seq, text = f.prompt.value;
-      if (text.trim().length < 4) return;
-      timer = setTimeout(function () {
-        apiRaw("/api/tasks/infer", { method: "POST", body: { prompt: text } }).then(function (g) {
-          if (my !== seq || !g) return;
-          setName(g.name);
-          var cron = "";
-          if (g.cron && !se.touched() && se.value() !== g.cron) { se.set(g.cron); cron = g.cron; }
-          else if (g.cron && se.value() === g.cron) cron = g.cron;
-          paint(cron);
-        }).catch(function () {});
-      }, 350);
-    });
+    f.name.addEventListener("input", function (e) { if (e.isTrusted && f.name.value.trim() !== lastName) { pill.classList.add("hidden"); delete filled.name; paint(lastCron); } });
+    f.prompt.addEventListener("input", function () { if (f.prompt.value.trim().length >= 4) ask(350); });
+    f.provider.addEventListener("change", function () { ask(0); });
+    $("#sched-host", root).addEventListener("sched", function () { if (se.touched()) ask(400); });
+    ask(0); // budget for the default provider right away
     f.skill_id.addEventListener("change", function () {
       var sk = skills.filter(function (x) { return x.id === f.skill_id.value; })[0];
-      if (sk && !f.prompt.value.trim()) setName(sk.name), paint("");
+      if (sk && !f.prompt.value.trim()) setName(sk.name), paint(lastCron);
     });
   }
   function taskFormModal(taskId) {
@@ -2244,9 +2271,9 @@
         fieldHtml(T("bt.skill_ver"), '<select name="skill_version_id"><option value="">' + esc(T("bt.latest")) + "</option></select>") + "</div>" +
         fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
-        '<div class="form-row">' + fieldHtml(T("tf.budget"), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint")) +
+        '<div class="form-row">' + fieldHtml(T("tf.budget_c", { c: curSym(state.currency || "USD") }), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint"), taskId ? "" : '<span class="af-pill hidden" id="af-budget" data-tip="">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
-        '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.enabled")) + "</label>" +
+        '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
         var loadVers = function () {
