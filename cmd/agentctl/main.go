@@ -75,8 +75,14 @@ func main() {
 				}
 				if last["can_apply"] != true {
 					inst, _ := last["install"].(map[string]any)
-					fmt.Println(i18n.T("cli.update_notify_only", inst["kind"]))
+					if inst["kind"] == "self-built" {
+						fmt.Println(i18n.T("cli.update_self_built", out["releases_page"]))
+					} else {
+						fmt.Println(i18n.T("cli.update_notify_only", inst["kind"]))
+					}
 				}
+			} else if inst, _ := out["install"].(map[string]any); last != nil && inst["kind"] == "self-built" {
+				fmt.Println(i18n.T("cli.update_self_built_dev", last["latest"]))
 			} else {
 				fmt.Println(i18n.T("cli.update_none", out["current"]))
 			}

@@ -1,5 +1,7 @@
 # tidebot
 
+[![ci](https://github.com/Zhengmingming1/tidebot/actions/workflows/ci.yml/badge.svg)](https://github.com/Zhengmingming1/tidebot/actions/workflows/ci.yml) [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+
 [中文](README.md) · [English](README.en.md)
 
 tidebot 是我给自己写的一个小工具：一个常驻在本机后台的进程，帮我定时去跑 Claude Code。
@@ -280,7 +282,7 @@ tidebot 调用的是你本机安装的 Claude Code CLI，用的是你自己的 A
 
 tidebot 用 [GNU AGPL-3.0](LICENSE) 发布，只限这一个版本（SPDX: `AGPL-3.0-only`）。随便用、随便改、随便转发都行。只有一个要求：如果你改了它，又通过网络给别人用（比如把 WebUI 开给团队），也得把改过的源码给他们。
 
-源码在 [github.com/Zhengmingming1/tidebot](https://github.com/Zhengmingming1/tidebot)。安装包和自动更新还是走 [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases)。界面图标来自 Lucide（ISC），依赖的许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。欢迎提 issue 和 PR，先看看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+源码在 [github.com/Zhengmingming1/tidebot](https://github.com/Zhengmingming1/tidebot)。安装包和自动更新还是走 [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases)。界面图标来自 Lucide（ISC），依赖的许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。自己从源码编译的版本不会自动替换成官方安装包，只会提示有新版，详见 [docs/building.md](docs/building.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。欢迎提 issue 和 PR，先看看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 文档
 

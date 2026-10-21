@@ -14,7 +14,7 @@ import (
 )
 
 // ReleasesPage is where users can always download by hand.
-const ReleasesPage = "https://github.com/" + ReleasesRepo + "/releases/latest"
+var ReleasesPage = "https://github.com/" + ReleasesRepo + "/releases/latest"
 
 // Source is one place to get latest.json(.sig) and the release files.
 //

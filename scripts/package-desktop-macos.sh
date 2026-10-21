@@ -6,7 +6,9 @@ set -euo pipefail
 VER="${1:?version}"; VER="${VER#v}"
 OUT="${2:-dist}"; mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LDF="-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$VER"
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+# TIDEBOT_OFFICIAL=1 only in the release workflow: marks binaries that may self-update.
+LDF="-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$VER -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Commit=$COMMIT -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Official=${TIDEBOT_OFFICIAL:-}"
 B="$(mktemp -d)"
 cd "$ROOT/cmd/tidebot-desktop"
 export CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=11.0

@@ -73,12 +73,26 @@ The source repo is public (AGPL-3.0-only), but the update channel stays separate
 [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases) repo with `SHA256SUMS`
 and a signed `latest.json` (+ `latest.json.sig`, ed25519, built by `tools/relsign`).
 
-Secrets in this repo:
+Secrets (environment **`release`**, which only deploys from `v*` tags and `main`; no
+required reviewer, so the weekly routine can still release unattended):
 
 - `UPDATE_SIGNING_KEY`: base64 ed25519 private key. Its public half is `updater.PublicKey`
   in `internal/updater/manifest.go`; `relsign` refuses to sign if they don't match.
 - `RELEASES_TOKEN`: fine-grained PAT, only `tidebot-releases`, Contents read/write.
   Without it the mirror step is skipped with a warning.
+- The Apple/Windows signing secrets above belong there too. Only the `desktop-macos`,
+  `desktop-windows`, `publish` and `price catalog` jobs declare `environment: release`.
+
+Pull requests (including forks) never see these. CI runs on `pull_request`, not
+`pull_request_target`; the default `GITHUB_TOKEN` is read-only; fork PRs from outside
+contributors need approval before they run; every third-party action is pinned to a commit
+SHA (Dependabot bumps them). Rulesets: only the owner pushes to `main` and creates `v*` tags.
+Nobody can force-push or delete `main`, or move or delete a `v*` tag.
+
+Only release-workflow binaries carry `buildinfo.Official=1` (`TIDEBOT_OFFICIAL=1` in
+`release.yml`). Anything built from source is notify-only; see [building.md](building.md).
+`scripts/e2e-update.sh` runs a full 0.1.6 → 0.1.7 update against a local feed signed with a
+throwaway key. CI runs it on Linux.
 
 On the client, agentd / the desktop app check `latest.json` once a day (Settings → About →
 Updates, can be turned off). `agentctl update check|apply` does the same by hand. Apply =

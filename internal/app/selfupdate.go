@@ -120,6 +120,7 @@ func (a *App) UpdateStatus(ctx context.Context) map[string]any {
 	defer s.mu.Unlock()
 	return map[string]any{
 		"current":       buildinfo.Version,
+		"official":      buildinfo.IsOfficial(),
 		"settings":      a.UpdateSettings(ctx),
 		"install":       a.updateInstall(),
 		"last":          s.last,

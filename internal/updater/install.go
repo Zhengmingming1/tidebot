@@ -19,7 +19,17 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 )
+
+// OfficialBuild reports whether this binary may replace itself with downloaded
+// release files. Only release-workflow builds are marked (buildinfo.Official);
+// a copy someone built from source is notify-only. A var for tests.
+var OfficialBuild = buildinfo.IsOfficial
+
+// KindSelfBuilt is Install.Kind for a copy built from source.
+const KindSelfBuilt = "self-built"
 
 // How this copy was installed decides whether we may replace it.
 const (
@@ -42,6 +52,9 @@ func Detect(product, exe string) Install {
 	notify := func(kind, why string) Install { in.Kind, in.Mode, in.Reason = kind, ModeNotify, why; return in }
 	if os.Getenv("TIDEBOT_MANAGED") == "1" {
 		return notify("managed", "TIDEBOT_MANAGED=1")
+	}
+	if !OfficialBuild() {
+		return notify(KindSelfBuilt, "built from source, not an official release; new releases are announced, never installed automatically")
 	}
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return notify("docker", "running in a container; pull the new image")

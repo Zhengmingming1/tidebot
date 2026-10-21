@@ -19,6 +19,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/amend"
 	"github.com/Zhengmingming1/tidebot/internal/auth"
+	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/config"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/db"
@@ -353,5 +354,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "csrf_token": sess.CSRFToken, "totp_enabled": totp, "user": "owner",
 		"timezone": s.loc().String(), "version": Version, "language": s.language(r.Context()), "os_language": osLang(r.Context()),
 		"currency": s.fx().Display,
+		// AGPL-3.0 §13: people using the WebUI over a network get a link to this build's source.
+		"source_url": buildinfo.SourceRef(), "license": "AGPL-3.0-only", "official": buildinfo.IsOfficial(),
 	})
 }

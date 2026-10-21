@@ -1,0 +1,7 @@
+# Keeps the SHA-pinned actions current (weekly PRs; they run CI like any other PR).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
