@@ -286,3 +286,67 @@ and UI/auto-fill, so this one goes to resources.
 3. Warn (notification) when free disk space on the data volume drops under ~1 GB, with a
    link to this card.
 4. Let backups have their own "keep last N manual backups" setting next to the auto ones.
+
+## 2026-10-21 (16:00): low disk space warning (macOS / Linux / Windows)
+
+Category: **cross-platform + resource usage**. Today's other changes were WebUI forms
+(budget suggestion) and storage settings, so this one is about the OS side: knowing when the
+disk under the data folder is about to fill up, on all three platforms.
+
+**Done**
+
+- **`internal/diskspace`**: free/total for the volume holding a path. macOS/Linux use
+  `statfs` (`Bavail`, so blocks reserved for root don't count as free). Windows uses
+  `GetDiskFreeSpaceEx` ("free to caller", which respects quotas). A file path is measured
+  through its folder, since Windows only accepts directories. Other platforms return
+  `ErrUnsupported` and the check is skipped. Unicode/space paths are tested.
+- **Watcher in agentd** (`internal/app/diskwatch.go`), every 15 min: it checks the data
+  folder and, if the database lives elsewhere, that folder too, and uses the tighter one.
+  The threshold is 5% of the volume, clamped to 1–5 GB (a 20 GB VPS warns at 1 GB, a
+  256 GB Mac at 5 GB).
+  - Crossing it sends one `disk_low` notification (bell, configured channels, desktop).
+  - While still low, it sends at most one reminder a day.
+  - It re-arms only after free space is back above threshold + 50%, so a disk hovering
+    at the line stays quiet.
+  - The last alert time is stored in settings, so a restart doesn't repeat the warning.
+- **Tray**: "磁盘空间不足（剩 812 MB）" in the Problems section, and the icon turns red.
+  It reads the cached measurement, so the 2-second tray poll never touches the disk.
+- **Settings › Data › Storage**: the disk's free/total goes in the tooltip next to the
+  total. A sand-coloured warning notice appears above the usage bar **only when low**, with
+  the threshold rule in its ⓘ. In the bell, the `disk_low` item links straight to that card
+  so cleaning up is one click away.
+- zh-CN/en strings for the notification, tray, card and tooltip. The check-i18n
+  notification-key list now includes `disk_low`.
+- Tests: threshold clamping, warn once → throttle → daily reminder → hysteresis → re-arm,
+  no repeat after a restart, the message params, the tray problem appearing and clearing,
+  the storage view, and an unsupported platform (omitted, cache cleared). Also a smoke test
+  on the real volume.
+
+**Inspiration**
+
+- Coolify `app/Jobs/ServerStorageCheckJob.php` + `app/Notifications/Server/HighDiskUsage.php`:
+  a per-server usage threshold, a notification throttle
+  (`server_disk_usage_notification_interval_hours`, default 24 h) and
+  `RECOVERY_MARGIN = 5` points. The throttle is only released once usage has clearly
+  recovered, "so usage that moves around the threshold does not send an alert on every
+  change". tidebot borrows the same three ideas (threshold, daily throttle, recovery margin).
+  It uses absolute free bytes rather than a percentage, because a laptop at 95% full can
+  still have 25 GB left. No code copied.
+
+**Learned**
+
+- `statfs` `Bsize` is `int64` on Linux and `uint32` on macOS. Converting both to `uint64`
+  keeps one Unix file for darwin/linux/BSD without separate per-OS files.
+- `//go:build unix` (Go 1.19+) covers darwin/linux/BSDs in one tag. `!unix && !windows`
+  keeps wasm/plan9 compiling.
+- For the screenshot, the `storage.get` response was intercepted in Playwright to fake a
+  nearly full disk. That's simpler than adding a test-only knob to the product.
+
+**Ideas for later**
+
+1. When the disk is low, run the retention cleanup once right away (with the normal policy)
+   and include "freed X" in the notification.
+2. Refuse to start new scheduled runs below a hard floor (e.g. 200 MB) and record them as
+   skipped with a clear reason, so they don't fail half-way and corrupt artifacts.
+3. A desktop-only "open data folder" button on the storage card (Finder/Explorer/xdg-open).
+4. Show the biggest tasks by log size in the storage tooltip (from the 10:00 run's list).
