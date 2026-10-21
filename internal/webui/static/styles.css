@@ -1421,7 +1421,7 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 @media (max-width: 1279px) { .table td:first-child .cell-main { max-width: 280px; } .table td.run-prov { max-width: 140px; } }
 
 /* ---- Log viewer (2026-10-20): one-row toolbar, transcript-like rows ---- */
-.lv-bar { flex-wrap: nowrap; gap: 4px; }
+.lv-bar { flex-wrap: wrap; gap: 6px 4px; } /* one row when it fits; wraps in the narrow two-column run page (~1180px windows) */
 .lv-bar .lv-f { flex: none; }
 .lv-f button { padding: 0 8px; }
 .lv-bar .search-in.sm { min-width: 120px; flex: 0 1 200px; }

@@ -696,6 +696,7 @@
   "sp.export": "导出 CSV",
   "sp.export_tip": "导出 CSV · 所选范围内每次运行一行，金额按当前显示币种",
   "dl.saved": "已下载 {n}",
+  "dl.saved_to": "已保存到 {p}",
   "sp.budget_saved": "预算已保存。",
   "sp.budgets": "预算",
   "sp.by_model": "按模型",
