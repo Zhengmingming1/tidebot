@@ -21,6 +21,7 @@ func TestInferTask(t *testing.T) {
 		{"Weekdays at 08:15 check the build status", "Check the build status", "15 8 * * 1-5"},
 		{"9 点给我讲个笑话", "给我讲个笑话", ""}, // a time without a frequency: no schedule
 		{"Summarize today's commits", "Summarize today's commits", ""},
+		{"Every weekday at 9am, summarize yesterday's GitHub commits into a daily report", "Summarize yesterday's GitHub commits", "0 9 * * 1-5"},
 		{"", "", ""},
 	}
 	for _, c := range cases {
