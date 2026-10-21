@@ -38,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: bash scripts/package-server.sh "${TAG#v}" dist
@@ -60,7 +60,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: cmd/tidebot-desktop/go.mod
           cache-dependency-path: cmd/tidebot-desktop/go.sum
@@ -82,7 +82,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: cmd/tidebot-desktop/go.mod
           cache-dependency-path: cmd/tidebot-desktop/go.sum
@@ -126,7 +126,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: cmd/tidebot-desktop/go.mod
           cache-dependency-path: cmd/tidebot-desktop/go.sum
@@ -262,7 +262,7 @@ jobs:
 
       # Public mirror: Zhengmingming1/tidebot-releases gets the same files plus
       # SHA256SUMS and a signed latest.json for the in-app updater (the update channel).
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: signed update manifest
