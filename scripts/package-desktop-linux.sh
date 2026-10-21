@@ -7,7 +7,9 @@ VER="${1:?version}"; VER="${VER#v}"
 OUT="${2:-dist}"; mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARCH="$(dpkg --print-architecture)"
-LDF="-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$VER"
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+# TIDEBOT_OFFICIAL=1 only in the release workflow: marks binaries that may self-update.
+LDF="-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$VER -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Commit=$COMMIT -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Official=${TIDEBOT_OFFICIAL:-}"
 (cd "$ROOT/cmd/tidebot-desktop" && CGO_ENABLED=1 go build -tags gtk3 -trimpath -ldflags "$LDF" -o "$OUT/.tidebot-desktop" .)
 # .deb
 deb="$(mktemp -d)"

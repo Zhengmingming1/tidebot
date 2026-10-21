@@ -23,11 +23,14 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 )
 
-// ReleasesRepo is the public repo that carries release files and latest.json.
-const ReleasesRepo = "Zhengmingming1/tidebot-releases"
+// ReleasesRepo is the public repo that carries release files and latest.json
+// (the update channel). A var so forks can point builds at their own channel with
+// -ldflags "-X github.com/Zhengmingming1/tidebot/internal/updater.ReleasesRepo=...".
+var ReleasesRepo = "Zhengmingming1/tidebot-releases"
 
 // PublicKey verifies latest.json. The private half lives only in the source
-// repo's Actions secret UPDATE_SIGNING_KEY. Replace both together if rotated.
+// repo's Actions secret UPDATE_SIGNING_KEY (environment "release"). Replace both
+// together if rotated. Forks override it with -X ...updater.PublicKey=<base64>.
 var PublicKey = "r9j+SIJVqWgrff/AGa6+GXBIHY0ekRSkjF253CjNPPU="
 
 // Asset is one downloadable file for one target.

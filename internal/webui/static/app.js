@@ -3639,7 +3639,8 @@
           row("version", T("set.version"), T("set.version_sub"), "<code>" + esc(state.version || "dev") + "</code>") +
           row("terms", T("set.terms"), T("set.terms_sub"), "") +
           row("source", T("set.source"), T("set.source_sub"), '<a href="' + esc(RELEASES_PAGE) + '" target="_blank" rel="noopener"><code>github.com/Zhengmingming1/tidebot-releases</code></a>') +
-          row("code", T("set.code"), T("set.code_sub"), '<a href="' + esc(SOURCE_REPO) + '" target="_blank" rel="noopener"><code>github.com/Zhengmingming1/tidebot</code></a>') + "</section>" +
+          row("code", T("set.code"), T("set.code_sub"), '<a href="' + esc(state.sourceURL || SOURCE_REPO) + '" target="_blank" rel="noopener"><code>' + esc((state.sourceURL || SOURCE_REPO).replace(/^https:\/\//, "")) + "</code></a>") +
+          row("license", T("set.license"), T("set.license_sub"), '<a href="' + esc(SOURCE_REPO + "/blob/main/LICENSE") + '" target="_blank" rel="noopener"><code>' + esc(state.license || "AGPL-3.0-only") + "</code></a>") + "</section>" +
           '<section class="card" id="set-update"><div class="card-head"><span class="ico">' + ic("refresh") + "</span><h2>" + esc(T("up.title")) + "</h2></div>" +
           row("up_auto", T("up.auto"), T("up.auto_sub"), '<label class="check"><input type="checkbox" id="up-auto"> ' + esc(T("up.on")) + "</label>") +
           row("up_every", T("up.every"), T("up.every_sub"), '<select id="up-every"><option value="24">' + esc(T("up.daily")) + '</option><option value="168">' + esc(T("up.weekly")) + "</option></select>") +
@@ -3658,7 +3659,10 @@
                 (last.notes ? '<pre class="changelog">' + esc(last.notes) + "</pre>" : "") +
                 (last.notes_url ? '<p><a href="' + esc(last.notes_url) + '" target="_blank" rel="noopener">' + esc(T("up.notes")) + "</a></p>" : "");
               if (last.can_apply) h += '<p><button class="btn primary" id="up-apply">' + esc(T("up.apply")) + '</button> <small class="muted">' + esc(T("up.apply_sub")) + "</small></p>";
+              else if (inst.kind === "self-built") h += '<p class="muted">' + esc(T("up.self_built")) + ' <a href="' + esc(st.releases_page || RELEASES_PAGE) + '" target="_blank" rel="noopener">' + esc(T("up.download_page")) + "</a></p>";
               else h += '<p class="muted">' + esc(T("up.notify_only", { kind: inst.kind || "?" })) + (inst.reason ? " — " + esc(inst.reason) : "") + "</p>";
+            } else if (last && inst.kind === "self-built") {
+              h += '<p class="muted">' + esc(T("up.self_built_dev", { v: last.latest })) + ' <a href="' + esc(st.releases_page || RELEASES_PAGE) + '" target="_blank" rel="noopener">' + esc(T("up.download_page")) + "</a></p>";
             } else if (last) {
               h += '<p class="muted">' + esc(T("up.none", { v: st.current })) + "</p>";
             }
@@ -3813,6 +3817,8 @@
     }).then(function (me) {
       state.tz = me.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
       state.version = me.version || "";
+      state.sourceURL = me.source_url || SOURCE_REPO;
+      state.license = me.license || "AGPL-3.0-only";
       state.currency = me.currency || "USD";
       $("#login").classList.add("hidden");
       $("#shell").classList.remove("hidden");

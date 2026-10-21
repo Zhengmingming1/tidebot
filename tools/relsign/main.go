@@ -61,6 +61,9 @@ func manifest(tag, dist, notesFile string) {
 	priv := ed25519.PrivateKey(key)
 	notes, _ := os.ReadFile(notesFile)
 	base := "https://github.com/" + updater.ReleasesRepo + "/releases/download/" + tag + "/"
+	if v := os.Getenv("RELSIGN_ASSET_BASE"); v != "" { // local test feeds only (scripts/e2e-update.sh)
+		base = strings.TrimRight(v, "/") + "/"
+	}
 	m := updater.Manifest{Version: strings.TrimPrefix(tag, "v"), Date: time.Now().UTC().Format("2006-01-02"), Channel: "stable",
 		Notes: changelog(string(notes)), NotesURL: "https://github.com/" + updater.ReleasesRepo + "/releases/tag/" + tag, Assets: map[string]updater.Asset{}}
 	entries, err := os.ReadDir(dist)

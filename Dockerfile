@@ -18,6 +18,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git tzdata && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 10001 tidebot
 COPY --from=build /out/agentd /out/agentctl /usr/local/bin/
+COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/doc/tidebot/
 USER tidebot
 ENV TIDEBOT_HOME=/home/tidebot/.tidebot \
     TIDEBOT_WEBUI=1 \

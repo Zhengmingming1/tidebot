@@ -6,7 +6,8 @@ VER="${1:?version like 0.1.0}"; VER="${VER#v}"
 OUT="${2:-dist}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-LDF="-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$VER -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Commit=$COMMIT"
+# TIDEBOT_OFFICIAL=1 only in the release workflow: marks binaries that may self-update.
+LDF="-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$VER -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Commit=$COMMIT -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Official=${TIDEBOT_OFFICIAL:-}"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do

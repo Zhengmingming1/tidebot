@@ -49,5 +49,7 @@
   "update.n.rolled_back": "更新到 %s 失败，已回滚",
   "cli.update_available": "有新版本：%v → %v",
   "cli.update_notify_only": "当前安装方式（%v）由包管理器或镜像负责更新，这里不会自动替换。",
+  "cli.update_self_built": "这份是自己从源码编译的，不会自动替换成官方安装包。想用官方版请手动下载：%v",
+  "cli.update_self_built_dev": "开发版（自己从源码编译）不会自动更新。官方最新版是 %v。",
   "cli.update_none": "已是最新（%v）。"
 }

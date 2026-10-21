@@ -1,5 +1,7 @@
 # tidebot
 
+[![ci](https://github.com/Zhengmingming1/tidebot/actions/workflows/ci.yml/badge.svg)](https://github.com/Zhengmingming1/tidebot/actions/workflows/ci.yml) [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+
 [中文](README.md) · [English](README.en.md)
 
 tidebot is a small thing I built for myself. It's a background process on my machine that runs Claude Code on a schedule.
@@ -282,7 +284,7 @@ tidebot drives the Claude Code CLI installed on your machine, with your own API 
 
 tidebot is released under the [GNU AGPL-3.0](LICENSE), version 3 only (SPDX: `AGPL-3.0-only`). Use it, change it, pass it on. The one catch: if you change it and let other people use it over a network (say, you open the WebUI to your team), you have to offer them your changed source too.
 
-The source lives at [github.com/Zhengmingming1/tidebot](https://github.com/Zhengmingming1/tidebot). Installers and auto-update still come from [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases). The icons are Lucide (ISC). Dependency licenses are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Issues and PRs are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) has the short version.
+The source lives at [github.com/Zhengmingming1/tidebot](https://github.com/Zhengmingming1/tidebot). Installers and auto-update still come from [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases). The icons are Lucide (ISC). Dependency licenses are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). A copy you build from source never replaces itself with official binaries; it only tells you about new releases (see [docs/building.md](docs/building.md)). Please report security issues privately, as described in [SECURITY.md](SECURITY.md). Issues and PRs are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) has the short version.
 
 ## Docs
 

@@ -9,12 +9,14 @@ on:
         description: "existing tag to (re)build, e.g. v0.1.0"
         required: true
 
+# Least privilege: read by default, each job asks for what it needs.
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # Stamped into release binaries (buildinfo.Official): only these may self-update.
+  TIDEBOT_OFFICIAL: "1"
 
 concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
@@ -32,14 +34,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - run: bash scripts/package-server.sh "${TAG#v}" dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: server
           path: dist/*
@@ -53,29 +55,31 @@ jobs:
         os: [ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: cmd/tidebot-desktop/go.mod
           cache-dependency-path: cmd/tidebot-desktop/go.sum
       - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev file libfuse2
       - run: bash scripts/package-desktop-linux.sh "${TAG#v}" dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-${{ matrix.os }}
           path: dist/*
 
   desktop-macos:
     needs: test
+    # Signing secrets live in the "release" environment (deployments limited to v* tags / main).
+    environment: release
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: cmd/tidebot-desktop/go.mod
           cache-dependency-path: cmd/tidebot-desktop/go.sum
@@ -101,23 +105,24 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/package-desktop-macos.sh "${TAG#v}" dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-macos
           path: dist/*
 
   desktop-windows:
     needs: test
+    environment: release
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: cmd/tidebot-desktop/go.mod
           cache-dependency-path: cmd/tidebot-desktop/go.sum
@@ -126,8 +131,8 @@ jobs:
           V="${TAG#v}"
           mkdir -p stage dist
           (cd cmd/tidebot-desktop && go run github.com/tc-hib/go-winres@v0.3.3 simply --icon ../../packaging/windows/tidebot.ico --product-name tidebot --file-description tidebot)
-          (cd cmd/tidebot-desktop && go build -trimpath -ldflags "-s -w -H windowsgui -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V" -o ../../stage/tidebot-desktop.exe .)
-          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V" -o stage/agentctl.exe ./cmd/agentctl
+          (cd cmd/tidebot-desktop && go build -trimpath -ldflags "-s -w -H windowsgui -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Commit=${GITHUB_SHA::7} -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Official=$TIDEBOT_OFFICIAL" -o ../../stage/tidebot-desktop.exe .)
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Version=$V -X github.com/Zhengmingming1/tidebot/internal/buildinfo.Official=$TIDEBOT_OFFICIAL" -o stage/agentctl.exe ./cmd/agentctl
       - name: install NSIS if missing
         run: command -v makensis || choco install nsis -y --no-progress
       - name: sign binaries (optional)
@@ -162,22 +167,25 @@ jobs:
         run: |
           $V = "$env:TAG".TrimStart("v")
           Compress-Archive -Path stage\tidebot-desktop.exe, stage\agentctl.exe -DestinationPath "dist\tidebot-desktop-$V-Windows-x64.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-windows
           path: dist/*
 
   docker:
     needs: test
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -186,7 +194,7 @@ jobs:
         run: |
           echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/tidebot" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
@@ -205,13 +213,17 @@ jobs:
 
   publish:
     needs: [server, desktop-linux, desktop-macos, desktop-windows, docker]
+    # UPDATE_SIGNING_KEY + RELEASES_TOKEN: environment "release" (v* tags / main only).
+    environment: release
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           pattern: "{server,desktop-*}"
@@ -244,7 +256,7 @@ jobs:
 
       # Public mirror: Zhengmingming1/tidebot-releases gets the same files plus
       # SHA256SUMS and a signed latest.json for the in-app updater (the update channel).
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: signed update manifest
