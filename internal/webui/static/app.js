@@ -478,7 +478,8 @@
       { kind: "nav", icon: "skills", label: T("nav.skills"), run: go("#/skills") },
       { kind: "nav", icon: "runs", label: T("nav.runs"), run: go("#/runs") },
       { kind: "nav", icon: "spend", label: T("nav.spend"), run: go("#/spend") },
-      { kind: "nav", icon: "settings", label: T("nav.settings"), run: go("#/settings") }
+      { kind: "nav", icon: "settings", label: T("nav.settings"), run: go("#/settings") },
+      { kind: "nav", icon: "database", label: T("nav.settings") + " › " + T("st.title"), run: go("#/settings/data/storage") }
     ].concat(SET_SECTIONS.map(function (k) { return { kind: "nav", icon: "settings", label: T("nav.settings") + " › " + T("setnav." + k), run: go("#/settings/" + k) }; }));
   }
   function palMatch(label, q) { return !q || label.toLowerCase().indexOf(q.toLowerCase()) >= 0; }
@@ -1557,7 +1558,7 @@
     });
   }
 
-  function fmtBytes(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
+  function fmtBytes(n) { n = Math.max(0, n || 0); return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB"; }
   // fileTree renders "a/b/c.md" paths as an indented tree; folders first.
   function fileTree(files) {
     var root = { d: {}, f: [] };
@@ -3025,6 +3026,81 @@
     m.textContent = T("set.saved");
     m.classList.remove("fade"); void m.offsetWidth; m.classList.add("fade");
   }
+  // ---- Settings › Data › Storage ----
+  // How much the data folder takes (run logs, artifacts, database, backups), how long
+  // history is kept, and one-click cleanup with a preview of what it frees. Idea from
+  // Uptime Kuma's Monitor History settings (keep N days, 0 = forever, DB size next to
+  // "shrink database"). Meta info (file counts, last cleanup) lives in tooltips.
+  var ST_PARTS = ["logs", "artifacts", "database", "backups"];
+  var ST_DAYS = [7, 14, 30, 60, 90, 180, 365, 0];
+  var ST_KEEP = [0, 5, 10, 20, 50, 100];
+  var ST_CAP_GB = [1, 2, 5, 10, 20, 50, 0];
+  function stOpts(list, cur, label) {
+    if (list.indexOf(cur) < 0) list = list.concat([cur]);
+    return list.map(function (v) { return opt(v, label(v), v === cur); }).join("");
+  }
+  function storageCardHtml() {
+    var sel = function (id, key) { return '<select id="' + id + '" data-st="' + key + '" aria-label="' + esc(T("st." + key)) + '" disabled><option>…</option></select>'; };
+    var r = function (key, sub, right) { return '<div class="set-row" id="set-st_' + key + '"><div class="lbl"><strong>' + esc(T("st." + key)) + '</strong><small id="st-' + key + '-sub">' + esc(sub) + "</small></div>" + right + "</div>"; };
+    return '<section class="card" id="set-storage"><div class="card-head"><span class="ico">' + ic("database") + "</span><h2>" + esc(T("st.title")) + '</h2><span class="st-total" id="st-total"></span></div>' +
+      '<div class="st-usage" id="st-usage" aria-live="polite"><div class="st-bar sk"></div></div>' +
+      r("log_days", T("st.log_days_sub"), sel("st-log", "log_days")) +
+      r("artifact_days", T("st.artifact_days_sub"), sel("st-art", "artifact_days")) +
+      r("keep_per_task", T("st.keep_per_task_sub"), sel("st-keep", "keep_per_task")) +
+      r("max_total", T("st.max_total_sub"), sel("st-cap", "max_total")) +
+      r("clean", "…", '<button class="btn sm" id="st-clean" disabled>' + ic("trash", "sm") + esc(T("st.clean_btn")) + "</button>") +
+      r("shrink", "…", '<button class="btn sm" id="st-shrink" disabled>' + ic("database", "sm") + esc(T("st.shrink_btn")) + "</button>") + "</section>";
+  }
+  function storagePaint(v) {
+    var box = $("#st-usage");
+    if (!box) return;
+    var parts = v.parts || {}, total = v.total_bytes || 0, p = v.policy || {};
+    var tipOf = function (k) { var x = parts[k] || {}; return T("st.p_" + k) + " · " + fmtBytes(x.bytes) + (k === "database" ? "" : " · " + T("st.files", { n: x.count || 0 })); };
+    box.innerHTML = '<div class="st-bar" role="img" aria-label="' + esc(ST_PARTS.map(tipOf).join("; ")) + '">' + ST_PARTS.filter(function (k) { return (parts[k] || {}).bytes > 0; }).map(function (k) {
+      var pct = total ? (parts[k].bytes / total) * 100 : 0;
+      return '<span class="st-seg s-' + k + '" data-w="' + Math.max(1, pct).toFixed(2) + '" data-tip="' + esc(tipOf(k)) + '"></span>';
+    }).join("") + '</div><ul class="st-legend">' + ST_PARTS.map(function (k) {
+      return '<li data-tip="' + esc(tipOf(k)) + '" tabindex="0"><i class="dot s-' + k + '"></i><span>' + esc(T("st.p_" + k)) + "</span><b>" + esc(fmtBytes((parts[k] || {}).bytes)) + "</b></li>";
+    }).join("") + "</ul>";
+    applySizes(box);
+    var last = v.last ? T(v.last.auto ? "st.last_auto" : "st.last_manual", { t: fullTime(v.last.at), f: fmtBytes(v.last.freed_bytes) }) : T("st.last_none");
+    $("#st-total").innerHTML = esc(T("st.total", { s: fmtBytes(total) })) + tip(T("st.where") + "\n" + last);
+    var day = function (n) { return n ? T("st.days", { n: n }) : T("st.forever"); };
+    $("#st-log").innerHTML = stOpts(ST_DAYS, p.log_days, day);
+    $("#st-art").innerHTML = stOpts(ST_DAYS, p.artifact_days, day);
+    $("#st-keep").innerHTML = stOpts(ST_KEEP, p.keep_per_task, function (n) { return n ? T("st.runs", { n: n }) : T("st.none"); });
+    var gb = Math.round((p.max_total_bytes || 0) / 1073741824 * 100) / 100;
+    $("#st-cap").innerHTML = stOpts(ST_CAP_GB, gb, function (n) { return n ? n + " GB" : T("st.no_cap"); });
+    $$("[data-st]").forEach(function (el) { el.disabled = false; });
+    var pv = v.preview || {}, cl = $("#st-clean"), sh = $("#st-shrink");
+    $("#st-clean-sub").textContent = pv.files ? T("st.clean_sub", { n: pv.files, s: fmtBytes(pv.bytes) }) : T("st.clean_none");
+    cl.disabled = !pv.files;
+    $("#st-shrink-sub").textContent = v.db_reclaimable >= 1048576 ? T("st.shrink_sub", { s: fmtBytes(v.db_reclaimable) }) : T("st.shrink_none", { s: fmtBytes((parts.database || {}).bytes) });
+    sh.disabled = !(v.db_reclaimable >= 1048576);
+    state.storage = v;
+  }
+  function storageWire() {
+    rpc("storage.get", {}).then(storagePaint).catch(fail);
+    $$("[data-st]").forEach(function (el) {
+      el.addEventListener("change", function () {
+        var k = el.getAttribute("data-st"), n = Number(el.value), body = {};
+        if (k === "max_total") body.max_total_bytes = Math.round(n * 1073741824); else body[k] = n;
+        rpc("storage.settings", body).then(function (v) { storagePaint(v); savedMark(el); }).catch(function (e) { fail(e); rpc("storage.get", {}).then(storagePaint); });
+      });
+    });
+    $("#st-clean").addEventListener("click", function (e) {
+      var b = e.currentTarget, pv = (state.storage || {}).preview || {}, keep = ((state.storage || {}).policy || {}).keep_per_task;
+      confirmDialog({ title: T("st.clean_title"), body: T("st.clean_confirm", { n: pv.files, s: fmtBytes(pv.bytes) }) + "\n" + T(keep ? "st.clean_keeps" : "st.clean_keeps0", { k: keep }), ok: T("st.clean_btn"), danger: true }).then(function (y) {
+        if (!y) return;
+        b.disabled = true;
+        rpc("storage.cleanup", {}).then(function (r) { toast(T("st.cleaned", { n: r.report.deleted_files, s: fmtBytes(r.report.freed_bytes) })); storagePaint(r.storage); }).catch(function (err) { fail(err); b.disabled = false; });
+      });
+    });
+    $("#st-shrink").addEventListener("click", function (e) {
+      var b = e.currentTarget; b.disabled = true;
+      rpc("storage.vacuum", {}).then(function (r) { toast(T("st.shrunk", { s: fmtBytes(r.saved_bytes) })); storagePaint(r.storage); }).catch(function (err) { fail(err); b.disabled = false; });
+    });
+  }
   function renderSettings(section, item) {
     section = SET_SECTIONS.indexOf(section) >= 0 ? section : "general";
     return api("/api/settings").then(function (st) {
@@ -3131,11 +3207,12 @@
           }).catch(fail);
         };
       } else if (section === "data") {
-        body = '<section class="card">' + head +
+        body = storageCardHtml() + '<section class="card" id="set-backups"><div class="card-head"><span class="ico">' + ic("download") + "</span><h2>" + esc(T("set.backup")) + "</h2></div>" +
           row("backup", T("set.backup"), T("set.backup_sub"), '<button class="btn sm" id="bk-now">' + esc(T("set.backup_now")) + "</button>", "agentctl backup create --passphrase") +
           '<div id="bk-list" class="pad-x"><p class="muted">…</p></div>' +
           row("restore", T("set.restore"), T("set.restore_sub"), "", "agentctl backup restore <file>") + "</section>";
         after = function () {
+          storageWire();
           var load = function () {
             return rpc("backups.list", {}).then(function (l) {
               $("#bk-list").innerHTML = l && l.length ? '<table class="tbl"><thead><tr><th>' + esc(T("set.bk_when")) + "</th><th>" + esc(T("set.bk_kind")) + '</th><th class="right">' + esc(T("set.bk_size")) + "</th></tr></thead><tbody>" + l.slice(0, 10).map(function (x) {

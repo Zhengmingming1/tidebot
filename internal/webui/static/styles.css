@@ -1470,3 +1470,25 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .af-pill[data-tip]:hover::after, .drawer .af-pill[data-tip]:hover::after { left: 0; right: auto; transform: none; }
 .pv-detect .i { width: 12px; height: 12px; flex: none; }
 .pv-detect.on { color: var(--text-2); }
+
+/* ---------- settings › data › storage ---------- */
+/* Space is reserved for bar + legend so the card doesn't jump when usage arrives. */
+.st-usage { min-height: 48px; margin-bottom: var(--s1); }
+.st-bar { display: flex; gap: 2px; height: 8px; border-radius: var(--radius-pill); background: var(--bg-sunk); overflow: visible; }
+.st-bar .st-seg { display: block; height: 100%; min-width: 4px; transition: width var(--dur) var(--ease); }
+.st-bar .st-seg:first-child { border-radius: var(--radius-pill) 0 0 var(--radius-pill); }
+.st-bar .st-seg:last-child { border-radius: 0 var(--radius-pill) var(--radius-pill) 0; }
+.st-bar .st-seg:only-child { border-radius: var(--radius-pill); }
+.st-legend { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); margin: var(--s2) 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--text-2); }
+.st-legend li { display: inline-flex; align-items: center; gap: var(--s1); }
+.st-legend b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.st-legend .dot { width: 8px; height: 8px; border-radius: 2px; }
+.s-logs { background: var(--accent); }
+.s-artifacts { background: #7fa6ea; }
+.s-database { background: #d39a3a; }
+.s-backups { background: #a7a196; }
+.st-total { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.st-total [data-tip]:hover::after, .st-total [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
+#set-storage .set-row select { min-width: 128px; }
+.confirm-body { white-space: pre-line; }
+@media (prefers-reduced-motion: reduce) { .st-bar .st-seg { transition: none; } }
