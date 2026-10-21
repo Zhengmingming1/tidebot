@@ -847,6 +847,8 @@
   "pv.af_filled": "已从粘贴内容填写 {n} 项",
   "pv.af_url_moved": "这是一个网址，已移到 Base URL",
   "pv.af_completed": "已补全为官方接口地址",
+  "pv.af_check_offer": "已保存。要顺手检测这 {n} 个模型能不能调用吗？",
+  "pv.af_check_all": "检测全部模型",
   "tf.qr_alt": "两步验证二维码",
   "tf.rec_intro": "下面是 10 个恢复码。手机丢了时，每个码可以代替验证码登录一次。",
   "tf.rec_once": "这些码只显示这一次，关掉后无法再查看。请现在下载或抄下来。",

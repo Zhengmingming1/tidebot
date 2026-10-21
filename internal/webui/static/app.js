@@ -1757,7 +1757,7 @@
   }
 
   // ---------- providers: list on the left, details on the right ----------
-  var provSel = null;
+  var provSel = null, pvOpen = null;
   var PV_COLORS = ["#2563eb", "#0d9488", "#7c3aed", "#db2777", "#ea580c", "#16a34a", "#0891b2", "#4f46e5"];
   function pvDisplay(p, presetById) { var pr = presetById[p.preset] || presetById[p.name]; return pr && pr.name && pr.id !== "custom" ? pr.name : p.name; }
   function pvAvatar(p, presetById) {
@@ -1800,8 +1800,10 @@
         (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
         (hidden.length ? '<details class="pv-more"><summary>' + esc(T("pv.more", { n: hidden.length })) + '</summary><ul class="pv-cards">' + hidden.map(card).join("") + "</ul></details>" : "") +
         '<small class="hint">' + esc(T("pv.sort_hint")) + "</small>";
-      var again = function (sel) { return providerCards(box).then(function () { if (sel && $("#drawer")) open(sel); }); };
-      var open = function (n) { provSel = n; openDrawer(function (dw) { providerDetail(dw, byName[n] || null, null, presetById, again); }); };
+      // Re-render, then reopen through the *new* render's opener: the old closure's
+      // byName predates a just-created provider (that crashed on "preset.id").
+      var again = function (sel) { return providerCards(box).then(function () { if (sel && $("#drawer") && pvOpen) pvOpen(sel); }); };
+      var open = pvOpen = function (n) { provSel = n; openDrawer(function (dw) { providerDetail(dw, byName[n] || null, null, presetById, again); }); };
       $$(".pv-card", box).forEach(function (li) {
         li.addEventListener("click", function () { open(li.getAttribute("data-pv")); });
         li.addEventListener("keydown", function (e) {
@@ -1992,6 +1994,7 @@
     };
     ["name", "base_url", "api_key"].forEach(function (n) { f[n].addEventListener("paste", onPaste); });
   }
+  var pvJustCreated = "";
   function providerDetail(host, p, preset, presetById, done) {
     var creating = !p || p.dup;
     var base = p ? (presetById[p.preset] || null) : preset;
@@ -2027,6 +2030,18 @@
     $$("[data-drawer-close]", host).forEach(function (b) { b.addEventListener("click", closeDrawer); });
     var f = $("#pvf", host), out = $("#pd-test", host), mode = "save";
     if (!creating) pricingEditor($("#pd-price", host), v.name);
+    if (!creating && pvJustCreated && pvJustCreated === v.name) {
+      pvJustCreated = "";
+      var ms = models.filter(function (m) { return (v[m[0]] || "").trim(); });
+      if (ms.length && v.key_set) {
+        var offer = document.createElement("div"); offer.className = "pv-offer"; $("#pd-test", host).parentNode.insertBefore(offer, $("#pd-test", host));
+        offer.innerHTML = '<p class="notice">' + ic("sparkle", "sm") + "<span>" + esc(T("pv.af_check_offer", { n: ms.length })) + '</span><button type="button" class="btn sm" id="pd-check-all">' + ic("check", "sm") + esc(T("pv.af_check_all")) + "</button></p>";
+        $("#pd-check-all", host).addEventListener("click", function (e) {
+          e.currentTarget.disabled = true;
+          ms.reduce(function (p, m) { return p.then(function () { return runTest(v.name, v[m[0]], $('[data-res="' + m[0] + '"]', host)); }); }, Promise.resolve()).then(function () { offer.innerHTML = ""; });
+        });
+      }
+    }
     var runTest = function (name, model, el) {
       el.innerHTML = '<span class="muted">' + esc(T("pv.testing")) + "</span>";
       return api("/api/providers/" + enc(name) + "/test", { method: "POST", body: { model: model || "" } }).then(function (r) {
@@ -2052,6 +2067,7 @@
       if (f.api_key.value) body.api_key = f.api_key.value;
       var testAfter = mode === "test";
       api("/api/providers", { method: "POST", body: body }).then(function (saved) {
+        if (creating) pvJustCreated = saved.name;
         f.api_key.value = "";
         toast(T("pv.saved"));
         return done(saved.name).then(function () { if (testAfter) { var el = $("#pd-test"); if (el) runTest(saved.name, "", el); } });
@@ -2401,6 +2417,19 @@
       });
     });
   }
+  // Plugin trigger forms remember the last numbers/switches/choices per trigger kind
+  // (poll interval, max items, threshold…), never URLs, text or secrets.
+  var trigMemKey = function (pid, tid) { return "tb_trig_" + pid + "_" + tid; };
+  function trigMemory(pid, tid, fields) {
+    var out = {};
+    try { var m = JSON.parse(localStorage.getItem(trigMemKey(pid, tid)) || "{}"); fields.forEach(function (fd) { if (m[fd.key] !== undefined && !fd.write_only) out[fd.key] = m[fd.key]; }); } catch (e) { /* ignore */ }
+    return out;
+  }
+  function trigRemember(pid, tid, fields, cfg) {
+    var keep = {};
+    fields.forEach(function (fd) { if (!fd.write_only && (fd.type === "integer" || fd.type === "number" || fd.type === "boolean" || (fd.enum && fd.enum.length)) && cfg[fd.key] !== undefined) keep[fd.key] = cfg[fd.key]; });
+    try { localStorage.setItem(trigMemKey(pid, tid), JSON.stringify(keep)); } catch (e) { /* ignore */ }
+  }
   function triggerModal(plugins) {
     api("/api/tasks").then(function (tasks) {
       var ptrig = [];
@@ -2417,7 +2446,7 @@
         var loadPF = function () {
           var x = ptrig[+((f.ptrig || {}).value || 0)]; if (!x) return;
           $("#tr-prev-out", root).innerHTML = "";
-          rpc("plugins.trigger_fields", { plugin_id: x.plugin, trigger_id: x.t.id }).then(function (fl) { pfields = fl || []; $("#tr-pf", root).innerHTML = schemaForm(pfields, {}, {}, "t-" + x.plugin); wirePluginAutofill($("#tr-pf", root), x.plugin, pfields); }).catch(fail);
+          rpc("plugins.trigger_fields", { plugin_id: x.plugin, trigger_id: x.t.id }).then(function (fl) { pfields = fl || []; $("#tr-pf", root).innerHTML = schemaForm(pfields, trigMemory(x.plugin, x.t.id, pfields), {}, "t-" + x.plugin); wirePluginAutofill($("#tr-pf", root), x.plugin, pfields); }).catch(fail);
         };
         var sync = function () { $$("[data-k]", f).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-k") !== f.kind.value); }); if (f.kind.value === "plugin" && !pfields.length) loadPF(); };
         f.kind.addEventListener("change", sync); sync();
@@ -2437,6 +2466,7 @@
           var k = f.kind.value, body = { kind: k, task_id: f.task_id.value, config: {} };
           if (k === "file_change") body.config.path = f.path.value.trim();
           if (k === "plugin") { var x = ptrig[+f.ptrig.value]; body.kind = x.t.kind; body.plugin_id = x.plugin; body.config = readSchemaForm($("#tr-pf", root), pfields); body.config.trigger_id = x.t.id; }
+          if (k === "plugin") trigRemember(ptrig[+f.ptrig.value].plugin, ptrig[+f.ptrig.value].t.id, pfields, body.config);
           rpc("triggers.create", body).then(function (r) {
             close();
             if (r && r.token) {
