@@ -986,6 +986,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .notice.warn { background: var(--warn-50); color: var(--warn); }
 #st-disk .notice { margin: 0 0 var(--s1); }
 #st-disk .notice > span { display: inline-flex; align-items: center; gap: 4px; }
+#st-disk [data-tip]:hover::after, #st-disk [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
 .trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sec-h .sec-sub { font-size: 13px; font-weight: 400; margin-left: 8px; }
 .of-wall { margin-bottom: var(--s4); }
