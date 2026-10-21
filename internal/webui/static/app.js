@@ -2417,7 +2417,7 @@
         var loadPF = function () {
           var x = ptrig[+((f.ptrig || {}).value || 0)]; if (!x) return;
           $("#tr-prev-out", root).innerHTML = "";
-          rpc("plugins.trigger_fields", { plugin_id: x.plugin, trigger_id: x.t.id }).then(function (fl) { pfields = fl || []; $("#tr-pf", root).innerHTML = schemaForm(pfields, {}, {}, "t-" + x.plugin); }).catch(fail);
+          rpc("plugins.trigger_fields", { plugin_id: x.plugin, trigger_id: x.t.id }).then(function (fl) { pfields = fl || []; $("#tr-pf", root).innerHTML = schemaForm(pfields, {}, {}, "t-" + x.plugin); wirePluginAutofill($("#tr-pf", root), x.plugin, pfields); }).catch(fail);
         };
         var sync = function () { $$("[data-k]", f).forEach(function (x) { x.classList.toggle("hidden", x.getAttribute("data-k") !== f.kind.value); }); if (f.kind.value === "plugin" && !pfields.length) loadPF(); };
         f.kind.addEventListener("change", sync); sync();
@@ -2511,12 +2511,175 @@
     });
     return out;
   }
+  // ---- official plugin prefill (POST /api/plugins/prefill) ----
+  // Fills what can be inferred from one value: an email address → SMTP/IMAP servers, a
+  // pasted robot webhook (or bare key/token) → normalized URL + masked display, a site
+  // URL → its RSS/Atom feed, a page URL → title + content selector. Fields the user typed
+  // into are never overwritten. Network lookups run server-side behind an SSRF guard.
+  function wirePluginAutofill(root, pid, fields) {
+    var has = function (k) { return !!$('[data-f="' + k + '"]', root); };
+    var el = function (k) { return $('[data-f="' + k + '"]', root); };
+    var auto = {}, mine = {};
+    fields.forEach(function (fd) { var e = el(fd.key); if (e) e.addEventListener("input", function (ev) { if (ev.isTrusted) mine[fd.key] = e.value !== auto[fd.key] && e.value !== ""; }); });
+    var flash = function (e) { e.classList.remove("af-flash"); void e.offsetWidth; e.classList.add("af-flash"); };
+    var put = function (k, v, force) {
+      var e = el(k); if (!e || v == null || v === "") return 0;
+      if (!force && (mine[k] || (e.value !== "" && e.value !== auto[k] && String(e.value) !== String(fieldDefault(k))))) return 0;
+      if (String(e.value) === String(v)) { auto[k] = e.value; return 0; }
+      e.value = v; auto[k] = e.value; flash(e); return 1;
+    };
+    var fieldDefault = function (k) { var fd = fields.filter(function (x) { return x.key === k; })[0]; return fd && fd.default != null ? fd.default : ""; };
+    var note = function (k, html, tone) {
+      var e = el(k); if (!e) return;
+      var host = e.closest(".field") || e.parentNode, n = $('[data-afn="' + k + '"]', host);
+      if (!n) { n = document.createElement("span"); n.setAttribute("data-afn", k); host.appendChild(n); }
+      n.className = "af-note" + (html ? " on" : "") + (tone ? " " + tone : "");
+      n.innerHTML = html ? (tone === "warn" ? ic("info", "sm") : ic("sparkle", "sm")) + "<span>" + html + "</span>" : "";
+    };
+    var ask = function (field, value, extra) { return apiRaw("/api/plugins/prefill", { method: "POST", body: Object.assign({ plugin: pid, field: field, value: value }, extra || {}) }); };
+    var debounce = function (fn, ms) { var t; return function () { var a = arguments; clearTimeout(t); t = setTimeout(function () { fn.apply(null, a); }, ms); }; };
+
+    if (pid === "email") {
+      var bar = document.createElement("div");
+      bar.className = "af-bar";
+      bar.innerHTML = '<label class="field"><span>' + esc(T("pf.af_mail")) + '</span><input type="email" id="af-mail" autocomplete="email" spellcheck="false" placeholder="you@example.com"></label>';
+      root.insertBefore(bar, root.firstChild);
+      var mailIn = $("#af-mail", bar), mailNote = document.createElement("span");
+      mailNote.className = "af-note"; mailNote.innerHTML = ic("sparkle", "sm") + "<span>" + esc(T("pf.af_mail_hint")) + "</span>"; bar.firstChild.appendChild(mailNote);
+      if (el("from") && el("from").value) mailIn.value = el("from").value;
+      var lookup = debounce(function (addr) {
+        if (!/@.+\./.test(addr)) return;
+        ask("address", addr).then(function (r) {
+          if (!r.found) { mailNote.className = "af-note warn on"; mailNote.innerHTML = ic("info", "sm") + "<span>" + esc(T("pf.af_mail_unknown")) + "</span>"; return; }
+          var v = r.values, n = 0;
+          ["smtp_host", "smtp_port", "smtp_username", "from", "imap_host", "imap_port", "imap_username", "default_to"].forEach(function (k) { n += put(k, v[k]); });
+          var name = T("pf.mp_" + r.provider) !== "pf.mp_" + r.provider ? T("pf.mp_" + r.provider) : r.provider;
+          mailNote.className = "af-note on";
+          mailNote.innerHTML = ic("sparkle", "sm") + "<span>" + esc(T(r.via === "mx" ? "pf.af_mail_mx" : "pf.af_mail_ok", { p: name, s: v.smtp_host + ":" + v.smtp_port, i: v.imap_host + ":" + v.imap_port })) + "</span>";
+          note("smtp_password", r.note ? esc(T("pf.mn_" + r.note, { p: name })) : "", "warn");
+          if (n) toast(T("pf.af_filled", { n: n }));
+        }).catch(function () {});
+      }, 400);
+      mailIn.addEventListener("input", function () { lookup(mailIn.value.trim()); });
+      ["from", "smtp_username"].forEach(function (k) { if (has(k)) el(k).addEventListener("change", function () { if (!mailIn.value) { mailIn.value = el(k).value; lookup(el(k).value.trim()); } }); });
+      if (mailIn.value) lookup(mailIn.value);
+    }
+
+    if ((pid === "wecom" || pid === "dingtalk") && has("webhook_url")) {
+      var wh = el("webhook_url");
+      var check = function (text) {
+        if (!text.trim()) { note("webhook_url", ""); return; }
+        ask("webhook_url", text).then(function (r) {
+          if (r.mismatch) { note("webhook_url", esc(T("pf.wh_mismatch", { k: T("pf.wh_" + r.kind) })), "warn"); return; }
+          if (!r.found) { note("webhook_url", esc(T("pf.wh_unknown")), "warn"); return; }
+          if (r.kind !== pid) { note("webhook_url", esc(T("pf.wh_unsupported", { k: T("pf.wh_" + r.kind) })), "warn"); return; }
+          if (r.values.webhook_url) put("webhook_url", r.values.webhook_url, true);
+          var msg = T("pf.wh_ok", { k: T("pf.wh_" + r.kind), m: r.masked }) + (r.built ? T("pf.wh_built") : "");
+          note("webhook_url", esc(msg));
+          if (r.values.sign_secret) { put("sign_secret", r.values.sign_secret, true); note("sign_secret", esc(T("pf.wh_secret", { m: r.secret_masked }))); }
+        }).catch(function () {});
+      };
+      wh.addEventListener("paste", function (e) { var t = (e.clipboardData || window.clipboardData).getData("text") || ""; if (t) { e.preventDefault(); wh.value = t.trim(); check(t); } });
+      wh.addEventListener("change", function () { check(wh.value); });
+    }
+
+    // Feed / page lookups share the private-address retry.
+    var discover = function (field, value, cb) {
+      var go = function (allow) {
+        note(field, esc(T("pf.looking")));
+        ask(field, value, { allow_private: !!allow }).then(function (r) {
+          if (!r.found && r.error_code === "private") {
+            note(field, esc(T("pf.private")) + ' <button type="button" class="link" data-af-allow="' + esc(field) + '">' + esc(T("pf.private_go")) + "</button>", "warn");
+            var b = $('[data-af-allow="' + field + '"]', root); if (b) b.addEventListener("click", function () { go(true); });
+            return;
+          }
+          if (!r.found) { note(field, esc(T("pf.fetch_fail", { e: r.error || "" })), "warn"); return; }
+          cb(r.discovery);
+        }).catch(function () { note(field, ""); });
+      };
+      go(false);
+    };
+    var looksURL = function (v) { return /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/i.test(v.trim()); };
+
+    if (pid === "rss-feed" && has("url")) {
+      var u = el("url");
+      var run = function () {
+        var v = u.value.trim(); if (!looksURL(v)) { note("url", ""); return; }
+        discover("url", v, function (d) {
+          if (d.is_feed) { note("url", esc(T("pf.feed_ok", { t: d.feeds[0].title || d.title || "RSS", n: d.feeds[0].items || 0 }))); return; }
+          if (!d.feeds.length) { note("url", esc(T("pf.feed_none")), "warn"); return; }
+          u.value = d.feeds[0].url; auto.url = u.value; flash(u);
+          var chips = d.feeds.length > 1 ? " " + d.feeds.map(function (f, i) { return '<button type="button" class="chip' + (i ? "" : " on") + '" data-feed="' + esc(f.url) + '" data-tip="' + esc(f.url) + '">' + esc(f.title || f.kind.toUpperCase()) + "</button>"; }).join("") : "";
+          note("url", esc(T(d.probed ? "pf.feed_probed" : "pf.feed_found", { t: d.feeds[0].title || d.title || d.feeds[0].url })) + chips);
+          $$("[data-feed]", root).forEach(function (b) { b.addEventListener("click", function () { u.value = b.getAttribute("data-feed"); auto.url = u.value; flash(u); $$("[data-feed]", root).forEach(function (x) { x.classList.toggle("on", x === b); }); }); });
+        });
+      };
+      u.addEventListener("change", run);
+      u.addEventListener("paste", function () { setTimeout(run, 0); });
+    }
+
+    if (pid === "web-monitor" && has("url")) {
+      var pu = el("url");
+      var runW = function () {
+        var v = pu.value.trim(); if (!looksURL(v)) { note("url", ""); return; }
+        discover("url", v, function (d) {
+          var sel = d.selector || "";
+          if (sel) put("selector", sel);
+          note("url", esc(T(sel ? "pf.page_sel" : "pf.page_ok", { t: d.title || v, s: sel })));
+          if (d.feeds && d.feeds.length) note("selector", esc(T("pf.page_has_feed", { t: d.feeds[0].title || d.feeds[0].url })), "warn");
+        });
+      };
+      pu.addEventListener("change", runW);
+      pu.addEventListener("paste", function () { setTimeout(runW, 0); });
+    }
+
+    if (pid === "daily-digest") {
+      if (has("hour")) note("hour", esc(T("pf.dd_tz", { tz: state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" })));
+      // Send via the first IM/mail connector that is configured.
+      if (has("notify_via")) {
+        var via = el("notify_via");
+        Promise.all(["wecom", "dingtalk", "email"].map(function (id) { return rpc("plugins.config_get", { id: id }).then(function (cv) { var ss = cv.secrets_set || {}, vals = cv.values || {}; return ss.webhook_url || vals.smtp_host || ss.app_secret ? id : ""; }, function () { return ""; }); })).then(function (ids) {
+          var ok = ids.filter(Boolean);
+          if (!ok.length) { note("notify_via", esc(T("pf.dd_none")), "warn"); return; }
+          if (ok.indexOf(via.value) < 0 && !mine.notify_via) { via.value = ok[0]; auto.notify_via = ok[0]; flash(via); }
+          note("notify_via", esc(T("pf.dd_via", { list: ok.map(function (x) { return T("of." + x + ".n"); }).join(T("af.sep")) })));
+        });
+      }
+      if (has("feeds")) {
+        var ta = el("feeds");
+        var fix = function () {
+          var lines = ta.value.split("\n").map(function (l) { return l.trim(); }).filter(Boolean);
+          var todo = lines.filter(looksURL).slice(0, 10);
+          if (!todo.length) return;
+          note("feeds", esc(T("pf.looking")));
+          var changed = 0, bad = 0;
+          var chain = todo.reduce(function (p, line) {
+            return p.then(function () {
+              return ask("feeds", line).then(function (r) {
+                if (!r.found) { bad++; return; }
+                var d = r.discovery;
+                if (!d.is_feed && d.feeds.length) { lines[lines.indexOf(line)] = d.feeds[0].url; changed++; }
+                else if (!d.is_feed) bad++;
+              }).catch(function () { bad++; });
+            });
+          }, Promise.resolve());
+          chain.then(function () {
+            if (changed) { ta.value = lines.join("\n"); auto.feeds = ta.value; flash(ta); }
+            note("feeds", changed || bad ? esc(T("pf.dd_feeds", { n: changed, b: bad })) : esc(T("pf.dd_feeds_ok", { n: todo.length })), bad ? "warn" : "");
+          });
+        };
+        ta.addEventListener("change", fix);
+        ta.addEventListener("paste", function () { setTimeout(fix, 0); });
+      }
+    }
+  }
   var PL_TESTABLE = { wecom: 1, dingtalk: 1, email: 1 };
   function pluginConfigModal(p, after) {
     rpc("plugins.config_get", { id: p.id }).then(function (cv) {
       var testable = PL_TESTABLE[p.id] && p.source === "official";
       modal('<div class="card-head"><span class="ico">' + ic("settings") + "</span><h2>" + esc(T("cfg.title", { n: plName(p) })) + '</h2></div><form id="pcf" novalidate>' + (state.dict["of." + p.id + ".cfg"] ? '<p class="hint">' + esc(T("of." + p.id + ".cfg")) + "</p>" : "") + schemaForm(cv.fields || [], cv.values || {}, cv.secrets_set || {}, p.id) + '<p class="notice bad hidden" id="pcf-err"></p><p class="notice ok hidden" id="pcf-ok"></p><div class="actions">' + (testable ? '<button type="button" class="btn" id="pcf-test">' + ic("send", "sm") + esc(T("of.test_send")) + '</button><span class="grow"></span>' : "") + '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
         var f = $("#pcf", root), err = $("#pcf-err", root), okm = $("#pcf-ok", root);
+        if (p.source === "official") wirePluginAutofill(f, p.id, cv.fields || []);
         var showErr = function (e) { okm.classList.add("hidden"); err.textContent = e.message; err.classList.remove("hidden"); };
         f.addEventListener("submit", function (e) {
           e.preventDefault();

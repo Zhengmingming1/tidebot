@@ -1460,8 +1460,8 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 /* ---- form auto-fill (2026-10-20): task name/schedule from the instruction, provider from the Base URL ---- */
 .af-pill { display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 6px; margin-left: var(--sp-1); border-radius: var(--radius-pill); background: var(--accent-50); color: var(--accent-600); font-size: var(--fs-xs); font-weight: 600; cursor: help; }
 .af-pill .i { width: 11px; height: 11px; }
-.af-note { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-3); line-height: 16px; }
-.af-note .i { width: 12px; height: 12px; flex: none; opacity: .7; }
+.af-note { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-3); line-height: 16px; }
+.af-note .i { width: 12px; height: 12px; flex: none; opacity: .7; margin-top: 2px; }
 .af-note.on { color: var(--accent-600); }
 .af-note.on .i { opacity: 1; }
 .af-flash { animation: af-flash 1.1s ease-out; border-radius: var(--radius); }
@@ -1496,3 +1496,10 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 #set-storage .set-row select { min-width: 128px; }
 .confirm-body { white-space: pre-line; }
 @media (prefers-reduced-motion: reduce) { .st-bar .st-seg { transition: none; } }
+.af-note.warn.on { color: var(--warn); }
+.af-note .link { font-size: inherit; padding: 0; border: 0; background: none; color: var(--accent-600); cursor: pointer; text-decoration: underline; }
+.af-note .chip { height: 22px; padding: 0 8px; margin-left: 4px; cursor: pointer; }
+.af-note .chip.on { border-color: var(--accent); color: var(--accent-600); background: var(--accent-50); }
+.af-note > span { min-width: 0; overflow-wrap: anywhere; }
+.af-bar { padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); border-radius: var(--radius); background: var(--accent-50); border: 1px solid var(--accent-100); }
+.af-bar .field { margin: 0; }
