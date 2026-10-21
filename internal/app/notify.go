@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ var urgentEvents = map[string]bool{EventConfirmNeeded: true, EventBudgetBreached
 // The WebUI renders "ntf.<key>.t" / "ntf.<key>.b" from its own i18n files
 // (scripts/check-i18n.py checks every key here has both).
 var NotificationKeys = []string{"run_finished", "run_failed", "run_interrupted", "approval_needed", "budget_breached", "budget_warning",
-	"breaker_tripped", "confirm_needed", "update_available", "update_rolled_back", "plugin_notify", "generic", "test"}
+	"breaker_tripped", "confirm_needed", "update_available", "update_rolled_back", "plugin_notify", "disk_low", "generic", "test"}
 
 // EventToMessage renders an event in the configured language (channels, tray) and
 // also carries the message key + params so the WebUI can render it in the viewer's language.
@@ -61,6 +62,12 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		ver, rest, _ := strings.Cut(e.Detail, "\n")
 		m.Params["v"], m.Params["detail"] = ver, rest
 		m.Title, m.Body = updateMessage(e)
+	case EventDiskLow:
+		var free, total uint64
+		_, _ = fmt.Sscanf(e.Detail, "%d/%d", &free, &total)
+		m.Params["free"], m.Params["total"] = fmtBytesShort(free), fmtBytesShort(total)
+		m.Params["detail"] = ""
+		m.Title, m.Body = i18n.T("desktop.n.disk_low", m.Params["free"]), i18n.T("desktop.n.disk_low_body")
 	case EventPluginNotify:
 		m.Title, m.Body = e.Detail, ""
 	default:

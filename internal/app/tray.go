@@ -84,6 +84,9 @@ func (a *App) TrayStatus(ctx context.Context, daemonErr error) TrayStatus {
 	if failed > 0 {
 		st.Problems = append(st.Problems, TrayProblem{Key: "desktop.p.failed", N: failed})
 	}
+	if d := a.lastDisk(); d != nil && d.Low {
+		st.Problems = append(st.Problems, TrayProblem{Key: "desktop.p.disk_low", N: int(d.Free >> 20)})
+	}
 	switch {
 	case len(st.Problems) > 0:
 		st.Icon = TrayError

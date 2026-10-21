@@ -47,6 +47,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	go a.PluginHost.Run(ctx)
 	go a.runFileWatcher(ctx, 0)
 	go a.runRetention(ctx)
+	go a.runDiskWatch(ctx)
 	go a.runUpdateChecker(ctx)
 	go a.runPriceCatalog(ctx)
 	if os.Getenv("TIDEBOT_NO_AUTO_BACKUP") != "1" {

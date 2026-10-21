@@ -68,6 +68,7 @@ type App struct {
 	PluginHost *plugin.Host
 
 	trig *triggerState
+	disk diskWatch
 
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
