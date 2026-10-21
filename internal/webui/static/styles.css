@@ -1503,3 +1503,5 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .af-note > span { min-width: 0; overflow-wrap: anywhere; }
 .af-bar { padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); border-radius: var(--radius); background: var(--accent-50); border: 1px solid var(--accent-100); }
 .af-bar .field { margin: 0; }
+.pv-offer .notice { display: flex; align-items: center; gap: var(--sp-2); }
+.pv-offer .notice > span { flex: 1; }
