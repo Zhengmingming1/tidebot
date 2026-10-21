@@ -16,9 +16,21 @@ permissions:
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  # The full 3-OS test matrix must pass before any (10x-billed macOS) packaging starts.
+  test:
+    uses: ./.github/workflows/full-matrix.yml
+    with:
+      ref: ${{ github.event.inputs.tag || github.ref_name }}
+
   server:
+    needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,7 +38,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test -count=1 ./...
       - run: bash scripts/package-server.sh "${TAG#v}" dist
       - uses: actions/upload-artifact@v4
         with:
@@ -34,6 +45,8 @@ jobs:
           path: dist/*
 
   desktop-linux:
+    needs: test
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +68,9 @@ jobs:
           path: dist/*
 
   desktop-macos:
+    needs: test
     runs-on: macos-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,7 +107,9 @@ jobs:
           path: dist/*
 
   desktop-windows:
+    needs: test
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
@@ -151,7 +168,9 @@ jobs:
           path: dist/*
 
   docker:
+    needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -187,6 +206,7 @@ jobs:
   publish:
     needs: [server, desktop-linux, desktop-macos, desktop-windows, docker]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:

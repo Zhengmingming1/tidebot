@@ -1,0 +1,90 @@
+name: full matrix
+# The 3-OS test matrix (the old per-push CI). Not run on push: macOS bills 10x and
+# Windows 2x. Run it from the Actions tab / `gh workflow run full-matrix.yml`, and
+# release.yml calls it for every v* tag before anything is packaged.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "branch, tag or SHA to test (default: the selected branch)"
+        required: false
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-matrix-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  i18n:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: zh-CN / en key parity
+        run: python3 scripts/check-i18n.py
+
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: vet
+        run: go vet ./...
+      - name: test
+        shell: bash
+        run: |
+          chmod +x testdata/mock-claude/claude
+          go test -count=1 ./...
+      - name: build
+        shell: bash
+        run: |
+          CGO_ENABLED=0 go build -o bin/ ./cmd/agentd ./cmd/agentctl
+          ls -l bin
+          PY=$(command -v python3 || command -v python); "$PY" scripts/check-no-private-url.py bin
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/tidebot-desktop/go.mod
+          cache-dependency-path: cmd/tidebot-desktop/go.sum
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: test + build
+        working-directory: cmd/tidebot-desktop
+        shell: bash
+        run: |
+          TAGS=""; [ "$RUNNER_OS" = Linux ] && TAGS="-tags gtk3"
+          go vet $TAGS ./...
+          go test $TAGS ./...
+          go build $TAGS -o /tmp/tidebot-desktop-ci .
+          [ "$RUNNER_OS" = Windows ] || python3 ../../scripts/check-no-private-url.py /tmp/tidebot-desktop-ci

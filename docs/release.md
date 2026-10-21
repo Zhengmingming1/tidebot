@@ -1,8 +1,18 @@
 # Releasing tidebot
 
-Releases are built by GitHub Actions. CI (`.github/workflows/ci.yml`) runs vet, tests and a build
-on Linux, macOS and Windows for every push to `main`. Pushing a tag `v*` runs
-`.github/workflows/release.yml`.
+Releases are built by GitHub Actions. Everyday CI (`.github/workflows/ci.yml`) runs on Linux
+only for pushes and PRs to `main`: i18n, vet, tests, the core build plus a darwin/windows
+cross-compile, and the desktop Linux build. Docs-only and README-only changes skip it. macOS
+minutes bill 10x and Windows 2x on a private repo, so the 3-OS matrix
+(`.github/workflows/full-matrix.yml`) only runs:
+
+- by hand: `gh workflow run full-matrix.yml` (optionally `-f ref=<branch|tag|sha>`), or
+  Actions → "full matrix" → Run workflow;
+- automatically for every tag `v*`: `.github/workflows/release.yml` calls it first, and no
+  packaging job starts unless it passes.
+
+Before tagging, it's worth a manual full-matrix run on `main`, so a macOS/Windows-only failure
+shows up before the tag exists.
 
 ## Cutting a release
 
