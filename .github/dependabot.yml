@@ -1,7 +1,12 @@
 # Keeps the SHA-pinned actions current (weekly PRs; they run CI like any other PR).
+# Grouped: artifact upload/download and the docker actions must move together,
+# and one PR per week is easier to review than six.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
