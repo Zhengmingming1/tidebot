@@ -16,7 +16,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 wi
   for b in agentd agentctl; do
     (cd "$ROOT" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDF" -o "$stage/$b$ext" ./cmd/$b)
   done
-  cp "$ROOT/README.md" "$ROOT/README.en.md" "$stage/"
+  cp "$ROOT/README.md" "$ROOT/README.en.md" "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
   if [ "$os" = windows ]; then
     (cd "$(dirname "$stage")" && if command -v zip >/dev/null; then zip -qr "$OUT/$name.zip" "$name"; else python3 -m zipfile -c "$OUT/$name.zip" "$name"; fi)
   else

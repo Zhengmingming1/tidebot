@@ -273,11 +273,16 @@ Not there yet:
 - The guard's path checks assume Unix paths, so the write-outside-workspace check isn't reliable on Windows.
 - I've only installed and run the Linux packages myself. The macOS .dmg and Windows installer come out of CI and nobody has clicked through them yet.
 - Builds are unsigned by default.
-- The repo is still private, so self-update can't see new releases yet.
 
 ## About Anthropic
 
 tidebot drives the Claude Code CLI installed on your machine, with your own API key or subscription. It is not affiliated with, endorsed by, or sponsored by Anthropic. Please follow the terms of Anthropic and of whichever model provider you use. "Claude" and "Claude Code" are trademarks of Anthropic.
+
+## License
+
+tidebot is released under the [GNU AGPL-3.0](LICENSE), version 3 only (SPDX: `AGPL-3.0-only`). Use it, change it, pass it on. The one catch: if you change it and let other people use it over a network (say, you open the WebUI to your team), you have to offer them your changed source too.
+
+The source lives at [github.com/Zhengmingming1/tidebot](https://github.com/Zhengmingming1/tidebot). Installers and auto-update still come from [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases). The icons are Lucide (ISC). Dependency licenses are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Issues and PRs are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) has the short version.
 
 ## Docs
 

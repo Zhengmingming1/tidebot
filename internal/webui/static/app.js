@@ -3319,6 +3319,8 @@
   var SET_SECTIONS = ["general", "providers", "budgets", "pricing", "security", "notifications", "network", "data", "about"];
   var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", pricing: "receipt", security: "shield", notifications: "bell", network: "globe", data: "folder", about: "info" };
   var RELEASES_PAGE = "https://github.com/Zhengmingming1/tidebot-releases/releases/latest";
+  // AGPL-3.0-only: the WebUI links its own source (section 13, for people using it over a network).
+  var SOURCE_REPO = "https://github.com/Zhengmingming1/tidebot";
   var NET_CODES = ["timeout", "dns", "tls", "proxy", "refused", "http_404", "http", "signature", "checksum", "unknown"];
   // Classified network error with a "how to fix" hint and the manual download link.
   function netErrHtml(code, detail, attempts) {
@@ -3636,7 +3638,8 @@
         body = '<section class="card">' + head +
           row("version", T("set.version"), T("set.version_sub"), "<code>" + esc(state.version || "dev") + "</code>") +
           row("terms", T("set.terms"), T("set.terms_sub"), "") +
-          row("source", T("set.source"), T("set.source_sub"), '<a href="' + esc(RELEASES_PAGE) + '" target="_blank" rel="noopener"><code>github.com/Zhengmingming1/tidebot-releases</code></a>') + "</section>" +
+          row("source", T("set.source"), T("set.source_sub"), '<a href="' + esc(RELEASES_PAGE) + '" target="_blank" rel="noopener"><code>github.com/Zhengmingming1/tidebot-releases</code></a>') +
+          row("code", T("set.code"), T("set.code_sub"), '<a href="' + esc(SOURCE_REPO) + '" target="_blank" rel="noopener"><code>github.com/Zhengmingming1/tidebot</code></a>') + "</section>" +
           '<section class="card" id="set-update"><div class="card-head"><span class="ico">' + ic("refresh") + "</span><h2>" + esc(T("up.title")) + "</h2></div>" +
           row("up_auto", T("up.auto"), T("up.auto_sub"), '<label class="check"><input type="checkbox" id="up-auto"> ' + esc(T("up.on")) + "</label>") +
           row("up_every", T("up.every"), T("up.every_sub"), '<select id="up-every"><option value="24">' + esc(T("up.daily")) + '</option><option value="168">' + esc(T("up.weekly")) + "</option></select>") +

@@ -243,7 +243,7 @@ jobs:
           fi
 
       # Public mirror: Zhengmingming1/tidebot-releases gets the same files plus
-      # SHA256SUMS and a signed latest.json for the in-app updater. Source stays here.
+      # SHA256SUMS and a signed latest.json for the in-app updater (the update channel).
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -253,7 +253,6 @@ jobs:
         if: env.UPDATE_SIGNING_KEY != ''
         run: |
           bash scripts/release-notes.sh "$TAG" Zhengmingming1/tidebot-releases > public-notes.md
-          python3 scripts/check-no-private-url.py public-notes.md  # public page must not link the private repo
           go run ./tools/relsign manifest "$TAG" dist public-notes.md
       - name: publish to tidebot-releases
         env:

@@ -645,6 +645,8 @@
   "set.signout": "退出登录",
   "set.source": "发布与反馈",
   "set.source_sub": "下载、更新说明和问题反馈都在公开的发布仓库。",
+  "set.code": "源代码",
+  "set.code_sub": "开源，GNU AGPL-3.0-only。改了之后通过网络给别人用，也要把源码给他们。",
   "set.sub": "单用户配置。密钥永远不会显示。",
   "set.terms": "服务条款",
   "set.terms_sub": "tidebot 只是调用你配置的模型服务。使用 Claude 等模型时，请遵守 Anthropic 及对应服务商的条款。",

@@ -271,11 +271,16 @@ bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏�
 - 防护规则里的路径判断按 Unix 路径写的，Windows 上写文件越界检查不可靠
 - 只有 Linux 的包我自己装过跑过；macOS 的 .dmg 和 Windows 安装包是 CI 打出来的，还没人点开试过
 - 默认不签名
-- 仓库还是私有的，所以自更新现在查不到新版本
 
 ## 关于 Anthropic
 
 tidebot 调用的是你本机安装的 Claude Code CLI，用的是你自己的 API key 或订阅。它和 Anthropic 没有任何关系，没有得到 Anthropic 的认可或赞助。请按 Anthropic 和你所用模型服务商的使用条款来用。“Claude”和“Claude Code”是 Anthropic 的商标。
+
+## 许可证
+
+tidebot 用 [GNU AGPL-3.0](LICENSE) 发布，只限这一个版本（SPDX: `AGPL-3.0-only`）。随便用、随便改、随便转发都行。只有一个要求：如果你改了它，又通过网络给别人用（比如把 WebUI 开给团队），也得把改过的源码给他们。
+
+源码在 [github.com/Zhengmingming1/tidebot](https://github.com/Zhengmingming1/tidebot)。安装包和自动更新还是走 [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases)。界面图标来自 Lucide（ISC），依赖的许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。欢迎提 issue 和 PR，先看看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 文档
 
