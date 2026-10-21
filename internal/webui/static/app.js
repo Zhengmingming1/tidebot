@@ -416,7 +416,10 @@
     items.forEach(function (n) { (groups[n.group] || groups.other).push(n); });
     var unread = function (n) { return n.created_at > state.notifSeen; };
     var it = function (n) {
-      return '<div class="item' + (unread(n) ? " unread" : "") + '"><strong>' + esc(notifText(n).t) + "</strong><div>" + esc(notifText(n).b) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small></div>";
+      var inner = "<strong>" + esc(notifText(n).t) + "</strong><div>" + esc(notifText(n).b) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small>";
+      // low disk space opens the storage card, where old logs can be cleaned up
+      if (n.key === "disk_low") return '<a class="item link-item' + (unread(n) ? " unread" : "") + '" href="#/settings/data/storage">' + inner + "</a>";
+      return '<div class="item' + (unread(n) ? " unread" : "") + '">' + inner + "</div>";
     };
     var sec = function (key, inner, count) {
       return '<div class="ngroup"><h5>' + esc(T("nc." + key)) + (count ? ' <span class="pill sm">' + esc(count) + "</span>" : "") + "</h5>" + (inner || '<div class="item muted">' + esc(T("nc.empty")) + "</div>") + "</div>";
@@ -3043,7 +3046,7 @@
     var sel = function (id, key) { return '<select id="' + id + '" data-st="' + key + '" aria-label="' + esc(T("st." + key)) + '" disabled><option>…</option></select>'; };
     var r = function (key, sub, right) { return '<div class="set-row" id="set-st_' + key + '"><div class="lbl"><strong>' + esc(T("st." + key)) + '</strong><small id="st-' + key + '-sub">' + esc(sub) + "</small></div>" + right + "</div>"; };
     return '<section class="card" id="set-storage"><div class="card-head"><span class="ico">' + ic("database") + "</span><h2>" + esc(T("st.title")) + '</h2><span class="st-total" id="st-total"></span></div>' +
-      '<div class="st-usage" id="st-usage" aria-live="polite"><div class="st-bar sk"></div></div>' +
+      '<div id="st-disk"></div><div class="st-usage" id="st-usage" aria-live="polite"><div class="st-bar sk"></div></div>' +
       r("log_days", T("st.log_days_sub"), sel("st-log", "log_days")) +
       r("artifact_days", T("st.artifact_days_sub"), sel("st-art", "artifact_days")) +
       r("keep_per_task", T("st.keep_per_task_sub"), sel("st-keep", "keep_per_task")) +
@@ -3064,7 +3067,10 @@
     }).join("") + "</ul>";
     applySizes(box);
     var last = v.last ? T(v.last.auto ? "st.last_auto" : "st.last_manual", { t: fullTime(v.last.at), f: fmtBytes(v.last.freed_bytes) }) : T("st.last_none");
-    $("#st-total").innerHTML = esc(T("st.total", { s: fmtBytes(total) })) + tip(T("st.where") + "\n" + last);
+    // Free space on the data volume: in the tooltip normally, as a notice only when low.
+    var dk = v.disk, diskLine = dk ? T("st.disk_free", { f: fmtBytes(dk.free_bytes), t: fmtBytes(dk.total_bytes) }) : "";
+    $("#st-total").innerHTML = esc(T("st.total", { s: fmtBytes(total) })) + tip(T("st.where") + "\n" + (diskLine ? diskLine + "\n" : "") + last);
+    $("#st-disk").innerHTML = dk && dk.low ? '<p class="notice warn" role="status">' + ic("database", "sm") + "<span>" + esc(T("st.disk_low", { f: fmtBytes(dk.free_bytes) })) + tip(T("st.disk_low_tip", { th: fmtBytes(dk.threshold_bytes) })) + "</span></p>" : "";
     var day = function (n) { return n ? T("st.days", { n: n }) : T("st.forever"); };
     $("#st-log").innerHTML = stOpts(ST_DAYS, p.log_days, day);
     $("#st-art").innerHTML = stOpts(ST_DAYS, p.artifact_days, day);

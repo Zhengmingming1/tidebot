@@ -88,6 +88,7 @@ type StorageView struct {
 		Bytes int64 `json:"bytes"`
 	} `json:"preview"` // what "Clean up now" would delete under the current policy
 	Last *CleanupRecord `json:"last,omitempty"`
+	Disk *DiskStatus    `json:"disk,omitempty"` // volume holding the data folder; absent if unknown
 }
 
 // StorageUsage measures the data folder. It never lists file names or paths.
@@ -139,6 +140,9 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 	a.loadJSONSetting(ctx, setRetentionLast, &last)
 	if last.At != "" {
 		v.Last = &last
+	}
+	if d, ok := a.DiskStatus(); ok {
+		v.Disk = &d
 	}
 	return v, nil
 }
