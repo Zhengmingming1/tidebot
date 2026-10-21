@@ -1616,14 +1616,57 @@
   }
 
   // ---------- button editor ----------
+  // Icon suggestion for a button: first rule whose words appear in the label, else in the
+  // target (task name/instruction, skill name, prompt). Order = most specific first.
+  var ICON_RULES = [
+    ["receipt", /账单|发票|报销|对账|invoice|billing|\bbills?\b|expense/i],
+    ["doc", /日报|周报|月报|报告|报表|总结|汇总|摘要|纪要|文档|\breports?\b|\bsummar|\bdigest|\bdocs?\b|\bnotes?\b|\brecap/i],
+    ["rss", /\brss\b|订阅源|\bfeeds?\b|新闻|\bnews\b/i],
+    ["rocket", /部署|发布|上线|\bdeploy|\brelease|\bship\b|\blaunch/i],
+    ["database", /备份|数据库|\bback ?ups?\b|\bdatabase|\bdb\b|\bsql\b|\bdump\b/i],
+    ["trash", /清理|清空|删除|\bclean|\bpurge|\bdelete|\bprune/i],
+    ["sync", /同步|拉取|刷新|\bsync|\bpull\b|\brefresh|\bfetch/i],
+    ["git", /\bgit(hub|lab)?\b|提交|\bcommits?\b|\bprs?\b|pull request|合并请求|\bmerge\b|分支|\bbranch/i],
+    ["bug", /\bbugs?\b|缺陷|故障|报错|工单|\bissues?\b|\btriage|\bincident/i],
+    ["mail", /邮件|邮箱|\be?-?mail|\binbox|newsletter/i],
+    ["chat", /消息|通知|群聊|企业微信|钉钉|飞书|\bslack\b|\bwecom\b|dingtalk|\bnotify|\bmessage|\bchat\b/i],
+    ["calendar", /日程|会议|日历|\bcalendar|\bmeeting|\bagenda/i],
+    ["pulse", /监控|健康|巡检|可用性|检查|构建状态|\bci\b|\bbuilds?\b|\bcheck\b|\bmonitor|\bhealth|\buptime|\bping\b/i],
+    ["pie", /统计|分析|指标|图表|看板|\banalytics|\bstats?\b|\bmetrics?|\bchart|\bkpi|\bdashboard/i],
+    ["shield", /安全|审计|漏洞|权限|\bsecurity|\baudit|\bvuln|\bcve\b/i],
+    ["code", /代码|重构|审查|\bcode\b|\brefactor|\breview|\blint/i],
+    ["globe", /网页|网站|抓取|爬取|\bweb\b|\bsite\b|\bscrape|\bcrawl|\bwebsite/i],
+    ["download", /下载|导出|\bdownload|\bexport/i],
+    ["upload", /上传|\bupload/i],
+    ["book", /翻译|阅读|学习|论文|\btranslat|\bread\b|\blearn|\bpaper/i],
+    ["image", /图片|截图|海报|\bimages?\b|\bphotos?\b|\bscreenshot/i],
+    ["cloud", /云盘|对象存储|\bcloud\b|\bs3\b|\boss\b/i],
+    ["cpu", /性能|压测|\bperf|\bbenchmark|\bcpu\b|\bload test/i],
+    ["terminal", /脚本|命令|终端|\bscript|\bshell\b|\bcommand|\bcli\b/i],
+    ["clock", /提醒|闹钟|\bremind|\btimer\b/i],
+    ["star", /收藏|精选|\bstar\b|\bfavou?rite/i]
+  ];
+  function suggestIcon(label, target) {
+    for (var pass = 0; pass < 2; pass++) {
+      var text = pass ? target : label;
+      if (!text) continue;
+      for (var i = 0; i < ICON_RULES.length; i++) { var m = text.match(ICON_RULES[i][1]); if (m && P[ICON_RULES[i][0]]) return { icon: ICON_RULES[i][0], word: m[0].trim(), from: pass ? "target" : "label" }; }
+    }
+    return null;
+  }
+  // First clause of a task instruction, as a card subtitle (≤ 60 chars).
+  function firstClause(text) {
+    var t = String(text || "").replace(/\s+/g, " ").trim(), m = t.split(/[。！？!?\n]|\.\s/)[0] || t;
+    return Array.from(m).length > 60 ? Array.from(m).slice(0, 59).join("") + "…" : m;
+  }
   function buttonModal(list, idx, tasks, skills, save) {
     var b = idx == null ? { id: "", label: "", description: "", icon: "bolt", color: "", task_id: "", skill_id: "", skill_version_id: "", prompt: "", params: [] } : JSON.parse(JSON.stringify(list[idx]));
     b.params = b.params || [];
     var mode = b.task_id ? "task" : b.skill_id ? "skill" : "prompt";
     var icons = Object.keys(P).filter(function (k) { return ["chev", "more", "x", "circle"].indexOf(k) < 0; });
     modal('<div class="card-head"><span class="ico">' + ic("buttons") + "</span><h2>" + esc(T(idx == null ? "bt.new" : "bt.edit")) + '</h2></div><div class="bt-edit"><form id="bf">' +
-      '<div class="form-row">' + fieldHtml(T("bt.label"), '<input name="label" required maxlength="40" value="' + esc(b.label) + '">') + fieldHtml(T("bt.desc"), '<input name="description" maxlength="60" value="' + esc(b.description) + '">') + "</div>" +
-      '<div class="field"><span>' + esc(T("bt.icon")) + '</span><input id="ic-q" type="search" placeholder="' + esc(T("bt.icon_search")) + '"><div class="icon-grid" id="ic-grid">' + icons.map(function (k) { return '<button type="button" class="ic-cell' + (k === b.icon ? " on" : "") + '" data-ic="' + k + '" title="' + k + '">' + ic(k) + "</button>"; }).join("") + "</div></div>" +
+      '<div class="form-row">' + fieldHtml(T("bt.label"), '<input name="label" required maxlength="40" value="' + esc(b.label) + '">', "", '<span class="af-pill hidden" data-af="label" data-tip="' + esc(T("bt.af_label")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") + fieldHtml(T("bt.desc"), '<input name="description" maxlength="60" value="' + esc(b.description) + '">', "", '<span class="af-pill hidden" data-af="description" data-tip="' + esc(T("bt.af_desc")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") + "</div>" +
+      '<div class="field"><span>' + esc(T("bt.icon")) + '<span class="af-pill hidden" data-af="icon" data-tip="">' + ic("sparkle", "sm") + esc(T("af.auto")) + '</span></span><input id="ic-q" type="search" placeholder="' + esc(T("bt.icon_search")) + '"><div class="icon-grid" id="ic-grid">' + icons.map(function (k) { return '<button type="button" class="ic-cell' + (k === b.icon ? " on" : "") + '" data-ic="' + k + '" title="' + k + '">' + ic(k) + "</button>"; }).join("") + "</div></div>" +
       '<div class="field"><span>' + esc(T("bt.color")) + '</span><div class="swatches">' + SWATCHES.map(function (c) { return '<button type="button" class="sw' + (c === (b.color || "") ? " on" : "") + (c ? "" : " none") + '" data-sw="' + c + '" data-color="' + c + '" aria-label="' + esc(c || T("bt.color_default")) + '"></button>'; }).join("") + "</div></div>" +
       '<div class="field"><span>' + esc(T("bt.action")) + '</span><div class="seg" id="bt-mode">' + [["prompt", T("bt.m_prompt")], ["skill", T("bt.m_skill")], ["task", T("bt.m_task")]].map(function (m) { return '<button type="button" data-m="' + m[0] + '" class="' + (m[0] === mode ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + "</div></div>" +
       '<div data-for="task">' + fieldHtml(T("col.task"), '<select name="task_id">' + tasks.map(function (t) { return opt(t.id, t.name, t.id === b.task_id); }).join("") + "</select>") + "</div>" +
@@ -1658,8 +1701,40 @@
       };
       applyColors(root);
       drawParams(); loadVers(); showMode();
+      // Auto-fill: icon from the label/target until an icon is clicked; label and subtitle
+      // from the chosen task/skill while the user hasn't typed their own.
+      var creating = idx == null, auto = {}, mine = { icon: !creating, label: !creating && !!b.label, description: !creating && !!b.description };
+      var afPill = function (k, on, tipText) { var x = $('[data-af="' + k + '"]', root); if (!x) return; x.classList.toggle("hidden", !on); if (tipText != null) x.setAttribute("data-tip", tipText); };
+      var targetInfo = function () {
+        if (mode === "task") { var t = tasks.filter(function (x) { return x.id === f.task_id.value; })[0]; return t ? { name: t.name, desc: firstClause(t.prompt || t.goal || ""), text: t.name + " " + (t.prompt || "") } : null; }
+        if (mode === "skill") { var k = skills.filter(function (x) { return x.id === f.skill_id.value; })[0]; return k ? { name: k.name, desc: firstClause(k.description || ""), text: k.name + " " + (k.description || "") + " " + f.prompt.value } : null; }
+        return { name: "", desc: "", text: f.prompt.value };
+      };
+      var putText = function (k, v) {
+        if (mine[k] || !v || f[k].value === v) return;
+        if (f[k].value && f[k].value !== auto[k]) return;
+        f[k].value = Array.from(v).slice(0, +f[k].getAttribute("maxlength") || 60).join(""); auto[k] = f[k].value; afPill(k, true);
+      };
+      var autofill = function () {
+        var ti = targetInfo() || { name: "", desc: "", text: "" };
+        if (mode !== "prompt") { putText("label", ti.name); putText("description", ti.desc); }
+        if (mine.icon) return;
+        var sug = suggestIcon(f.label.value, ti.text);
+        if (!sug || sug.icon === b.icon) { if (sug) afPill("icon", true); return; }
+        b.icon = sug.icon;
+        $$("[data-ic]", root).forEach(function (y) { y.classList.toggle("on", y.getAttribute("data-ic") === sug.icon); });
+        var cell = $('[data-ic="' + sug.icon + '"]', root); if (cell) cell.scrollIntoView({ block: "nearest" });
+        afPill("icon", true, T(sug.from === "label" ? "bt.af_icon_label" : "bt.af_icon_target", { w: sug.word }));
+        preview();
+      };
+      ["label", "description"].forEach(function (k) { f[k].addEventListener("input", function (e) { if (e.isTrusted && f[k].value !== auto[k]) { mine[k] = !!f[k].value; afPill(k, false); } }); });
+      if (creating) {
+        f.label.addEventListener("input", autofill); f.prompt.addEventListener("input", autofill);
+        f.task_id.addEventListener("change", autofill); f.skill_id.addEventListener("change", autofill);
+        $$("[data-m]", root).forEach(function (x) { x.addEventListener("click", function () { setTimeout(autofill, 0); }); });
+      }
       $("#ic-q", root).addEventListener("input", function (e) { var q = e.target.value.trim().toLowerCase(); $$("[data-ic]", root).forEach(function (x) { x.classList.toggle("hidden", q && x.getAttribute("data-ic").indexOf(q) < 0); }); });
-      $$("[data-ic]", root).forEach(function (x) { x.addEventListener("click", function () { b.icon = x.getAttribute("data-ic"); $$("[data-ic]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
+      $$("[data-ic]", root).forEach(function (x) { x.addEventListener("click", function (e) { if (e.isTrusted) { mine.icon = true; afPill("icon", false); } b.icon = x.getAttribute("data-ic"); $$("[data-ic]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
       $$("[data-sw]", root).forEach(function (x) { x.addEventListener("click", function () { b.color = x.getAttribute("data-sw"); $$("[data-sw]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
       $$("[data-m]", root).forEach(function (x) { x.addEventListener("click", function () { mode = x.getAttribute("data-m"); showMode(); }); });
       f.skill_id.addEventListener("change", function () { b.skill_version_id = ""; loadVers(); });

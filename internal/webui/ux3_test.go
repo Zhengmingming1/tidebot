@@ -204,6 +204,11 @@ func TestSkillUploadAndImport(t *testing.T) {
 	if code, out := c.json(http.MethodPost, "/api/skills/import", map[string]string{"stage_id": p.StageID, "name": p.Name}); code != 200 {
 		t.Fatalf("import %d %v", code, out)
 	}
+	var sl []skillDTO
+	_ = json.Unmarshal(c.do(http.MethodGet, "/api/skills", "", nil).Body.Bytes(), &sl)
+	if len(sl) != 1 || sl[0].Description != "Split and merge PDFs" {
+		t.Fatalf("skill list description %+v", sl)
+	}
 	// same name again → 409 with existing, then import as a new version
 	rr = c.do(http.MethodPost, "/api/skills/upload", ct, body)
 	_ = json.Unmarshal(rr.Body.Bytes(), &p)
