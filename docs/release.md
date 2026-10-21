@@ -68,7 +68,8 @@ and never echoed.
 
 ## Self-update
 
-Source stays private. The `publish` job also mirrors each release to the public
+The source repo is public (AGPL-3.0-only), but the update channel stays separate: the
+`publish` job also mirrors each release to
 [tidebot-releases](https://github.com/Zhengmingming1/tidebot-releases) repo with `SHA256SUMS`
 and a signed `latest.json` (+ `latest.json.sig`, ed25519, built by `tools/relsign`).
 
@@ -101,5 +102,5 @@ scripts/package-desktop-macos.sh 0.1.0 dist   # macOS only
 followed by `docs/release-notes/<tag>.md`. The publish job uses it as the release body.
 v0.1.0 used the older file names (`... v010` mode).
 
-A GitHub Pages download page with OS detection was skipped: the repo is private, and Pages on
-private repos needs a paid plan.
+A GitHub Pages download page with OS detection was skipped for now. The releases page and the
+"Which file do I download?" table cover it.

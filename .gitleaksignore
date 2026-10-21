@@ -1,0 +1,5 @@
+# Known fake test fixtures (synthetic WeCom webhook key in prefill tests)
+dda11f75f1539eb5143803b90ad698116c0ffaa3:internal/prefill/prefill_test.go:generic-api-key:102
+dda11f75f1539eb5143803b90ad698116c0ffaa3:internal/webui/prefill_test.go:generic-api-key:17
+internal/prefill/prefill_test.go:generic-api-key:102
+internal/webui/prefill_test.go:generic-api-key:17

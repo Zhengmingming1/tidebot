@@ -645,6 +645,8 @@
   "set.signout": "Sign out",
   "set.source": "Releases & feedback",
   "set.source_sub": "Downloads, release notes and issues live in the public releases repo.",
+  "set.code": "Source code",
+  "set.code_sub": "Open source under the GNU AGPL-3.0-only. If you run a changed version for others over a network, offer them its source.",
   "set.sub": "Single-user configuration. Secrets are never displayed.",
   "set.terms": "Provider terms",
   "set.terms_sub": "tidebot only calls the model providers you configure. When using Claude or other models, follow Anthropic's and that provider's terms.",
