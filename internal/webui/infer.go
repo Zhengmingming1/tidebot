@@ -192,13 +192,29 @@ func cjk(s string) bool {
 // handleTaskInfer: POST /api/tasks/infer {prompt} → TaskGuess. POST keeps the prompt out of URLs and logs.
 func (s *Server) handleTaskInfer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Prompt string `json:"prompt"`
+		Prompt   string `json:"prompt"`
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Cron     string `json:"cron"` // the form's current schedule (for runs per day)
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil {
 		writeErr(w, 400, "bad json")
 		return
 	}
-	writeJSON(w, 200, InferTask(body.Prompt))
+	g := InferTask(body.Prompt)
+	out := map[string]any{"name": g.Name, "cron": g.Cron}
+	if body.Provider != "" {
+		n := body.Name
+		if n == "" {
+			n = g.Name
+		}
+		c := body.Cron
+		if c == "" && g.Cron != "" {
+			c = g.Cron
+		}
+		out["budget"] = s.suggestBudget(r.Context(), n, body.Prompt, body.Provider, c)
+	}
+	writeJSON(w, 200, out)
 }
 
 func postOnly(fn http.HandlerFunc) http.HandlerFunc {
