@@ -41,7 +41,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: bash scripts/package-server.sh "${TAG#v}" dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: server
           path: dist/*
@@ -64,7 +64,7 @@ jobs:
           cache-dependency-path: cmd/tidebot-desktop/go.sum
       - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev file libfuse2
       - run: bash scripts/package-desktop-linux.sh "${TAG#v}" dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ matrix.os }}
           path: dist/*
@@ -105,7 +105,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/package-desktop-macos.sh "${TAG#v}" dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-macos
           path: dist/*
@@ -167,7 +167,7 @@ jobs:
         run: |
           $V = "$env:TAG".TrimStart("v")
           Compress-Archive -Path stage\tidebot-desktop.exe, stage\agentctl.exe -DestinationPath "dist\tidebot-desktop-$V-Windows-x64.zip"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-windows
           path: dist/*
