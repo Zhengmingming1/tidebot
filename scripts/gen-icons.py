@@ -8,7 +8,7 @@ Outputs:
   packaging/macos/tidebot.icns, packaging/windows/tidebot.ico, packaging/linux/icons/<n>x<n>/tidebot.png
   internal/webui/static/{favicon.svg, favicon.png, apple-touch-icon.png}
 """
-import io, os, pathlib
+import io, os, pathlib, tempfile
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
 
@@ -60,7 +60,7 @@ def main():
     (S / "favicon.svg").write_text(mark)
     small[32].save(S / "favicon.png"); small[180].save(S / "apple-touch-icon.png")
     # preview sheet
-    out = pathlib.Path("/workspace/tidebot-shots/icons"); out.mkdir(parents=True, exist_ok=True)
+    out = pathlib.Path(os.environ.get("ICON_PREVIEW_DIR") or pathlib.Path(tempfile.gettempdir()) / "tidebot-icons"); out.mkdir(parents=True, exist_ok=True)
     sheet = Image.new("RGBA", (1400, 760), (244, 239, 230, 255)); d = ImageDraw.Draw(sheet)
     sheet.alpha_composite(big[512], (40, 40))
     x = 600
