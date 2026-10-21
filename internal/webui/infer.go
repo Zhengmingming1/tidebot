@@ -139,6 +139,8 @@ func inferTime(p string) (h, m int, ok bool) {
 
 // inferName: the first clause with schedule words and polite openers removed,
 // cut to 24 characters (CJK) or 6 words.
+var dangling = map[string]bool{"a": true, "an": true, "the": true, "into": true, "to": true, "of": true, "for": true, "and": true, "or": true, "with": true, "in": true, "on": true, "from": true, "by": true, "at": true, "my": true, "our": true}
+
 func inferName(p string) string {
 	strip := func(s string) string {
 		for _, re := range []*regexp.Regexp{reEveryMin, reHourly, reMonthly, reWeekdays, reWeeklyZh, reWeeklyEn, reDaily, reTimeEn, reTimeZh} {
@@ -168,6 +170,10 @@ func inferName(p string) string {
 		w := strings.Fields(name)
 		if len(w) > 6 {
 			w = w[:6]
+		}
+		// A cut at six words shouldn't end on "into a" / "for the".
+		for len(w) > 1 && dangling[strings.ToLower(w[len(w)-1])] {
+			w = w[:len(w)-1]
 		}
 		name = strings.Join(w, " ")
 		if len(name) > 0 {
