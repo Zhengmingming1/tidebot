@@ -1,7 +1,6 @@
 name: ci
-# Everyday CI: Linux only (macOS minutes bill 10x, Windows 2x on private repos).
-# The 3-OS matrix lives in full-matrix.yml: run it by hand, and release.yml runs it
-# before packaging a v* tag.
+# Every push/PR to main runs the full Linux/macOS/Windows matrix (defined once in
+# full-matrix.yml, which release.yml also runs before packaging a v* tag).
 
 on:
   push:
@@ -28,48 +27,5 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # One job on purpose: each job is billed rounded up to the minute, so i18n + core
-  # + desktop in one runner costs ~3 min instead of ~5.
-  linux:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: i18n (zh-CN / en key parity)
-        run: python3 scripts/check-i18n.py
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - name: core vet
-        run: go vet ./...
-      - name: core test
-        run: |
-          chmod +x testdata/mock-claude/claude
-          go test -count=1 ./...
-      - name: core build
-        run: |
-          CGO_ENABLED=0 go build -o bin/ ./cmd/agentd ./cmd/agentctl
-          python3 scripts/check-no-private-url.py bin
-      - name: cross-compile core (darwin, windows)
-        run: |
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agentd ./cmd/agentctl
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agentd ./cmd/agentctl
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: cmd/tidebot-desktop/go.mod
-          cache-dependency-path: cmd/tidebot-desktop/go.sum
-      - name: desktop deps
-        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev
-      - name: desktop vet + test + build
-        working-directory: cmd/tidebot-desktop
-        run: |
-          go vet -tags gtk3 ./...
-          go test -tags gtk3 ./...
-          go build -tags gtk3 -o /tmp/tidebot-desktop-ci .
-          python3 ../../scripts/check-no-private-url.py /tmp/tidebot-desktop-ci
-      - name: cross-compile desktop (windows)
-        working-directory: cmd/tidebot-desktop
-        run: GOOS=windows GOARCH=amd64 go build -o /dev/null .
+  matrix:
+    uses: ./.github/workflows/full-matrix.yml

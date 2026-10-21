@@ -1,7 +1,7 @@
 name: full matrix
-# The 3-OS test matrix (the old per-push CI). Not run on push: macOS bills 10x and
-# Windows 2x. Run it from the Actions tab / `gh workflow run full-matrix.yml`, and
-# release.yml calls it for every v* tag before anything is packaged.
+# The 3-OS test matrix. ci.yml calls it on every push/PR to main, release.yml calls it
+# for every v* tag before anything is packaged, and it can be run by hand from the
+# Actions tab / `gh workflow run full-matrix.yml -f ref=<branch|tag|sha>`.
 
 on:
   workflow_dispatch:
@@ -17,10 +17,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: full-matrix-${{ inputs.ref || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   i18n:
