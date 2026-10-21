@@ -1,66 +1,75 @@
 name: ci
+# Everyday CI: Linux only (macOS minutes bill 10x, Windows 2x on private repos).
+# The 3-OS matrix lives in full-matrix.yml: run it by hand, and release.yml runs it
+# before packaging a v* tag.
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "README.en.md"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "README.en.md"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  i18n:
-    runs-on: ubuntu-latest
+  # One job on purpose: each job is billed rounded up to the minute, so i18n + core
+  # + desktop in one runner costs ~3 min instead of ~5.
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: zh-CN / en key parity
+      - name: i18n (zh-CN / en key parity)
         run: python3 scripts/check-i18n.py
 
-  core:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: vet
+          cache-dependency-path: go.sum
+      - name: core vet
         run: go vet ./...
-      - name: test
-        shell: bash
+      - name: core test
         run: |
           chmod +x testdata/mock-claude/claude
           go test -count=1 ./...
-      - name: build
-        shell: bash
+      - name: core build
         run: |
           CGO_ENABLED=0 go build -o bin/ ./cmd/agentd ./cmd/agentctl
-          ls -l bin
-          PY=$(command -v python3 || command -v python); "$PY" scripts/check-no-private-url.py bin
+          python3 scripts/check-no-private-url.py bin
+      - name: cross-compile core (darwin, windows)
+        run: |
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agentd ./cmd/agentctl
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agentd ./cmd/agentctl
 
-  desktop:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: cmd/tidebot-desktop/go.mod
           cache-dependency-path: cmd/tidebot-desktop/go.sum
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-      - name: test + build
+      - name: desktop deps
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: desktop vet + test + build
         working-directory: cmd/tidebot-desktop
-        shell: bash
         run: |
-          TAGS=""; [ "$RUNNER_OS" = Linux ] && TAGS="-tags gtk3"
-          go vet $TAGS ./...
-          go test $TAGS ./...
-          go build $TAGS -o /tmp/tidebot-desktop-ci .
-          [ "$RUNNER_OS" = Windows ] || python3 ../../scripts/check-no-private-url.py /tmp/tidebot-desktop-ci
+          go vet -tags gtk3 ./...
+          go test -tags gtk3 ./...
+          go build -tags gtk3 -o /tmp/tidebot-desktop-ci .
+          python3 ../../scripts/check-no-private-url.py /tmp/tidebot-desktop-ci
+      - name: cross-compile desktop (windows)
+        working-directory: cmd/tidebot-desktop
+        run: GOOS=windows GOARCH=amd64 go build -o /dev/null .
