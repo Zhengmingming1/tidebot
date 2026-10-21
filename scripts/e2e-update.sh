@@ -32,7 +32,9 @@ H="$W/home"
 start() { # bindir
   rm -rf "$H"; mkdir -p "$H/data"
   printf 'home_dir: %s\ndata_dir: %s/data\ndb_path: %s/data/tidebot.db\nipc_path: %s/agentd.sock\nwebui_enabled: false\nlog_level: warn\n' "$H" "$H" "$H" "$H" > "$H/config.yaml"
-  TIDEBOT_CONFIG="$H/config.yaml" TIDEBOT_UPDATE_URL="http://127.0.0.1:$PORT" TIDEBOT_MANAGED= \
+  # Not supervised: without INVOCATION_ID (set for anything under systemd, e.g. CI runners)
+  # agentd re-execs itself after an update instead of exiting for systemd to restart it.
+  env -u INVOCATION_ID -u TIDEBOT_SUPERVISED TIDEBOT_CONFIG="$H/config.yaml" TIDEBOT_UPDATE_URL="http://127.0.0.1:$PORT" TIDEBOT_MANAGED= \
     nohup "$1/agentd" -config "$H/config.yaml" >"$H/agentd.log" 2>&1 &
   echo $! > "$H/agentd.pid"
   for _ in $(seq 100); do [ -S "$H/agentd.sock" ] && break; sleep 0.1; done
@@ -44,9 +46,9 @@ ver() { ctl "$1" update check 2>/dev/null | sed -n 's/^Up to date (\(.*\))\.$/\1
 echo "== 1. official 0.1.6 → 0.1.7"
 I="$W/opt/tidebot"; mkdir -p "$I"; build 0.1.6 1 "$I"; start "$I"
 ctl "$I" update check
-ctl "$I" update apply >/dev/null
+ctl "$I" update apply > "$W/apply.json" || { cat "$W/apply.json"; tail -20 "$H/agentd.log"; exit 1; }
 for _ in $(seq 150); do v="$(ver "$I" 2>/dev/null || true)"; [ "$v" = 0.1.7 ] && break; sleep 0.2; done
-[ "$(ver "$I")" = 0.1.7 ] || { echo "FAIL: still $(ver "$I")"; tail -20 "$H/agentd.log"; exit 1; }
+[ "$(ver "$I")" = 0.1.7 ] || { echo "FAIL: still $(ver "$I")"; cat "$W/apply.json"; tail -20 "$H/agentd.log"; exit 1; }
 ctl "$I" version | grep -q 0.1.7 || { echo "FAIL: agentctl not replaced"; exit 1; }
 echo "ok: daemon restarted as 0.1.7 in place; files: $(ls "$I" | tr '\n' ' ')"
 stop
