@@ -75,6 +75,9 @@ type Server struct {
 	OSLanguage string
 	// PickFile opens a native file dialog (desktop app only; nil elsewhere).
 	PickFile func(title string) (string, error)
+	// SaveFile asks for a destination with the native "Save as" dialog, suggesting name;
+	// "" means canceled (desktop app only; nil elsewhere).
+	SaveFile func(name string) (string, error)
 }
 
 // New creates a WebUI server (not listening yet).

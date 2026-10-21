@@ -13,6 +13,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/plugin/official"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -158,6 +159,13 @@ func main() {
 	core.SetUpdateProduct("desktop")
 	core.WebUI.PickFile = func(title string) (string, error) {
 		return sh.app.Dialog.OpenFile().SetTitle(title).CanChooseFiles(true).ShowHiddenFiles(true).PromptForSingleSelection()
+	}
+	core.WebUI.SaveFile = func(name string) (string, error) {
+		dlg := sh.app.Dialog.SaveFile().SetFilename(name).CanCreateDirectories(true)
+		if dir := downloadsDir(); dir != "" {
+			dlg = dlg.SetDirectory(dir)
+		}
+		return dlg.PromptForSingleSelection()
 	}
 	d, err := core.StartDaemon(ctx)
 	if err != nil {
@@ -497,4 +505,16 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// downloadsDir is where the save dialog starts: ~/Downloads when it exists, else home.
+func downloadsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	if st, err := os.Stat(filepath.Join(home, "Downloads")); err == nil && st.IsDir() {
+		return filepath.Join(home, "Downloads")
+	}
+	return home
 }

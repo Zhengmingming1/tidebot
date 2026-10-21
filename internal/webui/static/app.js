@@ -309,13 +309,30 @@
       if (res.status === 401) { showLogin(); throw new Error(T("err.sign_in")); }
       if (!res.ok) return res.json().catch(function () { return {}; }).then(function (d) { throw new Error(d.error || res.statusText); });
       var m = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "");
-      return res.blob().then(function (b) {
-        var a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = m ? m[1] : fallback;
+      return res.blob().then(function (b) { return saveBlob(b, m ? m[1] : fallback); });
+    }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+  }
+  // Save bytes the page made. In the desktop app this goes through the native "Save as"
+  // dialog (macOS's webview ignores <a download>, Linux's drops files silently in the
+  // download folder); in a browser it is the usual download.
+  var desktopSave = null;
+  function saveBlob(b, name) {
+    if (!desktopSave) desktopSave = api("/api/desktop/save").then(function (r) { return !!(r && r.available); }, function () { return false; });
+    return desktopSave.then(function (native) {
+      if (!native) {
+        var a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-        toast(T("dl.saved", { n: a.download }));
+        toast(T("dl.saved", { n: name }));
+        return;
+      }
+      return fetch("/api/desktop/save?name=" + enc(name), { method: "POST", headers: { "Accept": "application/json", "Content-Type": "application/octet-stream", "X-CSRF-Token": state.csrf }, body: b, credentials: "same-origin" }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (d) {
+          if (!res.ok) throw new Error(d.error || res.statusText);
+          if (!d.canceled) toast(T("dl.saved_to", { p: d.path }));
+        });
       });
-    }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+    });
   }
   function toastUndo(msg, undo) { return toast(msg, false, undo); }
   function fail(e) { toast(e.message, true); }
@@ -3143,8 +3160,7 @@
     var jsonl = function () { return lines.map(function (l) { return JSON.stringify({ time: l.ts, kind: l.kind, text: l.text }); }).join("\n") + "\n"; };
     $("#lv-copy", host).addEventListener("click", function () { navigator.clipboard.writeText(jsonl()).then(function () { toast(T("lv.copied", { n: lines.length })); }, fail); });
     $("#lv-dl", host).addEventListener("click", function () {
-      var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([jsonl()], { type: "application/x-ndjson" })); a.download = runId + ".jsonl";
-      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+      saveBlob(new Blob([jsonl()], { type: "application/x-ndjson" }), runId + ".jsonl").catch(fail);
     });
     var sec = host.closest("section");
     $("#lv-full", host).addEventListener("click", function () { sec.classList.toggle("log-full"); log.focus(); });
@@ -3707,10 +3723,7 @@
               $("#tf-rec").textContent = txt;
               $("#tf-copy").addEventListener("click", function () { copyText(txt); });
               $("#tf-dl").addEventListener("click", function () {
-                var a = document.createElement("a");
-                a.href = URL.createObjectURL(new Blob(["tidebot recovery codes\n\n" + txt + "\n"], { type: "text/plain" }));
-                a.download = "tidebot-recovery-codes.txt"; document.body.appendChild(a); a.click(); a.remove();
-                setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+                saveBlob(new Blob(["tidebot recovery codes\n\n" + txt + "\n"], { type: "text/plain" }), "tidebot-recovery-codes.txt").catch(fail);
               });
               $("#tf-done").addEventListener("click", function () { txt = ""; close(); refresh(); });
             }).catch(function (e) { $("#tf-err").textContent = T("tf.bad_code"); code.select(); }).then(function () { busy = false; });

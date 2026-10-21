@@ -696,6 +696,7 @@
   "sp.export": "Export CSV",
   "sp.export_tip": "Export CSV · one row per run in the selected range, amounts in the display currency",
   "dl.saved": "Downloaded {n}",
+  "dl.saved_to": "Saved to {p}",
   "sp.budget_saved": "Budget saved.",
   "sp.budgets": "Budgets",
   "sp.by_model": "By model",
