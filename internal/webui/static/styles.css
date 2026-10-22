@@ -1514,3 +1514,6 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .nm-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .id-chip[data-tip]:hover::after, .id-chip[data-tip]:focus-visible::after { left: 0; transform: none; font-family: var(--font); max-width: 360px; }
 .ov-next { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
+/* 2026-10-22: log copy/download/full-screen live in the log card header (filter bar stays one row) */
+.lv-tools { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.lv-tools [data-tip]:hover::after, .lv-tools [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; top: calc(100% + 6px); bottom: auto; }

@@ -3144,9 +3144,14 @@
     var lines = [], view = [], filter = "all", q = "", matches = [], cur = -1, start = 0, unseen = 0, pending = false, lastId = "", ended = false, retry = 0;
     host.innerHTML = '<div class="lv-bar"><div class="filters lv-f">' + KINDS.map(function (k) { return '<button data-k="' + k + '" class="' + (k === "all" ? "active" : "") + '">' + esc(T("lv.k_" + k)) + ' <span class="cnt" data-c="' + k + '">0</span></button>'; }).join("") + "</div>" +
       '<span class="grow"></span><label class="search-in sm">' + ic("search", "sm") + '<input id="lv-q" type="search" maxlength="200" placeholder="' + esc(T("lv.search")) + '" aria-label="' + esc(T("lv.search")) + '"></label><span class="muted num" id="lv-pos"></span>' +
-      '<button class="icon-btn sm" id="lv-prev" aria-label="' + esc(T("lv.prev")) + '" data-tip="' + esc(T("lv.prev")) + ' · N">' + ic("chevUp", "sm") + '</button><button class="icon-btn sm" id="lv-next" aria-label="' + esc(T("lv.next")) + '" data-tip="' + esc(T("lv.next")) + ' · n">' + ic("chevDown", "sm") + '</button><span class="lv-sep"></span>' +
-      '<button class="icon-btn sm" id="lv-copy" aria-label="' + esc(T("lv.copy")) + '" data-tip="' + esc(T("lv.copy")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn sm" id="lv-dl" aria-label="' + esc(T("lv.download")) + '" data-tip="' + esc(T("lv.download")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" id="lv-full" aria-label="' + esc(T("lv.full")) + '" data-tip="' + esc(T("lv.full")) + '">' + ic("maximize", "sm") + "</button></div>" +
+      '<button class="icon-btn sm" id="lv-prev" aria-label="' + esc(T("lv.prev")) + '" data-tip="' + esc(T("lv.prev")) + ' · N">' + ic("chevUp", "sm") + '</button><button class="icon-btn sm" id="lv-next" aria-label="' + esc(T("lv.next")) + '" data-tip="' + esc(T("lv.next")) + ' · n">' + ic("chevDown", "sm") + '</button></div>' +
       '<div class="lv-wrap"><div class="log" id="log" aria-live="off" tabindex="0"><button class="lv-more hidden" id="lv-more"></button><div id="lv-rows"></div></div><button class="lv-new hidden" id="lv-new"></button></div>';
+    // Copy / download / full screen sit in the card header next to the live state, so the
+    // filter + search bar stays on one row even in the two-column run page at 1024px.
+    var tools = document.createElement("span"), sec = host.closest("section"), head = sec && $(".card-head", sec);
+    tools.className = "lv-tools";
+    tools.innerHTML = '<span class="lv-sep"></span>' + '<button class="icon-btn sm" id="lv-copy" aria-label="' + esc(T("lv.copy")) + '" data-tip="' + esc(T("lv.copy")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn sm" id="lv-dl" aria-label="' + esc(T("lv.download")) + '" data-tip="' + esc(T("lv.download")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" id="lv-full" aria-label="' + esc(T("lv.full")) + '" data-tip="' + esc(T("lv.full")) + '">' + ic("maximize", "sm") + "</button>";
+    if (head) { $$(".lv-tools", head).forEach(function (el) { el.remove(); }); head.appendChild(tools); } else $(".lv-bar", host).appendChild(tools);
     var log = $("#log", host), rows = $("#lv-rows", host), more = $("#lv-more", host), newBtn = $("#lv-new", host);
     var atBottom = function () { return log.scrollTop + log.clientHeight >= log.scrollHeight - 24; };
     // Rows read like a transcript: the "assistant:" / "user:" prefixes become the left
@@ -3238,12 +3243,11 @@
       else if (e.key === "/") { e.preventDefault(); $("#lv-q", host).focus(); }
     });
     var jsonl = function () { return lines.map(function (l) { return JSON.stringify({ time: l.ts, kind: l.kind, text: l.text }); }).join("\n") + "\n"; };
-    $("#lv-copy", host).addEventListener("click", function () { navigator.clipboard.writeText(jsonl()).then(function () { toast(T("lv.copied", { n: lines.length })); }, fail); });
-    $("#lv-dl", host).addEventListener("click", function () {
+    $("#lv-copy", tools).addEventListener("click", function () { navigator.clipboard.writeText(jsonl()).then(function () { toast(T("lv.copied", { n: lines.length })); }, fail); });
+    $("#lv-dl", tools).addEventListener("click", function () {
       saveBlob(new Blob([jsonl()], { type: "application/x-ndjson" }), runId + ".jsonl").catch(fail);
     });
-    var sec = host.closest("section");
-    $("#lv-full", host).addEventListener("click", function () { sec.classList.toggle("log-full"); log.focus(); });
+    $("#lv-full", tools).addEventListener("click", function () { sec.classList.toggle("log-full"); log.focus(); });
     document.addEventListener("keydown", function esc1(e) { if (!document.contains(host)) { document.removeEventListener("keydown", esc1); return; } if (e.key === "Escape" && sec.classList.contains("log-full")) sec.classList.remove("log-full"); });
     paint(false);
     // SSE with resume: the browser resends Last-Event-ID on its own reconnects; if it gives up we reconnect with ?from=.
