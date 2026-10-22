@@ -90,6 +90,9 @@ func (s *Server) DesktopHandler(ctx context.Context) (http.Handler, error) {
 		mu.Unlock()
 		r2 := r.Clone(context.WithValue(r.Context(), osLangKey{}, s.OSLanguage))
 		r2.Header.Del("Cookie")
+		// The webview's in-process asset handlers (WKURLSchemeHandler, WebView2, WebKitGTK) don't
+		// all decode Content-Encoding, and there is no network to save: always send identity.
+		r2.Header.Del("Accept-Encoding")
 		r2.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: id})
 		if r2.RemoteAddr == "" {
 			r2.RemoteAddr = "127.0.0.1:0"

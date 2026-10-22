@@ -233,8 +233,14 @@ func (s *Server) routes() http.Handler {
 	if err != nil {
 		s.deps.Log.Error("embed static", "error", err)
 	}
-	fileServer := http.FileServer(http.FS(sub))
-	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	assets, aerr := loadAssets()
+	if aerr != nil {
+		s.deps.Log.Error("static assets", "error", aerr)
+		fileServer := http.FileServer(http.FS(sub))
+		mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	} else {
+		mux.HandleFunc("/static/", assets.serveStatic)
+	}
 	for p, h := range s.deps.Public {
 		mux.Handle(p, h)
 	}
@@ -243,8 +249,14 @@ func (s *Server) routes() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		b, err := Static.ReadFile("static/index.html")
-		if err != nil {
+		var b []byte
+		var rerr error
+		if assets != nil && assets.index != nil {
+			b = assets.index // asset URLs carry ?v=<build> so they can be cached for good
+		} else {
+			b, rerr = Static.ReadFile("static/index.html")
+		}
+		if rerr != nil || b == nil {
 			http.Error(w, "index missing", 500)
 			return
 		}

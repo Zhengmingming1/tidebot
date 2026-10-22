@@ -3,6 +3,12 @@
   "use strict";
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  // Build version from our own <script src="/static/app.js?v=…">: other static URLs reuse it
+  // so the browser can keep them cached until the next build.
+  var assetV = (function () {
+    var m = /[?&]v=([0-9a-f]+)/.exec((document.currentScript && document.currentScript.src) || "");
+    return m ? "?v=" + m[1] : "";
+  })();
   var state = { lang: "en", langPref: "auto", dict: {}, csrf: "", tz: "UTC", version: "", es: null, idleTimer: null, lastInput: Date.now(), notifSeen: localStorage.getItem("tb_notif_seen") || "" };
   var IDLE_MS = 30 * 60 * 1000;
 
@@ -32,12 +38,12 @@
   function loadLang(pref) {
     state.langPref = pref || "auto";
     var lang = pickLang(state.langPref);
-    return fetch("/static/i18n/" + lang + ".json", { credentials: "same-origin" }).then(function (r) { return r.json(); }).then(function (d) {
+    return fetch("/static/i18n/" + lang + ".json" + assetV, { credentials: "same-origin" }).then(function (r) { return r.json(); }).then(function (d) {
       state.dict = d; state.lang = lang;
       document.documentElement.lang = lang;
       try { localStorage.setItem("tb_lang", state.langPref); } catch (e) {}
     }).catch(function () {
-      if (lang !== "en") return fetch("/static/i18n/en.json").then(function (r) { return r.json(); }).then(function (d) { state.dict = d; state.lang = "en"; }).catch(function () {});
+      if (lang !== "en") return fetch("/static/i18n/en.json" + assetV).then(function (r) { return r.json(); }).then(function (d) { state.dict = d; state.lang = "en"; }).catch(function () {});
     });
   }
   function plural(n, one, many) { return T(n === 1 ? one : many, { n: n }); }
@@ -737,7 +743,7 @@
         try { set(c.toDataURL("image/png"), "image/png"); } catch (e) {}
       };
       if (fav.img && fav.img.complete) { draw(); return; }
-      if (!fav.img) { fav.img = new Image(); fav.img.src = "/static/favicon.svg"; }
+      if (!fav.img) { fav.img = new Image(); fav.img.src = "/static/favicon.svg" + assetV; }
       fav.img.addEventListener("load", draw, { once: true });
     }, 1000);
   }
