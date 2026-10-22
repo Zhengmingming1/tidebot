@@ -475,6 +475,8 @@
   "qr.hint": "计入今日预算。输出会在运行页面实时显示。",
   "qr.no_key": "（未配置密钥）",
   "qr.placeholder": "要让智能体做什么？",
+  "qr.recent": "最近",
+  "qr.run_key": "{k}+Enter 运行",
   "rd.bucket": "预算桶 · {b}",
   "rd.details": "详情",
   "rd.error": "错误",

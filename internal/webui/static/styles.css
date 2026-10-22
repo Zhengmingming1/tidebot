@@ -1517,3 +1517,7 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 /* 2026-10-22: log copy/download/full-screen live in the log card header (filter bar stays one row) */
 .lv-tools { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .lv-tools [data-tip]:hover::after, .lv-tools [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; top: calc(100% + 6px); bottom: auto; }
+/* 2026-10-22: quick run offers recent prompts as chips */
+.qr-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -8px 0; font-size: var(--fs-xs); }
+.qr-recent .qr-chip { height: 24px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
+.qr-recent .qr-chip:hover, .qr-recent .qr-chip:focus-visible { color: var(--accent); border-color: var(--accent-100); }

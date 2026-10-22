@@ -47,6 +47,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/skills/", s.withAuthCSRF(s.handleSkillSub))
 	mux.HandleFunc("/api/runs", s.withAuthCSRF(s.handleRuns))
 	mux.HandleFunc("/api/runs/quick", s.withAuthCSRF(s.handleQuickRun))
+	mux.HandleFunc("/api/runs/recent-prompts", s.withAuthCSRF(s.handleRecentPrompts))
 	mux.HandleFunc("/api/runs/", s.withAuthCSRF(s.handleRunSub))
 	mux.HandleFunc("/api/buttons", s.withAuthCSRF(s.handleButtons))
 	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
@@ -341,6 +342,20 @@ func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, map[string]any{"ok": true})
+}
+
+// handleRecentPrompts lists the last distinct quick-run prompts (newest first).
+func (s *Server) handleRecentPrompts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "GET only")
+		return
+	}
+	list, err := s.deps.Store.RecentQuickPrompts(r.Context(), 6)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"prompts": list})
 }
 
 // ---------- schedule ----------

@@ -1082,17 +1082,36 @@
     scheduleRefresh._t = setTimeout(function () { if ((location.hash || "#/") === hash && !$("#modal-root").innerHTML) refresh(); }, ms);
   }
 
+  // Quick run remembers what you did: recent prompts come back as chips (filtered as you
+  // type), the last provider is preselected, and Ctrl/⌘+Enter runs.
   function quickRunModal() {
-    api("/api/settings").then(function (st) {
+    Promise.all([api("/api/settings"), api("/api/runs/recent-prompts").catch(function () { return { prompts: [] }; })]).then(function (res) {
+      var st = res[0], recent = (res[1] && res[1].prompts) || [], lastProv = "";
+      try { lastProv = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
+      if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
+      var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
       modal('<div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h2>" + esc(T("home.quick")) + "</h2></div>" +
         '<form id="qr"><label class="field"><span>' + esc(T("f.prompt")) + '</span><textarea name="prompt" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></label>' +
-        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === st.default_provider ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label>" +
+        '<div class="qr-recent hidden" id="qr-recent" role="group" aria-label="' + esc(T("qr.recent")) + '"><span class="muted">' + esc(T("qr.recent")) + "</span></div>" +
+        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label>" +
         '<p class="hint">' + esc(T("qr.hint")) + "</p>" +
-        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
+        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit" data-tip="' + esc(T("qr.run_key", { k: mod })) + '">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
         function (root, close) {
-          $("#qr", root).addEventListener("submit", function (e) {
+          var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root);
+          box.insertAdjacentHTML("beforeend", recent.map(function (p, i) { return '<button type="button" class="chip qr-chip" data-i="' + i + '" data-tip="' + esc(p.length > 280 ? p.slice(0, 280) + "…" : p) + '">' + esc(p.length > 36 ? p.slice(0, 36) + "…" : p) + "</button>"; }).join(""));
+          var filterChips = function () {
+            var q = ta.value.trim().toLowerCase(), shown = 0;
+            $$(".qr-chip", box).forEach(function (b) { var p = recent[+b.dataset.i], on = !q || (p.toLowerCase().indexOf(q) >= 0 && p.trim().toLowerCase() !== q); b.classList.toggle("hidden", !on || shown >= 4); if (on) shown++; });
+            box.classList.toggle("hidden", !shown);
+          };
+          filterChips();
+          ta.addEventListener("input", filterChips);
+          box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); ta.focus(); });
+          ta.addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); } });
+          form.addEventListener("submit", function (e) {
             e.preventDefault();
             var f = e.target;
+            try { localStorage.setItem("tb_qr_provider", f.provider.value); } catch (e2) {}
             api("/api/runs/quick", { method: "POST", body: { prompt: f.prompt.value, provider: f.provider.value } }).then(function () {
               close(); toast(T("toast.quick_started"));
               setTimeout(function () { api("/api/runs?limit=1").then(function (r) { location.hash = r[0] ? "#/runs/" + r[0].id : "#/runs"; }); }, 500);

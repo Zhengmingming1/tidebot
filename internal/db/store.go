@@ -396,3 +396,28 @@ WHERE id=? AND status IN ('queued','running')`, RunInterruptedMsg, fin, r.ID)
 
 // ErrNotFound is returned when a row is missing.
 var ErrNotFound = fmt.Errorf("not found")
+
+// RecentQuickPrompts returns the distinct prompts of the latest ad-hoc (no task) runs,
+// newest first, so the quick-run dialog can offer them again.
+func (s *Store) RecentQuickPrompts(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 6
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT prompt FROM runs
+WHERE (task_id IS NULL OR task_id = '') AND TRIM(prompt) <> ''
+GROUP BY prompt ORDER BY MAX(created_at) DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

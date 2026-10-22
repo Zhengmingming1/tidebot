@@ -475,6 +475,8 @@
   "qr.hint": "Counts against today's budget. Output streams live on the run page.",
   "qr.no_key": "(no key)",
   "qr.placeholder": "What should the agent do?",
+  "qr.recent": "Recent",
+  "qr.run_key": "{k}+Enter to run",
   "rd.bucket": "Bucket · {b}",
   "rd.details": "Details",
   "rd.error": "Error",
