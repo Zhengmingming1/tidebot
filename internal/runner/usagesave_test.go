@@ -28,7 +28,11 @@ func (f *fakeUsage) snap() (pricing.Cost, bool) {
 	f.saved = c.Totals
 	return c, true
 }
-func (f *fakeUsage) save(c pricing.Cost) { f.mu.Lock(); f.saves = append(f.saves, c.Totals.Requests); f.mu.Unlock() }
+func (f *fakeUsage) save(c pricing.Cost) {
+	f.mu.Lock()
+	f.saves = append(f.saves, c.Totals.Requests)
+	f.mu.Unlock()
+}
 func (f *fakeUsage) got() []int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
