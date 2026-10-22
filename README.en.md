@@ -137,7 +137,7 @@ Once installed, `agentctl call update.check` looks for a newer release and `upda
 
 ## Quick start
 
-You need Go 1.22+. Real runs need the `claude` CLI installed. If you just want to look around, the repo ships a fake `claude` that costs nothing.
+You need Go 1.26+. Real runs need the `claude` CLI installed. If you just want to look around, the repo ships a fake `claude` that costs nothing.
 
 ```bash
 git clone https://github.com/Zhengmingming1/tidebot.git
@@ -238,7 +238,7 @@ The icon has three states: idle, running, needs attention. If the core dies, the
 You get native notifications when a run finishes, fails, needs approval or hits the budget. The menu language follows the WebUI language setting, or the OS if you never set one.
 
 ```bash
-scripts/build-desktop.sh linux        # needs Go 1.25, libgtk-3-dev, libwebkit2gtk-4.1-dev
+scripts/build-desktop.sh linux        # needs Go 1.26, libgtk-3-dev, libwebkit2gtk-4.1-dev
 bin/tidebot-desktop --autostart enable --hidden   # start on login, hidden in the tray
 ```
 

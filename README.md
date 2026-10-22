@@ -137,7 +137,7 @@ GitHub 的 README 没法自动识别你的系统，所以只能列出来让你�
 
 ## 快速开始
 
-需要 Go 1.22 以上。真跑任务需要本机装好 `claude` CLI；只想看看的话，仓库里带了一个假的 `claude`，不花钱。
+需要 Go 1.26 以上。真跑任务需要本机装好 `claude` CLI；只想看看的话，仓库里带了一个假的 `claude`，不花钱。
 
 ```bash
 git clone https://github.com/Zhengmingming1/tidebot.git
@@ -236,7 +236,7 @@ agentctl tasks run --id <task_id>
 运行完成、失败、需要确认、超预算都会弹系统通知。菜单语言跟 WebUI 里的语言设置走，没设就跟系统。
 
 ```bash
-scripts/build-desktop.sh linux        # 需要 Go 1.25、libgtk-3-dev、libwebkit2gtk-4.1-dev
+scripts/build-desktop.sh linux        # 需要 Go 1.26、libgtk-3-dev、libwebkit2gtk-4.1-dev
 bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏在托盘
 ```
 

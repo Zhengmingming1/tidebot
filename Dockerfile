@@ -1,6 +1,6 @@
 # tidebot server image: agentd + agentctl. The claude CLI is not bundled; add it in your own
 # image (see docs/release.md), e.g. FROM ghcr.io/zhengmingming1/tidebot + npm i -g @anthropic-ai/claude-code
-FROM golang:1.25-bookworm AS build
+FROM golang:1.26-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
