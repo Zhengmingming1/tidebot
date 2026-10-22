@@ -163,7 +163,7 @@ func Open(cfg config.Config) (*App, error) {
 		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Ver: ver, Reg: reg, Log: log,
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
-		LogPath: a.Runner.LogPath, Location: cfg.Location(),
+		LogPath: a.Runner.LogPath, LogWait: a.Runner.LogWait, Location: cfg.Location(),
 		Ext:           a.CallExt,
 		ClaudeStatus:  func(ctx context.Context, force bool) any { return a.ClaudeStatus(ctx, force) },
 		QuickRunSkill: a.startQuickRunSkill,

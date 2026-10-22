@@ -931,3 +931,59 @@ run/skill features; this one protects what the user typed.
 3. Apply the same guard to inline page editors (settings fields, task prompt editing in place).
 
 README screenshots are unaffected (the strip only appears after an attempted close).
+
+## 2026-10-23 (02:20): live log pushed on write instead of polled
+
+Category: **resource usage / CPU (core + browser)**. The last rounds were UX (dialog guard),
+static caching and run/skill features; this one is the core's work while a log is open.
+
+**Done**
+
+- **The live log no longer wakes the core twice a second.** While a run detail page was open,
+  `/api/runs/<id>/events` reopened the log file *and* asked the database for the run status
+  every 500 ms, even when the run printed nothing for minutes (thinking, waiting on a tool).
+  The store has a single connection, so those status reads queued with the scheduler and the
+  usage saver. New output also showed up 0–500 ms late (≈ 360 ms on average in a test).
+- Now the runner rings a per-run "bell" after each write to the log (`runner/logbell.go`,
+  `Runner.LogWriter` / `LogWait`), and the SSE handler sleeps on it. Output reaches the page
+  in ≈ 17 ms (same test). A burst is read at most every 100 ms and flushed once per batch
+  instead of once per line. A 2 s fallback tick still checks the status (a run that ends
+  without its final line), the idle cut-off and output written by another process.
+- Idle stream, per minute: before 120 file opens + 120 status queries; now 30 `stat`s +
+  30 status queries and no opens (the file is only opened when `stat` says it grew, as
+  Cronicle does). Nothing changes for runs nobody watches: the bell is one map lookup per
+  write and keeps no state without a watcher.
+- No leaks: a stream that ends, or a page that is closed mid-run, drops its bell (refcounted;
+  checked with `LogWatchers()`); the run's last write wakes anyone left.
+- Same on every OS: no file watcher (fsnotify/inotify/FSEvents/ReadDirectoryChangesW behave
+  differently and Windows holds the file), only an in-process channel; the reader still
+  opens the file briefly per batch so Windows can delete old logs. A trailing `\r` is
+  trimmed, so `[[end]]\r\n` ends the stream too.
+- Tests: `TestLogBell` (wake, per-run isolation, idempotent done, refcount, release),
+  `TestLiveLogPushedOnWrite` (lines arrive with a 1 h fallback, partial line waits for its
+  newline, CRLF end marker, no bell left), `TestLiveLogDisconnectReleases`,
+  `TestLiveLogFallbackPoll` (no LogWait: file growth and status change still picked up).
+
+**Inspiration**
+
+- Cronicle `lib/job.js` `watchJobLog()`: keeps the log descriptor and on each tick
+  `fs.fstat`s it, reads only `if (stats.size > log_pos)`, holds back a partial last line and
+  emits all new lines in one `socket.emit('log_data', lines)`. We borrowed "size check before
+  read" and "one send per batch".
+- Uptime Kuma `server/model/monitor.js`: each heartbeat is pushed to the browser right where
+  it is produced (`io.to(this.user_id).emit("heartbeat", …)`), with no reader polling. We
+  borrowed "the producer wakes the reader", in-process with a channel. No code copied.
+
+**Learned**
+
+- Go's `os.Open` on Windows doesn't share delete access, so holding a log open for the
+  whole stream (Cronicle keeps its fd) would block cleanup of that file; reopen per batch.
+- The single-connection SQLite store makes any per-viewer timer a scheduler cost; worth
+  auditing the other live polls (home, runs list) for the same pattern.
+
+**Ideas for later**
+
+1. Push run status changes the same way (one SSE "events" stream for home/runs instead of
+   the 2–15 s list polls).
+2. Ring the bell for plugin/AI-builder logs (`plugin_ai.go` reads the run log too).
+3. Expose `LogWatchers()` on `/metrics` (open live views).

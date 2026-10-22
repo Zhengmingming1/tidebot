@@ -983,6 +983,8 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID stri
 	// Each log line carries its end offset as the SSE id, so a reconnect (Last-Event-ID or ?from=)
 	// continues where the client left off instead of replaying the whole log.
 	var offset int64
+	// Lines are written as they are read and flushed once per batch, so a burst of
+	// output is one network write rather than one per line.
 	send := func(event, data string) {
 		for _, line := range strings.Split(data, "\n") {
 			if event != "" {
@@ -992,6 +994,9 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID stri
 			}
 			fmt.Fprintf(w, "data: %s\n\n", line)
 		}
+	}
+	end := func(status string) {
+		send("end", status)
 		flusher.Flush()
 	}
 	path := ""
@@ -1012,6 +1017,10 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID stri
 		if path == "" {
 			return false
 		}
+		// Stat first (like Cronicle's fstat before read): nothing new means no open.
+		if fi, err := os.Stat(path); err != nil || fi.Size() <= offset {
+			return false
+		}
 		f, err := os.Open(path)
 		if err != nil {
 			return false
@@ -1021,56 +1030,99 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID stri
 			return false
 		}
 		br := bufio.NewReader(f)
-		ended := false
+		ended, sent := false, false
 		for {
 			line, err := br.ReadString('\n')
 			if len(line) > 0 && strings.HasSuffix(line, "\n") {
 				offset += int64(len(line))
-				line = strings.TrimRight(line, "\n")
+				line = strings.TrimRight(line, "\r\n")
 				if line == "[[end]]" {
 					ended = true
 					continue
 				}
 				send("", line)
+				sent = true
 			}
 			if err != nil {
 				break
 			}
 		}
+		if sent {
+			flusher.Flush()
+		}
 		return ended
 	}
 	if readMore() {
-		send("end", s.runStatus(ctx, runID))
+		end(s.runStatus(ctx, runID))
 		return
 	}
 	if path == "" && isTerminal(st) {
 		send("", "(no log captured for this run)")
-		send("end", st)
+		end(st)
 		return
 	}
-	ticker := time.NewTicker(500 * time.Millisecond)
+	// With LogWait the stream sleeps until the run writes (in-process push, like Uptime
+	// Kuma emitting each heartbeat as it happens); the slow timer only catches a status
+	// change without a final line and the idle cut-off. Without it, poll as before.
+	poll := s.logPoll
+	if s.deps.LogWait == nil || poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
+	var lastRead time.Time
 	for {
+		var bell <-chan struct{}
+		done := func() {}
+		if s.deps.LogWait != nil {
+			bell, done = s.deps.LogWait(runID)
+			// Output may have landed between the last read and taking the bell.
+			if readMore() {
+				done()
+				end(s.runStatus(ctx, runID))
+				return
+			}
+		}
 		select {
 		case <-ctx.Done():
+			done()
 			return
 		case <-heartbeat.C:
+			done()
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
-		case <-ticker.C:
+		case <-bell:
+			done()
+			// Coalesce bursts: at most one read per logGap.
+			if gap := s.logGap - time.Since(lastRead); gap > 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(gap):
+				}
+			}
+			lastRead = time.Now()
 			if readMore() {
-				send("end", s.runStatus(ctx, runID))
+				end(s.runStatus(ctx, runID))
+				return
+			}
+		case <-ticker.C:
+			done()
+			lastRead = time.Now()
+			if readMore() {
+				end(s.runStatus(ctx, runID))
 				return
 			}
 			if cur := s.runStatus(ctx, runID); isTerminal(cur) {
 				readMore()
-				send("end", cur)
+				end(cur)
 				return
 			}
 			if !s.sseAllowed() {
 				send("idle", "stream paused (idle)")
+				flusher.Flush()
 				return
 			}
 		}

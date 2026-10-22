@@ -91,6 +91,7 @@ type Runner struct {
 	quit     chan struct{}
 	active   int
 	idle     chan struct{}
+	bells    logBells
 	// LogDir, when set, receives a human-readable log per run (<LogDir>/<run_id>.log)
 	// that the WebUI tails for live SSE output. Secrets are masked before writing.
 	LogDir string
@@ -305,7 +306,8 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		if err := os.MkdirAll(r.LogDir, 0o700); err == nil {
 			if f, ferr := os.OpenFile(lp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); ferr == nil {
 				defer f.Close()
-				logW = f
+				defer r.bells.release(runID)
+				logW = r.LogWriter(runID, f)
 			}
 		}
 	}

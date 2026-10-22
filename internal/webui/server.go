@@ -49,6 +49,9 @@ type Deps struct {
 	RunTask  func(taskID, bucket string) (string, error)
 	QuickRun func(prompt, providerName string) (string, error)
 	LogPath  func(runID string) string
+	// LogWait (optional) returns a channel closed when the run's log grows; the live
+	// log stream then sleeps until there is output instead of polling every 500ms.
+	LogWait  func(runID string) (<-chan struct{}, func())
 	Location *time.Location
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
 	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
@@ -72,6 +75,10 @@ type Server struct {
 	enabled    bool
 	lastActive time.Time
 	sseIdle    time.Duration
+	// Live log stream timing with Deps.LogWait: fallback poll (status / idle checks)
+	// and the minimum gap between reads in a burst of output.
+	logPoll time.Duration
+	logGap  time.Duration
 
 	// OSLanguage is set by the desktop shell; see DesktopHandler.
 	OSLanguage string
@@ -95,7 +102,7 @@ func New(d Deps) *Server {
 	if idle <= 0 {
 		idle = 30 * time.Minute
 	}
-	return &Server{deps: d, sseIdle: idle, lastActive: time.Now()}
+	return &Server{deps: d, sseIdle: idle, lastActive: time.Now(), logPoll: 2 * time.Second, logGap: 100 * time.Millisecond}
 }
 
 // Enabled reports current listen state.
