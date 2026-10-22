@@ -409,3 +409,45 @@ All four "ideas for later" from the 10-20 round are done, plus a desktop downloa
    (`autoconfig.<domain>/mail/config-v1.1.xml`) through the same SSRF guard.
 3. "Open folder" after a desktop save (reveal in Finder/Explorer/xdg-open).
 4. Verify the macOS/Windows save paths on real machines (CI only builds them).
+
+## 2026-10-22 (10:00): favicon badge for background and pinned tabs
+
+**Done**
+
+- **The tab icon now carries status**, like the title already did (`▶ 2 running`, `⚠`).
+  A pinned tab hides the title, so the icon has to carry it on its own. Red count = unread
+  failures (run failed / over budget; "9+" above nine). Amber dot = Claude Code or the
+  provider needs a look. Green dot = runs going. No badge when all is quiet. "Mark all read"
+  and "Reset UI" clear the count.
+- Drawn on a 64px canvas from `favicon.svg` and written to both `<link rel=icon>` tags. The
+  originals come back when the badge clears. Redraws are debounced 1 s and only happen when
+  the badge actually changes.
+- **Resource use:** the bell dot used to refresh only on navigation. It now refreshes once a
+  minute while the page is visible. In a hidden tab the poll only runs while something was
+  running last time we looked, so an idle background tab still makes zero requests. Status
+  is fetched first, then notifications, so a run that just failed shows up in that same tick.
+- Test: `TestFaviconBadge` (priority failed > alert > running, the "9+" cap, the poll guard).
+  It runs `favBadge` under node when node is installed and falls back to static checks
+  otherwise.
+
+**Inspiration**
+
+- Uptime Kuma `src/mixins/socket.js`: a `stats.down` watcher calls `favicon.badge(down)`
+  through a 1 s debounce with `animation: "none"`. `src/pages/StatusPage.vue` does the same
+  with the down-monitor count. We borrowed the count badge, the debounce and "no animation".
+  We dropped the favico.js dependency (a plain canvas is enough) and added the running/alert
+  states. No code copied.
+
+**Learned**
+
+- Draw from the SVG rather than the 32px PNG. Scaling the PNG up to 64px is visibly blurry
+  on Retina tab strips.
+- A same-origin SVG drawn into a canvas doesn't taint it, so `toDataURL` works in Chrome,
+  Firefox and WebKit.
+
+**Ideas for later**
+
+1. In the desktop app, show the same count on the Dock/taskbar icon (Wails badge API on
+   macOS/Windows) instead of the favicon.
+2. A setting to turn the badge off, if someone finds the count noisy.
+3. Push notification-center changes over the existing SSE connection instead of polling.

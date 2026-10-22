@@ -426,6 +426,7 @@
   function markAllRead(list) {
     if (list && list[0]) { state.notifSeen = list[0].created_at; try { localStorage.setItem("tb_notif_seen", state.notifSeen); } catch (e) {} }
     var dot = $("#bell-dot"); if (dot) dot.classList.add("hidden");
+    fav.failed = 0; paintFavicon();
   }
   function renderNotifCenter(pop, data) {
     var items = data.items || [], pend = data.pending || [];
@@ -470,10 +471,7 @@
       setLanguage(next);
     });
     $("#btn-bell").addEventListener("click", function (e) { e.stopPropagation(); toggleNotif(); });
-    api("/api/notifications/center").then(function (d) {
-      var dot = $("#bell-dot"), list = d.items || [];
-      if (dot) dot.classList.toggle("hidden", !((list[0] && list[0].created_at > state.notifSeen) || (d.pending || []).length));
-    }).catch(function () {});
+    api("/api/notifications/center").then(noteNotifs).catch(function () {});
   }
   document.addEventListener("click", function (e) { var p = $("#notif"); if (p && !p.contains(e.target)) p.classList.add("hidden"); });
 
@@ -672,7 +670,69 @@
     var pre = docTitle.running > 0 ? "▶ " + T("home.n_running", { n: docTitle.running }) + " · " : docTitle.alert ? "⚠ " : "";
     var t = pre + (docTitle.page ? docTitle.page + " – " : "") + "tidebot";
     if (document.title !== t) document.title = t;
+    paintFavicon();
   }
+  // ---------- favicon badge ----------
+  // The tab icon carries the same status as the title, so a pinned tab (title hidden)
+  // still shows it: red count = unread failures (run failed / over budget), amber = Claude
+  // Code or the provider needs a look, green = runs going. Idea from Uptime Kuma
+  // src/mixins/socket.js (favicon badge with the "down" count, 1s debounce, no animation);
+  // drawn here with a plain canvas, no library; redrawn only when the badge changes.
+  var fav = { failed: 0, key: "none", timer: null, links: null, img: null };
+  function favBadge(o) {
+    if (o.failed > 0) return { kind: "failed", color: "#c4352b", text: o.failed > 9 ? "9+" : String(o.failed) };
+    if (o.alert) return { kind: "alert", color: "#b26b00", text: "" };
+    if (o.running > 0) return { kind: "running", color: "#1f8a4c", text: "" };
+    return null;
+  }
+  function paintFavicon() {
+    clearTimeout(fav.timer);
+    fav.timer = setTimeout(function () {
+      var b = favBadge({ failed: fav.failed, alert: docTitle.alert, running: docTitle.running });
+      var key = b ? b.kind + b.text : "none";
+      if (key === fav.key) return;
+      fav.key = key;
+      if (!fav.links) fav.links = $$('link[rel="icon"]').map(function (l) { return { el: l, href: l.getAttribute("href"), type: l.getAttribute("type") }; });
+      var set = function (href, type) { fav.links.forEach(function (l) { l.el.setAttribute("href", href || l.href); l.el.setAttribute("type", type || l.type); }); };
+      if (!b) { set(); return; }
+      var draw = function () {
+        if (fav.key !== key) return; // changed again while the image loaded
+        var c = document.createElement("canvas"), x = c.getContext && c.getContext("2d");
+        if (!x) return;
+        c.width = c.height = 64;
+        x.drawImage(fav.img, 0, 0, 64, 64);
+        var r = b.text ? 17 : 12, cx = 64 - r - 1, cy = 64 - r - 1;
+        x.beginPath(); x.arc(cx, cy, r + 3, 0, 2 * Math.PI); x.fillStyle = "#fff"; x.fill();
+        x.beginPath(); x.arc(cx, cy, r, 0, 2 * Math.PI); x.fillStyle = b.color; x.fill();
+        if (b.text) {
+          x.fillStyle = "#fff"; x.textAlign = "center"; x.textBaseline = "middle";
+          x.font = "bold " + (b.text.length > 1 ? 19 : 24) + "px system-ui, -apple-system, Segoe UI, sans-serif";
+          x.fillText(b.text, cx, cy + 1);
+        }
+        try { set(c.toDataURL("image/png"), "image/png"); } catch (e) {}
+      };
+      if (fav.img && fav.img.complete) { draw(); return; }
+      if (!fav.img) { fav.img = new Image(); fav.img.src = "/static/favicon.svg"; }
+      fav.img.addEventListener("load", draw, { once: true });
+    }, 1000);
+  }
+  // Unread failures from the notification center feed the badge (and the bell dot).
+  function noteNotifs(d) {
+    var list = d.items || [];
+    var dot = $("#bell-dot");
+    if (dot) dot.classList.toggle("hidden", !((list[0] && list[0].created_at > state.notifSeen) || (d.pending || []).length));
+    fav.failed = list.filter(function (n) { return n.group === "failed" && n.created_at > state.notifSeen; }).length;
+    paintFavicon();
+  }
+  // Once a minute: the bell and badge stay current without navigating. In a background tab
+  // this only runs while something was running, so an idle hidden tab makes no requests,
+  // yet a run that ends (or fails) while you're elsewhere still flips the tab icon.
+  setInterval(function () {
+    if (!state.csrf || ($("#shell") && $("#shell").classList.contains("hidden"))) return;
+    if (document.hidden && !docTitle.running) return;
+    // status first: a run that just failed has written its notification by then
+    (document.hidden ? loadCC(false) : Promise.resolve()).then(function () { return api("/api/notifications/center"); }).then(noteNotifs).catch(function () {});
+  }, 60000);
   function toggleCCPop() {
     var old = $("#cc-pop");
     if (old) { old.remove(); $("#cc-btn").setAttribute("aria-expanded", "false"); return; }
@@ -3449,7 +3509,7 @@
             confirmDialog({ title: T("set.reset_ui"), body: T("set.reset_ui_confirm"), ok: T("set.reset"), danger: true }).then(function (y) {
               if (!y) return;
               try { Object.keys(localStorage).filter(function (k) { return /^tb_/.test(k); }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
-              state.notifSeen = ""; toast(T("set.reset_done"));
+              state.notifSeen = ""; fav.failed = 0; paintFavicon(); toast(T("set.reset_done"));
             });
           });
         };
