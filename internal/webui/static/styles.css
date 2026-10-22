@@ -1521,3 +1521,9 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .qr-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -8px 0; font-size: var(--fs-xs); }
 .qr-recent .qr-chip { height: 24px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
 .qr-recent .qr-chip:hover, .qr-recent .qr-chip:focus-visible { color: var(--accent); border-color: var(--accent-100); }
+/* 2026-10-22: run details offer rerun / save as task right in the card header */
+.rd-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.rd-acts [data-tip]:hover::after, .rd-acts [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
+.rd-head { flex-wrap: wrap; row-gap: 8px; }
+.rd-head h3 { white-space: nowrap; }
+.rd-head .id-chip { margin-left: 0; }

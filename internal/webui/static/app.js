@@ -2465,11 +2465,12 @@
       if (sk && !f.prompt.value.trim()) setName(sk.name), paint(lastCron);
     });
   }
-  function taskFormModal(taskId) {
+  // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
+  function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings")];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
     Promise.all(reqs).then(function (r) {
-      var skills = r[0] || [], st = r[1], tf = taskId ? r[2].form : { name: "", prompt: "", skill_id: "", skill_version_id: "", provider: smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
       var promptF = fieldHtml(T("tf.prompt"), '<textarea name="prompt" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>"));
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
@@ -3296,10 +3297,21 @@
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(r.input_tokens + r.output_tokens + (r.cache_read_tokens || 0) + (r.cache_write_tokens || 0))) + "</strong><span>" + esc(T("rd.in_out", { i: num(r.input_tokens), o: num(r.output_tokens) }) + (r.cache_read_tokens || r.cache_write_tokens ? " · " + T("rd.cache_rw", { r: num(r.cache_read_tokens || 0), w: num(r.cache_write_tokens || 0) }) : "")) + "</span></div></div>" +
         costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '</div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
+        '<section class="card"><div class="card-head rd-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '<span class="rd-acts">' +
+          (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
+          '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + '">' + ic("refresh", "sm") + esc(T("runs.rerun")) + '</button></span></div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
         "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();
+      $("#rd-rerun").addEventListener("click", function (e) {
+        var b = e.currentTarget; b.disabled = true;
+        api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} }).then(function () {
+          toast(T("runs.rerun_started"));
+          // The new run is the newest one; open it so its log streams right away.
+          setTimeout(function () { api("/api/runs?limit=1").then(function (l) { location.hash = l[0] ? "#/runs/" + l[0].id : "#/runs"; }); }, 500);
+        }).catch(function (err) { b.disabled = false; fail(err); });
+      });
+      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider }); });
       logView($("#lv"), id, live, function (why) {
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);
