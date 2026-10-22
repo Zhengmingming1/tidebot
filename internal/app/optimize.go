@@ -46,8 +46,8 @@ func (a *App) chooseSkillVersions(ctx context.Context, taskID, bucket string, in
 
 // recordSkillOutcomes feeds canary metrics; next-run-only runs never enter the baseline.
 func (a *App) recordSkillOutcomes(ctx context.Context, ch []skillChoice, res runner.Result, err error, nextRun bool) {
-	if res.RunID == "" {
-		return
+	if res.RunID == "" || errors.Is(err, runner.ErrStoppedByUser) || errors.Is(err, runner.ErrShuttingDown) {
+		return // stopped from outside: says nothing about the skill
 	}
 	class := ""
 	if err != nil {

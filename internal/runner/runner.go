@@ -80,7 +80,7 @@ var ErrShuttingDown = errors.New("tidebot is shutting down")
 type Runner struct {
 	store   *db.Store
 	log     *slog.Logger
-	sem     chan struct{}
+	slots   slots
 	mu      sync.Mutex
 	cancels map[string]context.CancelCauseFunc
 	// Drain state: once closing is set, RunOnce refuses new work and queued runs
@@ -119,7 +119,7 @@ func New(store *db.Store, log *slog.Logger, maxConcurrency int) *Runner {
 	return &Runner{
 		store:   store,
 		log:     log,
-		sem:     make(chan struct{}, maxConcurrency),
+		slots:   slots{max: maxConcurrency},
 		cancels: map[string]context.CancelCauseFunc{},
 		quit:    make(chan struct{}),
 	}
@@ -217,23 +217,16 @@ func waitClosed(ch <-chan struct{}, d time.Duration) bool {
 }
 
 // RunOnce executes a prompt under the concurrency limit and records the run.
+// The run row is written first (status queued), so a run waiting for a slot is
+// visible, counts as active for its task's overlap policy, and can be stopped
+// (Cancel) before it starts. Its timeout only starts once it has a slot.
 func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	if !r.enter() {
 		return Result{}, ErrShuttingDown
 	}
 	defer r.leave()
-	select {
-	case r.sem <- struct{}{}:
-		defer func() { <-r.sem }()
-	case <-ctx.Done():
-		return Result{}, ctx.Err()
-	case <-r.quit:
-		return Result{}, ErrShuttingDown
-	}
-	select { // both cases may have been ready above; quitting wins
-	case <-r.quit:
-		return Result{}, ErrShuttingDown
-	default:
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
 	}
 
 	runID := id.New("run")
@@ -261,17 +254,10 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	if opts.CostBucket != "" {
 		_, _ = r.store.DB.ExecContext(ctx, `UPDATE runs SET cost_bucket=? WHERE id=?`, opts.CostBucket, runID)
 	}
-	if opts.OnStart != nil {
-		opts.OnStart(runID)
-	}
 
 	// The cause tells execute why it was canceled (user, or Drain on quit).
+	// Registered before waiting for a slot, so a queued run can be stopped too.
 	runCtx, cancel := context.WithCancelCause(ctx)
-	if opts.Timeout > 0 {
-		var stop context.CancelFunc
-		runCtx, stop = context.WithTimeout(runCtx, opts.Timeout)
-		defer stop()
-	}
 	r.mu.Lock()
 	r.cancels[runID] = cancel
 	if r.stopping { // Drain already canceled the others
@@ -285,22 +271,10 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		r.mu.Unlock()
 	}()
 
-	started := time.Now().UTC()
-	_ = r.store.MarkRunRunning(ctx, runID, started)
-
 	log := opts.Logger
 	if log == nil {
 		log = r.log
 	}
-	log.Info("run started",
-		"run_id", runID,
-		"task_id", opts.TaskID,
-		"provider", opts.Profile.Name,
-		"model", opts.Profile.Model,
-		"base_url", displayBase(opts.Profile.BaseURL),
-		"claude_bin", opts.ClaudeBin,
-	)
-
 	var logW io.Writer = io.Discard
 	if lp := r.LogPath(runID); lp != "" {
 		if err := os.MkdirAll(r.LogDir, 0o700); err == nil {
@@ -311,6 +285,45 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 			}
 		}
 	}
+	if opts.OnStart != nil {
+		opts.OnStart(runID)
+	}
+
+	err := r.slots.acquire(runCtx, r.quit, runID, func(ahead int) {
+		fmt.Fprintf(logW, "[%s] queued: waiting for a free slot (%d ahead)\n", time.Now().Format("15:04:05"), ahead)
+		log.Info("run queued", "run_id", runID, "task_id", opts.TaskID, "ahead", ahead)
+	})
+	if err == nil {
+		select { // a slot and quitting may have come together; quitting wins
+		case <-r.quit:
+			r.slots.release()
+			err = errQuit
+		default:
+		}
+	}
+	if err != nil {
+		return r.finishUnstarted(runID, opts, logW, err)
+	}
+	defer r.slots.release()
+
+	if opts.Timeout > 0 {
+		var stop context.CancelFunc
+		runCtx, stop = context.WithTimeout(runCtx, opts.Timeout)
+		defer stop()
+	}
+
+	started := time.Now().UTC()
+	_ = r.store.MarkRunRunning(ctx, runID, started)
+
+	log.Info("run started",
+		"run_id", runID,
+		"task_id", opts.TaskID,
+		"provider", opts.Profile.Name,
+		"model", opts.Profile.Model,
+		"base_url", displayBase(opts.Profile.BaseURL),
+		"claude_bin", opts.ClaudeBin,
+	)
+
 	fmt.Fprintf(logW, "[%s] run %s started (provider=%s)\n", started.Local().Format("15:04:05"), runID, opts.Profile.Name)
 	if opts.RunID == "" {
 		opts.RunID = runID
@@ -397,15 +410,45 @@ func (r *Runner) usageEvery() time.Duration {
 	return r.UsageSaveEvery
 }
 
-// Cancel requests cancellation of an in-flight run.
+// Cancel stops a run of this process on the user's behalf: a queued one leaves
+// the line and never starts, a running one is killed (usage so far is kept).
+// Either ends as canceled with db.RunStoppedByUserMsg. False if the run isn't
+// queued or running here.
 func (r *Runner) Cancel(runID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.cancels[runID]
 	if ok {
-		c(nil)
+		c(ErrStoppedByUser)
 	}
 	return ok
+}
+
+// finishUnstarted records a run that gave up waiting for a slot (stopped by the
+// user, quitting, or the caller's context) as canceled. It never started, so it
+// has no start time, no duration and no cost.
+func (r *Runner) finishUnstarted(runID string, opts Options, logW io.Writer, why error) (Result, error) {
+	res := Result{RunID: runID, Status: "canceled"}
+	var err error
+	switch {
+	case errors.Is(why, errQuit), errors.Is(why, ErrShuttingDown):
+		res.ErrorMessage, err = db.RunStoppedOnQuitMsg, ErrShuttingDown
+	case errors.Is(why, ErrStoppedByUser):
+		res.ErrorMessage, err = db.RunStoppedByUserMsg, ErrStoppedByUser
+	default:
+		res.ErrorMessage, err = "run canceled", why
+	}
+	fin := db.Run{
+		ID: runID, Status: res.Status, ErrorMessage: nullStr(res.ErrorMessage),
+		FinishedAt:   sql.NullString{String: time.Now().UTC().Format(time.RFC3339), Valid: true},
+		ProviderName: sql.NullString{String: opts.Profile.Name, Valid: opts.Profile.Name != ""},
+		Model:        sql.NullString{String: opts.Profile.Model, Valid: opts.Profile.Model != ""},
+	}
+	if dbErr := r.store.UpdateRunFinish(context.Background(), fin); dbErr != nil {
+		r.log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
+	}
+	fmt.Fprintf(logW, "[%s] run finished: canceled before it started (%s)\n[[end]]\n", time.Now().Format("15:04:05"), res.ErrorMessage)
+	return res, err
 }
 
 func displayBase(u string) string {
@@ -593,6 +636,12 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 			result.Status = "canceled"
 			result.ErrorMessage = db.RunStoppedOnQuitMsg
 			return result, ErrShuttingDown
+		}
+		if errors.Is(context.Cause(ctx), ErrStoppedByUser) {
+			fmt.Fprintf(logW, "[%s] stopped by user\n", time.Now().Format("15:04:05"))
+			result.Status = "canceled"
+			result.ErrorMessage = db.RunStoppedByUserMsg
+			return result, ErrStoppedByUser
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			result.Status = "timeout"

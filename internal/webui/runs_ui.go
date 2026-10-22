@@ -37,17 +37,46 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 	}
-	writeStarted(w, newID)
+	s.writeStarted(w, newID)
 }
 
 // writeStarted answers a start request: 202 with the new run's id when its row exists
-// already, so the UI opens exactly that run (a queued run has no id yet).
-func writeStarted(w http.ResponseWriter, runID string) {
+// already, so the UI opens exactly that run. A run waiting for a free slot also gets
+// its place in line (queue_pos, 1 = next).
+func (s *Server) writeStarted(w http.ResponseWriter, runID string) {
 	out := map[string]any{"ok": true}
 	if runID != "" {
 		out["run_id"] = runID
+		if n := s.queuePos(runID); n > 0 {
+			out["queue_pos"] = n
+		}
 	}
 	writeJSON(w, 202, out)
+}
+
+func (s *Server) queuePos(runID string) int {
+	if s.deps.QueuePos == nil {
+		return 0
+	}
+	return s.deps.QueuePos(runID)
+}
+
+// stopRun: POST /api/runs/<id>/stop — a queued run leaves the line, a running one is
+// killed; both end as canceled ("stopped: by user"). 409 once the run has finished.
+func (s *Server) stopRun(w http.ResponseWriter, r *http.Request, id string) {
+	if s.deps.StopRun == nil {
+		writeErr(w, 503, "runner not available")
+		return
+	}
+	was, err := s.deps.StopRun(id)
+	switch {
+	case err == nil:
+		writeJSON(w, 202, map[string]any{"ok": true, "was": was})
+	case was == "":
+		writeErr(w, 404, "run not found")
+	default:
+		writeErr(w, 409, "run is not queued or running")
+	}
 }
 
 type beat struct {
@@ -82,7 +111,7 @@ func (s *Server) heartbeats(ctx context.Context, n int) (map[string][]beat, erro
 // handleDashboard: GET /api/dashboard — running now, next 24h, KPIs, heartbeat bars.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	running, err := s.queryRuns(ctx, "WHERE r.status IN ('queued','running') ORDER BY r.created_at DESC LIMIT 20")
+	running, err := s.queryRuns(ctx, "WHERE r.status IN ('queued','running') ORDER BY r.created_at DESC, r.id DESC LIMIT 20")
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

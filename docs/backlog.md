@@ -987,3 +987,77 @@ static caching and run/skill features; this one is the core's work while a log i
    the 2–15 s list polls).
 2. Ring the bell for plugin/AI-builder logs (`plugin_ai.go` reads the run log too).
 3. Expose `LogWatchers()` on `/metrics` (open live views).
+
+## 2026-10-23 (04:30): stop a run, and queued runs you can see
+
+Category: **feature + logic correctness (runner, WebUI, agentctl)**. The last rounds were
+resource usage (live log push), UX (dialog guard) and performance; this one closes a gap in
+what the user can control.
+
+**Done**
+
+- **Runs can be stopped.** There was no way to stop a run from the WebUI (or agentctl):
+  `Runner.Cancel` existed but nothing called it. Now a running or queued run has a Stop
+  button on its page (next to the live state, so it's above the fold at 1024×655) and a
+  stop icon in its row on the runs list (shown on hover, like rerun). Running → a short
+  confirm ("Claude Code is ended right away; tokens used so far still count"), then killed
+  through the existing process-group / job-object path. Queued → taken out of the line at
+  once, no question (nothing to lose). `POST /api/runs/<id>/stop` (session + CSRF; 202 with
+  `was`, 409 once finished, 404 unknown) and `agentctl runs stop --id <run>`.
+- **A user stop is quiet.** It has its own cancel cause (`runner.ErrStoppedByUser`, stored
+  as `stopped: by user`, shown as "已手动停止。"/"Stopped by you."): no "run failed" notice,
+  no retry, no circuit-breaker strike, no skill-outcome record — same treatment as a quit.
+- **Queued runs are real rows now.** Before, a run waiting for a free slot had no row until
+  it started: invisible on the runs list and home, not stoppable, and not counted by
+  `HasActiveRun`, so a frequent task with overlap "skip" could pile up several waiting runs
+  while the slots were busy. The row (status `queued`) is now written before waiting; the
+  start answer carries its id (and `queue_pos`), so "Run now" opens the queued run directly.
+- **Place in line.** The concurrency limit is a small FIFO (`runner/queue.go`) instead of a
+  buffered channel, so it knows who waits and in which order: pill "排队中 · 第 2 位" /
+  "Queued · #2" (tooltip: starts on its own, timeout counts from the start), the start toast
+  says "已排队（第 2 位）", the run page shows "等待中…" and redraws once when the run gets
+  its slot. The log gets a first line `queued: waiting for a free slot (N ahead)`.
+- **Timeout starts with the run**, not with the wait (it did before too; kept and tested).
+  A queued run stopped by the user, the quit, or its caller ends `canceled` with no start
+  time, no duration ("未开始") and no cost, and its log ends with `[[end]]`.
+- Small: the "running" filter on the runs list includes queued runs; runs created in the
+  same second sort by id (ms-ordered), so queued runs list in their real order.
+- Same on every OS: no new OS calls; the stop reuses the existing kill path (process group on
+  macOS/Linux, job object on Windows). The slot queue tests are pure Go and run on Windows CI.
+- Tests: `TestSlotsFIFOAndLeave`, `TestSlotsGrantedWhileLeaving` (slot handed over while the
+  waiter gives up is passed on, 200 rounds), `TestQueuedRunVisibleStoppableAndTimedFromStart`,
+  updated `TestDrainRefusesNewAndQueuedRuns` (queued row closed by the quit) and
+  `TestUserCancelIsNotQuit`; `TestUserStopQueuedAndRunning` (app: queue pos, stop both, no
+  failed event, no retry with RetryMax 3, no breaker count); `TestStopRunAndQueuePos`
+  (API codes, CSRF, filter, start answer), `TestStopRunUI` (wiring + i18n keys).
+
+**Inspiration**
+
+- n8n `packages/cli/src/executions/execution.service.ts` `stopInRegularMode()`: if the
+  execution is still in the concurrency queue (`concurrencyControl.has(id)`) it is removed
+  from the queue and closed with `stopBeforeRun()`, otherwise the active execution is
+  cancelled with a `ManualExecutionCancelledError`; the final write is guarded by the
+  expected status. `packages/cli/src/concurrency/concurrency-queue.ts`: the queue is an
+  ordered array of `{ executionId, resolve }`, with `remove(id)` and `has(id)`, and the
+  execution row exists before it is throttled. We borrowed "persist first, then wait in a
+  named FIFO; stop = leave the line or cancel, with a distinct manual-cancel cause". No code
+  copied.
+
+**Learned**
+
+- A buffered channel as a semaphore is FIFO in practice but can't say who is waiting or let
+  one leave by id; a 60-line mutex + slice queue does both and is easy to test without
+  processes.
+- The scheduler's overlap check reads the database, so anything that waits must have a row,
+  or the policy is silently weaker than it looks.
+
+**Ideas for later**
+
+1. Re-check budgets when a queued run gets its slot (today they're checked when it is
+   queued; a long queue could pass the daily cap).
+2. "Stop all" / "clear queue" on the runs page header when several are queued.
+3. Stop from the home "running now" list and the tray menu (needs a small confirm there).
+4. Let the user move a queued run to the front.
+
+README screenshots: the runs list looks the same unless runs are queued; the run page of a
+live run now has a Stop button in the log header (the README shows a finished run).

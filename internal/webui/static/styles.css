@@ -1547,3 +1547,4 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .card.modal.discarding { animation: dc-nudge .24s var(--ease); }
 @keyframes dc-nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-4px); } 70% { transform: translateX(4px); } }
 @media (prefers-reduced-motion: reduce) { .card.modal.discarding { animation: none; } }
+.card-head .rd-stop { margin-left: var(--s1); flex: none; }

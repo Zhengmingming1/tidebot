@@ -65,7 +65,9 @@ func (r *Runner) cancelIDs() []string {
 	defer r.mu.Unlock()
 	var ids []string
 	for id := range r.cancels {
-		ids = append(ids, id)
+		if r.slots.position(id) == 0 { // running, not waiting for a slot
+			ids = append(ids, id)
+		}
 	}
 	return ids
 }
@@ -132,7 +134,8 @@ func TestDrainWaitsForQuickRun(t *testing.T) {
 }
 
 // After Drain starts, new runs are refused before any row is written and runs
-// waiting for a concurrency slot give up instead of starting late.
+// waiting for a concurrency slot give up instead of starting late (their row,
+// written when they were queued, ends as canceled by the quit).
 func TestDrainRefusesNewAndQueuedRuns(t *testing.T) {
 	skipOnWindows(t)
 	r, sqlDB, dir := drainRunner(t, 1)
@@ -159,10 +162,11 @@ func TestDrainRefusesNewAndQueuedRuns(t *testing.T) {
 	if _, err := r.RunOnce(context.Background(), drainOpts(bin, dir)); !errors.Is(err, ErrShuttingDown) {
 		t.Fatalf("new run after drain: %v", err)
 	}
-	var n int
+	var n, never int
 	_ = sqlDB.QueryRow(`SELECT COUNT(1) FROM runs`).Scan(&n)
-	if n != 1 {
-		t.Fatalf("runs=%d, want only the one that had started", n)
+	_ = sqlDB.QueryRow(`SELECT COUNT(1) FROM runs WHERE status='canceled' AND started_at IS NULL AND error_message=?`, db.RunStoppedOnQuitMsg).Scan(&never)
+	if n != 2 || never != 1 {
+		t.Fatalf("runs=%d never-started=%d, want the running one plus the queued one closed by the quit", n, never)
 	}
 	if r.Active() != 0 {
 		t.Fatalf("active=%d", r.Active())
@@ -173,7 +177,7 @@ func TestDrainRefusesNewAndQueuedRuns(t *testing.T) {
 	}
 }
 
-// A user cancel is still a plain cancel, not a quit.
+// A user stop is its own cause, not a quit.
 func TestUserCancelIsNotQuit(t *testing.T) {
 	skipOnWindows(t)
 	r, _, dir := drainRunner(t, 1)
@@ -188,7 +192,7 @@ func TestUserCancelIsNotQuit(t *testing.T) {
 	waitActive(t, r, 1)
 	r.Cancel(r.cancelIDs()[0])
 	res := <-done
-	if errors.Is(err, ErrShuttingDown) || res.Status != "canceled" || res.ErrorMessage != "run canceled" {
+	if !errors.Is(err, ErrStoppedByUser) || res.Status != "canceled" || res.ErrorMessage != db.RunStoppedByUserMsg {
 		t.Fatalf("err=%v status=%s msg=%q", err, res.Status, res.ErrorMessage)
 	}
 }

@@ -1462,5 +1462,21 @@
   "st.title": "存储空间",
   "st.total": "共 {s}",
   "st.where": "tidebot 数据目录里的运行日志、产物、数据库和备份。运行记录和花费都保存在数据库里，清理只删除日志和产物文件。",
-  "st.open_folder": "打开数据文件夹"
+  "st.open_folder": "打开数据文件夹",
+  "st.queued_n": "排队中 · 第 {n} 位",
+  "st.queued_tip": "同时运行数已满，前面的运行结束后按顺序自动开始。超时从开始运行时算起。",
+  "toast.queued_n": "已排队（第 {n} 位），有空闲名额时自动开始",
+  "run.stop": "停止",
+  "run.stop_tip": "结束这次运行，已用的 token 照常计入花费",
+  "run.dequeue": "取消排队",
+  "run.dequeue_tip": "移出队列，这次运行不会开始，也不产生花费",
+  "run.stop_title": "停止这次运行？",
+  "run.stop_body": "Claude Code 会被立即结束，未完成的工作不会保存。已用的 token 照常计入花费。",
+  "run.stopped": "已停止",
+  "run.dequeued": "已取消排队",
+  "run.stop_gone": "这次运行已经结束了",
+  "rd.err_stopped": "已手动停止。",
+  "rd.waiting": "等待中…",
+  "rd.queued_at": "排队于 {t}",
+  "rd.never_started": "未开始"
 }

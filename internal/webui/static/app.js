@@ -77,6 +77,7 @@
     sparkle: '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/>',
     play: '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
     pause: '<rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>',
+    stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     checkc: '<circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/>',
     circle: '<circle cx="12" cy="12" r="10"/>',
@@ -376,7 +377,9 @@
   }
 
   // ---------- status helpers ----------
-  function statusPill(st) {
+  // A queued run shows its place in line ("排队中 · 第 2 位"); what it waits for is in the tooltip.
+  function statusPill(st, pos) {
+    if (st === "queued" && pos > 0) return '<span class="pill info" data-tip="' + esc(T("st.queued_tip")) + '">' + esc(T("st.queued_n", { n: pos })) + "</span>";
     var map = { succeeded: ["ok", T("st.succeeded")], running: ["run", T("st.running")], queued: ["info", T("st.queued")], failed: ["bad", T("st.failed")], timeout: ["bad", T("st.timeout")], canceled: ["warn", T("st.canceled")], skipped: ["", T("st.skipped")] };
     var m = map[st] || ["", st || "—"];
     return '<span class="pill ' + m[0] + '">' + esc(m[1]) + "</span>";
@@ -385,6 +388,7 @@
   function runErr(msg) {
     msg = msg || "";
     if (/^interrupted: quit/.test(msg)) return T("rd.err_quit");
+    if (/^stopped: by user/.test(msg)) return T("rd.err_stopped");
     return /^interrupted:/.test(msg) ? T("rd.err_interrupted") : msg;
   }
   function taskPill(st) {
@@ -1005,7 +1009,7 @@
   function confirmDialog(o) {
     return new Promise(function (resolve) {
       var done = false;
-      modal('<div class="card-head"><span class="ico' + (o.danger ? " danger" : "") + '">' + ic(o.danger ? "trash" : "info") + "</span><h2>" + esc(o.title) + "</h2></div>" +
+      modal('<div class="card-head"><span class="ico' + (o.danger ? " danger" : "") + '">' + ic(o.icon || (o.danger ? "trash" : "info")) + "</span><h2>" + esc(o.title) + "</h2></div>" +
         (o.body ? '<p class="confirm-body">' + esc(o.body) + "</p>" : "") +
         (o.typeName ? '<label class="field"><span>' + esc(T("cf.type_name", { n: o.typeName })) + '</span><input id="cf-name" autocomplete="off" spellcheck="false" data-noguard></label>' : "") +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn ' + (o.danger ? "danger-solid" : "primary") + '" id="cf-ok"' + (o.typeName ? " disabled" : " autofocus") + ">" + esc(o.ok || T("cf.ok")) + "</button></div>", function (root, close) {
@@ -1028,7 +1032,7 @@
   // One-click "run now" from any list; the toast links to the live run.
   function runTaskNow(id, btn) {
     if (btn) btn.disabled = true;
-    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function (res) { toast(T(res && res.run_id ? "toast.run_started" : "toast.run_queued")); if (/^#\/tasks$/.test(location.hash)) refresh(); }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); if (/^#\/tasks$/.test(location.hash)) refresh(); }).catch(fail).then(function () { if (btn) btn.disabled = false; });
   }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 
@@ -1036,18 +1040,34 @@
     if (!runs.length) return emptyState("runs", T("runs.none"), T("runs.none_sub"));
     return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.provider")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
       runs.map(function (r) {
-        var running = r.status === "running";
+        var running = r.status === "running", active = running || r.status === "queued";
         return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + esc(runTitle(r)) + '</strong></a><small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small></div></div></td>" +
           '<td class="run-prov"><span class="ell">' + esc(r.provider || "—") + "</span>" + (r.model ? '<small class="ell">' + esc(r.model) + "</small>" : "") + "</td>" +
-          "<td>" + statusPill(r.status) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
-          '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
+          "<td>" + statusPill(r.status, r.queue_pos) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
+          '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && active ? '<button class="icon-btn sm row-act" data-stop="' + esc(r.id) + '" data-st="' + esc(r.status) + '" data-tip="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '" aria-label="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '">' + ic("stop", "sm") + "</button>" : "") + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
   // A start request answers once the new run exists, with its id: open exactly that run so
   // its log streams right away. No id means it is queued behind the concurrency limit.
   function openStarted(res, msg) {
-    if (res && res.run_id) { toast(T(msg)); location.hash = "#/runs/" + enc(res.run_id); return; }
+    if (res && res.run_id) { toast(startedText(res, msg)); location.hash = "#/runs/" + enc(res.run_id); return; }
     toast(T("toast.run_queued")); location.hash = "#/runs";
+  }
+  // Toast for a start answer: a run waiting for a free slot says where it is in line.
+  function startedText(res, msg) {
+    return res && res.queue_pos ? T("toast.queued_n", { n: res.queue_pos }) : T(res && res.run_id ? msg : "toast.run_queued");
+  }
+  // Stop a run: a queued one just leaves the line (nothing to lose, no question); a
+  // running one is killed after a confirm, keeping what it has spent. Resolves true
+  // when it was stopped; a run that ended meanwhile says so instead of an error.
+  function stopRun(id, st) {
+    var go = function () {
+      return api("/api/runs/" + enc(id) + "/stop", { method: "POST", body: {} }).then(function (res) {
+        toast(T(res && res.was === "queued" ? "run.dequeued" : "run.stopped")); return true;
+      }, function (e) { if (e.status === 409) { toast(T("run.stop_gone")); return true; } throw e; });
+    };
+    if (st === "queued") return go();
+    return confirmDialog({ title: T("run.stop_title"), body: T("run.stop_body"), ok: T("run.stop"), danger: true, icon: "stop" }).then(function (y) { return y ? go() : false; });
   }
   // ---------- HOME ----------
   function runButton(id, el) {
@@ -1134,7 +1154,7 @@
         $("#run-n").textContent = d.running.length ? T("home.n_running", { n: d.running.length }) : "";
         setDocTitle({ running: d.running.filter(function (x) { return x.status === "running"; }).length });
         $("#running").innerHTML = d.running.length ? '<ul class="live-list">' + d.running.map(function (x) {
-          return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + (x.status === "queued" ? esc(T("st.queued")) : tAgo("home.started_ago", null, "t", x.started_at || x.created_at)) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
+          return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + (x.status === "queued" ? esc(x.queue_pos ? T("st.queued_n", { n: x.queue_pos }) : T("st.queued")) : tAgo("home.started_ago", null, "t", x.started_at || x.created_at)) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
         }).join("") + "</ul>" : '<p class="hc-empty">' + ic("checkc", "sm") + "<span><strong>" + esc(T("home.idle")) + "</strong> · " + esc(T("home.idle_sub")) + "</span></p>";
         $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.slice(0, 4).map(function (s) {
           return '<li><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
@@ -1486,7 +1506,7 @@
       }).catch(function () {});
       wireRows();
       $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { var tb = b.getAttribute("data-tab"); history.replaceState(null, "", "#/tasks/" + enc(id) + "/" + tb); lastHash = location.hash; renderTaskDetail(id, tb); }); });
-      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(T(res && res.run_id ? "toast.run_started" : "toast.run_queued")); reload(); }).catch(fail); });
+      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(fail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
       $("#t-dup").addEventListener("click", function () {
         var b = $("#t-dup"); b.disabled = true;
@@ -3234,9 +3254,13 @@
       var paint = function (list) {
         $("#rtable").innerHTML = list.length || !v.q ? runsTable(list, true) : emptyState("search", T("runs.no_match"), "");
         wireRows($("#rtable"));
+        $$("[data-stop]", $("#rtable")).forEach(function (b) { b.addEventListener("click", function (e) {
+          e.stopPropagation(); b.disabled = true;
+          stopRun(b.getAttribute("data-stop"), b.getAttribute("data-st")).then(function (y) { if (y) reload(); else b.disabled = false; }).catch(function (err) { b.disabled = false; fail(err); });
+        }); });
         $$("[data-rerun]").forEach(function (b) { b.addEventListener("click", function (e) {
           e.stopPropagation(); b.disabled = true;
-          api("/api/runs/" + enc(b.getAttribute("data-rerun")) + "/rerun", { method: "POST", body: {} }).then(function (res) { toast(T(res && res.run_id ? "runs.rerun_started" : "toast.run_queued")); reload(); }).catch(function (err) { b.disabled = false; fail(err); });
+          api("/api/runs/" + enc(b.getAttribute("data-rerun")) + "/rerun", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "runs.rerun_started")); reload(); }).catch(function (err) { b.disabled = false; fail(err); });
         }); });
       };
       // a newer request always wins; slow responses for old search text are dropped
@@ -3399,14 +3423,16 @@
   }
   function renderRunDetail(id) {
     return api("/api/runs/" + enc(id)).then(function (r) {
-      var live = r.status === "running" || r.status === "queued";
+      var live = r.status === "running" || r.status === "queued", queued = r.status === "queued";
       mount('<div class="grid g4">' +
-        '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status) + "</strong><span>" + esc(triggerText(r.trigger)) + "</span></div>" +
-        '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(live ? T("rd.running") : dur(r.duration_ms)) + "</strong><span>" + esc(T("rd.started", { t: when(r.started_at || r.created_at) })) + "</span></div>" +
+        '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status, r.queue_pos) + "</strong><span>" + esc(triggerText(r.trigger)) + "</span></div>" +
+        '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(queued ? T("rd.waiting") : live ? T("rd.running") : r.started_at ? dur(r.duration_ms) : "—") + "</strong><span>" + esc(r.started_at || !r.finished_at ? T(queued ? "rd.queued_at" : "rd.started", { t: when(r.started_at || r.created_at) }) : T("rd.never_started")) + "</span></div>" +
         '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
         '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +
         costCalcHtml(r) +
-        '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
+        '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + "</span>" +
+        // Stop sits next to the live state, above the fold at 1024×655 (the details card is below the log there).
+        (live ? '<button type="button" class="btn sm danger rd-stop" id="rd-stop" data-tip="' + esc(T(queued ? "run.dequeue_tip" : "run.stop_tip")) + '">' + ic("stop", "sm") + esc(T(queued ? "run.dequeue" : "run.stop")) + "</button>" : "") + '</div><div id="lv"></div></section>' +
         '<section class="card"><div class="card-head rd-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '<span class="rd-acts">' +
           (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
           '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>" +
@@ -3420,6 +3446,10 @@
           openStarted(res, "runs.rerun_started");
         }).catch(function (err) { b.disabled = false; fail(err); });
       });
+      if ($("#rd-stop")) $("#rd-stop").addEventListener("click", function (e) {
+        var b = e.currentTarget; b.disabled = true;
+        stopRun(id, r.status).then(function (y) { if (y) refresh(); else b.disabled = false; }).catch(function (err) { b.disabled = false; fail(err); });
+      });
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider }); });
       if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider }); });
       logView($("#lv"), id, live, function (why) {
@@ -3428,13 +3458,15 @@
       });
       // While it runs, the core saves usage every few seconds: keep the two cards current
       // in place (no remount, so no flicker). Paused while the tab is hidden.
-      if (live) livePoll(function () { return liveRunStats(id); }, RUN_STATS_MS);
+      if (live) livePoll(function () { return liveRunStats(id, r.status); }, queued ? 2000 : RUN_STATS_MS);
     });
   }
   var RUN_STATS_MS = 5000;
-  function liveRunStats(id) {
+  function liveRunStats(id, was) {
     return api("/api/runs/" + enc(id)).then(function (r) {
       var still = r.status === "running" || r.status === "queued";
+      // A queued run got its slot (or was stopped): redraw the page once, in place.
+      if (was === "queued" && r.status !== "queued") { stopPoll(); if (location.hash === "#/runs/" + id) refresh(); return; }
       var c = $("#rd-cost"), k = $("#rd-tok");
       if (!c || !k) return;
       // Compare with what we rendered last (not the browser's re-serialised HTML), so

@@ -32,6 +32,7 @@ func (a *App) RegisterRPC(srv *ipc.Server) {
 	srv.Register("tasks.rollback", a.rpcTasksRollback)
 	srv.Register("tasks.tag", a.rpcTasksTag)
 	srv.Register("runs.list", a.rpcRunsList)
+	srv.Register("runs.stop", a.rpcRunsStop)
 	srv.Register("amendments.propose", a.rpcAmendPropose)
 	srv.Register("amendments.list", a.rpcAmendList)
 	srv.Register("amendments.confirm", a.rpcAmendConfirm)
@@ -190,6 +191,20 @@ func (a *App) rpcRunsList(ctx context.Context, params json.RawMessage) (any, err
 	}
 	_ = json.Unmarshal(params, &p)
 	return a.Store.ListRuns(ctx, p.TaskID, p.Limit)
+}
+
+func (a *App) rpcRunsStop(ctx context.Context, params json.RawMessage) (any, error) {
+	var p struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
+		return nil, fmt.Errorf("id required")
+	}
+	was, err := a.StopRun(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"id": p.ID, "was": was}, nil
 }
 
 func (a *App) rpcAmendPropose(ctx context.Context, params json.RawMessage) (any, error) {

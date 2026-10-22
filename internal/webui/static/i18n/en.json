@@ -1462,5 +1462,21 @@
   "st.title": "Storage",
   "st.total": "{s} in total",
   "st.where": "Run logs, artifacts, the database and backups in tidebot's data folder. Run history and spend stay in the database; cleanup only removes log and artifact files.",
-  "st.open_folder": "Open data folder"
+  "st.open_folder": "Open data folder",
+  "st.queued_n": "Queued · #{n}",
+  "st.queued_tip": "All run slots are busy. It starts on its own, in order, when one frees up. Its timeout counts from the start.",
+  "toast.queued_n": "Queued (#{n}) — it starts when a run slot frees up",
+  "run.stop": "Stop",
+  "run.stop_tip": "End this run; tokens used so far still count in spend",
+  "run.dequeue": "Cancel",
+  "run.dequeue_tip": "Take it out of the queue; it won't start or cost anything",
+  "run.stop_title": "Stop this run?",
+  "run.stop_body": "Claude Code is ended right away and unfinished work is not saved. Tokens used so far still count in spend.",
+  "run.stopped": "Stopped",
+  "run.dequeued": "Removed from the queue",
+  "run.stop_gone": "This run has already finished",
+  "rd.err_stopped": "Stopped by you.",
+  "rd.waiting": "Waiting…",
+  "rd.queued_at": "Queued {t}",
+  "rd.never_started": "Never started"
 }

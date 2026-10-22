@@ -226,6 +226,12 @@ func main() {
 		}
 
 	case "runs":
+		if len(args) > 0 && args[0] == "stop" { // agentctl runs stop --id <run>
+			var out map[string]string
+			must(cli.Call("runs.stop", map[string]string{"id": needFlag(args[1:], "--id")}, &out))
+			fmt.Println(i18n.T("cli.ok"))
+			return
+		}
 		p := map[string]any{"task_id": flagOpt(args, "--task", ""), "limit": 20}
 		var out []map[string]any
 		must(cli.Call("runs.list", p, &out))

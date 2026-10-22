@@ -20,7 +20,7 @@ func TestLiveRunUsage(t *testing.T) {
 	for _, want := range []string{
 		`'<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>"`,
 		`'<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>"`,
-		`if (live) livePoll(function () { return liveRunStats(id); }, RUN_STATS_MS);`,
+		`if (live) livePoll(function () { return liveRunStats(id, r.status); }, queued ? 2000 : RUN_STATS_MS);`,
 		`if (prev.c !== next.c) c.innerHTML = next.c;`,
 		`if (!still) stopPoll();`,
 	} {

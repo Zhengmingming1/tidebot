@@ -346,6 +346,10 @@ const RunInterruptedMsg = "interrupted: tidebot stopped before this run finished
 // "interrupted:" prefix; the WebUI matches "interrupted: quit" for its own text.
 const RunStoppedOnQuitMsg = "interrupted: quit: tidebot was quitting and stopped this run"
 
+// RunStoppedByUserMsg is the error_message of runs the user stopped (WebUI Stop,
+// agentctl runs stop), whether they were running or still queued.
+const RunStoppedByUserMsg = "stopped: by user"
+
 // InterruptedRun is a run a previous core left queued/running.
 type InterruptedRun struct {
 	ID, TaskID, StartedAt string

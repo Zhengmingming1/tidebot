@@ -164,6 +164,8 @@ type runDTO struct {
 	CacheRead    int64   `json:"cache_read_tokens"`
 	CacheWrite   int64   `json:"cache_write_tokens"`
 	Requests     int64   `json:"requests"`
+	// QueuePos is a queued run's place in line for a free slot (1 = next).
+	QueuePos int `json:"queue_pos,omitempty"`
 }
 
 func (s *Server) runSelect() string {
@@ -193,6 +195,9 @@ func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]ru
 		}
 		if len(d.Prompt) > 300 {
 			d.Prompt = d.Prompt[:300] + "…"
+		}
+		if d.Status == "queued" {
+			d.QueuePos = s.queuePos(d.ID)
 		}
 		out = append(out, d)
 	}
@@ -347,7 +352,7 @@ func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeStarted(w, runID)
+	s.writeStarted(w, runID)
 }
 
 // handleRecentPrompts lists the last distinct quick-run prompts (newest first).
@@ -636,7 +641,7 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 500, err.Error())
 				return
 			}
-			writeStarted(w, runID)
+			s.writeStarted(w, runID)
 		})).ServeHTTP(w, r)
 		return
 	case "pause", "resume":
@@ -871,7 +876,9 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "WHERE 1=1"
 	var args []any
-	if st := q.Get("status"); st != "" {
+	if st := q.Get("status"); st == "running" { // the "running" filter shows queued runs too
+		where += " AND r.status IN ('queued','running')"
+	} else if st != "" {
 		where += " AND r.status=?"
 		args = append(args, st)
 	}
@@ -888,7 +895,9 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		where += ` AND (r.prompt LIKE ? ESCAPE '\' OR t.name LIKE ? ESCAPE '\' OR r.id LIKE ? ESCAPE '\' OR r.error_message LIKE ? ESCAPE '\')`
 		args = append(args, like, like, like, like)
 	}
-	order := map[string]string{"": "r.created_at DESC", "new": "r.created_at DESC", "old": "r.created_at ASC",
+	// ids are time-ordered to the millisecond: they break ties between runs created in the
+	// same second, so queued runs list in their real order.
+	order := map[string]string{"": "r.created_at DESC, r.id DESC", "new": "r.created_at DESC, r.id DESC", "old": "r.created_at ASC, r.id ASC",
 		"cost": s.runAmt("r.") + " DESC, r.created_at DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC",
 		"duration": "COALESCE(r.duration_ms,0) DESC, r.created_at DESC"}[q.Get("sort")]
 	if order == "" {
@@ -942,6 +951,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[1] == "rerun" && r.Method == http.MethodPost {
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.rerun(w, r, id) })).ServeHTTP(w, r)
+		return
+	}
+	if parts[1] == "stop" && r.Method == http.MethodPost {
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.stopRun(w, r, id) })).ServeHTTP(w, r)
 		return
 	}
 	if parts[1] != "events" {

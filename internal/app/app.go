@@ -163,7 +163,9 @@ func Open(cfg config.Config) (*App, error) {
 		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Ver: ver, Reg: reg, Log: log,
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
-		LogPath: a.Runner.LogPath, LogWait: a.Runner.LogWait, Location: cfg.Location(),
+		StopRun:  func(id string) (string, error) { return a.StopRun(context.Background(), id) },
+		QueuePos: a.Runner.QueuePos,
+		LogPath:  a.Runner.LogPath, LogWait: a.Runner.LogWait, Location: cfg.Location(),
 		Ext:           a.CallExt,
 		ClaudeStatus:  func(ctx context.Context, force bool) any { return a.ClaudeStatus(ctx, force) },
 		QuickRunSkill: a.startQuickRunSkill,
@@ -331,8 +333,8 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
 		done()
 	}
-	if errors.Is(err, runner.ErrShuttingDown) {
-		// The user (or the OS) is quitting: the run row says so, no "failed" notice.
+	if errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrStoppedByUser) {
+		// The user stopped it, or is quitting: the run row says so, no "failed" notice.
 		return res, err
 	}
 	ev := Event{Kind: EventRunFinished, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), RunID: res.RunID,
@@ -458,8 +460,29 @@ func (a *App) SeedBuiltinProviders(ctx context.Context) error {
 	return nil
 }
 
+// StopRun stops a run on the user's behalf (WebUI Stop, agentctl runs stop): a queued
+// run leaves the line and never starts, a running one is killed. It reports the
+// status the run had ("queued" or "running"); an error means it isn't active here.
+func (a *App) StopRun(ctx context.Context, runID string) (string, error) {
+	var st string
+	if err := a.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE id=?`, runID).Scan(&st); err != nil {
+		return "", ErrRunNotFound
+	}
+	if (st != "queued" && st != "running") || !a.Runner.Cancel(runID) {
+		return st, ErrRunNotActive
+	}
+	return st, nil
+}
+
+// ErrRunNotFound / ErrRunNotActive are StopRun's answers for unknown and finished runs.
+var (
+	ErrRunNotFound  = errors.New("run not found")
+	ErrRunNotActive = errors.New("run is not queued or running")
+)
+
 // startWait is how long a WebUI start waits for the new run's row, so it can answer with
-// the run id. A run queued behind the concurrency limit answers without one.
+// the run id. The row is written before the run waits for a slot, so queued runs answer
+// with their id too; only a start held up before that (e.g. a busy database) has none.
 const startWait = 3 * time.Second
 
 // launch runs fn in the background and waits until the run row exists (its id is returned),

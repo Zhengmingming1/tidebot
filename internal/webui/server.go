@@ -45,9 +45,13 @@ type Deps struct {
 	OnToggle func(enabled bool) // optional: persist + apply
 
 	// Execution hooks provided by app; they start work asynchronously and return the new
-	// run's id once its row exists ("" when it is still queued behind the concurrency limit).
+	// run's id once its row exists (written before the run waits for a free slot).
 	RunTask  func(taskID, bucket string) (string, error)
 	QuickRun func(prompt, providerName string) (string, error)
+	// StopRun stops a queued or running run and reports which it was; QueuePos is a
+	// queued run's place in line (0 = not waiting). Both optional.
+	StopRun  func(runID string) (string, error)
+	QueuePos func(runID string) int
 	LogPath  func(runID string) string
 	// LogWait (optional) returns a channel closed when the run's log grows; the live
 	// log stream then sleeps until there is output instead of polling every 500ms.
