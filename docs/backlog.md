@@ -808,3 +808,67 @@ is on another page.
 2. Keep exec bits in `version_files.mode` on import (tar/zip modes) and write them back.
 3. Download a task as a bundle (spec + pinned skill versions) to move a whole task.
 4. Show the files of a version (`/api/skills/<id>/files`) in a small tree before downloading.
+
+## 2026-10-22 (22:20): static files cached by content hash and sent gzipped
+
+Category: **resource usage / performance (server + browser)**. The last rounds were run and
+skill features, so this one is underneath every page.
+
+**Done**
+
+- **Opening the WebUI again no longer downloads everything again.** The embedded files went
+  through `http.FileServer` on an `embed.FS`, which has no modification times: no
+  `Last-Modified`, no `ETag`, no `Cache-Control`. Browsers couldn't cache or revalidate, so
+  every open/reload fetched app.js (378 KB), styles.css (122 KB) and the i18n JSON (68 KB)
+  again, uncompressed.
+- Now `internal/webui/assets.go` reads the embedded files once, keeps a gzip copy of the text
+  ones (js/css/json/svg/html; PNG goes as is) and a strong ETag from the content hash. A build
+  version (hash over all files) is put into `index.html` as `?v=<build>` on every `/static/`
+  URL; requests with the current `?v=` get `max-age=31536000, immutable`, anything else
+  `no-cache` + ETag, so it's a 304. `index.html` itself stays `no-store`, so a new build is
+  picked up on the next open, never a stale mix.
+- app.js reads `?v=` from its own `<script src>` and adds it to the i18n fetches and the
+  favicon-badge image, so those are cached the same way.
+- Numbers (demo server, Chrome): first open 378 → 101 KB (app.js), 122 → 23 KB (css),
+  68 → 24 KB (zh-CN.json), about 570 → 150 KB in total; opening again in a new tab or a later
+  navigation: 0 bytes of static, checked with a counting proxy in front of agentd (only the
+  first load reached the server).
+- **Same on every OS.** Content types come from a fixed table instead of
+  `mime.TypeByExtension`, which reads the Windows registry and can say `text/plain` for `.js`
+  there. The desktop window's in-process handler drops `Accept-Encoding`: the webview scheme
+  handlers (WKURLSchemeHandler, WebView2, WebKitGTK) don't all decode `Content-Encoding`, and
+  there's no network to save, so all three get identity bytes. The loopback bridge and server
+  mode are real HTTP and get gzip.
+- `HEAD` works, other methods get 405, unknown files and directories 404; `X-Content-Type-
+  Options: nosniff` as before. If building the asset table ever failed, it falls back to the
+  old file server.
+- Tests: `TestAssetsVersionedIndex` (every `/static/` URL in index.html versioned, nothing
+  else changed), `TestBuildAssetsVersionFollowsContent` (CRLF vs LF → different build),
+  `TestStaticCachingAndGzip` (gzip round trip equals the file, `gzip;q=0` → identity, 304 for
+  either ETag variant / weak / list / `*`, immutable only for the current `?v=`, PNG not
+  compressed, HEAD/405/404), `TestDesktopStaticIdentity`, `TestAppJSUsesAssetVersion`.
+
+**Inspiration**
+
+- Uptime Kuma `server/server.js`: the built `dist/` is served with `expressStaticGzip("dist",
+  { enableBrotli: true })`, and `vite.config.mjs` pre-compresses `js|mjs|json|css|html|svg`
+  with gzip and brotli at build time (`vite-plugin-compression`), Vite giving the files
+  hashed names. We borrowed "compress the static text once up front, not per request, and
+  give the URLs a content version so they can be cached for good", doing it at first request
+  from the embedded bytes since we have no frontend build step. No code copied.
+
+**Learned**
+
+- In Chrome over CDP (`Network.enable`), same-tab navigations re-fetched the static files
+  even though they were cacheable; without CDP they came from the cache. Measure caching with a
+  proxy, not with DevTools attached.
+- A `?v=` on index.html's URLs is enough; app.js doesn't need to know any hash at build time,
+  it can read its own script URL.
+
+**Ideas for later**
+
+1. Brotli as well (smaller than gzip for app.js), once a pure-Go encoder is worth the
+   dependency.
+2. Gzip larger JSON API answers (runs list, spend export) when the client accepts it.
+3. Split app.js per page (lazy-load the plugin builder and spend charts) to cut the first
+   parse time on slow machines.
