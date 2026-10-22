@@ -1537,3 +1537,5 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .qr-reset { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .qr-reset .i { width: 14px; height: 14px; }
 .qr-reset[data-tip]:hover::after, .qr-reset[data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
+/* Skills: row actions sit flush right (download icon + Versions). */
+.row-actions.end { justify-content: flex-end; }

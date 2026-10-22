@@ -815,6 +815,8 @@ func (s *Server) handleSkillSub(w http.ResponseWriter, r *http.Request) {
 		s.handleSkillDiff(w, r, id)
 	case "files":
 		s.handleSkillFiles(w, r, id)
+	case "export":
+		s.handleSkillExport(w, r, id)
 	case "rollback":
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var body struct {

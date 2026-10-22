@@ -309,9 +309,21 @@
     return fetch(path, { credentials: "same-origin" }).then(function (res) {
       if (res.status === 401) { showLogin(); throw new Error(T("err.sign_in")); }
       if (!res.ok) return res.json().catch(function () { return {}; }).then(function (d) { throw new Error(d.error || res.statusText); });
-      var m = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "");
-      return res.blob().then(function (b) { return saveBlob(b, m ? m[1] : fallback); });
+      return res.blob().then(function (b) { return saveBlob(b, dispName(res.headers.get("content-disposition"), fallback)); });
     }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+  }
+  // File name from Content-Disposition: the UTF-8 filename* (non-ASCII skill names) wins
+  // over the plain ASCII fallback.
+  function dispName(cd, fallback) {
+    cd = cd || "";
+    var u = /filename\*=UTF-8''([^;\s]+)/i.exec(cd);
+    if (u) { try { return decodeURIComponent(u[1]); } catch (e) { /* fall through */ } }
+    var m = /filename="([^"]+)"/.exec(cd);
+    return m ? m[1] : fallback;
+  }
+  // One skill version as a .zip that Import takes back as is. vid empty = current version.
+  function exportSkill(id, vid, btn) {
+    return downloadFile("/api/skills/" + enc(id) + "/export" + (vid ? "?v=" + enc(vid) : ""), "skill.zip", btn);
   }
   // Save bytes the page made. In the desktop app this goes through the native "Save as"
   // dialog (macOS's webview ignores <a download>, Linux's drops files silently in the
@@ -1508,12 +1520,13 @@
       var rows = skills.length ? '<table class="table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
         skills.map(function (s) {
           return '<tr><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + "</td><td>" + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
-            '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right"><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></td></tr>";
+            '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
         '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
       $("#sk-import").addEventListener("click", function () { skillImportModal(renderSkills); });
       $$("[data-versions]").forEach(function (b) { b.addEventListener("click", function () { location.hash = "#/skills/" + enc(b.getAttribute("data-versions")); }); });
+      $$("[data-sk-export]").forEach(function (b) { b.addEventListener("click", function () { exportSkill(b.getAttribute("data-sk-export"), "", b); }); });
     });
   }
 
@@ -1545,7 +1558,7 @@
       var tree = '<ul class="vlist">' + list.map(function (v) {
         var isCur = v.id === vers.current, isCan = v.id === vers.canary;
         return '<li class="' + (isCur ? "cur" : "") + '"><span class="vdot' + (isCur ? " cur" : isCan ? " can" : "") + '"></span><div class="grow"><strong>v' + esc(v.no) + "</strong>" + (isCur ? ' <span class="tag perm">' + esc(T("ver.current")) + "</span>" : "") + (isCan ? ' <span class="tag next">' + esc(T("ver.canary")) + "</span>" : "") +
-          "<small>" + esc((T("src." + v.source) === "src." + v.source ? v.source : T("src." + v.source)) + " · " + when(v.created_at)) + (v.message ? " · " + esc(v.message) : "") + '</small></div><div class="row-actions"><button class="btn sm ghost" data-cmp="' + esc(v.id) + '">' + esc(T("diff.compare")) + "</button>" +
+          "<small>" + esc((T("src." + v.source) === "src." + v.source ? v.source : T("src." + v.source)) + " · " + when(v.created_at)) + (v.message ? " · " + esc(v.message) : "") + '</small></div><div class="row-actions"><button class="icon-btn sm" data-v-export="' + esc(v.id) + '" data-tip="' + esc(T("sk.export_tip", { n: v.no })) + '" aria-label="' + esc(T("sk.export_v", { n: v.no })) + '">' + ic("download", "sm") + '</button><button class="btn sm ghost" data-cmp="' + esc(v.id) + '">' + esc(T("diff.compare")) + "</button>" +
           (isCur ? "" : '<button class="btn sm" data-srb="' + esc(v.id) + '" data-no="' + esc(v.no) + '">' + ic("rollback", "sm") + esc(T("ver.rollback")) + "</button>") + "</div></li>";
       }).join("") + "</ul>";
       var modes = [["off", T("opt.m_off"), T("opt.m_off_sub")], ["propose", T("opt.m_propose"), T("opt.m_propose_sub")], ["canary", T("opt.m_canary"), T("opt.m_canary_sub")]];
@@ -1566,7 +1579,7 @@
           (live ? (p.status === "pending" ? '<button class="btn sm" data-canary="' + esc(p.id) + '">' + esc(T("opt.start_canary")) + "</button>" : "") + '<button class="btn sm danger" data-discard="' + esc(p.id) + '">' + esc(T("opt.discard")) + '</button><button class="btn sm primary" data-promote="' + esc(p.id) + '" data-no="' + esc(v ? v.no : "") + '">' + esc(T("opt.promote")) + "</button>" : "") + "</div></div>";
       }).join("") : '<p class="muted">' + esc(T("opt.none")) + "</p>";
       mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><h1>' + esc(sk.name) + '</h1><p class="mono muted">' + esc(sk.id) + '</p><div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + "</span></div></div></div>" +
+        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
         '<div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></section>" +
         '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + "</span><h3>" + esc(T("ver.tree")) + "</h3></div>" + tree + '<p class="hint mt">' + ic("info", "sm") + esc(T("ver.rb_pointer")) + "</p></section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("opt.title")) + '</h3></div><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
@@ -1580,6 +1593,8 @@
       };
       ["#d-a", "#d-b", "#d-all"].forEach(function (s) { $(s).addEventListener("change", load); });
       $("#d-swap").addEventListener("click", function () { var x = $("#d-a").value; $("#d-a").value = $("#d-b").value; $("#d-b").value = x; load(); });
+      $("#sk-export").addEventListener("click", function () { exportSkill(id, "", $("#sk-export")); });
+      $$("[data-v-export]").forEach(function (bt) { bt.addEventListener("click", function () { exportSkill(id, bt.getAttribute("data-v-export"), bt); }); });
       $$("[data-cmp]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = bt.getAttribute("data-cmp"); $("#d-b").value = vers.current; load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
       $$("[data-cmp-pair]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = vers.current; $("#d-b").value = bt.getAttribute("data-cmp-pair"); load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
       var reload = function () { renderSkillDetail(id, new URLSearchParams("a=" + $("#d-a").value + "&b=" + $("#d-b").value)); };
