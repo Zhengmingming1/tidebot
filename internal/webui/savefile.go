@@ -55,7 +55,7 @@ func (s *Server) handleDesktopSave(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "write failed")
 		return
 	}
-	writeJSON(w, 200, map[string]string{"path": p, "name": filepath.Base(p)})
+	writeJSON(w, 200, map[string]string{"path": p, "name": filepath.Base(p), "reveal": s.saved.add(p)})
 }
 
 // saveName keeps only a plain file name for the dialog's suggestion.

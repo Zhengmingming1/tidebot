@@ -286,11 +286,12 @@
     if (!box) { box = document.createElement("div"); box.id = "toasts"; box.className = "toasts"; box.setAttribute("aria-live", "polite"); document.body.appendChild(box); }
     return box;
   }
-  function toast(msg, bad, undo) {
+  // undo: optional action (default label "撤销"; act names another action, e.g. "在文件夹中显示").
+  function toast(msg, bad, undo, act) {
     var el = document.createElement("div");
     el.className = "toast" + (bad ? " bad" : "") + (undo ? " undo" : "");
     el.setAttribute("role", bad ? "alert" : "status");
-    el.innerHTML = '<span class="t-msg"></span>' + (undo ? '<button class="t-undo">' + esc(T("t.undo")) + "</button>" : "") + (bad || undo ? '<button class="t-x" aria-label="' + esc(T("btn.close")) + '">' + ic("x", "sm") + "</button>" : "");
+    el.innerHTML = '<span class="t-msg"></span>' + (undo ? '<button class="t-undo">' + esc(act || T("t.undo")) + "</button>" : "") + (bad || undo ? '<button class="t-x" aria-label="' + esc(T("btn.close")) + '">' + ic("x", "sm") + "</button>" : "");
     $(".t-msg", el).textContent = msg;
     var box = toastBox(), gone = false;
     var close = function () { if (gone) return; gone = true; el.classList.add("out"); setTimeout(function () { el.remove(); }, 200); };
@@ -329,11 +330,22 @@
       return fetch("/api/desktop/save?name=" + enc(name), { method: "POST", headers: { "Accept": "application/json", "Content-Type": "application/octet-stream", "X-CSRF-Token": state.csrf }, body: b, credentials: "same-origin" }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (d) {
           if (!res.ok) throw new Error(d.error || res.statusText);
-          if (!d.canceled) toast(T("dl.saved_to", { p: d.path }));
+          if (d.canceled) return;
+          // "Show in folder" names the file by the id the server gave it, never by path.
+          desktopOpenable().then(function (ok) {
+            toast(T("dl.saved_to", { p: d.path }), false, ok && d.reveal ? function () { desktopOpen({ target: "saved", id: d.reveal }); } : null, T("dl.show"));
+          });
         });
       });
     });
   }
+  // Desktop app only: show tidebot's data folder or a just-saved file in Finder / Explorer / the Linux file manager.
+  var desktopOpenOK = null;
+  function desktopOpenable() {
+    if (!desktopOpenOK) desktopOpenOK = api("/api/desktop/open").then(function (r) { return !!(r && r.available); }, function () { return false; });
+    return desktopOpenOK;
+  }
+  function desktopOpen(body) { return api("/api/desktop/open", { method: "POST", body: body }).catch(fail); }
   function toastUndo(msg, undo) { return toast(msg, false, undo); }
   function fail(e) { toast(e.message, true); }
   // CSP forbids inline style attributes; sizes are applied through CSSOM.
@@ -3418,7 +3430,7 @@
   function storageCardHtml() {
     var sel = function (id, key) { return '<select id="' + id + '" data-st="' + key + '" aria-label="' + esc(T("st." + key)) + '" disabled><option>…</option></select>'; };
     var r = function (key, sub, right) { return '<div class="set-row" id="set-st_' + key + '"><div class="lbl"><strong>' + esc(T("st." + key)) + '</strong><small id="st-' + key + '-sub">' + esc(sub) + "</small></div>" + right + "</div>"; };
-    return '<section class="card" id="set-storage"><div class="card-head"><span class="ico">' + ic("database") + "</span><h2>" + esc(T("st.title")) + '</h2><span class="st-total" id="st-total"></span></div>' +
+    return '<section class="card" id="set-storage"><div class="card-head"><span class="ico">' + ic("database") + "</span><h2>" + esc(T("st.title")) + '</h2><span class="st-total" id="st-total"></span><button type="button" class="icon-btn sm hidden" id="st-open" data-tip="' + esc(T("st.open_folder")) + '" aria-label="' + esc(T("st.open_folder")) + '">' + ic("folder", "sm") + "</button></div>" +
       '<div id="st-disk"></div><div class="st-usage" id="st-usage" aria-live="polite"><div class="st-bar sk"></div></div>' +
       r("log_days", T("st.log_days_sub"), sel("st-log", "log_days")) +
       r("artifact_days", T("st.artifact_days_sub"), sel("st-art", "artifact_days")) +
@@ -3460,6 +3472,12 @@
   }
   function storageWire() {
     rpc("storage.get", {}).then(storagePaint).catch(fail);
+    desktopOpenable().then(function (ok) {
+      var b = $("#st-open");
+      if (!ok || !b) return;
+      b.classList.remove("hidden");
+      b.addEventListener("click", function () { desktopOpen({ target: "data" }); });
+    });
     $$("[data-st]").forEach(function (el) {
       el.addEventListener("change", function () {
         var k = el.getAttribute("data-st"), n = Number(el.value), body = {};

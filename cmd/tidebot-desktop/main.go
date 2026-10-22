@@ -27,6 +27,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
+	"github.com/Zhengmingming1/tidebot/internal/osopen"
 	"github.com/Zhengmingming1/tidebot/internal/updater"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -167,6 +168,7 @@ func main() {
 		}
 		return dlg.PromptForSingleSelection()
 	}
+	core.WebUI.OpenPath = osopen.Open
 	d, err := core.StartDaemon(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start core (is agentd already running?):", err)

@@ -1505,3 +1505,4 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .af-bar .field { margin: 0; }
 .pv-offer .notice { display: flex; align-items: center; gap: var(--sp-2); }
 .pv-offer .notice > span { flex: 1; }
+.card-head #st-open { margin-left: 8px; }

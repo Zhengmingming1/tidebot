@@ -701,6 +701,7 @@
   "sp.export_tip": "Export CSV · one row per run in the selected range, amounts in the display currency",
   "dl.saved": "Downloaded {n}",
   "dl.saved_to": "Saved to {p}",
+  "dl.show": "Show in folder",
   "sp.budget_saved": "Budget saved.",
   "sp.budgets": "Budgets",
   "sp.by_model": "By model",
@@ -1429,5 +1430,6 @@
   "st.shrunk": "Database shrunk, freed {s}",
   "st.title": "Storage",
   "st.total": "{s} in total",
-  "st.where": "Run logs, artifacts, the database and backups in tidebot's data folder. Run history and spend stay in the database; cleanup only removes log and artifact files."
+  "st.where": "Run logs, artifacts, the database and backups in tidebot's data folder. Run history and spend stay in the database; cleanup only removes log and artifact files.",
+  "st.open_folder": "Open data folder"
 }

@@ -79,6 +79,10 @@ type Server struct {
 	// SaveFile asks for a destination with the native "Save as" dialog, suggesting name;
 	// "" means canceled (desktop app only; nil elsewhere).
 	SaveFile func(name string) (string, error)
+	// OpenPath shows a folder, or selects a file in its folder, in the OS file manager
+	// (desktop app only; nil elsewhere). See handleDesktopOpen for what may be opened.
+	OpenPath func(path string, reveal bool) error
+	saved    savedFiles
 }
 
 // New creates a WebUI server (not listening yet).
