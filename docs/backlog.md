@@ -872,3 +872,62 @@ skill features, so this one is underneath every page.
 2. Gzip larger JSON API answers (runs list, spend export) when the client accepts it.
 3. Split app.js per page (lazy-load the plugin builder and spend charts) to cut the first
    parse time on slow machines.
+
+## 2026-10-23 (00:20): dialogs ask before dropping unsaved edits
+
+Category: **UX / logic correctness (every dialog)**. The last rounds were performance and
+run/skill features; this one protects what the user typed.
+
+**Done**
+
+- **A stray Esc or click no longer throws away a long prompt.** Every dialog (new/edit task,
+  quick run, provider, button, trigger, plugin settings…) closed on Esc, on a click outside,
+  on × / Cancel, and when the browser went Back (the router clears `#modal-root`), with no
+  question asked. Now, if the user changed something, the footer turns in place into a warm
+  strip "放弃未保存的修改？ [继续编辑] [放弃]" (focus on "继续编辑", a short nudge, none under
+  reduced motion). Esc again or "继续编辑" goes back to the field the user was in; "放弃"
+  closes. Untouched dialogs close at once as before.
+- **What counts as an edit.** A field is tracked only after a trusted `input`/`change` from the
+  user, and compared with what it held when the user first touched the dialog (pointer, key or
+  focus). So async prefills and our own auto-fill (task name from the prompt, provider from the
+  Base URL) never trip it, and typing then deleting makes the dialog clean again. CRLF vs LF is
+  not a change. Search boxes and `[data-noguard]` (the "type the name to delete" box) are
+  ignored. The `close()` handed to a dialog's code (used after a successful save) never asks.
+- **Back / forward:** with edits open, the hash is put back (`replaceState`, no extra history
+  entry) and the strip shows; "放弃" then continues to where the user was going.
+- **Tab close / reload** in a browser (server mode) gets the browser's own "leave site?"
+  prompt via `beforeunload`. Not in the desktop window: WKWebView (macOS) never shows that
+  prompt while WebView2 (Windows) does, so it is skipped there to behave the same on all
+  three; the desktop window's close goes through the native quit path anyway.
+- Fits 1024×655: the strip takes the sticky footer's place, so it is always visible
+  (checked in headless Chrome, zh-CN, demo data: quick run and the long new-task form).
+- Tests: `TestModalDiscardGuard` (wiring for Esc/backdrop/×/Back/beforeunload, i18n keys in
+  both languages; under node: prefill and auto-fill not dirty, CRLF-only not dirty, typed text
+  dirty, undone edit clean, search / data-noguard ignored, checkbox and late-added fields
+  tracked; tolerates CRLF checkouts).
+
+**Inspiration**
+
+- n8n `packages/frontend/editor-ui/src/app/components/Modal.vue`: `closeDialog()` awaits an
+  optional `beforeClose()` and only closes unless it returns exactly `false`; Esc and the
+  header × go through the same path. `features/credentials/components/CredentialEdit/
+  CredentialEdit.vue` sets `hasUnsavedChanges` only from user data changes, clears it after
+  save, and its `beforeClose()` asks "close without saving?" with a "keep editing" choice. We
+  borrowed "one guarded close path for every non-save close, dirty = real user edits" and put
+  it into our single `modal()` helper so all dialogs get it at once. No code copied.
+
+**Learned**
+
+- Safari/WKWebView doesn't focus checkboxes or buttons on click, so "baseline on focus" alone
+  would miss them; taking the baseline on pointerdown/keydown/focusin covers all three engines.
+- Only one dialog lives in `#modal-root`; dialogs that open another dialog (e.g. a picker)
+  replace the first one, so those flows still drop the outer form. Worth a stacked modal later.
+
+**Ideas for later**
+
+1. Keep a draft of the new-task / quick-run prompt in `sessionStorage` and offer "restore
+   draft" when the dialog is opened again after discarding or a crash.
+2. Stacked dialogs (picker on top of a form) so a nested choice never replaces the form.
+3. Apply the same guard to inline page editors (settings fields, task prompt editing in place).
+
+README screenshots are unaffected (the strip only appears after an attempted close).
