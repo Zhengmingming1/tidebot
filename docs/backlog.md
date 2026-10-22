@@ -693,3 +693,62 @@ saves and change-gated polling, so this one is a user-facing flow.
    instead of "newest run" after 500 ms.
 4. Refresh `run-live.png` in the README at Friday's release (the rerun/save-as-task buttons
    from earlier rounds aren't in it yet).
+
+## 2026-10-22 (18:00): start requests return the new run's id
+
+Category: **logic / correctness (backend)**. The last rounds were all run-page UI, so this
+one fixes what sits under them.
+
+**Done**
+
+- **The UI opens the run it started.** Quick run, rerun (run page) and edit & rerun used to
+  wait 500 ms and then open "the newest run". With a scheduled run, a webhook or a second tab
+  starting at the same moment, that opened somebody else's run; on a slow disk the new row
+  wasn't there yet and it opened the previous one. Now `/api/runs/quick`,
+  `/api/runs/<id>/rerun`, `/api/tasks/<id>/run` and `/api/buttons/<id>/run` answer with
+  `run_id` once the run's row exists, and the UI goes to `#/runs/<run_id>` directly.
+- **Start failures are no longer silent.** The start hooks returned before the run had even
+  passed its budget check, so "budget blocked", a guard refusal or a broken task spec got a
+  cheerful "started" toast and then nothing. The server now waits (up to 3 s) for the run
+  row: if the run fails before creating one, that error goes back to the request and shows
+  as an error toast.
+- **Queued runs are honest.** A run waiting behind the concurrency limit has no row yet; after
+  3 s the request answers without an id, the toast says "已排队，有空闲名额时开始运行" and the
+  runs list opens. The run keeps going in the background either way.
+- The fixed 600–800 ms "refresh a bit later" timers after Run now / rerun on the tasks and
+  runs lists and after a home button are gone: the answer comes after the row exists, so
+  refreshing right away already shows it.
+- `launch()` in `internal/app/app.go` is the one place for this (task runs, quick runs, skill
+  button runs); the run's final error is still logged as before. `RunButton` (tray menu)
+  keeps its signature. Nothing OS-specific: run ids are plain strings, no paths involved.
+- Tests: `TestLaunch` (id on start, early error returned, fast failure still returns the id,
+  queued → no id, every failure logged), `TestStartReturnsRunID` (task and quick run ids match
+  the stored rows, unix mock claude), `TestStartAnswersWithRunID` (API answers incl. queued and
+  budget-blocked) and `TestStartOpensExactRun` (no `api("/api/runs?limit=1")` guess left,
+  zh-CN/en key present).
+
+**Inspiration**
+
+- n8n `packages/cli/src/workflow-runner.ts` `WorkflowRunner.run()`: it registers the
+  execution (`activeExecutions.add`) and returns the `executionId` straight away, before the
+  workflow finishes; a failure before execution start is thrown to the caller
+  (`PreExecuteBlockedError`). `packages/frontend/editor-ui/src/app/composables/useRunWorkflow.ts`
+  then uses `runWorkflowApiResponse.executionId` to attach to exactly that execution, and its
+  stop handler waits (`until(...activeExecutionId)`) when the id isn't known yet. We borrowed
+  "answer with the id as soon as the record exists, surface pre-start failures, accept that
+  the id can be late". No code copied.
+
+**Learned**
+
+- `runner.Options.OnStart` already fired right after the row insert (it was added for the AI
+  plugin builder); reusing it meant no change in the runner at all.
+- When a run is created and fails within the wait, both the id and the error arrive. The id
+  must win: the run page shows the failure with its log, while an error toast would hide it.
+
+**Ideas for later**
+
+1. Show the queue position in the "queued" toast (and on the runs list) using the runner
+   semaphore's waiters.
+2. Return 409/402-style codes for budget blocks so the UI can offer "open budget settings"
+   in the error toast instead of plain text.
+3. Let the tray menu's preset buttons open the new run's page in the desktop window.
