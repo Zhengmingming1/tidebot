@@ -127,3 +127,54 @@ func TestTOTPRoundTrip(t *testing.T) {
 		t.Fatal("totp verify failed")
 	}
 }
+
+// TestSessionSeenThrottled: a burst of authed requests writes last_seen_at once, not per call.
+func TestSessionSeenThrottled(t *testing.T) {
+	sqlDB, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	s := New(sqlDB)
+	ctx := context.Background()
+	if err := s.EnsureOwner(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPassword(ctx, "supersecret1"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := s.Login(ctx, "supersecret1", "", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := func() (n int64) {
+		if err := s.DB.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := s.GetSession(ctx, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	before := changes()
+	for i := 0; i < 5; i++ {
+		if _, err := s.GetSession(ctx, sess.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := changes(); got != before {
+		t.Fatalf("GetSession wrote %d rows within a minute", got-before)
+	}
+	// a stale last_seen_at is refreshed
+	if _, err := s.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at='2000-01-01T00:00:00Z' WHERE id=?`, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetSession(ctx, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	var seen string
+	_ = s.DB.QueryRowContext(ctx, `SELECT last_seen_at FROM sessions WHERE id=?`, sess.ID).Scan(&seen)
+	if strings.HasPrefix(seen, "2000") {
+		t.Fatalf("stale last_seen_at not refreshed: %s", seen)
+	}
+}

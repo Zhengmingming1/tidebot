@@ -162,14 +162,17 @@ VALUES(?,?,?,?,?,?,?)`, sid, "owner", csrf, now.Format(time.RFC3339), exp.Format
 }
 
 // GetSession loads a non-expired session.
+// SeenWriteEvery throttles the sessions.last_seen_at write in GetSession.
+var SeenWriteEvery = time.Minute
+
 func (s *Service) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	if sessionID == "" {
 		return nil, errors.New("no session")
 	}
 	var sess Session
-	var expStr string
+	var expStr, seenStr string
 	err := s.DB.QueryRowContext(ctx, `
-SELECT id, user_id, csrf_token, expires_at FROM sessions WHERE id=?`, sessionID).Scan(&sess.ID, &sess.UserID, &sess.CSRFToken, &expStr)
+SELECT id, user_id, csrf_token, expires_at, last_seen_at FROM sessions WHERE id=?`, sessionID).Scan(&sess.ID, &sess.UserID, &sess.CSRFToken, &expStr, &seenStr)
 	if err != nil {
 		return nil, errors.New("invalid session")
 	}
@@ -179,7 +182,11 @@ SELECT id, user_id, csrf_token, expires_at FROM sessions WHERE id=?`, sessionID)
 		return nil, errors.New("session expired")
 	}
 	sess.ExpiresAt = exp
-	_, _ = s.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=? WHERE id=?`, nowUTC(), sessionID)
+	// At most one write per session per minute: every API call (polls included) passes
+	// here, and a write per request meant a WAL commit + fsync every few seconds.
+	if seen, err := time.Parse(time.RFC3339, seenStr); err != nil || time.Since(seen) >= SeenWriteEvery {
+		_, _ = s.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=? WHERE id=?`, nowUTC(), sessionID)
+	}
 	return &sess, nil
 }
 

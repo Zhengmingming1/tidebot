@@ -3,7 +3,7 @@
   "use strict";
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
-  var state = { lang: "en", langPref: "auto", dict: {}, csrf: "", tz: "UTC", version: "", es: null, idleTimer: null, notifSeen: localStorage.getItem("tb_notif_seen") || "" };
+  var state = { lang: "en", langPref: "auto", dict: {}, csrf: "", tz: "UTC", version: "", es: null, idleTimer: null, lastInput: Date.now(), notifSeen: localStorage.getItem("tb_notif_seen") || "" };
   var IDLE_MS = 30 * 60 * 1000;
 
   function esc(v) {
@@ -820,7 +820,7 @@
 
   // ---------- idle / SSE ----------
   function stopStream() { if (state.es) { state.es.close(); state.es = null; } }
-  function bumpIdle() { clearTimeout(state.idleTimer); state.idleTimer = setTimeout(stopStream, IDLE_MS); }
+  function bumpIdle() { state.lastInput = Date.now(); clearTimeout(state.idleTimer); state.idleTimer = setTimeout(stopStream, IDLE_MS); }
   ["mousemove", "click", "scroll", "keydown"].forEach(function (ev) { document.addEventListener(ev, bumpIdle, { passive: true }); });
 
   // ---------- login ----------
@@ -1006,7 +1006,24 @@
     poller.t = setTimeout(tick, ms);
   }
   function stopPoll() { clearTimeout(poller.t); poller.t = null; poller.fn = null; }
+  // Change gate for live pages: ask /api/rev (one in-memory SQLite counter, no table scans)
+  // and run the page's heavy reload only when the token moved since the last good reload.
+  // The token also turns over each minute, so time-based views (next 24 h) stay fresh.
+  function revGate() {
+    var seen = null;
+    return function (load) {
+      return apiRaw("/api/rev").then(function (r) {
+        var rev = r && r.rev;
+        if (rev && rev === seen) return;
+        return Promise.resolve(load()).then(function () { seen = rev; });
+      });
+    };
+  }
+  // Seconds between change checks: 2 while something runs, 5 while you're using the page,
+  // 15 once there's been no input for 2 minutes (the desktop window often sits open all day).
+  function liveEvery(busy) { return busy ? 2 : Date.now() - (state.lastInput || 0) < 120000 ? 5 : 15; }
   document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) state.lastInput = Date.now(); // coming back counts as activity
     if (!document.hidden && poller.fn && !poller.t) poller.tick();
     if (!document.hidden && state.esPaused) { state.esPaused = false; if (state.esResume) state.esResume(); }
   });
@@ -1066,13 +1083,13 @@
       $$("[data-btn]").forEach(function (b) { b.addEventListener("click", function () { runButton(b.getAttribute("data-btn"), b); }); });
       $("#qa-new").addEventListener("click", quickRunModal);
       if ($("#home-new")) $("#home-new").addEventListener("click", function () { taskFormModal(null); });
-      var ticks = 0;
+      var ticks = 0, gate = revGate();
       livePoll(function () {
         ticks++;
-        // live elapsed counters every tick; data every tick while something runs, else every 5s
+        // elapsed counters tick locally every second; the data is refetched only when /api/rev moved
         $$("[data-since]").forEach(function (el) { var t = el.getAttribute("data-since"); if (t) el.textContent = dur(Date.now() - new Date(t).getTime()); });
-        if ($("#running .spin") || ticks % 5 === 0) {
-          return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r2) { if ((location.hash || "#/") === "#/") paint(r2[0], r2[1]); });
+        if (ticks % liveEvery(!!$("#running .spin")) === 0) {
+          return gate(function () { return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r2) { if ((location.hash || "#/") === "#/") paint(r2[0], r2[1]); }); });
         }
       }, 1000);
     });
@@ -3132,7 +3149,8 @@
       };
       // a newer request always wins; slow responses for old search text are dropped
       var reload = function () { var my = ++v.seq; return api(url()).then(function (list) { if (my === v.seq) { paint(list); live(list); } }); };
-      var live = function (list) { if (list.some(function (r) { return r.status === "running" || r.status === "queued"; })) livePoll(reload, 2000); else stopPoll(); };
+      var gate = revGate();
+      var live = function (list) { if (list.some(function (r) { return r.status === "running" || r.status === "queued"; })) livePoll(function () { return gate(reload); }, 2000); else stopPoll(); };
       paint(runs); live(runs);
       var qt;
       $("#rq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value.trim(); reload().catch(fail); }, 250); });

@@ -579,3 +579,61 @@ tooltips, quick-run memory), so this one goes back to the core.
 2. Push the live usage over the existing log SSE stream instead of polling the run every 5 s.
 3. `Meter.Now()` re-prices every request on each event; keep running totals for very long runs.
 4. Show live cost in the Home "running" row and the tray tooltip.
+
+## 2026-10-22 (14:20): live pages only refetch when something changed
+
+Category: **resource usage**. The last rounds were UI polish and run-usage correctness.
+
+**Done**
+
+- **New `GET /api/rev`** (session auth like the rest of `/api/`): returns
+  `"<changes>.<minute>"`. `changes` is SQLite's `total_changes()` on the store's single
+  connection, so it moves on every insert/update/delete anywhere in tidebot (runs, mid-run
+  usage saves, tasks, settings, notifications) and costs no table scan. `minute` is the
+  server's Unix minute, so time-based views (next 24 h, "today") still refresh once a minute
+  with no writes.
+- **Home** used to re-run `/api/overview` + `/api/dashboard` (schedule preview, heartbeats,
+  two cost summaries, ~9 KB JSON) every 5 s while idle and **every second** while a run was
+  going, as long as the window was visible. The desktop window often sits open all day. Now
+  the elapsed counters still tick locally every second, but the page only asks `/api/rev`
+  (23 B, ~0.5 ms) and refetches when the token moved. Change checks run every 2 s while
+  something runs, 5 s while you're using the page, and 15 s after 2 minutes without input
+  (coming back to the tab counts as input). The **runs list** live poll (2 s while a run is
+  queued/running) goes through the same gate. A failed reload is retried on the next check.
+- **Session writes:** every authed request (polls included) rewrote `sessions.last_seen_at`,
+  which meant a WAL commit and fsync every few seconds just for having the page open. It is
+  now written at most once a minute per session (`auth.SeenWriteEvery`). Nothing reads it at
+  finer precision. This also keeps `/api/rev` stable while you only read.
+- Measured on the demo data (`scripts/demo-webui.sh`), headless Chrome at 1024×655: 31 s on
+  an idle home page made 6 `/api/rev` calls and 1 data refresh (the first one). Before it was
+  12 heavy calls plus 12 session writes. A button run still shows in "running" within ~0.8 s
+  and clears as soon as it ends.
+- Also: `gofmt` on `internal/claudebin/resolve.go` (it had drifted).
+- Tests: `TestRevAPI` (reads leave the token alone, a write moves it, POST 405, anonymous
+  401), `TestRevGate` (node: unchanged token doesn't reload, failed reload retried, minute
+  turnover, cadence 2/5/15 s; tolerates CRLF), `TestSessionSeenThrottled`.
+
+**Inspiration**
+
+- healthchecks `hc/front/views.py` `status_single`: the details page polls with `?u=<last
+  updated>` and the server only renders and sends the event log when that value changed.
+  `static/js/adaptive-setinterval.js`: polls every 3 s for a "quota" of 20 runs after a mouse
+  move or the tab becoming visible, otherwise once a minute. We borrowed "cheap version
+  check, heavy payload only on change" and "poll slower when nobody is looking", and used
+  SQLite's own change counter as the version. No code copied.
+
+**Learned**
+
+- With `SetMaxOpenConns(1)` and no connection lifetime, `total_changes()` is a free,
+  process-wide "something was written" counter. It only resets if the connection is
+  reopened, and the minute part makes a reset harmless.
+- Look for writes on the read path before using a write counter as a version. The session
+  touch on every request would have made the token move on every poll.
+
+**Ideas for later**
+
+1. Gate the run-detail live stats (5 s) and the 60 s notification-center poll the same way.
+2. Return `rev` in a response header of the heavy endpoints, so the first check after a page
+   load can skip the redundant refresh.
+3. Long-poll `/api/rev?after=` (wake on the app's event bus), once the per-origin connection
+   limit with several open tabs and the run-log SSE has been checked.

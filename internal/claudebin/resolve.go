@@ -33,19 +33,19 @@ import (
 
 // Result describes where claude was found (or everywhere we looked).
 type Result struct {
-	Path     string   `json:"path,omitempty"`
-	Version  string   `json:"version,omitempty"`
-	Method   string   `json:"method"` // configured | login_shell | path | known_dir | not_found
-	Searched []string `json:"searched"`
-	PATH     string   `json:"-"` // PATH to give claude's child process
-	Note     string   `json:"note,omitempty"`
+	Path     string    `json:"path,omitempty"`
+	Version  string    `json:"version,omitempty"`
+	Method   string    `json:"method"` // configured | login_shell | path | known_dir | not_found
+	Searched []string  `json:"searched"`
+	PATH     string    `json:"-"` // PATH to give claude's child process
+	Note     string    `json:"note,omitempty"`
 	At       time.Time `json:"-"`
 }
 
 // Options control resolution. Zero values use the real environment.
 type Options struct {
-	Configured string            // config claude_bin; "" or "claude" = auto
-	Home       string            // defaults to os.UserHomeDir
+	Configured string // config claude_bin; "" or "claude" = auto
+	Home       string // defaults to os.UserHomeDir
 	Env        func(string) string
 	GOOS       string
 	Shell      string // defaults to $SHELL (unix)
