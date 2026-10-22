@@ -752,3 +752,59 @@ one fixes what sits under them.
 2. Return 409/402-style codes for budget blocks so the UI can offer "open budget settings"
    in the error toast instead of plain text.
 3. Let the tray menu's preset buttons open the new run's page in the desktop window.
+
+## 2026-10-22 (20:30): download a skill as .zip
+
+Category: **missing feature (Skills page)**. The last rounds were all about runs, so this one
+is on another page.
+
+**Done**
+
+- **Skills can go back out.** Import took .zip/.skill/.tar.gz/folders, but there was no way
+  to get a skill out of tidebot again: to move it to another computer, share it or keep a copy
+  you had to dig through the blob store. Now there's a download icon on each row of the skills
+  list (current version), a "下载 .zip" button in the skill's header, and a download icon on
+  every version in the version tree. Tooltip: "下载 v3（.zip），可在其他电脑直接导入".
+- `GET /api/skills/<id>/export[?v=<version>]` builds `<name>-v<n>.zip` with the files under
+  one top folder, so Import takes it back as is (tested as a round trip: same name, same file
+  count, offered as a new version of the existing skill). Versions of other skills and bogus
+  ids get 400, unknown skills 404, signed out 401, POST 405.
+- **Same on every OS.** Bytes are stored as imported, no line-ending conversion (a SKILL.md
+  written on Windows comes back with its CRLF). Entry names are forward-slash, sorted, with the
+  version's creation time, so the same version always gives the same bytes. The folder/file
+  name keeps letters and digits of any script and turns everything else (`/\:*?"<>|`, spaces,
+  dots) into `-`; Windows device names (`CON`, `COM1`…) get a `-skill` suffix.
+- Non-ASCII names: the header sends an ASCII `filename=` plus UTF-8 `filename*=`, and the
+  page's `downloadFile` now prefers `filename*` (CSV export unchanged). In the desktop app the
+  zip goes through the native Save dialog like the other exports.
+- Small one on the way: the skill page showed its raw ID as a mono line under the name; it's
+  now the same `ID` chip with a tooltip as on tasks, and the description shows there instead.
+- Verified in headless Chrome at 1024×655 (zh-CN, demo data): the list icon downloads
+  `changelog-writer-v2.zip`, a version-tree icon downloads `pdf-tools-v1.zip`, tooltips stay
+  inside the window.
+- Tests: `TestSkillExport` (zip content incl. CRLF, deterministic bytes, Content-Disposition,
+  re-import round trip, error codes), `TestExportSlug`, `TestSkillExportUI` (buttons wired;
+  `dispName` under node: `filename*` wins, broken escape falls back; tolerates CRLF).
+
+**Inspiration**
+
+- Open WebUI `src/lib/components/workspace/Tools.svelte`: every tool has an "Export" item
+  (`exportHandler` saves `tool-<id>-export-<time>.json`), and the page menu has "Export JSON"
+  next to "Import JSON" for all tools; the exported file is exactly what Import reads. We
+  borrowed "per-item export next to import, in the import format" and made it per version.
+  No code copied.
+
+**Learned**
+
+- tidebot's skill name rule (letters, digits, spaces, `. _ -`) already rules out most
+  Windows-hostile characters, but not device names or trailing dots; the slug has to handle
+  those itself.
+- `version_files.mode` is always 420 (0644), so the zip can't carry exec bits; a script that
+  needs `+x` loses it in both directions. Worth fixing in the store, not in the export.
+
+**Ideas for later**
+
+1. "Export all skills" as one zip (one folder per skill), next to Import on the skills page.
+2. Keep exec bits in `version_files.mode` on import (tar/zip modes) and write them back.
+3. Download a task as a bundle (spec + pinned skill versions) to move a whole task.
+4. Show the files of a version (`/api/skills/<id>/files`) in a small tree before downloading.
