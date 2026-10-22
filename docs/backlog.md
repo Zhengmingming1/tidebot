@@ -637,3 +637,59 @@ Category: **resource usage**. The last rounds were UI polish and run-usage corre
    load can skip the redundant refresh.
 3. Long-poll `/api/rev?after=` (wake on the app's event bus), once the per-origin connection
    limit with several open tabs and the run-log SSE has been checked.
+
+## 2026-10-22 (16:00): edit & rerun a quick run
+
+Category: **UX / interaction**. The last rounds were the favicon badge, polish, mid-run usage
+saves and change-gated polling, so this one is a user-facing flow.
+
+**Done**
+
+- **Edit & rerun.** A quick (ad-hoc) run's details card has a pencil button next to "重跑"
+  (tooltip says what it does, plus the key). It opens the quick-run dialog titled "改后重跑"
+  with the run's prompt and provider already filled in, cursor at the end. Run it and the
+  edited prompt becomes a new quick run; the original run stays as it was (the hint says so).
+  Before, changing one word meant opening quick run and retyping or hunting for the chip.
+- **"还原"** shows at the right end of the prompt label only once the prompt or provider
+  differs from the original run, and puts both back. CRLF vs LF and trailing whitespace don't
+  count as a change (pasting on Windows adds `\r\n`).
+- The prompt box grows with its content up to 40% of the window, then scrolls, so a long
+  prompt is readable at 1024×655 without dragging the corner. The dialog footer stays visible.
+  This applies to the normal quick-run dialog too.
+- **Keys:** on a run page `r` reruns and `e` opens edit & rerun (same letters as run/edit on
+  a task page). A disabled button (live run) is never clicked by the shortcut. The shortcut
+  help line and the button tooltips mention it. zh-CN + en.
+- Task runs don't get the pencil: their stored prompt is the composed spec and they run in
+  the task workspace with skills, so an ad-hoc copy would quietly behave differently. Editing
+  the task is the honest path there.
+- Verified in headless Chrome at 1024×655 on the demo data: prefill, provider preselected,
+  "还原" hidden → shown → restored, Ctrl+Enter starts a new run with the edited prompt and
+  opens it, the original run's prompt is unchanged, no pencil on task runs.
+- Test: `TestEditAndRerun` (wiring, the `r`/`e` keys, and `qrEdited` under node: CRLF and
+  trailing spaces aren't changes, prompt/provider changes are, leading spaces are).
+
+**Inspiration**
+
+- Open WebUI `src/lib/components/chat/Messages/UserMessage.svelte`: `editMessageHandler`
+  copies the sent message into an edit box, autosizes the textarea to `scrollHeight` and
+  focuses it; Cmd/Ctrl+Enter confirms, Escape cancels, and the edit is sent as a new branch
+  while the old message stays. We borrowed "prefill from what was sent, send as new, keep
+  the original" and the autosize. No code copied.
+
+**Learned**
+
+- `:has()` would have been the shortest CSS for the label row, but older WebKitGTK builds on
+  Linux desktops don't all support it; a plain class works everywhere.
+- Tooltips on controls at the right edge of a dialog have to anchor right, or they get cut off
+  by the dialog's own scroll container.
+
+**Ideas for later**
+
+1. Edit & rerun for task runs as a one-off: run the edited prompt in the task workspace with
+   the same skills, without creating a task version (needs a backend "override prompt" path).
+2. Show a small diff (old → new prompt) in the new run's details when it came from
+   edit & rerun, with a link back to the original run.
+3. Return the new run id from `/api/runs/quick` and `/rerun` so the UI opens that exact run
+   instead of "newest run" after 500 ms.
+4. Refresh `run-live.png` in the README at Friday's release (the rerun/save-as-task buttons
+   from earlier rounds aren't in it yet).
