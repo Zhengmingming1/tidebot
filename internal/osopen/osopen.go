@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	posixpath "path"
 	"path/filepath"
 	"runtime"
 )
@@ -42,7 +43,7 @@ func Commands(goos, path string, reveal bool) []Candidate {
 		dir := path
 		var cs []Candidate
 		if reveal {
-			dir = filepath.Dir(path)
+			dir = posixpath.Dir(path) // only reached for Unix paths; same result on any host OS
 			// The freedesktop FileManager1 interface selects the file (Nautilus, Dolphin,
 			// Nemo, Thunar…); without it, open the folder.
 			u := (&url.URL{Scheme: "file", Path: path}).String()
