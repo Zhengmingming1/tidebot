@@ -109,7 +109,7 @@ func TestStopRunUI(t *testing.T) {
 		`if (e.status === 409) { toast(T("run.stop_gone")); return true; }`,
 		`data-stop="' + esc(r.id) + '"`,
 		`id="rd-stop"`,
-		`statusPill(r.status, r.queue_pos)`,
+		`statusPill(r.status, r.queue_pos, r.error)`,
 		`T("st.queued_n", { n: pos })`,
 		`/^stopped: by user/.test(msg)) return T("rd.err_stopped")`,
 		`if (was === "queued" && r.status !== "queued")`,

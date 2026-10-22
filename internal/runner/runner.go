@@ -53,6 +53,12 @@ type Options struct {
 	// mid-run (see Runner.UsageSaveEvery), e.g. to keep the spend ledger current.
 	// Not called for the final cost: that is the returned Result.Cost.
 	OnUsage func(runID string, c pricing.Cost)
+	// BeforeStart, if set, runs once a run that had to wait in line gets its slot,
+	// just before Claude Code is launched. Things checked when the run was queued
+	// (budgets, the task still being active) may have changed during the wait: it
+	// can tighten the options (e.g. a smaller cost cap) or return an error to not
+	// start at all. Such a run ends as skipped (see ErrSkipped) and frees the slot.
+	BeforeStart func(ctx context.Context, o *Options) error
 }
 
 // Result is the outcome of one run.
@@ -289,7 +295,9 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		opts.OnStart(runID)
 	}
 
+	waited := false
 	err := r.slots.acquire(runCtx, r.quit, runID, func(ahead int) {
+		waited = true
 		fmt.Fprintf(logW, "[%s] queued: waiting for a free slot (%d ahead)\n", time.Now().Format("15:04:05"), ahead)
 		log.Info("run queued", "run_id", runID, "task_id", opts.TaskID, "ahead", ahead)
 	})
@@ -305,6 +313,12 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		return r.finishUnstarted(runID, opts, logW, err)
 	}
 	defer r.slots.release()
+
+	if waited && opts.BeforeStart != nil {
+		if why := opts.BeforeStart(runCtx, &opts); why != nil {
+			return r.finishSkipped(runID, opts, logW, why)
+		}
+	}
 
 	if opts.Timeout > 0 {
 		var stop context.CancelFunc
@@ -449,6 +463,33 @@ func (r *Runner) finishUnstarted(runID string, opts Options, logW io.Writer, why
 	}
 	fmt.Fprintf(logW, "[%s] run finished: canceled before it started (%s)\n[[end]]\n", time.Now().Format("15:04:05"), res.ErrorMessage)
 	return res, err
+}
+
+// ErrSkipped wraps the reason a queued run was not started when it got its slot
+// (Options.BeforeStart said no). The run row ends as skipped, with no start time
+// and no cost.
+var ErrSkipped = errors.New("skipped")
+
+// finishSkipped records a queued run that BeforeStart turned away. The stored
+// message is "skipped: <why>" so the WebUI can explain it in the viewer's language.
+func (r *Runner) finishSkipped(runID string, opts Options, logW io.Writer, why error) (Result, error) {
+	msg := "skipped: " + why.Error()
+	res := Result{RunID: runID, Status: "skipped", ErrorMessage: msg}
+	fin := db.Run{
+		ID: runID, Status: res.Status, ErrorMessage: nullStr(msg),
+		FinishedAt:   sql.NullString{String: time.Now().UTC().Format(time.RFC3339), Valid: true},
+		ProviderName: sql.NullString{String: opts.Profile.Name, Valid: opts.Profile.Name != ""},
+		Model:        sql.NullString{String: opts.Profile.Model, Valid: opts.Profile.Model != ""},
+	}
+	if opts.TaskID != "" {
+		fin.TaskID = sql.NullString{String: opts.TaskID, Valid: true}
+	}
+	if dbErr := r.store.UpdateRunFinish(context.Background(), fin); dbErr != nil {
+		r.log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
+	}
+	fmt.Fprintf(logW, "[%s] run finished: skipped before it started (%s)\n[[end]]\n", time.Now().Format("15:04:05"), why)
+	r.log.Info("run skipped at start", "run_id", runID, "task_id", opts.TaskID, "why", why.Error())
+	return res, fmt.Errorf("%w: %w", ErrSkipped, why)
 }
 
 func displayBase(u string) string {

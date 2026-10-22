@@ -1061,3 +1061,74 @@ what the user can control.
 
 README screenshots: the runs list looks the same unless runs are queued; the run page of a
 live run now has a Stop button in the log header (the README shows a finished run).
+
+## 2026-10-23 (06:20): queued runs are checked again when they get their slot
+
+Category: **logic correctness (budget, scheduler, runner)**. The last rounds were a feature
+(stop / queue), resource usage (live log push) and UX (dialog guard); this one closes a gap
+the queue opened, listed as idea 1 of the 04:30 round.
+
+**Done**
+
+- **Budgets are re-checked at the slot, not only at the door.** The daily caps (global,
+  bucket, task) and the provider quota were checked once, when a run was asked for. A run
+  that then waited in line kept that answer: three queued runs could each start after the
+  runs ahead of them had used up the day's budget, and each one's per-run cap was "what was
+  left when I queued", so together they could spend several times what was left.
+- Now a run that had to wait gets a second check right before Claude Code starts
+  (`runner.Options.BeforeStart`, called only if the run waited, so a run that got a slot at
+  once costs nothing extra). The check is the same code as the first one, moved into
+  `App.admitRun` (caps, quota, breach log, notice, pause per the budget's action). If it says
+  no, the run ends as **skipped** — never started, no start time, no cost — and the slot goes
+  straight to the next in line. If it says yes, the run starts with the fresh per-run cap
+  (cost control and `--max-budget-usd`), so a smaller remainder is respected.
+- **A scheduled run of a task paused while it waited is skipped too** (`skipped: task paused`).
+  Runs started by hand (Run now, buttons, quick runs) still go, as before on paused tasks.
+  This skip is quiet: no retry, no circuit-breaker strike, no notice.
+- A budget skip sends one budget notice (the breach), not an extra "run failed" one, and it
+  isn't retried (budget errors never are). Skill canary metrics ignore skipped runs.
+- WebUI: the reason is shown in the viewer's language ("未启动：排队期间预算或额度已用完。
+  全局：已达每日 token 上限（61572 / 1000）……"), reusing the spend page's `be.*` texts via a
+  small `budgetWhy()`; and the status pill of a skipped or stopped-before-start run carries
+  the reason as its tooltip, on the run page and in the runs list, so it's readable without
+  scrolling at 1024×655 (the details block is below the log).
+- Same on every OS: no new OS calls; pure Go hook + strings. Runner test runs on unix (mock
+  is a shell script, like the other queue tests); the slot logic itself is already covered on
+  Windows by the pure-Go queue tests.
+- Tests: `TestBeforeStartRecheckOnSlot` (no check without a wait; "no" → skipped row, log
+  `[[end]]`, slot passed on; "yes" can tighten options — a shorter timeout takes effect),
+  `TestQueuedRunSkippedWhenBudgetRanOut` (cron + quick run skipped after spend landed, task
+  paused per `pause_notify`, 2 budget notices, no `run_failed`, no retry),
+  `TestQueuedCronRunSkippedWhenTaskPaused` (cron skipped, breaker 0, manual run on the same
+  paused task still starts), `TestSkippedRunUI` (wiring + i18n keys).
+
+**Inspiration**
+
+- n8n `packages/cli/src/active-executions.ts` `add()`: after
+  `capacityReservation.reserve()` (the concurrency wait) it claims the execution only
+  `{ requireStatus: existingExecution.expectedStatus }` — i.e. it re-validates what may have
+  changed during the wait — and on any throw releases the reserved capacity
+  (`capacityReservation.release()`), see also `concurrency/concurrency-capacity-reservation.ts`.
+  We borrowed "re-check after the wait, and hand the slot back if the re-check fails".
+  No code copied.
+
+**Learned**
+
+- Checking a limit before a wait and acting after it is a classic TOCTOU; the queue made the
+  gap minutes long. Anything else decided at queue time (provider choice, skill version,
+  amendments marked "next run") is worth a look with the same eye.
+- Two runs that start together can still both get "what's left" (spend lands only as they
+  go, every 5 s). Exact enforcement would need a reservation (hold the per-run cap against
+  the day's remainder while a run is live).
+
+**Ideas for later**
+
+1. Budget reservations: subtract live runs' caps from the remainder at check time, so two
+   concurrent runs can't each be allowed the whole remainder.
+2. Re-resolve the task's provider / prompt version at the slot (a task edited while queued
+   still runs the version compiled at queue time).
+3. Runs list filter chip for "skipped", and a home-page line "N runs skipped by budget today".
+
+README screenshots are unaffected (runs list and run page look the same unless a run was
+skipped). Screenshots of the new state: `/workspace/shots/run-skipped-budget-1024x655.png`,
+`runs-list-skipped-tip-1024x655.png` (+ `-en`).

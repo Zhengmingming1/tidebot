@@ -1476,6 +1476,8 @@
   "run.dequeued": "已取消排队",
   "run.stop_gone": "这次运行已经结束了",
   "rd.err_stopped": "已手动停止。",
+  "rd.err_skip_budget": "未启动：排队期间预算或额度已用完。{why}。预算重置或调高后再运行即可。",
+  "rd.err_skip_paused": "未启动：排队期间任务已暂停，这次定时运行已跳过。",
   "rd.waiting": "等待中…",
   "rd.queued_at": "排队于 {t}",
   "rd.never_started": "未开始"

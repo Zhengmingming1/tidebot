@@ -378,18 +378,36 @@
 
   // ---------- status helpers ----------
   // A queued run shows its place in line ("排队中 · 第 2 位"); what it waits for is in the tooltip.
-  function statusPill(st, pos) {
+  // A run that ended without starting (skipped at its slot, stopped while queued)
+  // says why in the pill's tooltip, so the reason is visible without scrolling.
+  function statusPill(st, pos, err) {
     if (st === "queued" && pos > 0) return '<span class="pill info" data-tip="' + esc(T("st.queued_tip")) + '">' + esc(T("st.queued_n", { n: pos })) + "</span>";
+    var tip = (st === "skipped" || st === "canceled") && err ? ' data-tip="' + esc(runErr(err)) + '"' : "";
     var map = { succeeded: ["ok", T("st.succeeded")], running: ["run", T("st.running")], queued: ["info", T("st.queued")], failed: ["bad", T("st.failed")], timeout: ["bad", T("st.timeout")], canceled: ["warn", T("st.canceled")], skipped: ["", T("st.skipped")] };
     var m = map[st] || ["", st || "—"];
-    return '<span class="pill ' + m[0] + '">' + esc(m[1]) + "</span>";
+    return '<span class="pill ' + m[0] + '"' + tip + ">" + esc(m[1]) + "</span>";
   }
   // Stable error codes from the core, shown in the viewer's language; anything else as-is.
   function runErr(msg) {
     msg = msg || "";
     if (/^interrupted: quit/.test(msg)) return T("rd.err_quit");
     if (/^stopped: by user/.test(msg)) return T("rd.err_stopped");
+    // A queued run turned away when it got its slot: why is in the viewer's language,
+    // the exact cap figures follow as-is.
+    if (/^skipped: task paused/.test(msg)) return T("rd.err_skip_paused");
+    var b = /^skipped: budget blocked: (.*)$/.exec(msg);
+    if (b) return T("rd.err_skip_budget", { why: budgetWhy(b[1]) });
     return /^interrupted:/.test(msg) ? T("rd.err_interrupted") : msg;
+  }
+  // A core budget reason ("global/ daily USD cap reached (5.1/5.0)") in the viewer's language.
+  function budgetWhy(d) {
+    var sc = /^(global|task|bucket)\//.exec(d), name = sc ? T("sp.scope_" + sc[1]) : "";
+    var m = /daily (USD|CNY) cap reached \(([\d.]+)\/([\d.]+)\)/.exec(d);
+    if (m) { var sym = m[1] === "CNY" ? "¥" : "$"; return T("be.usd_cap", { name: name, used: sym + m[2], cap: sym + m[3] }); }
+    m = /daily token cap reached \((\d+)\/(\d+)\)/.exec(d);
+    if (m) return T("be.token_cap", { name: name, used: m[1], cap: m[2] });
+    if (/remaining daily budget is zero/.test(d)) return T("be.zero", { name: name || T("sp.scope_global") });
+    return d;
   }
   function taskPill(st) {
     var m = { active: ["ok", T("task.active")], paused: ["warn", T("task.paused")], archived: ["", T("task.archived")] }[st] || ["", st];
@@ -1043,7 +1061,7 @@
         var running = r.status === "running", active = running || r.status === "queued";
         return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + esc(runTitle(r)) + '</strong></a><small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small></div></div></td>" +
           '<td class="run-prov"><span class="ell">' + esc(r.provider || "—") + "</span>" + (r.model ? '<small class="ell">' + esc(r.model) + "</small>" : "") + "</td>" +
-          "<td>" + statusPill(r.status, r.queue_pos) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
+          "<td>" + statusPill(r.status, r.queue_pos, r.error) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
           '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && active ? '<button class="icon-btn sm row-act" data-stop="' + esc(r.id) + '" data-st="' + esc(r.status) + '" data-tip="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '" aria-label="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '">' + ic("stop", "sm") + "</button>" : "") + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
@@ -3425,7 +3443,7 @@
     return api("/api/runs/" + enc(id)).then(function (r) {
       var live = r.status === "running" || r.status === "queued", queued = r.status === "queued";
       mount('<div class="grid g4">' +
-        '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status, r.queue_pos) + "</strong><span>" + esc(triggerText(r.trigger)) + "</span></div>" +
+        '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status, r.queue_pos, r.error) + "</strong><span>" + esc(triggerText(r.trigger)) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(queued ? T("rd.waiting") : live ? T("rd.running") : r.started_at ? dur(r.duration_ms) : "—") + "</strong><span>" + esc(r.started_at || !r.finished_at ? T(queued ? "rd.queued_at" : "rd.started", { t: when(r.started_at || r.created_at) }) : T("rd.never_started")) + "</span></div>" +
         '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
         '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +

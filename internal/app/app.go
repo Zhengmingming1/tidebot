@@ -252,49 +252,10 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	if bucket == "" {
 		bucket = cost.BucketProduction
 	}
-	runMax := 0.05
-	if a.Cost != nil {
-		chk, err := a.Cost.CheckBeforeRun(ctx, opts.TaskID, bucket, runMax)
-		if err != nil {
-			return runner.Result{}, err
-		}
-		if !chk.OK {
-			_ = a.Cost.LogBreach(ctx, chk.BreachScope, opts.TaskID, bucket, "cap", chk.Reason, chk.BreachAction)
-			a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), Detail: chk.Reason})
-			if opts.TaskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
-				_ = a.Cost.PauseTask(ctx, opts.TaskID, chk.Reason)
-			}
-			return runner.Result{}, fmt.Errorf("budget blocked: %s", chk.Reason)
-		}
-		if chk.Warn {
-			a.Log.Warn("budget warning", "detail", chk.WarnDetail)
-			a.warnOnce(chk.WarnDetail)
-		}
-		runMax = chk.RunMaxUSD // display currency
-		f := a.cachedFX()
-		if runMax <= 0 {
-			runMax = f.Convert(0.01, pricing.USD, f.Display)
-		}
-		if dr := f.Convert(DryRunBudgetUSD, pricing.USD, f.Display); bucket == cost.BucketDryRun && runMax > dr {
-			runMax = dr
-		}
-	} else {
-		f := a.cachedFX()
-		runMax = f.Convert(runMax, pricing.USD, f.Display)
-	}
-	if c := callerCapUSD(opts.ExtraArgs); c > 0 {
-		f := a.cachedFX()
-		if v := f.Convert(c, pricing.USD, f.Display); v < runMax {
-			runMax = v
-		}
-	}
-	cc, err := a.costControl(ctx, prof, runMax)
+	callerCap := callerCapUSD(opts.ExtraArgs)
+	runMax, cc, err := a.admitRun(ctx, opts.TaskID, bucket, prof, callerCap)
 	if err != nil {
-		if a.Cost != nil {
-			_ = a.Cost.LogBreach(ctx, "provider", prof.Name, bucket, "quota", err.Error(), "skip")
-		}
-		a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), Detail: err.Error()})
-		return runner.Result{}, fmt.Errorf("budget blocked: %w", err)
+		return runner.Result{}, err
 	}
 	opts.Cost = cc
 	if len(opts.ExtraArgs) == 0 {
@@ -324,6 +285,20 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(runID, opts.TaskID, bucket, prof.Name, prof.Model, c))
 		}
 	}
+	// A run that waited for a slot is checked again before it starts: runs ahead
+	// of it may have used up the day's budget, or the task was paused meanwhile.
+	opts.BeforeStart = func(sctx context.Context, o *runner.Options) error {
+		if !a.taskStillRunnable(sctx, o.TaskID, o.TriggerKind) {
+			return errTaskInactive
+		}
+		rm, ncc, err := a.admitRun(sctx, o.TaskID, bucket, prof, callerCap)
+		if err != nil {
+			return err
+		}
+		o.Cost = ncc
+		o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, rm)
+		return nil
+	}
 	res, err := a.Runner.RunOnce(ctx, opts)
 	a.recordRunMeta(ctx, res.RunID)
 	// failed / stopped runs still spent tokens: record them too. The caller's
@@ -333,8 +308,9 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
 		done()
 	}
-	if errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrStoppedByUser) {
-		// The user stopped it, or is quitting: the run row says so, no "failed" notice.
+	if errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrStoppedByUser) || errors.Is(err, runner.ErrSkipped) {
+		// The user stopped it, or is quitting, or it was skipped at its slot (a budget
+		// notice was already sent): the run row says so, no "failed" notice.
 		return res, err
 	}
 	ev := Event{Kind: EventRunFinished, TaskID: opts.TaskID, TaskName: a.taskName(opts.TaskID), RunID: res.RunID,
@@ -346,6 +322,76 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	}
 	a.Events.Emit(ev)
 	return res, err
+}
+
+// errTaskInactive: a scheduled run's task was paused, archived or deleted while
+// the run waited for a slot. Not the task's failure: no retry, no breaker strike.
+var errTaskInactive = errors.New("task paused")
+
+// taskStillRunnable reports whether a queued run may still start. Scheduled runs
+// (cron, retry) of a task that is no longer active don't; ad-hoc runs and runs
+// the user started by hand always may (Run now works on a paused task too).
+func (a *App) taskStillRunnable(ctx context.Context, taskID, trigger string) bool {
+	if taskID == "" || (trigger != "cron" && trigger != "retry") {
+		return true
+	}
+	t, err := a.Store.GetTask(ctx, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	return err != nil || t.Status == "active" // a read error must not drop the run
+}
+
+// admitRun checks the budgets (global, bucket, task) and the provider quota, and
+// returns the per-run cap (display currency) with the cost control for the run.
+// A breach is logged, notified and (per the budget's action) pauses the task.
+// It runs when a run is asked for and again when a queued run gets its slot.
+func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider.Profile, callerCap float64) (float64, *runner.CostControl, error) {
+	runMax := 0.05
+	if a.Cost != nil {
+		chk, err := a.Cost.CheckBeforeRun(ctx, taskID, bucket, runMax)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !chk.OK {
+			_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, "cap", chk.Reason, chk.BreachAction)
+			a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: taskID, TaskName: a.taskName(taskID), Detail: chk.Reason})
+			if taskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
+				_ = a.Cost.PauseTask(ctx, taskID, chk.Reason)
+			}
+			return 0, nil, fmt.Errorf("budget blocked: %s", chk.Reason)
+		}
+		if chk.Warn {
+			a.Log.Warn("budget warning", "detail", chk.WarnDetail)
+			a.warnOnce(chk.WarnDetail)
+		}
+		runMax = chk.RunMaxUSD // display currency
+		f := a.cachedFX()
+		if runMax <= 0 {
+			runMax = f.Convert(0.01, pricing.USD, f.Display)
+		}
+		if dr := f.Convert(DryRunBudgetUSD, pricing.USD, f.Display); bucket == cost.BucketDryRun && runMax > dr {
+			runMax = dr
+		}
+	} else {
+		f := a.cachedFX()
+		runMax = f.Convert(runMax, pricing.USD, f.Display)
+	}
+	if c := callerCap; c > 0 {
+		f := a.cachedFX()
+		if v := f.Convert(c, pricing.USD, f.Display); v < runMax {
+			runMax = v
+		}
+	}
+	cc, err := a.costControl(ctx, prof, runMax)
+	if err != nil {
+		if a.Cost != nil {
+			_ = a.Cost.LogBreach(ctx, "provider", prof.Name, bucket, "quota", err.Error(), "skip")
+		}
+		a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: taskID, TaskName: a.taskName(taskID), Detail: err.Error()})
+		return 0, nil, fmt.Errorf("budget blocked: %w", err)
+	}
+	return runMax, cc, nil
 }
 
 func isMockBin(bin string) bool {

@@ -1476,6 +1476,8 @@
   "run.dequeued": "Removed from the queue",
   "run.stop_gone": "This run has already finished",
   "rd.err_stopped": "Stopped by you.",
+  "rd.err_skip_budget": "Not started: the budget or quota ran out while this run was waiting. {why}. Run it again once it resets or is raised.",
+  "rd.err_skip_paused": "Not started: the task was paused while this run was waiting, so this scheduled run was skipped.",
   "rd.waiting": "Waiting…",
   "rd.queued_at": "Queued {t}",
   "rd.never_started": "Never started"
