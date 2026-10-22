@@ -32,7 +32,7 @@ jobs:
         run: python3 scripts/check-i18n.py
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.24.x" # latest patch of go.mod's go 1.24 (setup-go v6+ would pin exactly 1.24.0)
+          go-version: "1.25.x" # latest patch of go.mod's go 1.25 (setup-go v6+ would pin exactly 1.25.0)
           cache-dependency-path: go.sum
       - name: secret scan (gitleaks, full history)
         run: go run github.com/zricethezav/gitleaks/v8@v8.30.1 git --redact --no-banner .
@@ -51,7 +51,7 @@ jobs:
           ref: ${{ inputs.ref }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.24.x" # latest patch of go.mod's go 1.24 (setup-go v6+ would pin exactly 1.24.0)
+          go-version: "1.25.x" # latest patch of go.mod's go 1.25 (setup-go v6+ would pin exactly 1.25.0)
           cache-dependency-path: go.sum
       - name: vet
         run: go vet ./...

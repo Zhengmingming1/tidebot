@@ -3,7 +3,7 @@
 tidebot is GNU AGPL-3.0-only, and anyone can build it:
 
 ```bash
-go build -o bin/ ./cmd/agentd ./cmd/agentctl           # server + CLI (Go 1.24+)
+go build -o bin/ ./cmd/agentd ./cmd/agentctl           # server + CLI (Go 1.25+)
 (cd cmd/tidebot-desktop && go build -tags gtk3 .)     # desktop; Linux needs libgtk-3-dev libwebkit2gtk-4.1-dev
 scripts/package-server.sh 0.1.7 dist                  # release-style archives
 ```
