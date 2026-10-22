@@ -451,3 +451,72 @@ All four "ideas for later" from the 10-20 round are done, plus a desktop downloa
    macOS/Windows) instead of the favicon.
 2. A setting to turn the badge off, if someone finds the count noisy.
 3. Push notification-center changes over the existing SSE connection instead of polling.
+
+## 2026-10-22 (10:13): five extra polish items
+
+**Done**
+
+- **Open folder (desktop app, all three OSes).** The Storage card has a folder button that
+  opens tidebot's data folder. After a desktop save, the toast has a "Show in folder"
+  action that selects the file. macOS uses `open -R`, Windows `explorer /select,`, and Linux
+  the FileManager1 D-Bus call with a fallback to `xdg-open` of the folder
+  (`internal/osopen`). The browser never sends a path. `/api/desktop/open` only accepts
+  `data` or a random id the save endpoint handed out (the last 20 are kept), and missing
+  paths are refused. The button stays hidden in a plain browser. Tests: `TestCommands`,
+  `TestOpen`, `TestDesktopOpen`.
+- **Meta info moves into tooltips.** Task, skill and run IDs are now a small `ID` chip
+  (hover shows the ID, click copies it) instead of a row of their own. The schedule row
+  reads "Every day 9:00 · next tomorrow 9:00". The raw cron, the time zone and the next
+  runs are in the info tooltip. The skills list shows the description again. Test:
+  `TestIDChip` (escaping under node).
+- **The log filter bar stays on one row at 1024px.** Copy, download and full screen moved
+  into the log card header next to the live/finished state. Their tooltips open downward,
+  so the top of the viewport doesn't clip them. Test: `TestLogToolsInHeader`.
+- **Quick run remembers.** Up to four recent quick-run prompts appear as chips and filter as
+  you type. Click one to fill the prompt. The last provider is preselected (only its name
+  is stored, in `localStorage`). Ctrl/⌘+Enter runs, and the hint is in the Run button's
+  tooltip. New `GET /api/runs/recent-prompts` uses `Store.RecentQuickPrompts`: distinct
+  prompts of runs with no task, parameterized SQL. Tests: `TestRecentQuickPrompts`,
+  `TestRecentPromptsAPI`, `TestQuickRunMemory`.
+- **Fewer clicks on a run page.** The details card has "Rerun", which starts the task again
+  (or the same prompt/provider for a quick run) and opens the new run. A quick run also
+  has "Save as task", which opens New task with the prompt and provider filled in.
+  Autofill then proposes the name, schedule and budget. Test: `TestRunDetailActions`.
+
+**Inspiration**
+
+- cc-switch `src-tauri/src/commands/config.rs`: `open_config_folder` (creates the folder,
+  then opens it) and `reveal_app_log_file` (reveals the file, or the folder if it's gone).
+  cherry-studio `src/main/services/file/internal/system/openGuard.ts`:
+  `assertOpenableTarget`, which only opens paths that exist. We added the "ids, not paths"
+  rule on top.
+- Cronicle `htdocs/js/pages/Schedule.class.js` `summarize_event_timing`: a plain-language
+  timing summary up front. Healthchecks `static/js/details.js` `.click-to-copy`: an ID you
+  click to copy, with a "Click to copy" tooltip.
+- opcode `src/components/SessionOutputViewer.tsx`: the output card header holds copy and
+  fullscreen next to the title and status.
+- Open WebUI `src/lib/components/chat/Suggestions.svelte` (suggested prompts filtered as you
+  type) and `ModelSelector.svelte` (remembers the selected model). Also the
+  `ctrlEnterToSend` option in `MessageInput.svelte`.
+- n8n `packages/frontend/editor-ui/src/features/execution/executions/components/workflow/WorkflowExecutionsPreview.vue`:
+  the execution preview header has a Retry dropdown and "Copy to editor". You act on a
+  past run right where you're looking at it.
+
+No code copied from any of them.
+
+**Learned**
+
+- A tooltip drawn with `::after` is clipped by `overflow: hidden` on its own element.
+  Truncate long chip labels in JS, not with CSS ellipsis.
+- Tooltips in a card header near the top of the viewport need to open downward.
+- On Linux, `xdg-open` on a file opens the file. Selecting it needs the FileManager1 D-Bus
+  call, and the folder is the honest fallback.
+- Tests that match app.js text must normalise CRLF (Windows checkouts).
+
+**Ideas for later**
+
+1. "Open workspace folder" on the task page (desktop app), behind the same id-only rule.
+2. Pin a recent quick-run prompt so it stays at the front.
+3. "Rerun with changes": open the quick-run dialog prefilled instead of starting at once.
+4. Verify the FileManager1 reveal on KDE/GNOME and the `explorer /select,` path on a real
+   Windows machine (CI only runs the unit tests).

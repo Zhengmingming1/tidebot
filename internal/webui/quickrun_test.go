@@ -13,7 +13,7 @@ func TestQuickRunMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(b)
+	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`api("/api/runs/recent-prompts")`,
 		`localStorage.setItem("tb_qr_provider", f.provider.value)`,

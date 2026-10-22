@@ -14,7 +14,7 @@ func TestLogToolsInHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(b)
+	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	bar := regexp.MustCompile(`(?s)host\.innerHTML = '<div class="lv-bar">.*?'<div class="lv-wrap">`).FindString(src)
 	if bar == "" {
 		t.Fatal("log bar markup not found")
