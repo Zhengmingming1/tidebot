@@ -335,9 +335,12 @@
   // dialog (macOS's webview ignores <a download>, Linux's drops files silently in the
   // download folder); in a browser it is the usual download.
   var desktopSave = null;
-  function saveBlob(b, name) {
+  function nativeSave() {
     if (!desktopSave) desktopSave = api("/api/desktop/save").then(function (r) { return !!(r && r.available); }, function () { return false; });
-    return desktopSave.then(function (native) {
+    return desktopSave;
+  }
+  function saveBlob(b, name) {
+    return nativeSave().then(function (native) {
       if (!native) {
         var a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name;
         document.body.appendChild(a); a.click(); a.remove();
@@ -926,7 +929,20 @@
     applySizes(pg);
     if (pendingRestore !== null) { var y = pendingRestore; pendingRestore = null; window.scrollTo(0, y); pg.scrollTop = y; }
   }
+  // Unsaved-changes guard (idea: n8n Modal.vue beforeClose + CredentialEdit hasUnsavedChanges).
+  // A field counts only once the user typed/clicked in it and its value moved away from what it
+  // held when the user first touched the dialog, so prefills and auto-fill never trip it, and
+  // undoing an edit makes the dialog clean again. Search boxes and [data-noguard] are ignored.
+  var modalGuard = null;
+  function fieldVal(el) { return el.type === "checkbox" || el.type === "radio" ? String(el.checked) : String(el.value).replace(/\r\n?/g, "\n"); }
+  function guardable(el) { return !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !/^(hidden|search|button|submit|reset|file|image)$/.test(el.type) && !(el.closest && el.closest("[data-noguard]")); }
+  function guardBase(box) { $$("input,textarea,select", box).forEach(function (el) { if (guardable(el) && el._tbBase === undefined) el._tbBase = fieldVal(el); }); }
+  function guardDirty(box) {
+    return $$("input,textarea,select", box).some(function (el) { return el._tbTouched && guardable(el) && el._tbBase !== undefined && fieldVal(el) !== el._tbBase; });
+  }
   // Modal: role=dialog, Esc closes, Tab stays inside, focus returns to the opener.
+  // Esc, the backdrop, × / Cancel and the browser Back button ask before dropping edits;
+  // the close() handed to onMount (used after a successful save) never asks.
   function modal(html, onMount) {
     var root = $("#modal-root"), opener = document.activeElement;
     root.innerHTML = '<div class="modal-bg"><div class="card modal" role="dialog" aria-modal="true" tabindex="-1">' + html + "</div></div>";
@@ -935,11 +951,36 @@
     var close = function () {
       if (!root.contains(box)) return;
       root.innerHTML = ""; document.removeEventListener("keydown", onKey, true);
+      if (modalGuard && modalGuard.box === box) modalGuard = null;
       if (opener && opener.focus && document.contains(opener)) opener.focus();
     };
+    var bar = null, footer = null, back = null;
+    var keep = function () {
+      if (!bar) return;
+      bar.remove(); bar = null; box.classList.remove("discarding");
+      if (footer) footer.classList.remove("hidden");
+      if (back && document.contains(back)) back.focus(); else box.focus();
+    };
+    var ask = function (then) {
+      if (bar) { $("#dc-keep", bar).focus(); return; }
+      back = document.activeElement;
+      var all = $$(".actions", box); footer = all.length ? all[all.length - 1] : null;
+      bar = document.createElement("div");
+      bar.className = "actions discard-bar"; bar.setAttribute("role", "alert");
+      bar.innerHTML = '<span class="dc-msg">' + ic("info", "sm") + esc(T("cf.discard_q")) + '</span><button type="button" class="btn ghost" id="dc-keep">' + esc(T("cf.keep_editing")) + '</button><button type="button" class="btn danger-solid" id="dc-go">' + esc(T("cf.discard")) + "</button>";
+      if (footer) { footer.classList.add("hidden"); footer.parentNode.insertBefore(bar, footer.nextSibling); } else box.appendChild(bar);
+      box.classList.add("discarding");
+      $("#dc-keep", bar).addEventListener("click", keep);
+      $("#dc-go", bar).addEventListener("click", function () { close(); if (then) then(); });
+      $("#dc-keep", bar).focus();
+    };
+    var tryClose = function () { if (bar) { keep(); return; } if (guardDirty(box)) ask(); else close(); };
+    modalGuard = { box: box, dirty: function () { return root.contains(box) && guardDirty(box); }, ask: ask };
+    ["pointerdown", "keydown", "focusin"].forEach(function (ev) { box.addEventListener(ev, function () { guardBase(box); }, true); });
+    ["input", "change"].forEach(function (ev) { box.addEventListener(ev, function (e) { if (e.isTrusted && guardable(e.target)) e.target._tbTouched = true; }, true); });
     var onKey = function (e) {
       if (!root.contains(box)) { document.removeEventListener("keydown", onKey, true); return; }
-      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key === "Escape") { e.preventDefault(); tryClose(); return; }
       if (e.key !== "Tab") return;
       var f = $$('a[href],button:not([disabled]),input:not([disabled]):not(.hidden),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])', box).filter(function (x) { return x.offsetParent !== null; });
       if (!f.length) return;
@@ -947,14 +988,14 @@
       else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
     };
     document.addEventListener("keydown", onKey, true);
-    $(".modal-bg", root).addEventListener("mousedown", function (e) { if (e.target.classList.contains("modal-bg")) close(); });
+    $(".modal-bg", root).addEventListener("mousedown", function (e) { if (e.target.classList.contains("modal-bg")) tryClose(); });
     // Standard dialogs: a close button in the header, and header/footer shadows only while
     // there is content scrolled under them (the header and actions are sticky in CSS).
     var head = box.firstElementChild;
     if (head && head.classList.contains("card-head") && !$("[data-close]", head)) head.insertAdjacentHTML("beforeend", '<button type="button" class="icon-btn sm modal-x" data-close aria-label="' + esc(T("btn.close")) + '" data-tip="' + esc(T("btn.close")) + ' · Esc">' + ic("x", "sm") + "</button>");
     var edges = function () { box.classList.toggle("sc-top", box.scrollTop > 0); box.classList.toggle("sc-bot", box.scrollTop + box.clientHeight < box.scrollHeight - 1); };
     box.addEventListener("scroll", edges, { passive: true });
-    $$("[data-close]", root).forEach(function (b) { b.addEventListener("click", close); });
+    $$("[data-close]", root).forEach(function (b) { b.addEventListener("click", tryClose); });
     if (onMount) onMount(root, close);
     requestAnimationFrame(edges);
     var first = $("[autofocus]", box) || $("input:not([type=hidden]):not(.hidden),textarea,select", box);
@@ -966,7 +1007,7 @@
       var done = false;
       modal('<div class="card-head"><span class="ico' + (o.danger ? " danger" : "") + '">' + ic(o.danger ? "trash" : "info") + "</span><h2>" + esc(o.title) + "</h2></div>" +
         (o.body ? '<p class="confirm-body">' + esc(o.body) + "</p>" : "") +
-        (o.typeName ? '<label class="field"><span>' + esc(T("cf.type_name", { n: o.typeName })) + '</span><input id="cf-name" autocomplete="off" spellcheck="false"></label>' : "") +
+        (o.typeName ? '<label class="field"><span>' + esc(T("cf.type_name", { n: o.typeName })) + '</span><input id="cf-name" autocomplete="off" spellcheck="false" data-noguard></label>' : "") +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn ' + (o.danger ? "danger-solid" : "primary") + '" id="cf-ok"' + (o.typeName ? " disabled" : " autofocus") + ">" + esc(o.ok || T("cf.ok")) + "</button></div>", function (root, close) {
         var ok = $("#cf-ok", root), nm = $("#cf-name", root);
         if (nm) nm.addEventListener("input", function () { ok.disabled = nm.value.trim() !== o.typeName; });
@@ -4022,7 +4063,21 @@
     loadCC(false);
     return p;
   }
-  window.addEventListener("hashchange", function () { route(); });
+  // Back/forward while a dialog holds edits: stay put and ask; "Discard" then goes on.
+  window.addEventListener("hashchange", function () {
+    if (modalGuard && location.hash !== lastHash && modalGuard.dirty()) {
+      var want = location.hash;
+      history.replaceState(null, "", lastHash || "#/");
+      modalGuard.ask(function () { location.hash = want; });
+      return;
+    }
+    route();
+  });
+  // Closing/reloading the tab with edits in a dialog: the browser's own "leave site?" prompt.
+  // Not in the desktop window: WKWebView never shows it while WebView2 does, so it would differ by OS.
+  window.addEventListener("beforeunload", function (e) {
+    if (!state.native && modalGuard && modalGuard.dirty()) { e.preventDefault(); e.returnValue = ""; return ""; }
+  });
 
   function langSelect(id) {
     var opts = [["auto", T("lang.auto")], ["zh-CN", "简体中文"], ["en", "English"]];
@@ -4048,6 +4103,7 @@
       state.currency = me.currency || "USD";
       $("#login").classList.add("hidden");
       $("#shell").classList.remove("hidden");
+      nativeSave().then(function (n) { state.native = n; });
       dropBoot();
       renderShell();
       route();

@@ -1539,3 +1539,11 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .qr-reset[data-tip]:hover::after, .qr-reset[data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
 /* Skills: row actions sit flush right (download icon + Versions). */
 .row-actions.end { justify-content: flex-end; }
+
+/* ---- unsaved-changes guard (2026-10-23): the footer turns into "discard changes?" in place ---- */
+.card.modal form > .actions.discard-bar:last-child, .card.modal > .actions.discard-bar:last-child { align-items: center; background: var(--warn-50); box-shadow: 0 -1px 0 var(--border); }
+.discard-bar .dc-msg { display: inline-flex; align-items: center; gap: var(--sp-1); margin-right: auto; min-width: 0; color: var(--warn); font-weight: 600; font-size: var(--fs-sm, 13px); }
+.discard-bar .dc-msg .i { flex: none; }
+.card.modal.discarding { animation: dc-nudge .24s var(--ease); }
+@keyframes dc-nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-4px); } 70% { transform: translateX(4px); } }
+@media (prefers-reduced-motion: reduce) { .card.modal.discarding { animation: none; } }
