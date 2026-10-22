@@ -1286,11 +1286,10 @@
         "<dt>" + esc(T("f.prompt")) + '</dt><dd><div class="inline-edit" id="ie-prompt" tabindex="0" role="button" aria-label="' + esc(T("ie.edit_prompt")) + '" title="' + esc(T("ie.hint")) + '">' + esc(tk.prompt) + "</div></dd>" +
         (tk.goal && tk.goal !== tk.prompt ? "<dt>" + esc(T("td.goal")) + "</dt><dd>" + esc(tk.goal) + "</dd>" : "") +
         "<dt>" + esc(T("td.requirements")) + "</dt><dd>" + (tk.constraints.length ? '<ul class="list-plain">' + tk.constraints.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" : '<span class="muted">' + esc(T("td.none_yet")) + "</span>") + "</dd>" +
-        "<dt>" + esc(T("col.schedule")) + "</dt><dd>" + esc(cronHuman(tk.cron)) + (tk.cron ? " <code>" + esc(tk.cron) + '</code><ul class="next" id="ov-next"></ul>' : "") + "</dd>" +
+        "<dt>" + esc(T("col.schedule")) + "</dt><dd>" + esc(cronHuman(tk.cron)) + (tk.cron ? '<span class="ov-next" id="ov-next"></span>' : "") + "</dd>" +
         "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(tk.provider || T("td.default")) + "</dd>" +
         "<dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd>" +
-        "<dt>" + esc(T("td.workspace")) + "</dt><dd><code>" + esc(tk.workspace || "—") + "</code></dd>" +
-        "<dt>" + esc(T("td.task_id")) + "</dt><dd><code>" + esc(tk.id) + "</code></dd></dl></div>";
+        "<dt>" + esc(T("td.workspace")) + "</dt><dd><code>" + esc(tk.workspace || "—") + "</code></dd></dl></div>";
     }
     if (tab === "runs") return '<div class="thread flush-t">' + (extra && extra.length ? runsTable(extra) : emptyState("runs", T("runs.none"), "")) + "</div>";
     return '<div class="thread"><table class="table"><thead><tr><th>' + esc(T("col.version")) + "</th><th>" + esc(T("col.source")) + "</th><th>" + esc(T("col.note")) + "</th><th>" + esc(T("col.created")) + '</th><th></th></tr></thead><tbody>' +
@@ -1337,7 +1336,7 @@
       }).join("") + "</ul>" : emptyState("runs", T("runs.none"), "");
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
+        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
         '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span></div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause">' + ic("pause", "sm") + esc(T("td.pause")) + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
@@ -1354,7 +1353,12 @@
       };
       inlineEdit($("#ie-name"), false, patch("name"));
       if ($("#ie-prompt")) inlineEdit($("#ie-prompt"), true, patch("prompt"));
-      if ($("#ov-next")) api("/api/scheduler/preview?cron=" + enc(t.cron) + "&n=3").then(function (d) { $("#ov-next").innerHTML = (d.times || []).map(function (x) { return "<li>" + esc(when(x)) + "</li>"; }).join(""); }).catch(function () {});
+      // Schedule: the next run inline; the cron expression, time zone and the runs after it in the tooltip.
+      if ($("#ov-next")) api("/api/scheduler/preview?cron=" + enc(t.cron) + "&n=4").then(function (d) {
+        var ts = d.times || [], box = $("#ov-next");
+        if (!box || !ts.length) return;
+        box.innerHTML = '<span class="muted">' + esc(T("td.next_at", { t: when(ts[0]) })) + "</span>" + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : ""));
+      }).catch(function () {});
       wireRows();
       $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { var tb = b.getAttribute("data-tab"); history.replaceState(null, "", "#/tasks/" + enc(id) + "/" + tb); lastHash = location.hash; renderTaskDetail(id, tb); }); });
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); setTimeout(reload, 800); }).catch(fail); });
@@ -1437,7 +1441,7 @@
     return api("/api/skills").then(function (skills) {
       var rows = skills.length ? '<table class="table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
         skills.map(function (s) {
-          return '<tr><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + '</a><small class="mono">' + esc(s.id) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + "</td><td>" + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
+          return '<tr><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + "</td><td>" + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
             '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right"><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
@@ -1607,6 +1611,10 @@
   function applyColors(root) { $$("[data-color]", root).forEach(function (el) { var c = el.getAttribute("data-color"); if (/^#[0-9a-fA-F]{6}$/.test(c)) el.style.setProperty("--qa-color", c); }); }
   var SWATCHES = ["", "#2f6fed", "#0f9d8a", "#7b5cd6", "#d9822b", "#d64545", "#3b8b3b", "#5a6b7d"];
   // Secondary help lives in a tooltip next to the label (hover or keyboard focus), not under every field.
+  // An id the user may need (support, the CLI) without it taking a row on the page: a small
+  // "ID" chip whose tooltip shows the id; clicking copies it.
+  function idChip(label, id) { return '<button type="button" class="id-chip" data-copyid="' + esc(id) + '" data-tip="' + esc(T("id.tip", { l: label, id: id })) + '" aria-label="' + esc(T("id.copy", { l: label })) + '">ID</button>'; }
+  document.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-copyid]"); if (b) copyText(b.getAttribute("data-copyid")).catch(fail); });
   function tip(text) { return text ? '<span class="info-tip" tabindex="0" role="img" aria-label="' + esc(text) + '" data-tip="' + esc(text) + '">' + ic("info", "sm") + "</span>" : ""; }
   function fieldHtml(label, inner, hint, extra) { return '<label class="field"><span>' + esc(label) + tip(hint) + (extra || "") + "</span>" + inner + "</label>"; }
   function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (sel ? " selected" : "") + ">" + esc(label) + "</option>"; }
@@ -3265,7 +3273,7 @@
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(r.input_tokens + r.output_tokens + (r.cache_read_tokens || 0) + (r.cache_write_tokens || 0))) + "</strong><span>" + esc(T("rd.in_out", { i: num(r.input_tokens), o: num(r.output_tokens) }) + (r.cache_read_tokens || r.cache_write_tokens ? " · " + T("rd.cache_rw", { r: num(r.cache_read_tokens || 0), w: num(r.cache_write_tokens || 0) }) : "")) + "</span></div></div>" +
         costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + '</h3></div><dl class="kv"><dt>' + esc(T("col.run")) + "</dt><dd><code>" + esc(r.id) + "</code></dd><dt>" + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '</div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
         "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();

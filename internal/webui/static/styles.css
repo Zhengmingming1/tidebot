@@ -1506,3 +1506,11 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .pv-offer .notice { display: flex; align-items: center; gap: var(--sp-2); }
 .pv-offer .notice > span { flex: 1; }
 .card-head #st-open { margin-left: 8px; }
+
+/* 2026-10-22: ids live in a copy chip (tooltip shows the id), not in a row of their own */
+.id-chip { display: inline-flex; align-items: center; height: 16px; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-3); font: 600 10px/1 var(--mono, ui-monospace, monospace); letter-spacing: .04em; cursor: pointer; vertical-align: middle; }
+.id-chip:hover, .id-chip:focus-visible { color: var(--accent); border-color: var(--accent-100); }
+.card-head .id-chip { margin-left: 8px; }
+.nm-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.id-chip[data-tip]:hover::after, .id-chip[data-tip]:focus-visible::after { left: 0; transform: none; font-family: var(--font); max-width: 360px; }
+.ov-next { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
