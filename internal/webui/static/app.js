@@ -626,8 +626,9 @@
     }
     if (e.key === "g" || e.key === "n") { gPending = { k: e.key, valueOf: function () { return this.t; }, t: Date.now() }; return; }
     // page-level single keys
-    var act = { r: "#t-run", e: "#t-edit" }[e.key];
-    if (act && $(act)) { e.preventDefault(); $(act).click(); }
+    // r / e: run & edit on a task page, rerun & edit-and-rerun on a run page.
+    var act = { r: ["#t-run", "#rd-rerun"], e: ["#t-edit", "#rd-edit"] }[e.key], hit = act && (($(act[0]) || $(act[1])));
+    if (hit && !hit.disabled) { e.preventDefault(); hit.click(); }
   });
 
   // ---------- sidebar: Claude Code status ----------
@@ -1101,29 +1102,39 @@
 
   // Quick run remembers what you did: recent prompts come back as chips (filtered as you
   // type), the last provider is preselected, and Ctrl/⌘+Enter runs.
-  function quickRunModal() {
+  // quickRunModal(pre) with pre = {prompt, provider} is "edit & rerun" from a run page: the
+  // old run's prompt and provider are filled in, "Revert" appears once you change them, and
+  // the original run is left alone (the edited one is a new ad-hoc run).
+  function quickRunModal(pre) {
+    pre = pre && pre.prompt ? pre : null;
     Promise.all([api("/api/settings"), api("/api/runs/recent-prompts").catch(function () { return { prompts: [] }; })]).then(function (res) {
-      var st = res[0], recent = (res[1] && res[1].prompts) || [], lastProv = "";
+      var st = res[0], recent = pre ? [] : (res[1] && res[1].prompts) || [], lastProv = "";
       try { lastProv = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
+      if (pre && pre.provider) lastProv = pre.provider;
       if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
       var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
-      modal('<div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h2>" + esc(T("home.quick")) + "</h2></div>" +
-        '<form id="qr"><label class="field"><span>' + esc(T("f.prompt")) + '</span><textarea name="prompt" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></label>' +
+      modal('<div class="card-head"><span class="ico">' + ic(pre ? "edit" : "sparkle") + "</span><h2>" + esc(T(pre ? "qr.edit_title" : "home.quick")) + "</h2></div>" +
+        '<form id="qr"><div class="field"><span id="qr-lbl"' + (pre ? ' class="qr-lbl"' : "") + '>' + esc(T("f.prompt")) + (pre ? '<button type="button" class="linkish qr-reset hidden" id="qr-reset" data-tip="' + esc(T("qr.revert_tip")) + '">' + ic("rollback", "sm") + esc(T("qr.revert")) + "</button>" : "") + '</span><textarea name="prompt" aria-labelledby="qr-lbl" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></div>' +
         '<div class="qr-recent hidden" id="qr-recent" role="group" aria-label="' + esc(T("qr.recent")) + '"><span class="muted">' + esc(T("qr.recent")) + "</span></div>" +
         '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label>" +
-        '<p class="hint">' + esc(T("qr.hint")) + "</p>" +
+        '<p class="hint">' + esc(T(pre ? "qr.edit_hint" : "qr.hint")) + "</p>" +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit" data-tip="' + esc(T("qr.run_key", { k: mod })) + '">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
         function (root, close) {
-          var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root);
+          var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root);
+          var orig = pre ? { prompt: pre.prompt, provider: form.provider.value } : null;
           box.insertAdjacentHTML("beforeend", recent.map(function (p, i) { return '<button type="button" class="chip qr-chip" data-i="' + i + '" data-tip="' + esc(p.length > 280 ? p.slice(0, 280) + "…" : p) + '">' + esc(p.length > 36 ? p.slice(0, 36) + "…" : p) + "</button>"; }).join(""));
           var filterChips = function () {
             var q = ta.value.trim().toLowerCase(), shown = 0;
             $$(".qr-chip", box).forEach(function (b) { var p = recent[+b.dataset.i], on = !q || (p.toLowerCase().indexOf(q) >= 0 && p.trim().toLowerCase() !== q); b.classList.toggle("hidden", !on || shown >= 4); if (on) shown++; });
             box.classList.toggle("hidden", !shown);
           };
-          filterChips();
-          ta.addEventListener("input", filterChips);
-          box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); ta.focus(); });
+          var sync = function () { fitTextarea(ta); if (reset) reset.classList.toggle("hidden", !qrEdited(orig, ta.value, form.provider.value)); };
+          if (pre) { ta.value = pre.prompt; ta.setSelectionRange(ta.value.length, ta.value.length); }
+          filterChips(); sync();
+          ta.addEventListener("input", function () { filterChips(); sync(); });
+          form.provider.addEventListener("change", sync);
+          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; sync(); ta.focus(); });
+          box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); sync(); ta.focus(); });
           ta.addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); } });
           form.addEventListener("submit", function (e) {
             e.preventDefault();
@@ -1136,6 +1147,20 @@
           });
         });
     }).catch(fail);
+  }
+  // qrEdited: has the edit-&-rerun form moved away from the original run? Trailing
+  // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).
+  function qrEdited(orig, prompt, provider) {
+    if (!orig) return false;
+    var norm = function (s) { return String(s || "").replace(/\r\n?/g, "\n").replace(/\s+$/, ""); };
+    return norm(prompt) !== norm(orig.prompt) || (provider || "") !== (orig.provider || "");
+  }
+  // fitTextarea grows a textarea with its content up to 40% of the window (then it scrolls),
+  // so a long prompt is readable without dragging the corner. The dialog body scrolls too.
+  function fitTextarea(ta) {
+    var max = Math.max(96, Math.round(window.innerHeight * 0.4));
+    ta.style.height = "";
+    ta.style.height = Math.min(max, ta.scrollHeight + 2) + "px";
   }
 
   // ---------- TASKS ----------
@@ -3317,7 +3342,8 @@
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
         '<section class="card"><div class="card-head rd-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '<span class="rd-acts">' +
           (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
-          '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + '">' + ic("refresh", "sm") + esc(T("runs.rerun")) + '</button></span></div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
+          '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>" +
+          (r.task_id ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") + '</span></div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
         "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();
@@ -3329,6 +3355,7 @@
           setTimeout(function () { api("/api/runs?limit=1").then(function (l) { location.hash = l[0] ? "#/runs/" + l[0].id : "#/runs"; }); }, 500);
         }).catch(function (err) { b.disabled = false; fail(err); });
       });
+      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider }); });
       if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider }); });
       logView($("#lv"), id, live, function (why) {
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
