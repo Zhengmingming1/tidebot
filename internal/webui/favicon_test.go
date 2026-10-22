@@ -15,7 +15,7 @@ func TestFaviconBadge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(b)
+	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		"paintFavicon();\n  }\n  // ---------- favicon badge", // setDocTitle repaints it
 		"if (document.hidden && !docTitle.running) return;",   // idle hidden tab: no requests
