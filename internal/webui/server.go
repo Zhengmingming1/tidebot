@@ -44,13 +44,14 @@ type Deps struct {
 	Log      *slog.Logger
 	OnToggle func(enabled bool) // optional: persist + apply
 
-	// Execution hooks provided by app; they start work asynchronously.
-	RunTask  func(taskID, bucket string) error
-	QuickRun func(prompt, providerName string) error
+	// Execution hooks provided by app; they start work asynchronously and return the new
+	// run's id once its row exists ("" when it is still queued behind the concurrency limit).
+	RunTask  func(taskID, bucket string) (string, error)
+	QuickRun func(prompt, providerName string) (string, error)
 	LogPath  func(runID string) string
 	Location *time.Location
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
-	QuickRunSkill func(prompt, providerName, skillID, versionID string) error
+	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
 	Providers     ProviderAdmin
 
 	// Public handlers mounted without session auth (they authenticate themselves),

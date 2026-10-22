@@ -43,22 +43,29 @@ func (s *Server) Buttons(ctx context.Context) []Button {
 
 // RunButton starts a preset asynchronously and returns its label.
 func (s *Server) RunButton(ctx context.Context, id string) (string, error) {
+	label, _, err := s.runButton(ctx, id)
+	return label, err
+}
+
+// runButton starts a preset and returns its label and the new run's id ("" if queued).
+func (s *Server) runButton(ctx context.Context, id string) (label, runID string, err error) {
 	for _, b := range s.loadButtons(ctx) {
 		if b.ID != id {
 			continue
 		}
 		switch {
 		case b.TaskID != "" && s.deps.RunTask != nil:
-			return b.Label, s.deps.RunTask(b.TaskID, cost.BucketProduction)
+			runID, err = s.deps.RunTask(b.TaskID, cost.BucketProduction)
 		case b.Prompt != "" && b.SkillID != "" && s.deps.QuickRunSkill != nil:
-			return b.Label, s.deps.QuickRunSkill(expandParams(b.Prompt, b.Params), b.Provider, b.SkillID, b.SkillVerID)
+			runID, err = s.deps.QuickRunSkill(expandParams(b.Prompt, b.Params), b.Provider, b.SkillID, b.SkillVerID)
 		case b.Prompt != "" && s.deps.QuickRun != nil:
-			return b.Label, s.deps.QuickRun(expandParams(b.Prompt, b.Params), b.Provider)
+			runID, err = s.deps.QuickRun(expandParams(b.Prompt, b.Params), b.Provider)
 		default:
-			return b.Label, errors.New("execution not available")
+			err = errors.New("execution not available")
 		}
+		return b.Label, runID, err
 	}
-	return "", errors.New("button not found")
+	return "", "", errors.New("button not found")
 }
 
 // DesktopHandler serves the full WebUI (static + API) for the desktop shell's native window

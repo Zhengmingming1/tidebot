@@ -940,6 +940,7 @@
   "toast.buttons_saved": "Buttons saved",
   "toast.confirmed": "Requirements confirmed",
   "toast.quick_started": "Quick run started",
+  "toast.run_queued": "Queued — it starts when a run slot frees up",
   "toast.rejected": "Rejected",
   "toast.rolled_back": "Rolled back to v{n}",
   "toast.run_started": "Run started",

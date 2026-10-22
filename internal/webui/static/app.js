@@ -969,7 +969,7 @@
   // One-click "run now" from any list; the toast links to the live run.
   function runTaskNow(id, btn) {
     if (btn) btn.disabled = true;
-    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); setTimeout(function () { if (/^#\/tasks$/.test(location.hash)) refresh(); }, 800); }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function (res) { toast(T(res && res.run_id ? "toast.run_started" : "toast.run_queued")); if (/^#\/tasks$/.test(location.hash)) refresh(); }).catch(fail).then(function () { if (btn) btn.disabled = false; });
   }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 
@@ -984,11 +984,17 @@
           '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
+  // A start request answers once the new run exists, with its id: open exactly that run so
+  // its log streams right away. No id means it is queued behind the concurrency limit.
+  function openStarted(res, msg) {
+    if (res && res.run_id) { toast(T(msg)); location.hash = "#/runs/" + enc(res.run_id); return; }
+    toast(T("toast.run_queued")); location.hash = "#/runs";
+  }
   // ---------- HOME ----------
   function runButton(id, el) {
     if (el) el.classList.add("busy");
     return api("/api/buttons/" + enc(id) + "/run", { method: "POST", body: {} })
-      .then(function (r) { toast(T("toast.started", { name: r.started })); setTimeout(refresh, 700); })
+      .then(function (r) { toast(T("toast.started", { name: r.started })); refresh(); })
       .catch(fail)
       .then(function () { if (el) el.classList.remove("busy"); });
   }
@@ -1140,9 +1146,8 @@
             e.preventDefault();
             var f = e.target;
             try { localStorage.setItem("tb_qr_provider", f.provider.value); } catch (e2) {}
-            api("/api/runs/quick", { method: "POST", body: { prompt: f.prompt.value, provider: f.provider.value } }).then(function () {
-              close(); toast(T("toast.quick_started"));
-              setTimeout(function () { api("/api/runs?limit=1").then(function (r) { location.hash = r[0] ? "#/runs/" + r[0].id : "#/runs"; }); }, 500);
+            api("/api/runs/quick", { method: "POST", body: { prompt: f.prompt.value, provider: f.provider.value } }).then(function (r) {
+              close(); openStarted(r, "toast.quick_started");
             }).catch(fail);
           });
         });
@@ -1422,7 +1427,7 @@
       }).catch(function () {});
       wireRows();
       $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { var tb = b.getAttribute("data-tab"); history.replaceState(null, "", "#/tasks/" + enc(id) + "/" + tb); lastHash = location.hash; renderTaskDetail(id, tb); }); });
-      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); setTimeout(reload, 800); }).catch(fail); });
+      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(T(res && res.run_id ? "toast.run_started" : "toast.run_queued")); reload(); }).catch(fail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
       $("#t-dup").addEventListener("click", function () {
         var b = $("#t-dup"); b.disabled = true;
@@ -3169,7 +3174,7 @@
         wireRows($("#rtable"));
         $$("[data-rerun]").forEach(function (b) { b.addEventListener("click", function (e) {
           e.stopPropagation(); b.disabled = true;
-          api("/api/runs/" + enc(b.getAttribute("data-rerun")) + "/rerun", { method: "POST", body: {} }).then(function () { toast(T("runs.rerun_started")); setTimeout(reload, 600); }).catch(function (err) { b.disabled = false; fail(err); });
+          api("/api/runs/" + enc(b.getAttribute("data-rerun")) + "/rerun", { method: "POST", body: {} }).then(function (res) { toast(T(res && res.run_id ? "runs.rerun_started" : "toast.run_queued")); reload(); }).catch(function (err) { b.disabled = false; fail(err); });
         }); });
       };
       // a newer request always wins; slow responses for old search text are dropped
@@ -3349,10 +3354,8 @@
       bumpIdle();
       $("#rd-rerun").addEventListener("click", function (e) {
         var b = e.currentTarget; b.disabled = true;
-        api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} }).then(function () {
-          toast(T("runs.rerun_started"));
-          // The new run is the newest one; open it so its log streams right away.
-          setTimeout(function () { api("/api/runs?limit=1").then(function (l) { location.hash = l[0] ? "#/runs/" + l[0].id : "#/runs"; }); }, 500);
+        api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} }).then(function (res) {
+          openStarted(res, "runs.rerun_started");
         }).catch(function (err) { b.disabled = false; fail(err); });
       });
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider }); });

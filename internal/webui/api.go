@@ -313,7 +313,7 @@ func (s *Server) handleButtonRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 		return
 	}
-	label, err := s.RunButton(r.Context(), parts[0])
+	label, runID, err := s.runButton(r.Context(), parts[0])
 	if err != nil {
 		code := 500
 		if label == "" {
@@ -322,7 +322,11 @@ func (s *Server) handleButtonRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, code, err.Error())
 		return
 	}
-	writeJSON(w, 202, map[string]any{"ok": true, "started": label})
+	out := map[string]any{"ok": true, "started": label}
+	if runID != "" {
+		out["run_id"] = runID
+	}
+	writeJSON(w, 202, out)
 }
 
 func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
@@ -338,11 +342,12 @@ func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "execution not available")
 		return
 	}
-	if err := s.deps.QuickRun(body.Prompt, body.Provider); err != nil {
+	runID, err := s.deps.QuickRun(body.Prompt, body.Provider)
+	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 202, map[string]any{"ok": true})
+	writeStarted(w, runID)
 }
 
 // handleRecentPrompts lists the last distinct quick-run prompts (newest first).
@@ -626,11 +631,12 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 405, "method")
 				return
 			}
-			if err := s.deps.RunTask(id, cost.BucketProduction); err != nil {
+			runID, err := s.deps.RunTask(id, cost.BucketProduction)
+			if err != nil {
 				writeErr(w, 500, err.Error())
 				return
 			}
-			writeJSON(w, 202, map[string]any{"ok": true})
+			writeStarted(w, runID)
 		})).ServeHTTP(w, r)
 		return
 	case "pause", "resume":

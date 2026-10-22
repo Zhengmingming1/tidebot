@@ -9,6 +9,7 @@ import (
 )
 
 // rerun: POST /api/runs/<id>/rerun — a task run reruns the task; an ad-hoc run reruns its prompt.
+// The answer carries the new run's id (see writeStarted).
 func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 	runs, err := s.queryRuns(r.Context(), "WHERE r.id=?", id)
 	if err != nil || len(runs) == 0 {
@@ -16,12 +17,13 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	run := runs[0]
+	var newID string
 	if run.TaskID != "" {
 		if s.deps.RunTask == nil {
 			writeErr(w, 503, "runner not available")
 			return
 		}
-		if err := s.deps.RunTask(run.TaskID, cost.BucketProduction); err != nil {
+		if newID, err = s.deps.RunTask(run.TaskID, cost.BucketProduction); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
@@ -30,12 +32,22 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			writeErr(w, 503, "runner not available")
 			return
 		}
-		if err := s.deps.QuickRun(run.Prompt, run.Provider); err != nil {
+		if newID, err = s.deps.QuickRun(run.Prompt, run.Provider); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
 	}
-	writeJSON(w, 202, map[string]any{"ok": true})
+	writeStarted(w, newID)
+}
+
+// writeStarted answers a start request: 202 with the new run's id when its row exists
+// already, so the UI opens exactly that run (a queued run has no id yet).
+func writeStarted(w http.ResponseWriter, runID string) {
+	out := map[string]any{"ok": true}
+	if runID != "" {
+		out["run_id"] = runID
+	}
+	writeJSON(w, 202, out)
 }
 
 type beat struct {

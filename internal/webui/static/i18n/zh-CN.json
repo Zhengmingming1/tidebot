@@ -940,6 +940,7 @@
   "toast.buttons_saved": "按钮已保存",
   "toast.confirmed": "需求已确认",
   "toast.quick_started": "快速运行已启动",
+  "toast.run_queued": "已排队，有空闲名额时开始运行",
   "toast.rejected": "已拒绝",
   "toast.rolled_back": "已回滚到 v{n}",
   "toast.run_started": "运行已启动",

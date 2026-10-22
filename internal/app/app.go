@@ -355,6 +355,11 @@ func (a *App) runTask(ctx context.Context, task db.Task) error {
 }
 
 func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket string) error {
+	return a.runTaskTriggerOn(ctx, task, trigger, bucket, nil)
+}
+
+// runTaskTriggerOn is runTaskTrigger with an OnStart hook that receives the run id.
+func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucket string, onStart func(string)) error {
 	providerName := a.Cfg.DefaultProvider
 	view, err := a.Tasks.Get(ctx, task.ID)
 	if err == nil && view.Spec != nil && view.Spec.Provider != "" {
@@ -403,6 +408,7 @@ func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket 
 	res, err := a.RunPromptEx(ctx, runner.Options{
 		Prompt: prompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
 		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket,
+		OnStart: onStart,
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
@@ -452,40 +458,74 @@ func (a *App) SeedBuiltinProviders(ctx context.Context) error {
 	return nil
 }
 
-// startTaskAsync runs a task in the background (WebUI buttons / Run now).
-func (a *App) startTaskAsync(taskID, bucket string) error {
-	task, err := a.Store.GetTask(context.Background(), taskID)
-	if err != nil {
-		return fmt.Errorf("task not found")
-	}
+// startWait is how long a WebUI start waits for the new run's row, so it can answer with
+// the run id. A run queued behind the concurrency limit answers without one.
+const startWait = 3 * time.Second
+
+// launch runs fn in the background and waits until the run row exists (its id is returned),
+// fn fails before creating a row (that error is returned, e.g. budget blocked), or wait
+// passes (empty id, the run keeps going). fn's final error is passed to onErr either way.
+func launch(wait time.Duration, fn func(onStart func(string)) error, onErr func(error)) (string, error) {
+	started := make(chan string, 1)
+	done := make(chan error, 1)
 	go func() {
-		if err := a.runTaskTrigger(context.Background(), *task, "manual", bucket); err != nil {
-			a.Log.Warn("manual task run", "task_id", taskID, "error", err)
+		err := fn(func(id string) {
+			select {
+			case started <- id:
+			default:
+			}
+		})
+		if err != nil && onErr != nil {
+			onErr(err)
 		}
+		done <- err
 	}()
-	return nil
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case id := <-started:
+		return id, nil
+	case err := <-done:
+		select {
+		case id := <-started: // ran (and maybe failed) quickly: the run page shows why
+			return id, nil
+		default:
+		}
+		return "", err
+	case <-t.C:
+		return "", nil
+	}
 }
 
-// startQuickRunAsync runs an ad-hoc prompt in the background.
-func (a *App) startQuickRunAsync(prompt, providerName string) error {
-	if _, err := a.ResolveProfile(providerName); err != nil {
-		return err
+// startTaskAsync runs a task in the background (WebUI buttons / Run now) and returns the
+// new run's id once it exists ("" if it is still queued).
+func (a *App) startTaskAsync(taskID, bucket string) (string, error) {
+	task, err := a.Store.GetTask(context.Background(), taskID)
+	if err != nil {
+		return "", fmt.Errorf("task not found")
 	}
-	go func() {
+	return launch(startWait, func(onStart func(string)) error {
+		return a.runTaskTriggerOn(context.Background(), *task, "manual", bucket, onStart)
+	}, func(err error) { a.Log.Warn("manual task run", "task_id", taskID, "error", err) })
+}
+
+// startQuickRunAsync runs an ad-hoc prompt in the background and returns the run id.
+func (a *App) startQuickRunAsync(prompt, providerName string) (string, error) {
+	if _, err := a.ResolveProfile(providerName); err != nil {
+		return "", err
+	}
+	return launch(startWait, func(onStart func(string)) error {
 		_, err := a.RunPromptEx(context.Background(), runner.Options{
-			Prompt: prompt, TriggerKind: "quick", CostBucket: cost.BucketProduction,
+			Prompt: prompt, TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: onStart,
 		}, providerName, 0)
-		if err != nil {
-			a.Log.Warn("quick run", "error", err)
-		}
-	}()
-	return nil
+		return err
+	}, func(err error) { a.Log.Warn("quick run", "error", err) })
 }
 
 // startQuickRunSkill runs an ad-hoc prompt in a scratch workspace with one skill materialized.
-func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string) error {
+func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string) (string, error) {
 	if _, err := a.ResolveProfile(providerName); err != nil {
-		return err
+		return "", err
 	}
 	mode := "follow"
 	if versionID != "" {
@@ -493,18 +533,15 @@ func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string
 	}
 	ws, err := os.MkdirTemp(a.Cfg.DataDir, "button-")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := a.Skills.Materialize(context.Background(), ws, []tasksvc.SkillBinding{{SkillID: skillID, Mode: mode, VersionID: versionID}}); err != nil {
 		os.RemoveAll(ws)
-		return fmt.Errorf("skill: %w", err)
+		return "", fmt.Errorf("skill: %w", err)
 	}
-	go func() {
+	return launch(startWait, func(onStart func(string)) error {
 		defer os.RemoveAll(ws)
-		_, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: prompt, WorkspaceDir: ws, TriggerKind: "quick", CostBucket: cost.BucketProduction}, providerName, 0)
-		if err != nil {
-			a.Log.Warn("button run", "error", err)
-		}
-	}()
-	return nil
+		_, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: prompt, WorkspaceDir: ws, TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: onStart}, providerName, 0)
+		return err
+	}, func(err error) { a.Log.Warn("button run", "error", err) })
 }

@@ -150,7 +150,8 @@ func (a *App) DecideConfirmation(ctx context.Context, cid string, approve bool) 
 		var taskID string
 		_ = a.DB.QueryRowContext(ctx, `SELECT task_id FROM pending_confirmations WHERE id=?`, cid).Scan(&taskID)
 		if taskID != "" {
-			return a.startTaskAsync(taskID, "production")
+			_, err := a.startTaskAsync(taskID, "production")
+			return err
 		}
 	}
 	return nil
