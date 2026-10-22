@@ -520,3 +520,62 @@ No code copied from any of them.
 3. "Rerun with changes": open the quick-run dialog prefilled instead of starting at once.
 4. Verify the FileManager1 reveal on KDE/GNOME and the `explorer /select,` path on a real
    Windows machine (CI only runs the unit tests).
+
+## 2026-10-22 (12:00): usage saved while a run is going
+
+Category: **logic/correctness + resource usage**. The last rounds were UI (favicon badge,
+tooltips, quick-run memory), so this one goes back to the core.
+
+**Done**
+
+- **A run's usage is saved every 5 s while it runs**, not only at the end. Before, a crash,
+  force quit or power loss left the run at $0 / 0 tokens: the spend page under-counted and
+  daily/task budgets let the next run through as if nothing had been spent. Now the runner
+  writes the priced cost and tokens so far to the run row (`UpdateRunCost`) and the app
+  upserts the `cost_ledger` row (`Options.OnUsage`), so budgets and the spend page see a long
+  run's cost *before* it ends. A run closed by startup recovery keeps what it used.
+- **Throttle with leading and trailing edge** (`internal/runner/usagesave.go`): the first
+  priced request is saved at once, later ones at most once per `Runner.UsageSaveEvery`
+  (default 5 s, < 0 = off), the last one of a burst when the interval ends, and nothing when
+  the totals didn't change. Saves run on their own goroutine with a 2 s deadline, so a busy
+  database never stalls reading Claude Code's output (the store has a single connection).
+  `stop` waits for an in-flight save, so a mid-run write can never land after the final one.
+- **The final ledger write no longer uses the caller's context.** On quit or user stop that
+  context is already canceled, and the write silently failed. It now gets its own 3 s deadline.
+- **Memory:** the runner kept every stream-json event (raw JSON, including large tool output)
+  in `Result.Events` for the whole run, and nothing ever read it. A long run held megabytes
+  per run until it finished. Events are now dropped after parsing.
+- **Run detail of a live run** shows "已用花费 / 已用 Tokens" and refreshes those two cards and
+  the cost breakdown every 5 s in place (no remount, no flicker; paused in a hidden tab, stops
+  when the run ends). The tooltip explains the refresh and that spend counts even if tidebot
+  quits. The interrupted-run message now says the usage up to then is kept. zh-CN + en.
+- Mock Claude: `TIDEBOT_MOCK_STEP_USAGE=1` makes each demo step a priced request.
+- Tests: `TestUsageSaverThrottle`, `TestUsageSaverStopWaitsForSave`, `TestUsageSaverNil`,
+  `TestRunUsageSaveOff` (all platforms), `TestRunUsageSavedMidRun` and
+  `TestLedgerUpdatedMidRun` (unix, mock script), `TestLiveRunUsage` (escaping under node).
+
+**Inspiration**
+
+- Roo Code `src/core/task/Task.ts`: `debouncedEmitTokenUsage` uses `debounce` with
+  `leading: true, trailing: true, maxWait` (2 s), only emits when `hasTokenUsageChanged`
+  against the last snapshot, and `emitFinalTokenUsageUpdate()` flushes before abort/finish.
+  Its `abortStream` / `updateApiReqMsg` save the partial stream's tokens and cost with the
+  cancel reason. We borrowed leading+trailing throttling, change detection and "final write
+  wins", and applied it to the database rather than UI events. No code copied.
+
+**Learned**
+
+- A run's usage has two homes (run row for the UI, ledger for budgets); both need the mid-run
+  save, or budgets and the spend page disagree after a crash.
+- `context.WithoutCancel` (Go 1.21+) plus a short timeout is the right shape for "record this
+  even though the run was canceled".
+- The ledger row keeps the `created_at`/`day` of its first save, so a run crossing midnight now
+  counts toward the day it started on (before: the day it ended).
+
+**Ideas for later**
+
+1. Enforce daily/task budgets *across* concurrent runs mid-run (the ledger is now live, so a
+   run could stop once the day's total crosses the cap, not only its own per-run cap).
+2. Push the live usage over the existing log SSE stream instead of polling the run every 5 s.
+3. `Meter.Now()` re-prices every request on each event; keep running totals for very long runs.
+4. Show live cost in the Home "running" row and the tray tooltip.

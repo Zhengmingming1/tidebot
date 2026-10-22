@@ -3293,8 +3293,8 @@
       mount('<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status) + "</strong><span>" + esc(triggerText(r.trigger)) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(live ? T("rd.running") : dur(r.duration_ms)) + "</strong><span>" + esc(T("rd.started", { t: when(r.started_at || r.created_at) })) + "</span></div>" +
-        '<div class="card stat"><small>' + esc(T("col.cost")) + "</small><strong>" + esc(r.cost_source && r.cost_currency && r.cost_currency !== state.currency ? money(r.cost_amount, r.cost_currency, 4) : usd(r.cost_usd, 4)) + costBadge(r.cost_source) + "</strong><span>" + esc(r.cost_source && r.cost_currency && r.cost_currency !== state.currency ? T("rd.approx_in", { v: usd(r.cost_usd, 4) }) : T("rd.bucket", { b: r.bucket })) + "</span></div>" +
-        '<div class="card stat"><small>Tokens</small><strong>' + esc(num(r.input_tokens + r.output_tokens + (r.cache_read_tokens || 0) + (r.cache_write_tokens || 0))) + "</strong><span>" + esc(T("rd.in_out", { i: num(r.input_tokens), o: num(r.output_tokens) }) + (r.cache_read_tokens || r.cache_write_tokens ? " · " + T("rd.cache_rw", { r: num(r.cache_read_tokens || 0), w: num(r.cache_write_tokens || 0) }) : "")) + "</span></div></div>" +
+        '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
+        '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +
         costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' +
         '<section class="card"><div class="card-head rd-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '<span class="rd-acts">' +
@@ -3316,12 +3316,48 @@
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);
       });
+      // While it runs, the core saves usage every few seconds: keep the two cards current
+      // in place (no remount, so no flicker). Paused while the tab is hidden.
+      if (live) livePoll(function () { return liveRunStats(id); }, RUN_STATS_MS);
     });
+  }
+  var RUN_STATS_MS = 5000;
+  function liveRunStats(id) {
+    return api("/api/runs/" + enc(id)).then(function (r) {
+      var still = r.status === "running" || r.status === "queued";
+      var c = $("#rd-cost"), k = $("#rd-tok");
+      if (!c || !k) return;
+      // Compare with what we rendered last (not the browser's re-serialised HTML), so
+      // unchanged cards are never touched.
+      var prev = c._live || {}, next = { c: runCostStat(r, still), k: runTokStat(r, still), x: costCalcHtml(r) };
+      if (prev.c !== next.c) c.innerHTML = next.c;
+      if (prev.k !== next.k) k.innerHTML = next.k;
+      if (prev.x !== next.x) {
+        var calc = $("#rd-calc");
+        if (calc) calc.outerHTML = next.x || '<section id="rd-calc" hidden></section>';
+        else if (next.x) c.parentNode.insertAdjacentHTML("afterend", next.x);
+      }
+      c._live = next;
+      if (!still) stopPoll();
+    });
+  }
+  // Run detail stat cards. A live run shows usage so far; the tooltip says it updates.
+  function runCostStat(r, live) {
+    var foreign = r.cost_source && r.cost_currency && r.cost_currency !== state.currency;
+    return "<small" + (live ? ' data-tip="' + esc(T("rd.usage_live_tip")) + '"' : "") + ">" + esc(T(live ? "rd.cost_so_far" : "col.cost")) + "</small><strong>" +
+      esc(foreign ? money(r.cost_amount, r.cost_currency, 4) : usd(r.cost_usd, 4)) + costBadge(r.cost_source) + "</strong><span>" +
+      esc(foreign ? T("rd.approx_in", { v: usd(r.cost_usd, 4) }) : T("rd.bucket", { b: r.bucket })) + "</span>";
+  }
+  function runTokStat(r, live) {
+    var cr = r.cache_read_tokens || 0, cw = r.cache_write_tokens || 0;
+    return "<small" + (live ? ' data-tip="' + esc(T("rd.usage_live_tip")) + '"' : "") + ">" + esc(T(live ? "rd.tokens_so_far" : "rd.tokens")) + "</small><strong>" +
+      esc(num(r.input_tokens + r.output_tokens + cr + cw)) + "</strong><span>" +
+      esc(T("rd.in_out", { i: num(r.input_tokens), o: num(r.output_tokens) }) + (cr || cw ? " · " + T("rd.cache_rw", { r: num(cr), w: num(cw) }) : "")) + "</span>";
   }
   // Run detail: how the cost was computed (tokens × price per 1M, per model).
   function costCalcHtml(r) {
     var c = r.cost_detail, src = r.cost_source;
-    var head = '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h3>' + esc(T("cost.calc")) + "</h3>" + costBadge(src) + "</div>";
+    var head = '<section class="card" id="rd-calc"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h3>' + esc(T("cost.calc")) + "</h3>" + costBadge(src) + "</div>";
     if (!src) return "";
     if (src === "legacy") return head + '<p class="muted pad-x">' + esc(T("cost.legacy_note")) + "</p></section>";
     if (!c || !c.lines) return "";

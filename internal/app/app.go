@@ -313,11 +313,23 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	}
 	// Keep Claude Code from self-updating mid-run; version is recorded per run.
 	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
+	if a.Cost != nil {
+		// Keep the ledger current while the run goes, so budgets and the spend page
+		// see a long run's cost before it ends, and a crash doesn't lose it.
+		opts.OnUsage = func(runID string, c pricing.Cost) {
+			wctx, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer done()
+			_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(runID, opts.TaskID, bucket, prof.Name, prof.Model, c))
+		}
+	}
 	res, err := a.Runner.RunOnce(ctx, opts)
 	a.recordRunMeta(ctx, res.RunID)
-	// failed / stopped runs still spent tokens: record them too
+	// failed / stopped runs still spent tokens: record them too. The caller's
+	// context may already be canceled (quit, user stop), so don't write under it.
 	if res.RunID != "" && a.Cost != nil {
-		_ = a.Cost.RecordEntry(ctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
+		wctx, done := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
+		done()
 	}
 	if errors.Is(err, runner.ErrShuttingDown) {
 		// The user (or the OS) is quitting: the run row says so, no "failed" notice.

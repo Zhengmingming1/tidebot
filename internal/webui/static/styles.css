@@ -1527,3 +1527,8 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .rd-head { flex-wrap: wrap; row-gap: 8px; }
 .rd-head h3 { white-space: nowrap; }
 .rd-head .id-chip { margin-left: 0; }
+
+/* run detail: live usage cards — the hint opens downward (top row of the page) */
+.stat small[data-tip] { cursor: help; }
+.stat small[data-tip]:hover::after, .stat small[data-tip]:focus-visible::after { bottom: auto; top: calc(100% + 6px); left: 0; transform: none; }
+.grid > .stat:last-child small[data-tip]:hover::after, .grid > .stat:last-child small[data-tip]:focus-visible::after { left: auto; right: 0; }

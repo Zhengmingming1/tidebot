@@ -49,6 +49,10 @@ type Options struct {
 	NoPluginMCP bool
 	// Cost prices the run from token usage and enforces caps mid-run (nil = no pricing).
 	Cost *CostControl
+	// OnUsage, if set, receives the run's usage so far each time the runner saves it
+	// mid-run (see Runner.UsageSaveEvery), e.g. to keep the spend ledger current.
+	// Not called for the final cost: that is the returned Result.Cost.
+	OnUsage func(runID string, c pricing.Cost)
 }
 
 // Result is the outcome of one run.
@@ -62,7 +66,6 @@ type Result struct {
 	InputTokens  int
 	OutputTokens int
 	DurationMS   int64
-	Events       []Event
 	ResultText   string
 	// Cost is tidebot's own pricing of the run (zero when Options.Cost is nil).
 	Cost pricing.Cost
@@ -91,6 +94,9 @@ type Runner struct {
 	// LogDir, when set, receives a human-readable log per run (<LogDir>/<run_id>.log)
 	// that the WebUI tails for live SSE output. Secrets are masked before writing.
 	LogDir string
+	// UsageSaveEvery is how often a running run's usage is saved (0 = default 5s,
+	// < 0 = only at the end). Saving mid-run means a crash keeps the spend.
+	UsageSaveEvery time.Duration
 }
 
 // LogPath returns the log file path for a run ("" if logging disabled).
@@ -307,7 +313,23 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	if opts.RunID == "" {
 		opts.RunID = runID
 	}
-	res, err := execute(runCtx, opts, logW)
+	var onUsage func(pricing.Cost)
+	if every := r.usageEvery(); every > 0 && opts.Cost != nil {
+		onUsage = func(c pricing.Cost) {
+			// Own short deadline: the run's context may be canceled, and a busy
+			// database must not hold the saver (stop waits for it).
+			wctx, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer done()
+			if err := r.store.UpdateRunCost(wctx, runID, c); err != nil {
+				log.Warn("save run usage", "error", err, "run_id", runID)
+				return
+			}
+			if opts.OnUsage != nil {
+				opts.OnUsage(runID, c)
+			}
+		}
+	}
+	res, err := execute(runCtx, opts, logW, r.usageEvery(), onUsage)
 	res.RunID = runID
 	finished := time.Now().UTC()
 	res.DurationMS = finished.Sub(started).Milliseconds()
@@ -366,6 +388,13 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	return res, err
 }
 
+func (r *Runner) usageEvery() time.Duration {
+	if r.UsageSaveEvery == 0 {
+		return DefaultUsageSaveEvery
+	}
+	return r.UsageSaveEvery
+}
+
 // Cancel requests cancellation of an in-flight run.
 func (r *Runner) Cancel(runID string) bool {
 	r.mu.Lock()
@@ -398,7 +427,7 @@ func nullStr(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
-func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) {
+func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.Duration, onUsage func(pricing.Cost)) (Result, error) {
 	if logW == nil {
 		logW = io.Discard
 	}
@@ -452,11 +481,26 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 	defer untrack()
 
 	var (
-		events []Event
 		result Result
 		mu     sync.Mutex
 		wg     sync.WaitGroup
+		saver  *usageSaver
 	)
+	if meter != nil && onUsage != nil && usageEvery > 0 {
+		var saved pricing.Usage
+		saver = startUsageSaver(usageEvery, func() (pricing.Cost, bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			c := meter.Now()
+			if !usageChanged(c.Totals, saved) {
+				return c, false
+			}
+			saved = c.Totals
+			return c, true
+		}, onUsage)
+	}
+	// Stopped before the caller's final write, so a mid-run save never lands after it.
+	defer saver.stop()
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -480,11 +524,13 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 			if s := FormatEvent(ev); s != "" {
 				fmt.Fprintf(logW, "[%s] %s\n", time.Now().Format("15:04:05"), provider.MaskSecret(s, opts.APIKey))
 			}
+			// Events are not kept: a long run streams megabytes of tool output,
+			// and everything needed afterwards is read here as it arrives.
 			mu.Lock()
-			events = append(events, ev)
 			if meter != nil && budgetMsg == "" {
 				if mid, u, ok := assistantUsage(ev); ok {
 					meter.Add(mid, u)
+					saver.changed()
 					if msg := opts.Cost.exceeded(meter.Now()); msg != "" {
 						budgetMsg = msg
 						fmt.Fprintf(logW, "[%s] %s — stopping run\n", time.Now().Format("15:04:05"), msg)
@@ -520,9 +566,9 @@ func execute(ctx context.Context, opts Options, logW io.Writer) (Result, error) 
 	wg.Wait()
 	waitErr := cmd.Wait()
 
+	saver.stop()
 	mu.Lock()
 	defer mu.Unlock()
-	result.Events = events
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
