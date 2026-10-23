@@ -1256,3 +1256,78 @@ runs list silently hid.
 1. Date range on the runs list ("today / 7 days / custom"), reusing the keyset cursor.
 2. Select several runs → rerun / export / mark important.
 3. Home page line "N runs skipped by budget today" linking to `#/runs?status=stopped`.
+
+## 2026-10-23 (16:00): macOS desktop "Update" button did nothing
+
+Category: **bug fix (desktop, macOS)**. Committed as `597e1d6`; this entry was missing and is
+added by the next run.
+
+**Done**
+
+- The update confirmation used `window.confirm()`, which WKWebView answers with `false`
+  without showing anything, so "Update" silently did nothing on macOS. It is an in-page dialog
+  now, and a test forbids native `confirm/alert/prompt` in app.js.
+- Checking and updating run as a background job the UI polls: checking → up to date (check
+  time in the tooltip) → new version → download progress → installing → restart, with retry on
+  error. Each source times out after 15 s, the whole check after 45 s; a download with no data
+  for 30 s is aborted; a proxy timeout says to check the proxy node.
+- Tests: `internal/app/updatejob_test.go`, `internal/updater/stall_test.go`,
+  `internal/webui/nativedialog_test.go`.
+
+**Ideas for later**
+
+1. Show the update job in the tray menu ("Downloading 42 %").
+
+## 2026-10-23 (18:20): JSON API answers gzipped
+
+Category: **resource usage (network, server + browser)**. The last rounds were the runs list
+and an update bug; this one is underneath every page that polls.
+
+**Done**
+
+- `writeJSON` now encodes into a pooled buffer and, when the client accepts gzip and the body
+  is at least 1 KB, sends it gzipped (pooled `gzip.Writer`, default level). Smaller answers,
+  `gzip;q=0`, `Cache-Control: no-transform` and 204/304 go out as before, now with an exact
+  `Content-Length`. Every `/api/` answer carries `Vary: Accept-Encoding`.
+- Only JSON is compressed: the live log (SSE) stays identity and still flushes per batch,
+  downloads (skill .zip, spend CSV) and the auth layer's 401/403 are untouched. The marker
+  wrapper passes `Flush` and `Unwrap` through.
+- **Same on every OS.** The desktop window's in-process handler already drops
+  `Accept-Encoding` (WKWebView / WebView2 / WebKitGTK don't all decode it), so the desktop app
+  gets identity bytes on macOS, Windows and Linux; the loopback bridge and server/browser mode
+  get gzip. Pure Go `compress/gzip`, no new dependency.
+- Numbers (demo agentd, 249 runs with varied prompts, curl): `/api/runs` 100 rows
+  69.9 → 11.9 KB, 200 rows 140.4 → 23.0 KB; `/api/overview` 6.4 → 1.2 KB, `/api/providers`
+  9.5 → 1.6 KB, `/api/settings` 2.9 → 0.7 KB; `/api/me` (323 B) and `/api/rev` unchanged.
+  Response time on loopback the same (≈4 ms). Buffers above 256 KB are not kept in the pool.
+- Verified in headless Chrome at 1024×655: runs page renders 100 rows, `overview`,
+  `dashboard`, `runs` arrive gzipped, no page errors. Shot: `/workspace/shots/api-gzip-runs-1024x655.png`.
+- Tests: `TestAPIJSONGzip` (gzip body decodes to the identity body, ≥3× smaller, identity has
+  exact Content-Length, Vary on both, q=0, small answer, 400 error, index and 401 untouched),
+  `TestDesktopAPIIdentity`, `TestSSENotGzipped` (real listener, gzip client, event arrives
+  uncompressed), `TestWriteJSONStatusAndPool` (204, >256 KB answer, pool bound, no-transform).
+
+**Inspiration**
+
+- n8n `packages/cli/src/abstract-server.ts` `setupCommonMiddlewares()`: one `compression()`
+  middleware in front of the whole REST API; expressjs/compression `index.js` only compresses
+  above a 1 KB `threshold`, for compressible types, and honours `Cache-Control: no-transform`.
+- Open WebUI `backend/open_webui/main.py`: `CompressMiddleware` (starlette-compress) added
+  outermost, behind the `ENABLE_COMPRESSION_MIDDLEWARE` switch.
+- We borrowed "threshold + no-transform + Vary", but compress only in our single JSON writer
+  instead of a generic middleware, so streaming and downloads can't be buffered by mistake.
+  No code copied.
+
+**Learned**
+
+- Go's `http.Client` adds `Accept-Encoding: gzip` and decodes on its own, so the existing SSE
+  tests already ran through the gzip path; a test that wants to see the raw encoding has to
+  set the header itself.
+- Identical seeded rows compress 20×+ and flatter the result; measure with varied text.
+
+**Ideas for later**
+
+1. Gzip the spend CSV export and skill file listings the same way (needs the download path
+   to keep `Content-Disposition` and size hints right).
+2. `ETag` on the heavier GET answers (overview, providers) so an unchanged poll is a 304.
+3. Brotli for static files, carried over from 22:20.

@@ -286,7 +286,7 @@ func (s *Server) routes() http.Handler {
 		s.touch()
 		// basic security headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		mux.ServeHTTP(w, r)
+		mux.ServeHTTP(withAPIGzip(w, r), r)
 	})
 }
 
@@ -314,14 +314,6 @@ func (s *Server) withAuthCSRF(fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth.RequireAuth(s.deps.Auth, auth.RequireCSRF(http.HandlerFunc(fn))).ServeHTTP(w, r)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(true)
-	_ = enc.Encode(v)
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
