@@ -559,6 +559,9 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 	}
 
 	if err := cmd.Start(); err != nil {
+		if ctx.Err() != nil { // stopped, quit or timed out right before the start
+			return endedByContext(ctx, Result{ExitCode: -1}, logW)
+		}
 		return Result{Status: "failed", ErrorMessage: err.Error(), ExitCode: -1}, err
 	}
 	release := afterStart(cmd)
@@ -672,26 +675,7 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 	}
 
 	if ctx.Err() != nil {
-		if errors.Is(context.Cause(ctx), ErrShuttingDown) {
-			fmt.Fprintf(logW, "[%s] tidebot is quitting — run stopped\n", time.Now().Format("15:04:05"))
-			result.Status = "canceled"
-			result.ErrorMessage = db.RunStoppedOnQuitMsg
-			return result, ErrShuttingDown
-		}
-		if errors.Is(context.Cause(ctx), ErrStoppedByUser) {
-			fmt.Fprintf(logW, "[%s] stopped by user\n", time.Now().Format("15:04:05"))
-			result.Status = "canceled"
-			result.ErrorMessage = db.RunStoppedByUserMsg
-			return result, ErrStoppedByUser
-		}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			result.Status = "timeout"
-			result.ErrorMessage = "run timed out"
-			return result, ctx.Err()
-		}
-		result.Status = "canceled"
-		result.ErrorMessage = "run canceled"
-		return result, ctx.Err()
+		return endedByContext(ctx, result, logW)
 	}
 	if waitErr != nil {
 		if result.Status == "" {
@@ -706,6 +690,32 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 		result.Status = "succeeded"
 	}
 	return result, nil
+}
+
+// endedByContext maps a done run context to the run's end: quit, user stop,
+// timeout or plain cancel. Also used when the context is done before the process
+// could start (exec refuses to start on a done context).
+func endedByContext(ctx context.Context, result Result, logW io.Writer) (Result, error) {
+	if errors.Is(context.Cause(ctx), ErrShuttingDown) {
+		fmt.Fprintf(logW, "[%s] tidebot is quitting — run stopped\n", time.Now().Format("15:04:05"))
+		result.Status = "canceled"
+		result.ErrorMessage = db.RunStoppedOnQuitMsg
+		return result, ErrShuttingDown
+	}
+	if errors.Is(context.Cause(ctx), ErrStoppedByUser) {
+		fmt.Fprintf(logW, "[%s] stopped by user\n", time.Now().Format("15:04:05"))
+		result.Status = "canceled"
+		result.ErrorMessage = db.RunStoppedByUserMsg
+		return result, ErrStoppedByUser
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		result.Status = "timeout"
+		result.ErrorMessage = "run timed out"
+		return result, ctx.Err()
+	}
+	result.Status = "canceled"
+	result.ErrorMessage = "run canceled"
+	return result, ctx.Err()
 }
 
 func bytesTrimSpace(b []byte) []byte {

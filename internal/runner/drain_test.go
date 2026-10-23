@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -194,5 +195,28 @@ func TestUserCancelIsNotQuit(t *testing.T) {
 	res := <-done
 	if !errors.Is(err, ErrStoppedByUser) || res.Status != "canceled" || res.ErrorMessage != db.RunStoppedByUserMsg {
 		t.Fatalf("err=%v status=%s msg=%q", err, res.Status, res.ErrorMessage)
+	}
+}
+
+// A stop or quit that lands just before the process starts (exec refuses a done
+// context) keeps its cause instead of turning into a plain "failed" run.
+func TestCancelBeforeStartKeepsCause(t *testing.T) {
+	skipOnWindows(t)
+	dir := t.TempDir()
+	bin := slowClaude(t, dir, "0")
+	for _, c := range []struct {
+		cause  error
+		status string
+		msg    string
+	}{
+		{ErrStoppedByUser, "canceled", db.RunStoppedByUserMsg},
+		{ErrShuttingDown, "canceled", db.RunStoppedOnQuitMsg},
+	} {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(c.cause)
+		res, err := execute(ctx, drainOpts(bin, dir), io.Discard, 0, nil)
+		if !errors.Is(err, c.cause) || res.Status != c.status || res.ErrorMessage != c.msg {
+			t.Errorf("%v: err=%v status=%s msg=%q", c.cause, err, res.Status, res.ErrorMessage)
+		}
 	}
 }
