@@ -1445,3 +1445,64 @@ Category: **feature + cross-platform (task form, desktop app)**. Idea 1 from 20:
    "Open Recent".
 2. Drag a folder from Finder / Explorer onto the field to fill it (desktop app gets the path).
 3. Warn (not refuse) when the folder is the whole home folder, since the agent may write anywhere in it.
+
+## 2026-10-24 (00:20): change the password in the WebUI, sign out other sessions
+
+Category: **security + "everything in the WebUI"** (Settings → Security). The last two rounds were
+features for the task folder; before that resource usage. Until now the password could only be
+changed with `agentctl auth set-password`, and there was no way to end a login left open on
+another computer.
+
+**Done**
+
+- Security → Password row: "已设置 / Set" pill plus a **"修改密码 / Change password"** button
+  ("设置密码 / Set password" and a "未设置" pill when a desktop window runs without one). The row
+  text keeps the CLI as the forgot-it path; the command chip no longer breaks mid-word.
+- Dialog: current password, new password (with "显示 / Show" for both new fields), repeat. Live
+  "至少 8 位 / At least 8 characters" hint that turns green, "两次输入不一样" once the repeat is as
+  long as the new one, "和当前密码一样" on submit. Enter submits. Inputs carry
+  `current-password` / `new-password` plus a hidden `username` so password managers fill / save
+  them. Fits 1024×655 (modal 520×474, footer visible, scrollWidth 1024).
+- `POST /api/auth/password {current,new}` (session + CSRF, 4 KB body cap): `auth.ChangePassword`
+  checks the current password (not needed only when none is set yet), 8–1024 bytes, not the same;
+  writes the argon2id hash and **deletes every other session in the same transaction** — this
+  window stays. Answer: `{signed_out:n}` → toast "密码已更新，已退出其他 n 处登录". Errors carry a
+  `code` (`bad_current` 403, `length` / `same` 400). Nothing echoes or logs a password.
+- **Wrong current passwords count as failed logins** for that IP (`login_attempts`), so a stolen
+  session can't brute-force the password: after 5 the endpoint answers 429 + `Retry-After` and the
+  dialog counts down on its submit button.
+- Session row: **"退出其他登录（n）/ Sign out others (n)"** when other live sessions exist
+  (`/api/settings` now returns `password_set`, `other_sessions`; `POST /api/auth/sessions/others`).
+  What "others" means is in the button's tooltip.
+- Same on macOS / Windows / Linux: plain WebUI + Go, no OS paths; the desktop window's local
+  session counts as "this window" and is kept.
+- Shots: `/workspace/tidebot-shots/password-change-zh-CN-1024x655.png`,
+  `security-row-zh-CN-1024x655.png` (+ `-en-`).
+- Tests: `TestPasswordChange` (CSRF needed, bad current / short / too long / same, success keeps
+  this session and ends the other, old password refused, new one works, GET 405),
+  `TestPasswordChangeRateLimited` (5 wrong guesses → 429 even with the right one, nothing
+  changed), `TestPasswordFirstSetAndSignOutOthers`, `TestPasswordUI` (wiring, CSS, i18n keys).
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/components/settings/Security.vue`: current / new / repeat fields with
+  `autocomplete` hints, mismatch shown on the repeat field, fields cleared after success.
+- open-webui/open-webui `backend/open_webui/routers/auths.py` `update_password()` (re-verify the
+  current password, validate, hash, then `disconnect_user_sessions`) and
+  `src/lib/components/chat/Settings/Account/UpdatePassword.svelte`. We keep the current window
+  signed in instead of signing everyone out. No code copied.
+
+**Learned**
+
+- `.modal form` sets a 16 px flex gap, which beats a single-class rule on the form; reserved error
+  lines then doubled the spacing. Scope dialog layout rules as `.modal .x`.
+- A re-check of the password inside a signed-in session is a second login form and needs the same
+  rate limit; `DisableTOTPChecked` (2FA off) still has none.
+
+**Ideas for later**
+
+1. Rate-limit the "turn off 2FA" password check the same way (share `checkRateLimit`).
+2. List sessions (created, last seen, IP, "this window") with a per-row sign-out, like GitHub's
+   sessions page.
+3. Have `agentctl auth set-password` (the forgot-password reset) sign out all browser sessions too,
+   once the desktop window re-creates its local session on 401.

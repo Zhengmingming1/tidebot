@@ -1588,3 +1588,13 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .ws-field > span [data-tip]:hover::after, .ws-field > span [data-tip]:focus-visible::after { left: 0; right: auto; transform: none; }
 .ws-in > input { text-overflow: ellipsis; }
 .ws-in > .icon-btn { flex: none; }
+
+/* change password dialog */
+.pw-sub { margin: 0 0 var(--s2); }
+.modal .pw-form { gap: 0; }
+.pw-form .err, .pw-form .pw-len { min-height: 20px; margin: 4px 0 8px; }
+.set-row .lbl small code { white-space: nowrap; }
+.pw-len { display: flex; align-items: center; gap: 4px; }
+.pw-len svg { width: 14px; height: 14px; opacity: .45; }
+.pw-len.ok { color: var(--ok); }
+.pw-len.ok svg { opacity: 1; }

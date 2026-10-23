@@ -4006,15 +4006,22 @@
         };
       } else if (section === "security") {
         body = '<section class="card">' + head +
-          row("password", T("login.password"), T("set.pw_sub"), '<span class="pill ok">' + esc(T("set.set")) + "</span>", "agentctl auth set-password") +
+          row("password", T("login.password"), T("set.pw_sub"), '<span class="row-gap">' + (st.password_set === false ? '<span class="pill plain">' + esc(T("pw.unset")) + "</span>" : '<span class="pill ok">' + esc(T("set.set")) + "</span>") +
+            '<button class="btn sm" id="pw-change">' + esc(T(st.password_set === false ? "pw.set" : "pw.change")) + "</button></span>", "agentctl auth set-password") +
           row("2fa", T("set.totp"), T(st.totp_enabled ? "set.totp_on_sub" : "set.totp_off_sub"), st.totp_enabled ?
             '<span class="row-gap"><span class="pill ok">' + esc(T("set.on")) + '</span><button class="btn sm" id="tf-off">' + esc(T("tf.disable")) + "</button></span>" :
             '<button class="btn primary sm" id="tf-on">' + esc(T("tf.enable")) + "</button>") +
           row("cookies", T("set.cookies"), T("set.cookies_sub"), "") +
-          row("session", T("set.session"), T("set.session_sub"), '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button>") + "</section>";
+          row("session", T("set.session"), T("set.session_sub"), '<span class="row-gap">' + (st.other_sessions > 0 ? '<button class="btn sm ghost" id="ses-others" data-tip="' + esc(T("ses.others_tip")) + '">' + esc(T("ses.others", { n: st.other_sessions })) + "</button>" : "") +
+            '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button></span>") + "</section>";
         after = function () {
           $("#btn-logout").addEventListener("click", function () {
             api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; draftsClearAll(); showLogin(); });
+          });
+          $("#pw-change").addEventListener("click", function () { pwChange(st.password_set !== false); });
+          if ($("#ses-others")) $("#ses-others").addEventListener("click", function (e) {
+            var b = e.currentTarget; b.disabled = true;
+            api("/api/auth/sessions/others", { method: "POST", body: {} }).then(function (r) { toast(T("ses.others_done", { n: r.signed_out })); refresh(); }).catch(function (err) { b.disabled = false; fail(err); });
           });
           if ($("#tf-on")) $("#tf-on").addEventListener("click", twoFASetup);
           if ($("#tf-off")) $("#tf-off").addEventListener("click", twoFADisable);
@@ -4320,6 +4327,74 @@
           $("#tf-verify").addEventListener("click", verify);
         });
     }).catch(fail);
+  }
+  // Change (or, from a desktop window without one, set) the owner password. Other
+  // sessions are signed out by the server; this one stays. Inputs carry
+  // current-password / new-password so password managers fill and save them.
+  function pwChange(hasPw) {
+    var pw = function (id, label, ac, extra) {
+      return '<label class="field"><span>' + esc(label) + '</span><div class="in-group"><input type="password" id="' + id + '" autocomplete="' + ac + '" maxlength="1024" spellcheck="false" autocapitalize="off">' + (extra || "") + "</div></label>";
+    };
+    modal('<div class="card-head"><span class="ico">' + ic("key") + "</span><h2>" + esc(T(hasPw ? "pw.change" : "pw.set")) + '</h2></div><p class="muted pw-sub">' + esc(T("pw.sub")) + "</p>" +
+      '<form id="pw-form" class="pw-form" novalidate><input type="text" class="hidden" autocomplete="username" value="owner" readonly tabindex="-1" aria-hidden="true">' +
+      (hasPw ? pw("pw-cur", T("pw.current"), "current-password") + '<p class="err" id="pw-cur-err"></p>' : "") +
+      pw("pw-new", T("pw.new"), "new-password", '<button type="button" class="btn ghost" id="pw-eye" aria-pressed="false">' + esc(T("pv.show")) + "</button>") +
+      '<p class="hint pw-len" id="pw-len">' + ic("check", "sm") + esc(T("pw.len")) + "</p>" +
+      pw("pw-rep", T("pw.repeat"), "new-password") + '<p class="err" id="pw-err"></p>' +
+      '<div class="actions"><button type="button" class="btn" id="pw-cancel">' + esc(T("btn.cancel")) + '</button><button type="submit" class="btn primary" id="pw-go">' + esc(T("pw.save")) + "</button></div></form>",
+      function (root, close) {
+        var cur = $("#pw-cur", root), nw = $("#pw-new", root), rep = $("#pw-rep", root), go = $("#pw-go", root), err = $("#pw-err", root), cerr = $("#pw-cur-err", root);
+        var busy = false, waitTimer = null, waitUntil = 0;
+        (cur || nw).focus();
+        var check = function (final) {
+          var a = nw.value, b = rep.value, msg = "";
+          $("#pw-len", root).classList.toggle("ok", a.length >= 8);
+          if (final && a.length < 8) msg = T("pw.len");
+          else if (b && (final || b.length >= a.length) && a !== b) msg = T("pw.mismatch");
+          else if (final && hasPw && cur.value && a === cur.value) msg = T("pw.same");
+          if (Date.now() >= waitUntil) err.textContent = msg;
+          return !msg;
+        };
+        var wait = function (secs) {
+          waitUntil = Date.now() + secs * 1000; go.disabled = true; clearInterval(waitTimer);
+          var tick = function () {
+            var left = Math.ceil((waitUntil - Date.now()) / 1000);
+            if (left <= 0 || !document.contains(go)) { clearInterval(waitTimer); waitUntil = 0; go.disabled = false; err.textContent = ""; return; }
+            err.textContent = T("pw.too_many", { n: left });
+          };
+          tick(); waitTimer = setInterval(tick, 1000);
+        };
+        nw.addEventListener("input", function () { check(false); });
+        rep.addEventListener("input", function () { check(false); });
+        if (cur) cur.addEventListener("input", function () { cerr.textContent = ""; });
+        $("#pw-eye", root).addEventListener("click", function (e) {
+          var on = nw.type === "password";
+          nw.type = rep.type = on ? "text" : "password";
+          e.currentTarget.setAttribute("aria-pressed", on); e.currentTarget.textContent = T(on ? "pv.hide" : "pv.show");
+        });
+        $("#pw-cancel", root).addEventListener("click", function () { clearInterval(waitTimer); close(); });
+        $("#pw-form", root).addEventListener("submit", function (e) {
+          e.preventDefault();
+          if (busy || go.disabled) return;
+          if (hasPw && !cur.value) { cerr.textContent = T("pw.bad_current"); cur.focus(); return; }
+          if (!check(true)) { (nw.value.length < 8 ? nw : rep).focus(); return; }
+          busy = true; go.disabled = true;
+          api("/api/auth/password", { method: "POST", body: { current: cur ? cur.value : "", new: nw.value } }).then(function (r) {
+            $$("input", root).forEach(function (x) { x.value = ""; });
+            clearInterval(waitTimer); close();
+            toast(r.signed_out > 0 ? T("pw.done_n", { n: r.signed_out }) : T("pw.done"));
+            refresh();
+          }).catch(function (x) {
+            go.disabled = false;
+            var code = x.data && x.data.code;
+            if (x.status === 429) { wait((x.data && x.data.retry_after) || 60); return; }
+            if (code === "bad_current") { cerr.textContent = T("pw.bad_current"); cur.select(); return; }
+            if (code === "same") { err.textContent = T("pw.same"); nw.select(); return; }
+            if (code === "length") { err.textContent = T("pw.len"); nw.focus(); return; }
+            err.textContent = x.message;
+          }).then(function () { busy = false; });
+        });
+      });
   }
   function twoFADisable() {
     modal('<div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("tf.disable")) + '</h2></div><p>' + esc(T("tf.disable_sub")) + '</p><label class="field"><span>' + esc(T("login.password")) + '</span><input type="password" id="tf-pw" autocomplete="current-password" maxlength="1024"></label><p class="err" id="tf-err"></p>' +

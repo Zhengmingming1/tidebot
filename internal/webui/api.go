@@ -70,6 +70,8 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/desktop/open", s.withAuthCSRF(s.handleDesktopOpen))
 	mux.HandleFunc("/api/notifications/center", s.withAuthCSRF(s.handleNotifCenter))
 	mux.HandleFunc("/api/auth/2fa/", s.withAuthCSRF(s.handle2FA))
+	mux.HandleFunc("/api/auth/password", s.withAuthCSRF(s.handlePassword))
+	mux.HandleFunc("/api/auth/sessions/others", s.withAuthCSRF(s.handleSessionsOthers))
 	mux.HandleFunc("/api/notifications", s.withAuthCSRF(s.handleNotifications))
 	mux.HandleFunc("/api/search", s.withAuthCSRF(s.handleSearch))
 	mux.HandleFunc("/api/settings", s.withAuthCSRF(s.handleSettings))
@@ -1410,7 +1412,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	sum, _ := s.deps.Cost.Summary(r.Context(), "")
 	totp, _ := s.deps.Auth.TOTPEnabled(r.Context())
+	pwSet, _ := s.deps.Auth.HasPassword(r.Context())
+	others := 0
+	if sess := auth.SessionFromContext(r.Context()); sess != nil {
+		others = s.deps.Auth.OtherSessions(r.Context(), sess.ID)
+	}
 	writeJSON(w, 200, map[string]any{
+		"password_set":     pwSet,
+		"other_sessions":   others,
 		"webui_enabled":    s.Enabled(),
 		"addr":             s.deps.Cfg.WebUIAddr,
 		"allow_lan":        s.deps.Cfg.WebUIAllowLAN,
