@@ -2695,6 +2695,54 @@
       if (sk && !f.prompt.value.trim()) setName(sk.name), paint(lastCron);
     });
   }
+  // Working folder field (task form): type a path or, in the desktop app, pick one with
+  // the native folder dialog; empty = the folder tidebot keeps for the task, shown as the
+  // placeholder. The server cleans the path (~, quotes, separators) and says up front
+  // whether it is usable or will be created, as a pill in the label row so nothing moves.
+  var pickFolderOK = null;
+  function folderPickable() {
+    if (!pickFolderOK) pickFolderOK = api("/api/desktop/pick-folder").then(function (r) { return !!(r && r.available); }, function () { return false; });
+    return pickFolderOK;
+  }
+  function wsFieldHtml(val) {
+    return '<div class="field ws-field"><span id="tf-wlbl">' + esc(T("tf.workspace")) + tip(T("tf.ws_hint")) + '<span class="pill sm hidden" id="tf-ws-st"></span></span>' +
+      '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="tf-wlbl" value="' + esc(val) + '">' +
+      '<button type="button" class="icon-btn sm hidden" id="tf-ws-pick" data-tip="' + esc(T("tf.ws_pick")) + '" aria-label="' + esc(T("tf.ws_pick")) + '">' + ic("folder", "sm") + "</button>" +
+      '<button type="button" class="icon-btn sm' + (val ? "" : " hidden") + '" id="tf-ws-reset" data-tip="' + esc(T("tf.ws_reset")) + '" aria-label="' + esc(T("tf.ws_reset")) + '">' + ic("rollback", "sm") + "</button></div></div>";
+  }
+  function wireWsField(root, input, taskId) {
+    var pill = $("#tf-ws-st", root), reset = $("#tf-ws-reset", root), pick = $("#tf-ws-pick", root), def = "", problem = "", seq = 0, timer = 0;
+    var paint = function (r) {
+      problem = r.problem || "";
+      var cls = "", txt = "", tipTxt = "";
+      if (problem) { cls = "bad"; txt = T("tf.ws_bad"); tipTxt = T("tf.ws_err_" + problem); }
+      else if (r.path && !r.exists) { cls = "info"; txt = T("tf.ws_new"); tipTxt = T("tf.ws_new_tip"); }
+      pill.className = "pill sm " + (cls || "hidden");
+      pill.textContent = txt;
+      if (tipTxt) pill.setAttribute("data-tip", tipTxt); else pill.removeAttribute("data-tip");
+      if (r.default) { def = r.default; input.placeholder = T("tf.ws_default_ph", { p: def }); input.title = input.value.trim() ? "" : def; }
+      reset.classList.toggle("hidden", !input.value.trim());
+    };
+    var check = function () {
+      var my = ++seq;
+      api("/api/tasks/workspace-check?path=" + enc(input.value.trim()) + (taskId ? "&id=" + enc(taskId) : "")).then(function (r) { if (my === seq) paint(r || {}); }).catch(function () { /* keep last state */ });
+    };
+    var set = function (v) { input.value = v; input._tbTouched = true; clearTimeout(timer); check(); };
+    input.addEventListener("input", function () { reset.classList.toggle("hidden", !input.value.trim()); clearTimeout(timer); timer = setTimeout(check, 250); });
+    reset.addEventListener("click", function () { set(""); input.focus(); });
+    folderPickable().then(function (ok) {
+      if (!ok || !root.contains(pick)) return;
+      pick.classList.remove("hidden");
+      pick.addEventListener("click", function () {
+        pick.disabled = true;
+        var start = input.value.trim() || (taskId ? def : "");
+        api("/api/desktop/pick-folder", { method: "POST", body: { start: start } }).then(function (r) { if (r && r.path) set(r.path); })
+          .catch(fail).then(function () { pick.disabled = false; });
+      });
+    });
+    check();
+    return { problem: function () { return problem; } };
+  }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings")];
@@ -2712,6 +2760,7 @@
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
         '<div class="form-row">' + fieldHtml(T("tf.budget_c", { c: curSym(state.currency || "USD") }), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint"), taskId ? "" : '<span class="af-pill hidden" id="af-budget" data-tip="">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
+        wsFieldHtml(tf.workspace || "") +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
@@ -2726,11 +2775,13 @@
         if (drafty) wireDraft(root, f.prompt, "task");
         f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
         if (!taskId) wireTaskAutofill(root, f, se, skills);
+        var ws = wireWsField(root, f.workspace, taskId);
         f.addEventListener("submit", function (e) {
           e.preventDefault();
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
+          if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, provider: f.provider.value, cron: se.value(),
-            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30 };
+            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim() };
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
             if (drafty) draftClear("task");

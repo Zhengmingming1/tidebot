@@ -1583,3 +1583,8 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .kv dd.ws-row .tag { flex: none; margin-top: 4px; line-height: 18px; }
 .kv dd.ws-row .icon-btn { flex: none; }
 .kv dd.ws-row [data-tip]:hover::after, .kv dd.ws-row [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
+/* Task form: working folder (path input + pick / reset icons, status pill in the label row) */
+.ws-field > span .pill { height: 18px; padding: 0 6px; font-size: var(--fs-xs); cursor: help; }
+.ws-field > span [data-tip]:hover::after, .ws-field > span [data-tip]:focus-visible::after { left: 0; right: auto; transform: none; }
+.ws-in > input { text-overflow: ellipsis; }
+.ws-in > .icon-btn { flex: none; }

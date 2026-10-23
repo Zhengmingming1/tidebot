@@ -40,6 +40,7 @@
   "desktop.resume": "Resume scheduler",
   "desktop.run": "Run preset",
   "desktop.tooltip": "Tidebot",
+  "desktop.pick_folder": "Choose the task's working folder",
   "desktop.tooltip_paused": "Tidebot (paused)",
   "desktop.tooltip_problem": "Tidebot (needs attention)",
   "notify.breaker": "Paused after repeated failures: %s",

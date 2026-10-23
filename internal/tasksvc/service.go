@@ -118,9 +118,7 @@ func (s *Service) UpdateSpec(ctx context.Context, taskID string, spec Spec, acto
 	}
 	// Keep denormalized prompt/workspace in sync for scheduler/runner.
 	task.Prompt = spec.Prompt
-	if spec.WorkspaceDir != "" {
-		task.WorkspaceDir = spec.WorkspaceDir
-	}
+	task.WorkspaceDir = spec.WorkspaceDir // "" = per-task default, as in Rollback
 	if spec.TimeoutMinutes > 0 {
 		task.TimeoutMinutes = spec.TimeoutMinutes
 	}

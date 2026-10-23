@@ -40,6 +40,7 @@
   "desktop.resume": "恢复调度",
   "desktop.run": "运行按钮预设",
   "desktop.tooltip": "Tidebot",
+  "desktop.pick_folder": "选择任务的工作文件夹",
   "desktop.tooltip_paused": "Tidebot（已暂停）",
   "desktop.tooltip_problem": "Tidebot（有问题需要处理）",
   "notify.breaker": "连续失败已暂停：%s",

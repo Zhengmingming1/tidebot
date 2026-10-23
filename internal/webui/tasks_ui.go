@@ -28,9 +28,19 @@ type taskForm struct {
 	BudgetUSD      float64 `json:"budget_usd"`
 	Enabled        bool    `json:"enabled"`
 	TimeoutMinutes int     `json:"timeout_minutes"`
+	// Workspace: the task's own working folder, "" = the per-task default. nil (field
+	// left out, e.g. an older page) keeps the folder the task has.
+	Workspace *string `json:"workspace,omitempty"`
 }
 
-func (s *Server) validateTaskForm(ctx context.Context, f *taskForm) error {
+func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID string) error {
+	if f.Workspace != nil {
+		ws, err := s.normalizeWorkspace(*f.Workspace, taskID)
+		if err != nil {
+			return err
+		}
+		f.Workspace = &ws
+	}
 	f.Name = strings.TrimSpace(f.Name)
 	f.Prompt = strings.TrimSpace(f.Prompt)
 	f.Cron = strings.TrimSpace(f.Cron)
@@ -104,6 +114,9 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 func specFromForm(spec tasksvc.Spec, f taskForm) tasksvc.Spec {
 	spec.Prompt = f.Prompt
 	spec.Provider = f.Provider
+	if f.Workspace != nil {
+		spec.WorkspaceDir = *f.Workspace
+	}
 	if f.TimeoutMinutes > 0 {
 		spec.TimeoutMinutes = f.TimeoutMinutes
 	}
@@ -125,11 +138,15 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := s.validateTaskForm(ctx, &f); err != nil {
+	if err := s.validateTaskForm(ctx, &f, ""); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	tv, err := s.deps.Tasks.Create(ctx, tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, ProviderName: f.Provider,
+	ws := ""
+	if f.Workspace != nil {
+		ws = *f.Workspace
+	}
+	tv, err := s.deps.Tasks.Create(ctx, tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, ProviderName: f.Provider, WorkspaceDir: ws,
 		TimeoutMinutes: f.TimeoutMinutes, OverlapPolicy: "skip", Actor: "user"})
 	if err != nil {
 		writeErr(w, 400, err.Error())
@@ -161,7 +178,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request, id string) {
 		writeErr(w, 404, "task not found")
 		return
 	}
-	if err := s.validateTaskForm(ctx, &f); err != nil {
+	if err := s.validateTaskForm(ctx, &f, id); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -196,6 +213,14 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 	}
 	f := taskForm{Name: v.Task.Name, Prompt: v.Spec.Prompt, Provider: v.Spec.Provider, Cron: v.Task.CronExpr,
 		Enabled: v.Task.Status == "active", TimeoutMinutes: v.Spec.TimeoutMinutes}
+	ws := v.Spec.WorkspaceDir
+	if ws == "" {
+		ws = v.Task.WorkspaceDir
+	}
+	if _, def := s.taskWorkspace(id, ws); def {
+		ws = ""
+	}
+	f.Workspace = &ws
 	if len(v.Spec.SkillBindings) > 0 {
 		f.SkillID = v.Spec.SkillBindings[0].SkillID
 		if v.Spec.SkillBindings[0].Mode == "pinned" {

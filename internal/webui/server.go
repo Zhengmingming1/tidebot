@@ -88,6 +88,9 @@ type Server struct {
 	OSLanguage string
 	// PickFile opens a native file dialog (desktop app only; nil elsewhere).
 	PickFile func(title string) (string, error)
+	// PickFolder opens the native folder dialog at start ("" = OS default); "" means
+	// canceled (desktop app only; nil elsewhere).
+	PickFolder func(start string) (string, error)
 	// SaveFile asks for a destination with the native "Save as" dialog, suggesting name;
 	// "" means canceled (desktop app only; nil elsewhere).
 	SaveFile func(name string) (string, error)

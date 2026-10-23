@@ -1388,3 +1388,60 @@ Category: **feature + cross-platform (task detail, desktop app)**. The last roun
    shown as placeholder.
 2. "Open folder" on a run's detail page (runs keep their `workspace_dir`).
 3. Show the folder's size and file count in the tooltip (reuse the storage scanner).
+
+## 2026-10-23 (22:20): task form sets the working folder — type it, or pick it in the desktop app
+
+Category: **feature + cross-platform (task form, desktop app)**. Idea 1 from 20:20: until now only
+`agentctl tasks create --workspace` could give a task its own folder.
+
+**Done**
+
+- New **"工作文件夹 / Working folder"** field in the new / edit task dialog. Empty = the folder
+  tidebot keeps for the task, shown as the placeholder ("默认：…/workspaces/<task id>"; a new task
+  shows `…/workspaces/…`, its id doesn't exist yet). The field's ⓘ explains the rest.
+- **Desktop app: "选择文件夹… / Choose folder…"** opens the native folder dialog (Wails
+  `CanChooseDirectories`: NSOpenPanel / IFileOpenDialog pick-folders / GTK select-folder), starting
+  at the current folder. Windows reports Cancel as an error; it is treated as cancel. Hidden in the
+  browser / server mode (`GET /api/desktop/pick-folder` → `available:false`, POST is 501).
+- **"改回默认 / Use the default folder"** icon clears the field (only shown when it has a value).
+- The server cleans what was typed: surrounding quotes (Explorer's "Copy as path"), `~` / `~/x` /
+  `~\x`, trailing separators, OS separators. Refused: relative paths, a drive / file system root,
+  anything inside tidebot's home (keys, database), an existing file, > 1024 bytes. The data folder
+  or the task's own default folder count as "default". Same check backs a live
+  `GET /api/tasks/workspace-check`, so the form shows a small pill in the label row while typing —
+  "将新建 / New" (created on first run) or "不可用 / Can't use" with the reason in its tooltip — and
+  Save is blocked with that reason. The pill sits in the label row, so nothing below moves.
+- `PUT /api/tasks/{id}` without `workspace` (an older open page) keeps the folder; `""` clears it.
+  `tasksvc.UpdateSpec` now always syncs `tasks.workspace_dir` from the spec (like `Rollback`), so
+  clearing really sends runs back to the default folder.
+- Layout at 1024×655 (zh-CN, en): 36 px input with 28 px icon buttons centred on it (8 px gaps),
+  tooltips in the label row anchored left so the modal doesn't clip them, `scrollWidth` 1024.
+  Shots: `/workspace/tidebot-shots/task-form-workspace-picked-1024x655.png`,
+  `task-form-workspace-default-1024x655.png`, `task-form-workspace-bad-1024x655.png` (+ `-en-`).
+- Tests: `TestTaskFormWorkspace` (create with a quoted path, form round trip, edit without the
+  field keeps it, bad paths refused and nothing changed, clear → default, default / data folder →
+  default, `~`), `TestWorkspaceCheck`, `TestPickFolder` (browser 501, start only when an existing
+  folder, cancel), `TestTaskFormWorkspaceUI` (wiring, CSS, i18n keys).
+
+**Inspiration**
+
+- farion1231/cc-switch `src/components/settings/DirectorySettings.tsx` and
+  `src/hooks/useDirectorySettings.ts`: one row per folder — input with the resolved default,
+  a browse icon (`selectConfigDirectory(currentValue)` opens at the current folder) and a
+  reset-to-default icon, both with hover tips; picked / typed values are trimmed and empty means
+  default (`sanitizeDir`). No code copied.
+
+**Learned**
+
+- `[data-tip]` tooltips are centred; in a modal's left column they are clipped by the modal's
+  overflow. Label-row tips there need the left-anchored variant.
+- Wails v3 beta.30 returns `cancelled by user` as an error on Windows only; macOS / Linux return "".
+- The modal's unsaved-changes guard only counts trusted input events, so values set from the folder
+  dialog or the reset icon must mark the field touched by hand.
+
+**Ideas for later**
+
+1. Remember recently used folders and offer them as suggestions (`<datalist>`), like VS Code's
+   "Open Recent".
+2. Drag a folder from Finder / Explorer onto the field to fill it (desktop app gets the path).
+3. Warn (not refuse) when the folder is the whole home folder, since the agent may write anywhere in it.

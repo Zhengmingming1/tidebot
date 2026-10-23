@@ -161,6 +161,18 @@ func main() {
 	core.WebUI.PickFile = func(title string) (string, error) {
 		return sh.app.Dialog.OpenFile().SetTitle(title).CanChooseFiles(true).ShowHiddenFiles(true).PromptForSingleSelection()
 	}
+	core.WebUI.PickFolder = func(start string) (string, error) {
+		dlg := sh.app.Dialog.OpenFile().SetTitle(i18n.T("desktop.pick_folder")).CanChooseFiles(false).
+			CanChooseDirectories(true).CanCreateDirectories(true).ShowHiddenFiles(true)
+		if start != "" {
+			dlg = dlg.SetDirectory(start)
+		}
+		p, err := dlg.PromptForSingleSelection()
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "cancel") {
+			return "", nil // Windows reports Cancel as an error ("cancelled by user")
+		}
+		return p, err
+	}
 	core.WebUI.SaveFile = func(name string) (string, error) {
 		dlg := sh.app.Dialog.SaveFile().SetFilename(name).CanCreateDirectories(true)
 		if dir := downloadsDir(); dir != "" {
