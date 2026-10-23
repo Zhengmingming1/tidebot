@@ -28,6 +28,15 @@ func TestCommands(t *testing.T) {
 	if u := g[0].Args[6]; !strings.HasPrefix(u, "array:string:file:///Users/a%20b/") {
 		t.Fatalf("uri %q", u)
 	}
+	// A bundle-like folder is never "opened" on macOS (that would launch it).
+	for _, p := range []string{"/w/Evil.app", "/w/x.bundle", "/w/my.project"} {
+		if g := Commands("darwin", p, false); len(g) != 1 || len(g[0].Args) != 2 || g[0].Args[0] != "-R" || g[0].Args[1] != p {
+			t.Fatalf("darwin bundle %s → %v", p, g)
+		}
+	}
+	if g := Commands("darwin", "/Users/a b/workspaces/t_1", false); len(g[0].Args) != 1 {
+		t.Fatalf("darwin plain folder %v", g)
+	}
 	if g := Commands("freebsd", "/d", false); len(g) != 1 || g[0].Name != "xdg-open" {
 		t.Fatalf("bsd %v", g)
 	}

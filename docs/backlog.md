@@ -1331,3 +1331,60 @@ and an update bug; this one is underneath every page that polls.
    to keep `Content-Disposition` and size hints right).
 2. `ETag` on the heavier GET answers (overview, providers) so an unchanged poll is a 304.
 3. Brotli for static files, carried over from 22:20.
+
+## 2026-10-23 (20:20): task page shows the real working folder — copy it, open it in Finder / Explorer
+
+Category: **feature + cross-platform (task detail, desktop app)**. The last rounds were API gzip
+(resource), the macOS update bug and the runs list; this one picks up idea 1 from 10:13.
+
+**Done**
+
+- **Bug: a task without its own folder showed "—"** under Workspace, although its runs work in
+  `<home>/workspaces/<task id>`. The detail answer (`GET /api/tasks/{id}`) now returns the folder
+  runs really use — the task's own, or the per-task default (also when the spec names the data
+  folder, same rule as `app.prepareGuard`) — plus `workspace_default`. The list answer is unchanged.
+- The path sits in a code chip that wraps a long path; a **"默认 / Default"** tag explains in its
+  tooltip that tidebot keeps this folder for the task. **Copy path** button everywhere.
+- **Desktop app: open the folder** (button, or `o` on the task page). It is named after the OS
+  file manager, like VS Code: "在访达中打开 / Open in Finder" (macOS), "在资源管理器中打开 /
+  Open in File Explorer" (Windows), "在文件管理器中打开 / Open in file manager" (Linux) —
+  `GET /api/desktop/open` now also returns `os`. Hidden in the browser / server mode (no file
+  manager there), and `o` does nothing when the button is hidden.
+- `POST /api/desktop/open {"target":"workspace","id":<task id>}`: the server looks the folder up
+  from the task, never from the page. The default folder is created first (it would be on the
+  next run anyway); a task's own folder is never created by the UI — missing → 404 → "文件夹还
+  不存在，任务第一次运行时会创建". Unknown / empty / path-looking ids are 404 and never reach
+  the file manager.
+- **macOS safety**: `open X.app` launches a bundle instead of showing it. `osopen` now shows any
+  folder whose name has an extension (`.app`, `.bundle`, …) selected in its parent (`open -R`).
+- Layout at 1024×655 (zh-CN, en): one 28 px row on the 8 px grid, path text level with the
+  label, tag and buttons centred on the first line, tooltips anchored right so nothing overflows
+  (scrollWidth stays 1024). Shots: `/workspace/tidebot-shots/task-workspace-open-1024x655.png`,
+  `task-workspace-default-tip-1024x655.png` (+ `-en-`).
+- Tests: `TestTaskWorkspaceShownAndOpened` (default path + flag, list untouched, `os` in GET,
+  501 in browser, default created on open, own folder shown/opened but not created, data dir
+  counts as default, bad ids never open), `TestTaskWorkspaceUI` (wiring, CSS, i18n keys,
+  shortcut help), `TestCommands` (bundle folders revealed on macOS, plain folders opened).
+
+**Inspiration**
+
+- farion1231/cc-switch `src-tauri/src/commands/config.rs` `open_config_folder()`: the page names
+  *which* folder (an app type), the backend resolves the path, creates it if missing, then opens it.
+- microsoft/vscode `src/vs/workbench/contrib/files/electron-browser/fileActions.contribution.ts`:
+  `REVEAL_IN_OS_LABEL` picks "Reveal in File Explorer / Finder / Open Containing Folder" by OS.
+  No code copied.
+
+**Learned**
+
+- `[data-tip]` tooltips are centred by default; near the right edge of a 1024 px window a 280 px
+  tooltip widens the page by ~36 px. Rows that end at the card's right edge need the right-anchored
+  variant.
+- The WebUI form can't set a task's folder (only `agentctl tasks create --workspace`), so the
+  tooltip must not send people to "Edit" for it.
+
+**Ideas for later**
+
+1. Let the task form pick / type a working folder (desktop: native folder picker), with the default
+   shown as placeholder.
+2. "Open folder" on a run's detail page (runs keep their `workspace_dir`).
+3. Show the folder's size and file count in the tooltip (reuse the storage scanner).

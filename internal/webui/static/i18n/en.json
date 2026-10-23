@@ -1423,7 +1423,7 @@
   "bt.none": "No buttons yet",
   "bt.removed": "Removed \"{n}\"",
   "sc.create": "n then t/s/p/b/q: new task / skill / provider / button / quick run",
-  "sc.task_keys": "On a task: r run now, e edit. On a run: r rerun, e edit & rerun",
+  "sc.task_keys": "On a task: r run now, e edit, o open its folder (desktop app). On a run: r rerun, e edit & rerun",
   "st.artifact_days": "Keep artifacts",
   "st.artifact_days_sub": "Files that runs produced (reports, exports) are deleted after this.",
   "st.clean": "Clean up now",
@@ -1501,5 +1501,12 @@
   "up.checked_at": "Checked {t}",
   "up.apply_retry": "Retry update",
   "up.confirm_title": "Install {v}?",
-  "up.proxy_hint": "Traffic goes through the proxy {p}, and it didn't answer in time. Check that the proxy app is running and its node can reach GitHub, or pick Direct / a manual proxy in Settings → Network, then retry."
+  "up.proxy_hint": "Traffic goes through the proxy {p}, and it didn't answer in time. Check that the proxy app is running and its node can reach GitHub, or pick Direct / a manual proxy in Settings → Network, then retry.",
+  "ws.copy": "Copy path",
+  "ws.default": "Default",
+  "ws.default_tip": "This task has no folder of its own; its runs work in this one, which tidebot keeps for it.",
+  "ws.open_mac": "Open in Finder",
+  "ws.open_win": "Open in File Explorer",
+  "ws.open_linux": "Open in file manager",
+  "ws.missing": "That folder doesn't exist yet. It is created when the task first runs."
 }

@@ -87,21 +87,24 @@ func (s *Server) loc() *time.Location {
 // ---------- DTOs ----------
 
 type taskDTO struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Status      string   `json:"status"`
-	Cron        string   `json:"cron"`
-	Prompt      string   `json:"prompt"`
-	Goal        string   `json:"goal"`
-	Provider    string   `json:"provider"`
-	Workspace   string   `json:"workspace"`
-	NextRunAt   string   `json:"next_run_at"`
-	LastFiredAt string   `json:"last_fired_at"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
-	VersionNo   int      `json:"version_no"`
-	VersionID   string   `json:"version_id"`
-	Constraints []string `json:"constraints"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Cron      string `json:"cron"`
+	Prompt    string `json:"prompt"`
+	Goal      string `json:"goal"`
+	Provider  string `json:"provider"`
+	Workspace string `json:"workspace"`
+	// WorkspaceDefault: the task has no folder of its own and runs in the one tidebot
+	// gives it (set on the detail answer only, where Workspace is then that folder).
+	WorkspaceDefault bool     `json:"workspace_default,omitempty"`
+	NextRunAt        string   `json:"next_run_at"`
+	LastFiredAt      string   `json:"last_fired_at"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
+	VersionNo        int      `json:"version_no"`
+	VersionID        string   `json:"version_id"`
+	Constraints      []string `json:"constraints"`
 	// ConstraintIDs parallels Constraints; amendment items refer to constraints by id.
 	ConstraintIDs []string `json:"constraint_ids"`
 	Skills        []string `json:"skills"`
@@ -556,7 +559,9 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 404, "task not found")
 			return
 		}
-		writeJSON(w, 200, toTaskDTO(v))
+		d := toTaskDTO(v)
+		d.Workspace, d.WorkspaceDefault = s.taskWorkspace(d.ID, d.Workspace)
+		writeJSON(w, 200, d)
 		return
 	}
 	switch parts[1] {

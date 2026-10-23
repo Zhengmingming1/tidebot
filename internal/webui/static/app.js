@@ -370,9 +370,11 @@
     });
   }
   // Desktop app only: show tidebot's data folder or a just-saved file in Finder / Explorer / the Linux file manager.
-  var desktopOpenOK = null;
+  var desktopOpenOK = null, desktopOS = "";
+  // The button is named after the OS file manager, like VS Code's "Reveal in Finder / File Explorer".
+  function fmLabel() { return T(desktopOS === "darwin" ? "ws.open_mac" : desktopOS === "windows" ? "ws.open_win" : "ws.open_linux"); }
   function desktopOpenable() {
-    if (!desktopOpenOK) desktopOpenOK = api("/api/desktop/open").then(function (r) { return !!(r && r.available); }, function () { return false; });
+    if (!desktopOpenOK) desktopOpenOK = api("/api/desktop/open").then(function (r) { desktopOS = (r && r.os) || ""; return !!(r && r.available); }, function () { return false; });
     return desktopOpenOK;
   }
   function desktopOpen(body) { return api("/api/desktop/open", { method: "POST", body: body }).catch(fail); }
@@ -648,7 +650,7 @@
   }
   function shortcutsHelp() {
     var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
-    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r / g c", T("sc.goto")], ["n t / n s / n p / n b / n q", T("sc.create")], ["r / e", T("sc.task_keys")]];
+    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r / g c", T("sc.goto")], ["n t / n s / n p / n b / n q", T("sc.create")], ["r / e / o", T("sc.task_keys")]];
     modal('<div class="card-head"><span class="ico">' + ic("more") + "</span><h2>" + esc(T("sc.title")) + '</h2></div><table class="tbl sc-table"><tbody>' +
       rows.map(function (r) { return "<tr><td>" + r[0].split(" / ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join(" / ") + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") +
       '</tbody></table><div class="actions"><button class="btn" id="sc-close">' + esc(T("btn.close")) + "</button></div>", function (r, close) { $("#sc-close").addEventListener("click", close); });
@@ -681,7 +683,9 @@
     if (e.key === "g" || e.key === "n") { gPending = { k: e.key, valueOf: function () { return this.t; }, t: Date.now() }; return; }
     // page-level single keys
     // r / e: run & edit on a task page, rerun & edit-and-rerun on a run page.
-    var act = { r: ["#t-run", "#rd-rerun"], e: ["#t-edit", "#rd-edit"] }[e.key], hit = act && (($(act[0]) || $(act[1])));
+    // o: open the task's folder (desktop app, overview tab).
+    var act = { r: ["#t-run", "#rd-rerun"], e: ["#t-edit", "#rd-edit"], o: ["#ws-open"] }[e.key], hit = act && (($(act[0]) || $(act[1])));
+    if (hit && hit.classList.contains("hidden")) hit = null; // e.g. "o" in the browser, where there is no file manager
     if (hit && !hit.disabled) { e.preventDefault(); hit.click(); }
   });
 
@@ -1516,7 +1520,10 @@
         "<dt>" + esc(T("col.schedule")) + "</dt><dd>" + esc(cronHuman(tk.cron)) + (tk.cron ? '<span class="ov-next" id="ov-next"></span>' : "") + "</dd>" +
         "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(tk.provider || T("td.default")) + "</dd>" +
         "<dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd>" +
-        "<dt>" + esc(T("td.workspace")) + "</dt><dd><code>" + esc(tk.workspace || "—") + "</code></dd></dl></div>";
+        "<dt>" + esc(T("td.workspace")) + '</dt><dd class="ws-row">' + (tk.workspace ? '<code class="ws-path">' + esc(tk.workspace) + "</code>" +
+          (tk.workspace_default ? '<span class="tag" data-tip="' + esc(T("ws.default_tip")) + '">' + esc(T("ws.default")) + "</span>" : "") +
+          '<button type="button" class="icon-btn sm" id="ws-copy" data-tip="' + esc(T("ws.copy")) + '" aria-label="' + esc(T("ws.copy")) + '">' + ic("copy", "sm") + "</button>" +
+          '<button type="button" class="icon-btn sm hidden" id="ws-open" aria-label="">' + ic("folder", "sm") + "</button>" : '<span class="muted">—</span>') + "</dd></dl></div>";
     }
     if (tab === "runs") return '<div class="thread flush-t">' + (extra && extra.length ? runsTable(extra) : emptyState("runs", T("runs.none"), "")) + "</div>";
     return '<div class="thread"><table class="table"><thead><tr><th>' + esc(T("col.version")) + "</th><th>" + esc(T("col.source")) + "</th><th>" + esc(T("col.note")) + "</th><th>" + esc(T("col.created")) + '</th><th></th></tr></thead><tbody>' +
@@ -1586,6 +1593,18 @@
         if (!box || !ts.length) return;
         box.innerHTML = '<span class="muted">' + esc(T("td.next_at", { t: when(ts[0]) })) + "</span>" + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : ""));
       }).catch(function () {});
+      if ($("#ws-copy")) $("#ws-copy").addEventListener("click", function () { copyText(t.workspace).catch(fail); });
+      // Desktop app only: open the folder in Finder / File Explorer / the file manager ("o").
+      if ($("#ws-open")) desktopOpenable().then(function (ok) {
+        var b = $("#ws-open");
+        if (!ok || !b) return;
+        var l = fmLabel() + " (o)";
+        b.setAttribute("data-tip", l); b.setAttribute("aria-label", fmLabel());
+        b.classList.remove("hidden");
+        b.addEventListener("click", function () {
+          api("/api/desktop/open", { method: "POST", body: { target: "workspace", id: t.id } }).catch(function (e) { toast(e.status === 404 ? T("ws.missing") : e.message, true); });
+        });
+      });
       wireRows();
       $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { var tb = b.getAttribute("data-tab"); history.replaceState(null, "", "#/tasks/" + enc(id) + "/" + tb); lastHash = location.hash; renderTaskDetail(id, tb); }); });
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(fail); });

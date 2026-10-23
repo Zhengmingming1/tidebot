@@ -1574,3 +1574,12 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 #set-update .up-actions small { min-width: 0; flex: 1 1 200px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 #set-update .up-sub { margin: var(--s1) 0 0; font-size: 12px; }
 #set-update .changelog { max-height: 160px; margin: 0 0 var(--s1); }
+
+/* task overview: working folder + default tag + copy / open. One 28px row (8px grid): the path chip,
+   tag and icon buttons share a centre line; a long path wraps inside its chip, the rest stay on line 1.
+   The row is lifted 4px so the path text lines up with the "工作目录" label. */
+.kv dd.ws-row { display: flex; align-items: flex-start; gap: var(--s1); margin-top: -4px; }
+.kv dd.ws-row .ws-path { min-width: 0; flex: 0 1 auto; padding: 4px 8px; line-height: 20px; word-break: break-all; }
+.kv dd.ws-row .tag { flex: none; margin-top: 4px; line-height: 18px; }
+.kv dd.ws-row .icon-btn { flex: none; }
+.kv dd.ws-row [data-tip]:hover::after, .kv dd.ws-row [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }

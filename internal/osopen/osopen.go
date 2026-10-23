@@ -30,7 +30,9 @@ type Candidate struct {
 func Commands(goos, path string, reveal bool) []Candidate {
 	switch goos {
 	case "darwin":
-		if reveal {
+		// `open X.app` (or any bundle folder) launches it instead of showing it, so a
+		// folder whose name has an extension is shown selected in its parent instead.
+		if reveal || posixpath.Ext(posixpath.Base(path)) != "" {
 			return []Candidate{{Name: "open", Args: []string{"-R", path}}}
 		}
 		return []Candidate{{Name: "open", Args: []string{path}}}

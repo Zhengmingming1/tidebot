@@ -1423,7 +1423,7 @@
   "bt.none": "还没有按钮",
   "bt.removed": "已删除「{n}」",
   "sc.create": "先按 n：t 任务 / s 技能 / p 服务商 / b 按钮 / q 快速运行",
-  "sc.task_keys": "任务详情页：r 立即运行，e 编辑；运行详情页：r 重跑，e 改后重跑",
+  "sc.task_keys": "任务详情页：r 立即运行，e 编辑，o 打开工作目录（桌面版）；运行详情页：r 重跑，e 改后重跑",
   "st.artifact_days": "产物保留",
   "st.artifact_days_sub": "运行生成的文件（报告、导出等）超过期限后删除。",
   "st.clean": "立即清理",
@@ -1501,5 +1501,12 @@
   "up.checked_at": "检查时间：{t}",
   "up.apply_retry": "重试更新",
   "up.confirm_title": "安装 {v}？",
-  "up.proxy_hint": "当前走的是代理 {p}，它没有及时回应。请确认代理软件已打开、所选节点能连上 GitHub，或在 设置 → 网络 里改成直连 / 手动代理，然后重试。"
+  "up.proxy_hint": "当前走的是代理 {p}，它没有及时回应。请确认代理软件已打开、所选节点能连上 GitHub，或在 设置 → 网络 里改成直连 / 手动代理，然后重试。",
+  "ws.copy": "复制路径",
+  "ws.default": "默认",
+  "ws.default_tip": "这个任务没有单独设置文件夹，运行都在 tidebot 为它分配的这个目录里。",
+  "ws.open_mac": "在访达中打开",
+  "ws.open_win": "在资源管理器中打开",
+  "ws.open_linux": "在文件管理器中打开",
+  "ws.missing": "文件夹还不存在，任务第一次运行时会创建。"
 }
