@@ -252,7 +252,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .composer { display: flex; gap: var(--s1); align-items: center; border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 4px 4px 4px var(--s2); background: var(--surface); }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-100); }
 .composer input { flex: 1; border: 0; outline: none; height: 40px; background: transparent; }
-.vtree { width: 100%; display: block; }
+.vtree { width: 100%; max-width: 312px; display: block; } /* viewBox is 312 wide: stay at 1:1 when the card spans the page (1024px window, single column) */
 .vtree .node rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1; }
 .vtree .node.cur rect { fill: var(--accent-50); stroke: var(--accent); stroke-width: 1.5; }
 .vtree .node { cursor: pointer; }
@@ -1424,7 +1424,7 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 .lv-bar { flex-wrap: wrap; gap: 6px 4px; } /* one row when it fits; wraps in the narrow two-column run page (~1180px windows) */
 .lv-bar .lv-f { flex: none; }
 .lv-f button { padding: 0 8px; }
-.lv-bar .search-in.sm { min-width: 120px; flex: 0 1 200px; }
+.lv-bar .search-in.sm { min-width: 0; flex: 1 1 120px; max-width: 200px; } /* basis 120 decides wrapping, grows to 200: English fits one row at 1024px */
 .lv-bar #lv-pos { min-width: 0; font-size: 12px; }
 .lv-sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; flex: none; }
 .lv-bar > [data-tip]:last-child:hover::after, .lv-bar > [data-tip]:last-child:focus-visible::after { left: auto; right: -4px; transform: none; }

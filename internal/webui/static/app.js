@@ -596,7 +596,10 @@
       api("/api/search?q=" + enc(q)).then(function (hits) {
         if (my !== pal.seq || !$("#pal-list")) return; // stale response: drop it
         var extra = [];
+        // sub is the raw status from the DB ("active", "succeeded"); show it in the UI language.
+        var subT = function (pre, v) { var k = pre + v; return v && T(k) !== k ? T(k) : v; };
         hits.forEach(function (h) {
+          h.sub = h.kind === "task" ? subT("task.", h.sub) : h.kind === "run" ? subT("st.", h.sub) : h.sub;
           if (h.kind === "task") {
             extra.push({ kind: "task", icon: "tasks", label: h.name, sub: h.sub, run: function () { location.hash = "#/tasks/" + enc(h.id); } });
             extra.push({ kind: "run_task", icon: "play", label: T("pal.run_task", { name: h.name }), run: function () {
