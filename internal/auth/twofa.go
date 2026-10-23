@@ -17,6 +17,9 @@ type RateLimitError struct{ RetryAfter time.Duration }
 
 func (e *RateLimitError) Error() string { return "too many login attempts; try later" }
 
+// ErrBadTOTP: the 6-digit code doesn't match (wrong, expired or already used).
+var ErrBadTOTP = errors.New("code does not match")
+
 // pendingTOTP holds a secret between "begin" and "confirm". It lives only in
 // memory: 2FA is not enabled (and nothing is persisted) until a code verifies.
 type pendingTOTP struct {
@@ -52,8 +55,9 @@ func (s *Service) ConfirmTOTP(ctx context.Context, code string) ([]string, error
 	if !ok || time.Now().After(p.exp) {
 		return nil, errors.New("no pending setup; start again")
 	}
-	if !VerifyTOTP(p.secret, strings.TrimSpace(code)) {
-		return nil, errors.New("code does not match")
+	step, match := totpStep(p.secret, strings.TrimSpace(code), time.Now())
+	if !match {
+		return nil, ErrBadTOTP
 	}
 	codes, hashes, err := newRecoveryCodes(10)
 	if err != nil {
@@ -63,8 +67,9 @@ func (s *Service) ConfirmTOTP(ctx context.Context, code string) ([]string, error
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, recovery_codes_hash=?, updated_at=? WHERE id='owner'`,
-		stored, strings.Join(hashes, ","), nowUTC())
+	// The confirming code's step counts as used, so it can't be replayed to sign in.
+	_, err = s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, recovery_codes_hash=?, totp_last_step=?, updated_at=? WHERE id='owner'`,
+		stored, strings.Join(hashes, ","), step, nowUTC())
 	if err != nil {
 		return nil, err
 	}
@@ -74,17 +79,33 @@ func (s *Service) ConfirmTOTP(ctx context.Context, code string) ([]string, error
 	return codes, nil
 }
 
-// DisableTOTPChecked turns 2FA off after re-checking the password.
-func (s *Service) DisableTOTPChecked(ctx context.Context, password string) error {
+// DisableTOTPChecked turns 2FA off after re-checking the password. Like
+// ChangePassword, wrong passwords count as failed logins from ip and the check is
+// refused (RateLimitError) once that IP is locked out, so a stolen session can't
+// guess the password here. No password set (desktop window) means none is asked.
+func (s *Service) DisableTOTPChecked(ctx context.Context, password, ip string) error {
+	if ip == "" {
+		ip = "unknown"
+	}
+	if err := s.checkRateLimit(ctx, ip); err != nil {
+		_ = s.recordAttempt(ctx, ip, false, "rate_limited")
+		return err
+	}
 	var hash string
 	if err := s.DB.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id='owner'`).Scan(&hash); err != nil {
-		return errors.New("invalid credentials")
+		return ErrBadCurrent
 	}
-	if ok, err := VerifyPassword(hash, password); err != nil || !ok {
-		return errors.New("invalid credentials")
+	if hash != "" {
+		if ok, err := VerifyPassword(hash, password); err != nil || !ok {
+			_ = s.recordAttempt(ctx, ip, false, "2fa_off_bad")
+			return ErrBadCurrent
+		}
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE users SET totp_secret='', totp_enabled=0, recovery_codes_hash='', updated_at=? WHERE id='owner'`, nowUTC())
-	return err
+	if err := s.DisableTOTP(ctx); err != nil {
+		return err
+	}
+	_ = s.recordAttempt(ctx, ip, true, "2fa_off")
+	return nil
 }
 
 // RecoveryCodesLeft counts unused recovery codes.

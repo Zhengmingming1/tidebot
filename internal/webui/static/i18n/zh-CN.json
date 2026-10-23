@@ -245,7 +245,7 @@
   "ie.keys_multi": "Ctrl+Enter 保存,Esc 取消",
   "ie.saved": "已保存。",
   "lang.auto": "自动",
-  "login.bad": "密码或验证码不对。",
+  "login.bad": "密码或验证码不对。每个验证码只能用一次，刚用过的话请等下一个。",
   "login.bad_or_totp": "密码不对，或者需要两步验证码。开了两步验证的话，请在下面输入。",
   "login.foot": "单用户控制台 · 设置或重置密码：",
   "login.password": "密码",
@@ -1543,5 +1543,7 @@
   "pw.done_n": "密码已更新，已退出其他 {n} 处登录",
   "ses.others": "退出其他登录（{n}）",
   "ses.others_tip": "其他浏览器或设备上的登录，当前窗口不受影响",
-  "ses.others_done": "已退出其他 {n} 处登录"
+  "ses.others_done": "已退出其他 {n} 处登录",
+  "tf.disable_sub_nopw": "关闭后登录不再需要验证码。",
+  "tf.need_pw": "请输入密码确认"
 }

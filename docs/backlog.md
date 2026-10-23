@@ -1560,3 +1560,60 @@ the task form and the task folder; this one is the list people look at most.
 1. Same small strip on the skills list (runs that used each skill) and the task detail header.
 2. Filter the task list by "failing" (last run failed / timed out), with a count like the runs list.
 3. Click the "成功 8/10" text to open the runs list filtered to that task.
+
+## 2026-10-24 (04:20): 2FA codes work once, turning 2FA off is rate-limited
+
+Category: **security / correctness** (sign-in and Settings → Security). The last rounds were UI and
+features; this closes two gaps in two-factor sign-in, one of them idea 1 from the 00:20 entry.
+
+**Done**
+
+- **A 6-digit code is accepted once.** Before, any code was valid for its whole ±30 s window, so a
+  code seen over a shoulder or in a proxy log could sign in again within about 90 s. Now
+  `users.totp_last_step` (new column, added idempotently) keeps the time step of the last accepted
+  code; sign-in only accepts a code from a **later** step (RFC 6238 §5.2). The check is one
+  conditional `UPDATE … WHERE totp_last_step < ?`, so two sign-ins racing with one code can't both
+  get in. A refused reuse is logged in `login_attempts` as `totp_reused` and counts toward the
+  lockout. Recovery codes were already single-use.
+- **The code that turns 2FA on is spent too** (WebUI confirm and `agentctl auth totp-setup`, now
+  via `EnableTOTPWithCode`), so it can't be replayed for a sign-in. Code comparison is constant-time.
+- **Turning 2FA off is rate-limited like sign-in:** wrong passwords count as failed logins for that
+  IP; after 5 the endpoint answers 429 + `Retry-After` even with the right one. Errors carry
+  `code: bad_password`; other failures are a 500 instead of a 403 that looked like a wrong password.
+  With no password set (desktop window) no password is asked.
+- `agentctl auth totp-disable` now also clears the recovery codes, so a later setup doesn't carry
+  old ones.
+- Dialog: a real `<form>` (Enter submits, hidden `username` + `current-password` for password
+  managers), "请输入密码确认" when empty, "密码不对" only for a wrong password, a countdown on the
+  disabled button while locked out, no password field when none is set. Sign-in's wrong-code
+  message now says a code works only once. zh-CN and en.
+- Same on macOS / Windows / Linux, desktop window and browser: Go + plain HTML, no paths or keys
+  involved. Modal 520×291 at 1024×655, scrollWidth 1024.
+- Shots: `/workspace/tidebot-shots/2fa-off-wrong-zh-CN-1024x655.png`,
+  `2fa-off-locked-zh-CN-1024x655.png`, `2fa-off-wrong-en-1024x655.png`.
+- Tests: `TestTOTPCodeUsedOnce` (setup code refused for sign-in, next code once, older code refused
+  after a newer one, `totp_reused` logged, disable clears marker and recovery codes),
+  `TestTOTPConcurrentReuse` (6 parallel sign-ins with one code → exactly 1), `TestTOTPStepWindow`,
+  `TestDisableTOTPCheckedRateLimit` (lockout shared with sign-in, per IP),
+  `TestTwoFADisableRateLimited` (HTTP 429 + Retry-After, 2FA stays on), `TestTwoFADisableUI`;
+  `TestTwoFAThreeStepFlow` updated for one-time codes.
+
+**Inspiration**
+
+- dani-garcia/vaultwarden `src/api/core/two_factor/authenticator.rs` `validate_totp_code()`: loops
+  over the ±1 step window and accepts a match only when `time_step > twofactor.last_used`, then
+  saves that step; a match at or below it is logged as "already been used". Storing the step (not
+  the code, as go-gitea/gitea `models/auth/twofactor.go` `LastUsedPasscode` does) also refuses older
+  codes still inside the window. No code copied.
+
+**Learned**
+
+- Tests that built TOTP codes with `time.Now()` at each call could straddle a 30 s boundary; with
+  one-time codes that turns into a flaky "replay accepted". Take one `t0` and derive every code from it.
+- A 2FA-off check that answers 403 for every error made a database error look like a wrong password.
+
+**Ideas for later**
+
+1. Ask for a current 2FA code (or a recovery code) when turning 2FA off, not only the password.
+2. Show the lockout wait as "14:57" instead of "897 秒" in the password and 2FA dialogs.
+3. Rate-limit the 2FA setup confirm step and show "codes left" with a regenerate button.

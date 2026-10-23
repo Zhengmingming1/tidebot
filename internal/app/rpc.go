@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -399,10 +400,10 @@ func (a *App) rpcAuthTOTPSetup(ctx context.Context, params json.RawMessage) (any
 		}
 		return map[string]any{"secret": sec, "uri": uri, "note": "confirm with auth.totp_setup code+secret"}, nil
 	}
-	if !auth.VerifyTOTP(p.Secret, p.Code) {
-		return nil, fmt.Errorf("invalid totp code")
-	}
-	if err := a.Auth.EnableTOTP(ctx, p.Secret); err != nil {
+	if err := a.Auth.EnableTOTPWithCode(ctx, p.Secret, p.Code); err != nil {
+		if errors.Is(err, auth.ErrBadTOTP) {
+			return nil, fmt.Errorf("invalid totp code")
+		}
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil

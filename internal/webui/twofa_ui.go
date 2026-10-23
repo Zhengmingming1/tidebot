@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/Zhengmingming1/tidebot/internal/auth"
 
 	"rsc.io/qr"
 )
@@ -66,8 +70,19 @@ func (s *Server) handle2FA(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "too long")
 			return
 		}
-		if err := s.deps.Auth.DisableTOTPChecked(ctx, body.Password); err != nil {
-			writeErr(w, 403, err.Error())
+		err := s.deps.Auth.DisableTOTPChecked(ctx, body.Password, auth.ClientIP(r.RemoteAddr))
+		var rl *auth.RateLimitError
+		switch {
+		case errors.As(err, &rl):
+			secs := int(rl.RetryAfter.Seconds() + 0.999)
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			writeJSON(w, 429, map[string]any{"error": rl.Error(), "retry_after": secs})
+			return
+		case errors.Is(err, auth.ErrBadCurrent):
+			writeJSON(w, 403, map[string]any{"error": err.Error(), "code": "bad_password"})
+			return
+		case err != nil:
+			writeErr(w, 500, "could not turn off 2FA")
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})

@@ -50,7 +50,8 @@ func TestTOTPEncryptedAtRestAndMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Legacy plaintext still logs in before migration.
-	if _, err := s.Login(ctx, "correct horse battery", TOTPCodeAt(sec, time.Now()), "10.0.0.1"); err != nil {
+	t0 := time.Now()
+	if _, err := s.Login(ctx, "correct horse battery", TOTPCodeAt(sec, t0), "10.0.0.1"); err != nil {
 		t.Fatalf("legacy login: %v", err)
 	}
 	n, err := s.MigrateTOTP(ctx)
@@ -64,7 +65,8 @@ func TestTOTPEncryptedAtRestAndMigration(t *testing.T) {
 	if n, _ := s.MigrateTOTP(ctx); n != 0 || storedSecret(t, s) != enc {
 		t.Fatal("migration not idempotent")
 	}
-	if _, err := s.Login(ctx, "correct horse battery", TOTPCodeAt(sec, time.Now()), "10.0.0.2"); err != nil {
+	// Next step's code: the one above is spent.
+	if _, err := s.Login(ctx, "correct horse battery", TOTPCodeAt(sec, t0.Add(30*time.Second)), "10.0.0.2"); err != nil {
 		t.Fatalf("encrypted login: %v", err)
 	}
 	// Fresh enable encrypts directly, nonce differs per record.

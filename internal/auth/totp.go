@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
@@ -23,20 +24,28 @@ func GenerateTOTPSecret(issuer, account string) (secret, uri string, err error) 
 	return secret, uri, nil
 }
 
-// VerifyTOTP checks a 6-digit code with ±1 step window.
+// VerifyTOTP checks a 6-digit code with ±1 step window. It does not remember used
+// codes; sign-in and 2FA setup go through Service.acceptTOTP, which does.
 func VerifyTOTP(secret, code string) bool {
+	_, ok := totpStep(secret, code, time.Now())
+	return ok
+}
+
+// totpStep returns the 30-second time step (now-1, now or now+1) whose code equals
+// code. The comparison is constant-time.
+func totpStep(secret, code string, now time.Time) (int64, bool) {
 	secret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
 	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
-	if err != nil {
-		return false
+	if err != nil || len(code) != 6 {
+		return 0, false
 	}
-	now := time.Now().Unix() / 30
+	cur := now.Unix() / 30
 	for _, delta := range []int64{-1, 0, 1} {
-		if hotp(key, now+delta) == code {
-			return true
+		if subtle.ConstantTimeCompare([]byte(hotp(key, cur+delta)), []byte(code)) == 1 {
+			return cur + delta, true
 		}
 	}
-	return false
+	return 0, false
 }
 
 func hotp(key []byte, counter int64) string {

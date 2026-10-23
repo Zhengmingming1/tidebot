@@ -74,14 +74,46 @@ func (s *Service) EnableTOTP(ctx context.Context, secret string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, updated_at=? WHERE id='owner'`, stored, nowUTC())
+	_, err = s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, totp_last_step=0, updated_at=? WHERE id='owner'`, stored, nowUTC())
 	return err
 }
 
-// DisableTOTP clears TOTP.
-func (s *Service) DisableTOTP(ctx context.Context) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE users SET totp_secret='', totp_enabled=0, updated_at=? WHERE id='owner'`, nowUTC())
+// EnableTOTPWithCode verifies code against secret, then enables 2FA with that code's
+// time step already used, so the code that turned 2FA on can't also sign someone in.
+func (s *Service) EnableTOTPWithCode(ctx context.Context, secret, code string) error {
+	step, ok := totpStep(secret, strings.TrimSpace(code), time.Now())
+	if !ok {
+		return ErrBadTOTP
+	}
+	stored, err := s.storeTOTP(secret)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE users SET totp_secret=?, totp_enabled=1, totp_last_step=?, updated_at=? WHERE id='owner'`, stored, step, nowUTC())
 	return err
+}
+
+// DisableTOTP clears TOTP, its recovery codes and the used-code marker.
+func (s *Service) DisableTOTP(ctx context.Context) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET totp_secret='', totp_enabled=0, recovery_codes_hash='', totp_last_step=0, updated_at=? WHERE id='owner'`, nowUTC())
+	return err
+}
+
+// acceptTOTP checks code and uses up its time step: the same code, or any code from
+// an earlier step, is refused afterwards (RFC 6238 §5.2). The conditional UPDATE keeps
+// two simultaneous sign-ins with one code from both getting through. reused is true
+// when the code was right but already spent.
+func (s *Service) acceptTOTP(ctx context.Context, secret, code string) (ok, reused bool) {
+	step, match := totpStep(secret, strings.TrimSpace(code), time.Now())
+	if !match {
+		return false, false
+	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE users SET totp_last_step=? WHERE id='owner' AND totp_last_step<?`, step, step)
+	if err != nil {
+		return false, false
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, n == 0
 }
 
 // TOTPEnabled reports if 2FA is on.
@@ -128,8 +160,13 @@ func (s *Service) Login(ctx context.Context, password, totpCode, ip string) (*Se
 			_ = s.recordAttempt(ctx, ip, false, "totp_undecryptable")
 			return nil, errors.New("invalid credentials")
 		}
-		if !VerifyTOTP(secret, strings.TrimSpace(totpCode)) && !s.useRecoveryCode(ctx, totpCode) {
-			_ = s.recordAttempt(ctx, ip, false, "bad_totp")
+		ok, reused := s.acceptTOTP(ctx, secret, totpCode)
+		if !ok && !s.useRecoveryCode(ctx, totpCode) {
+			detail := "bad_totp"
+			if reused {
+				detail = "totp_reused"
+			}
+			_ = s.recordAttempt(ctx, ip, false, detail)
 			return nil, errors.New("invalid credentials")
 		}
 	}

@@ -29,6 +29,8 @@ func EnsurePhase1bColumns(db *sql.DB) error {
 	alters := []string{
 		`ALTER TABLE runs ADD COLUMN cost_bucket TEXT NOT NULL DEFAULT 'production'`,
 		`ALTER TABLE runs ADD COLUMN paused_by_budget INTEGER NOT NULL DEFAULT 0`,
+		// Last accepted TOTP time step: a code (or an older one) is accepted once.
+		`ALTER TABLE users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, stmt := range alters {
 		if _, err := db.Exec(stmt); err != nil {

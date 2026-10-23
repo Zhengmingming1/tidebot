@@ -37,7 +37,8 @@ func TestTwoFAThreeStepFlow(t *testing.T) {
 	if on, _ := c.s.deps.Auth.TOTPEnabled(ctx); on {
 		t.Fatal("2fa enabled after a wrong code")
 	}
-	code, out = c.json(http.MethodPost, "/api/auth/2fa/confirm", map[string]any{"code": auth.TOTPCodeAt(secret, time.Now())})
+	t0 := time.Now() // one instant for every code below, so a 30 s boundary can't flip them
+	code, out = c.json(http.MethodPost, "/api/auth/2fa/confirm", map[string]any{"code": auth.TOTPCodeAt(secret, t0)})
 	recs, _ := out["recovery_codes"].([]any)
 	if code != 200 || len(recs) != 10 {
 		t.Fatalf("confirm %d %v", code, out)
@@ -60,8 +61,16 @@ func TestTwoFAThreeStepFlow(t *testing.T) {
 	if rr := loginRaw(c, `{"password":"testpass99"}`); rr.Code != 401 {
 		t.Fatalf("no totp %d", rr.Code)
 	}
-	if rr := loginRaw(c, `{"password":"testpass99","totp":"`+auth.TOTPCodeAt(secret, time.Now())+`"}`); rr.Code != 200 {
+	// The code that confirmed setup is spent; the next one works, once.
+	if rr := loginRaw(c, `{"password":"testpass99","totp":"`+auth.TOTPCodeAt(secret, t0)+`"}`); rr.Code != 401 {
+		t.Fatalf("setup code replayed for login: %d", rr.Code)
+	}
+	next := auth.TOTPCodeAt(secret, t0.Add(30*time.Second))
+	if rr := loginRaw(c, `{"password":"testpass99","totp":"`+next+`"}`); rr.Code != 200 {
 		t.Fatalf("totp login %d", rr.Code)
+	}
+	if rr := loginRaw(c, `{"password":"testpass99","totp":"`+next+`"}`); rr.Code != 401 {
+		t.Fatalf("totp code reused %d", rr.Code)
 	}
 	rc := recs[0].(string)
 	if rr := loginRaw(c, `{"password":"testpass99","totp":"`+strings.ToUpper(rc)+`"}`); rr.Code != 200 {
@@ -71,8 +80,8 @@ func TestTwoFAThreeStepFlow(t *testing.T) {
 		t.Fatalf("recovery code reused %d", rr.Code)
 	}
 	// Disable needs the password.
-	if code, _ := c.json(http.MethodPost, "/api/auth/2fa/disable", map[string]any{"password": "nope"}); code != 403 {
-		t.Fatalf("disable w/o password %d", code)
+	if code, out := c.json(http.MethodPost, "/api/auth/2fa/disable", map[string]any{"password": "nope"}); code != 403 || out["code"] != "bad_password" {
+		t.Fatalf("disable w/o password %d %v", code, out)
 	}
 	if code, _ := c.json(http.MethodPost, "/api/auth/2fa/disable", map[string]any{"password": "testpass99"}); code != 200 {
 		t.Fatalf("disable %d", code)

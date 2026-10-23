@@ -245,7 +245,7 @@
   "ie.keys_multi": "Ctrl+Enter to save, Esc to cancel",
   "ie.saved": "Saved.",
   "lang.auto": "Auto",
-  "login.bad": "Wrong password or code.",
+  "login.bad": "Wrong password or code. A code works only once, so if you just used it, wait for the next one.",
   "login.bad_or_totp": "Wrong password, or a 2FA code is needed. If 2FA is on, enter it below.",
   "login.foot": "Single-user console · set or reset the password with",
   "login.password": "Password",
@@ -1543,5 +1543,7 @@
   "pw.done_n": "Password updated. Signed out {n} other sessions",
   "ses.others": "Sign out others ({n})",
   "ses.others_tip": "Sessions in other browsers or devices. This window stays signed in.",
-  "ses.others_done": "Signed out {n} other sessions"
+  "ses.others_done": "Signed out {n} other sessions",
+  "tf.disable_sub_nopw": "After this, sign-in no longer asks for a code.",
+  "tf.need_pw": "Enter your password to confirm"
 }

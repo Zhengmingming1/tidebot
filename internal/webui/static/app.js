@@ -4037,7 +4037,7 @@
             api("/api/auth/sessions/others", { method: "POST", body: {} }).then(function (r) { toast(T("ses.others_done", { n: r.signed_out })); refresh(); }).catch(function (err) { b.disabled = false; fail(err); });
           });
           if ($("#tf-on")) $("#tf-on").addEventListener("click", twoFASetup);
-          if ($("#tf-off")) $("#tf-off").addEventListener("click", twoFADisable);
+          if ($("#tf-off")) $("#tf-off").addEventListener("click", function () { twoFADisable(st.password_set !== false); });
         };
       } else if (section === "notifications") {
         body = '<section class="card">' + head + '<div id="nt-box"><p class="muted pad-x">…</p></div></section>';
@@ -4409,14 +4409,43 @@
         });
       });
   }
-  function twoFADisable() {
-    modal('<div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("tf.disable")) + '</h2></div><p>' + esc(T("tf.disable_sub")) + '</p><label class="field"><span>' + esc(T("login.password")) + '</span><input type="password" id="tf-pw" autocomplete="current-password" maxlength="1024"></label><p class="err" id="tf-err"></p>' +
-      '<div class="actions"><button class="btn" id="tf-cancel">' + esc(T("btn.cancel")) + '</button><button class="btn danger" id="tf-go">' + esc(T("tf.disable")) + "</button></div>", function (root, close) {
-        $("#tf-pw").focus();
-        $("#tf-cancel").addEventListener("click", close);
-        $("#tf-go").addEventListener("click", function () {
-          api("/api/auth/2fa/disable", { method: "POST", body: { password: $("#tf-pw").value } }).then(function () { close(); toast(T("tf.disabled")); refresh(); })
-            .catch(function () { $("#tf-err").textContent = T("tf.bad_pw"); });
+  // Turn 2FA off after re-entering the password. Wrong passwords count toward the
+  // sign-in lockout on the server; a 429 counts down on the button like the
+  // change-password dialog. A real <form>, so Enter submits and managers fill it.
+  function twoFADisable(hasPw) {
+    modal('<div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("tf.disable")) + '</h2></div><p class="muted pw-sub">' + esc(T(hasPw ? "tf.disable_sub" : "tf.disable_sub_nopw")) + "</p>" +
+      '<form id="tf-off-form" class="pw-form" novalidate><input type="text" class="hidden" autocomplete="username" value="owner" readonly tabindex="-1" aria-hidden="true">' +
+      (hasPw ? '<label class="field"><span>' + esc(T("login.password")) + '</span><input type="password" id="tf-pw" autocomplete="current-password" maxlength="1024" spellcheck="false" autocapitalize="off" aria-describedby="tf-err"></label>' : "") +
+      '<p class="err" id="tf-err" role="alert"></p>' +
+      '<div class="actions"><button type="button" class="btn" id="tf-cancel">' + esc(T("btn.cancel")) + '</button><button type="submit" class="btn danger" id="tf-go">' + esc(T("tf.disable")) + "</button></div></form>", function (root, close) {
+        var pwIn = $("#tf-pw", root), go = $("#tf-go", root), err = $("#tf-err", root);
+        var busy = false, waitTimer = null, waitUntil = 0;
+        (pwIn || go).focus();
+        var wait = function (secs) {
+          waitUntil = Date.now() + secs * 1000; go.disabled = true; clearInterval(waitTimer);
+          var tick = function () {
+            var left = Math.ceil((waitUntil - Date.now()) / 1000);
+            if (left <= 0 || !document.contains(go)) { clearInterval(waitTimer); waitUntil = 0; go.disabled = false; err.textContent = ""; return; }
+            err.textContent = T("pw.too_many", { n: left });
+          };
+          tick(); waitTimer = setInterval(tick, 1000);
+        };
+        if (pwIn) pwIn.addEventListener("input", function () { if (Date.now() >= waitUntil) err.textContent = ""; });
+        $("#tf-cancel", root).addEventListener("click", function () { clearInterval(waitTimer); close(); });
+        $("#tf-off-form", root).addEventListener("submit", function (e) {
+          e.preventDefault();
+          if (busy || go.disabled) return;
+          if (pwIn && !pwIn.value) { err.textContent = T("tf.need_pw"); pwIn.focus(); return; }
+          busy = true; go.disabled = true;
+          api("/api/auth/2fa/disable", { method: "POST", body: { password: pwIn ? pwIn.value : "" } }).then(function () {
+            if (pwIn) pwIn.value = "";
+            clearInterval(waitTimer); close(); toast(T("tf.disabled")); refresh();
+          }).catch(function (x) {
+            go.disabled = false;
+            if (x.status === 429) { wait((x.data && x.data.retry_after) || 60); return; }
+            if (x.data && x.data.code === "bad_password") { err.textContent = T("tf.bad_pw"); if (pwIn) pwIn.select(); return; }
+            err.textContent = x.message;
+          }).then(function () { busy = false; });
         });
       });
   }
