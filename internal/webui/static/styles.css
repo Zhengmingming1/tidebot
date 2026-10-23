@@ -502,7 +502,14 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: none;
 /* I3: log view, runs toolbar, home dashboard */
 .lv-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: var(--s1); }
 .lv-f button { height: 28px; padding: 0 10px; font-size: 12px; }
-.lv-f .cnt { color: var(--text-3); font-weight: 500; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.lv-f .cnt, .run-f .cnt { color: var(--text-3); font-weight: 500; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.run-f .active .cnt { color: var(--text-2); }
+/* runs toolbar: search, five filter chips and sort stay on one row at 1024 px */
+.run-tb { flex-wrap: nowrap; }
+.run-tb .search-in { flex: 1 1 180px; min-width: 140px; max-width: 280px; }
+.run-tb .filters, .run-tb select { flex: none; }
+.runs-more { display: flex; align-items: center; justify-content: space-between; gap: var(--s1); height: 48px; padding: 0 var(--s3); border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.runs-more.hidden { display: none; }
 .search-in.sm { height: 28px; min-width: 180px; }
 .icon-btn { min-width: 32px; min-height: 32px; }
 .lv-wrap { position: relative; }

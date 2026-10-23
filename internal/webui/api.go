@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -49,6 +51,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/runs", s.withAuthCSRF(s.handleRuns))
 	mux.HandleFunc("/api/runs/quick", s.withAuthCSRF(s.handleQuickRun))
 	mux.HandleFunc("/api/runs/recent-prompts", s.withAuthCSRF(s.handleRecentPrompts))
+	mux.HandleFunc("/api/runs/counts", s.withAuthCSRF(s.handleRunCounts))
 	mux.HandleFunc("/api/runs/", s.withAuthCSRF(s.handleRunSub))
 	mux.HandleFunc("/api/buttons", s.withAuthCSRF(s.handleButtons))
 	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
@@ -872,15 +875,31 @@ func (s *Server) handleSkillsImport(w http.ResponseWriter, r *http.Request) {
 
 // ---------- runs ----------
 
-func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+// runStatusGroups maps a runs-list filter to the statuses it covers. "failed" is every
+// run that went wrong (a timeout is a failure too); "stopped" is a run that was ended or
+// never started on purpose (stopped by hand, or skipped by budget / a paused task), which
+// is not a fault. Any other value filters on that exact status, as before.
+var runStatusGroups = map[string][]string{
+	"running":   {"queued", "running"},
+	"succeeded": {"succeeded"},
+	"failed":    {"failed", "timeout"},
+	"stopped":   {"canceled", "skipped"},
+}
+
+// runsFilter builds the WHERE part shared by the list and its counts: task, search text
+// and (unless withStatus is false) the status filter. Everything goes in as a parameter.
+func runsFilter(q url.Values, withStatus bool) (string, []any, error) {
 	where := "WHERE 1=1"
 	var args []any
-	if st := q.Get("status"); st == "running" { // the "running" filter shows queued runs too
-		where += " AND r.status IN ('queued','running')"
-	} else if st != "" {
-		where += " AND r.status=?"
-		args = append(args, st)
+	if st := q.Get("status"); withStatus && st != "" {
+		group, ok := runStatusGroups[st]
+		if !ok {
+			group = []string{st}
+		}
+		where += " AND r.status IN (?" + strings.Repeat(",?", len(group)-1) + ")"
+		for _, g := range group {
+			args = append(args, g)
+		}
 	}
 	if tid := q.Get("task_id"); tid != "" {
 		where += " AND r.task_id=?"
@@ -888,30 +907,109 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	if qs := strings.TrimSpace(q.Get("q")); qs != "" {
 		if len(qs) > 100 {
-			writeErr(w, 400, "search text too long")
-			return
+			return "", nil, errors.New("search text too long")
 		}
 		like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(qs) + "%"
 		where += ` AND (r.prompt LIKE ? ESCAPE '\' OR t.name LIKE ? ESCAPE '\' OR r.id LIKE ? ESCAPE '\' OR r.error_message LIKE ? ESCAPE '\')`
 		args = append(args, like, like, like, like)
 	}
+	return where, args, nil
+}
+
+// handleRuns lists runs, newest first by default. Paging: for the time sorts the next
+// page starts after the last run shown (before=<run id>, a keyset cursor, so runs that
+// start while you scroll don't shift the pages); the other sorts use offset.
+func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	where, args, err := runsFilter(q, true)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	// ids are time-ordered to the millisecond: they break ties between runs created in the
 	// same second, so queued runs list in their real order.
+	sortBy := q.Get("sort")
 	order := map[string]string{"": "r.created_at DESC, r.id DESC", "new": "r.created_at DESC, r.id DESC", "old": "r.created_at ASC, r.id ASC",
-		"cost": s.runAmt("r.") + " DESC, r.created_at DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC",
-		"duration": "COALESCE(r.duration_ms,0) DESC, r.created_at DESC"}[q.Get("sort")]
+		"cost": s.runAmt("r.") + " DESC, r.created_at DESC, r.id DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC, r.id DESC",
+		"duration": "COALESCE(r.duration_ms,0) DESC, r.created_at DESC, r.id DESC"}[sortBy]
 	if order == "" {
 		writeErr(w, 400, "sort must be new, old, cost, tokens or duration")
 		return
 	}
+	if before := q.Get("before"); before != "" {
+		if sortBy != "" && sortBy != "new" && sortBy != "old" {
+			writeErr(w, 400, "before only works with sort=new or old; use offset")
+			return
+		}
+		var created string
+		if err := s.deps.DB.QueryRowContext(r.Context(), `SELECT created_at FROM runs WHERE id=?`, before).Scan(&created); err != nil {
+			writeErr(w, 400, "before: run not found")
+			return
+		}
+		cmp := "<"
+		if sortBy == "old" {
+			cmp = ">"
+		}
+		where += " AND (r.created_at " + cmp + " ? OR (r.created_at = ? AND r.id " + cmp + " ?))"
+		args = append(args, created, created, before)
+	}
 	where += " ORDER BY " + order + " LIMIT ?"
-	args = append(args, limitParam(r, 50, 200))
+	args = append(args, limitParam(r, 50, 1000))
+	if off, err := strconv.Atoi(q.Get("offset")); err == nil && off > 0 {
+		where += " OFFSET ?"
+		args = append(args, off)
+	}
 	runs, err := s.queryRuns(r.Context(), where, args...)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
 	writeJSON(w, 200, runs)
+}
+
+// handleRunCounts: GET /api/runs/counts — how many runs each filter chip would show,
+// for the same task and search text as the list. One grouped query.
+func (s *Server) handleRunCounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "GET only")
+		return
+	}
+	where, args, err := runsFilter(r.URL.Query(), false)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	rows, err := s.deps.DB.QueryContext(r.Context(), `SELECT r.status, COUNT(1) FROM runs r LEFT JOIN tasks t ON t.id = r.task_id `+where+` GROUP BY r.status`, args...)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := map[string]int{"all": 0}
+	for g := range runStatusGroups {
+		out[g] = 0
+	}
+	for rows.Next() {
+		var st string
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		out["all"] += n
+		for g, list := range runStatusGroups {
+			for _, x := range list {
+				if x == st {
+					out[g] += n
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) runStatus(ctx context.Context, id string) string {

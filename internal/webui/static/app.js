@@ -3316,39 +3316,100 @@
   }
 
   // ---------- RUNS ----------
-  var runsView = { q: "", sort: "new", seq: 0 };
+  // Filter chips carry their counts (same task + search as the list). "Failed" includes
+  // timeouts; "Stopped" is runs stopped by hand or skipped (budget / paused task), which
+  // aren't faults. The list loads RUNS_PAGE at a time with "Load more"; for the time sorts
+  // the next page starts after the last run shown (keyset cursor, so runs starting
+  // meanwhile don't shift it), the other sorts page by offset. Pages already loaded stay
+  // when the list refreshes live or re-renders. Idea: n8n findManyAndCount (lastId + count).
+  var RUNS_PAGE = 100, RUNS_MAX = 1000;
+  var RUN_FILTERS = [["", "runs.all_f", "all"], ["running", "st.running", "running"], ["succeeded", "st.succeeded", "succeeded"], ["failed", "st.failed", "failed", "runs.f_failed_tip"], ["stopped", "runs.f_stopped", "stopped", "runs.f_stopped_tip"]];
+  var runsView = { q: "", sort: "new", seq: 0, key: "", n: RUNS_PAGE };
+  function runsQuery(st, task, v) { return "sort=" + enc(v.sort) + (st ? "&status=" + enc(st) : "") + (task ? "&task_id=" + enc(task) : "") + (v.q ? "&q=" + enc(v.q) : ""); }
+  function runsHash(st, task) { var p = []; if (st) p.push("status=" + enc(st)); if (task) p.push("task=" + enc(task)); return "#/runs" + (p.length ? "?" + p.join("&") : ""); }
+  // what the total for the current filter is, from the counts (null for a filter without a chip)
+  function runsTotal(counts, st) { var f = RUN_FILTERS.filter(function (x) { return x[0] === st; })[0]; return f && counts && typeof counts[f[2]] === "number" ? counts[f[2]] : null; }
+  function runsMoreNext(list, sort) {
+    if (!list.length) return "";
+    return sort === "new" || sort === "old" ? "&before=" + enc(list[list.length - 1].id) : "&offset=" + list.length;
+  }
   function renderRuns(params) {
     var st = params.get("status") || "", task = params.get("task") || "", v = runsView;
-    var url = function () { return "/api/runs?limit=200&sort=" + enc(v.sort) + (st ? "&status=" + enc(st) : "") + (task ? "&task_id=" + enc(task) : "") + (v.q ? "&q=" + enc(v.q) : ""); };
-    return api(url()).then(function (runs) {
-      var f = [["", T("runs.all_f")], ["running", T("st.running")], ["succeeded", T("st.succeeded")], ["failed", T("st.failed")]];
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + esc(T("runs.times_in", { tz: tzLabel() })) + '</p></div><div class="actions"><button class="btn primary" id="r-quick">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div></div>" +
-        '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="rq" type="search" maxlength="100" placeholder="' + esc(T("runs.search")) + '" value="' + esc(v.q) + '"></label>' +
-        '<div class="filters">' + f.map(function (x) { return '<button data-f="' + x[0] + '" class="' + (x[0] === st ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" +
+    var key = [st, task, v.sort, v.q].join("|");
+    if (key !== v.key) { v.key = key; v.n = RUNS_PAGE; }
+    var url = function () { return "/api/runs?limit=" + Math.min(Math.max(v.n, RUNS_PAGE), RUNS_MAX) + "&" + runsQuery(st, task, v); };
+    var curl = function () { return "/api/runs/counts?" + runsQuery("", task, v).replace(/^sort=[^&]*&?/, ""); };
+    var noCounts = function () { return {}; };
+    return Promise.all([api(url()), api(curl()).catch(noCounts)]).then(function (res) {
+      var runs = res[0], counts = res[1] || {};
+      var chip = function (x) {
+        var n = counts[x[2]];
+        return '<button data-f="' + x[0] + '" class="' + (x[0] === st ? "active" : "") + '"' + (x[3] ? ' data-tip="' + esc(T(x[3])) + '"' : "") + ">" + esc(T(x[1])) + (typeof n === "number" ? ' <span class="cnt" data-c="' + x[2] + '">' + esc(num(n)) + "</span>" : "") + "</button>";
+      };
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + (task && runs[0] ? esc(T("runs.for", { name: runs[0].task_name })) + " · " : "") + esc(T("runs.times_in", { tz: tzLabel() })) + '</p></div><div class="actions"><button class="btn primary" id="r-quick">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div></div>" +
+        '<section class="card flush"><div class="toolbar run-tb"><label class="search-in">' + ic("search", "sm") + '<input id="rq" type="search" maxlength="100" placeholder="' + esc(T("runs.search")) + '" value="' + esc(v.q) + '"></label>' +
+        '<div class="filters run-f">' + RUN_FILTERS.map(chip).join("") + "</div>" +
         '<select id="rsort" aria-label="' + esc(T("runs.sort")) + '">' + [["new", T("runs.s_new")], ["old", T("runs.s_old")], ["cost", T("runs.s_cost")], ["tokens", T("runs.s_tokens")], ["duration", T("runs.s_duration")]].map(function (x) { return opt(x[0], x[1], x[0] === v.sort); }).join("") + "</select>" +
-        '<span class="grow"></span><span class="muted">' + esc(task && runs[0] ? T("runs.for", { name: runs[0].task_name }) : "") + '</span></div><div id="rtable"></div></section>', "runs", [[T("nav.runs")]]);
+        '</div><div id="rtable"></div><div class="runs-more hidden" id="rmore"></div></section>', "runs", [[T("nav.runs")]]);
       $("#r-quick").addEventListener("click", function () { quickRunModal(); });
+      var shown = runs, loading = false, ended = false;
+      var foot = function () {
+        var total = runsTotal(counts, st), box = $("#rmore");
+        if (!box) return;
+        var more = total != null ? shown.length < total : !ended && shown.length >= v.n;
+        if (shown.length >= RUNS_MAX) more = false;
+        box.classList.toggle("hidden", !more);
+        if (!more) { box.innerHTML = ""; return; }
+        box.innerHTML = '<span class="muted num">' + esc(total != null ? T("runs.shown_of", { n: num(shown.length), total: num(total) }) : T("runs.shown", { n: num(shown.length) })) + '</span><button type="button" class="btn sm" id="rmore-btn">' + ic("chevDown", "sm") + esc(T("runs.more")) + "</button>";
+        $("#rmore-btn").addEventListener("click", loadMore);
+      };
       var paint = function (list) {
+        shown = list;
         $("#rtable").innerHTML = list.length || !v.q ? runsTable(list, true) : emptyState("search", T("runs.no_match"), "");
         wireRows($("#rtable"));
         $$("[data-stop]", $("#rtable")).forEach(function (b) { b.addEventListener("click", function (e) {
           e.stopPropagation(); b.disabled = true;
           stopRun(b.getAttribute("data-stop"), b.getAttribute("data-st")).then(function (y) { if (y) reload(); else b.disabled = false; }).catch(function (err) { b.disabled = false; fail(err); });
         }); });
-        $$("[data-rerun]").forEach(function (b) { b.addEventListener("click", function (e) {
+        $$("[data-rerun]", $("#rtable")).forEach(function (b) { b.addEventListener("click", function (e) {
           e.stopPropagation(); b.disabled = true;
           api("/api/runs/" + enc(b.getAttribute("data-rerun")) + "/rerun", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "runs.rerun_started")); reload(); }).catch(function (err) { b.disabled = false; fail(err); });
         }); });
+        foot();
+      };
+      var paintCounts = function (c) {
+        counts = c || {};
+        RUN_FILTERS.forEach(function (x) { var el = $('.run-f [data-c="' + x[2] + '"]'); if (el && typeof counts[x[2]] === "number") el.textContent = num(counts[x[2]]); });
+      };
+      var loadMore = function () {
+        if (loading) return;
+        loading = true;
+        var btn = $("#rmore-btn"); if (btn) btn.disabled = true;
+        var my = v.seq;
+        apiRaw("/api/runs?limit=" + RUNS_PAGE + "&" + runsQuery(st, task, v) + runsMoreNext(shown, v.sort)).then(function (page) {
+          if (my !== v.seq || !$("#rtable")) return;
+          var seen = {}; shown.forEach(function (r) { seen[r.id] = 1; });
+          var list = shown.concat(page.filter(function (r) { return !seen[r.id]; }));
+          // nothing new came back: the total was stale, stop offering more
+          if (page.length < RUNS_PAGE) ended = true;
+          if (!page.length) counts = {};
+          v.n = Math.max(v.n, list.length);
+          var y = window.scrollY; paint(list); window.scrollTo(0, y);
+        }).catch(function (err) { if (btn) btn.disabled = false; fail(err); }).then(function () { loading = false; });
       };
       // a newer request always wins; slow responses for old search text are dropped
-      var reload = function () { var my = ++v.seq; return api(url()).then(function (list) { if (my === v.seq) { paint(list); live(list); } }); };
+      var reload = function () {
+        var my = ++v.seq;
+        return Promise.all([api(url()), api(curl()).catch(noCounts)]).then(function (r) { if (my === v.seq && $("#rtable")) { paintCounts(r[1]); paint(r[0]); live(r[0]); } });
+      };
       var gate = revGate();
       var live = function (list) { if (list.some(function (r) { return r.status === "running" || r.status === "queued"; })) livePoll(function () { return gate(reload); }, 2000); else stopPoll(); };
       paint(runs); live(runs);
       var qt;
-      $("#rq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value.trim(); reload().catch(fail); }, 250); });
-      $("#rsort").addEventListener("change", function (e) { v.sort = e.target.value; reload().catch(fail); });
-      $$("[data-f]").forEach(function (b) { b.addEventListener("click", function () { location.hash = "#/runs" + (b.getAttribute("data-f") ? "?status=" + b.getAttribute("data-f") : ""); }); });
+      $("#rq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value.trim(); v.key = [st, task, v.sort, v.q].join("|"); v.n = RUNS_PAGE; reload().catch(fail); }, 250); });
+      $("#rsort").addEventListener("change", function (e) { v.sort = e.target.value; v.key = [st, task, v.sort, v.q].join("|"); v.n = RUNS_PAGE; reload().catch(fail); });
+      // switching the status keeps the task filter (it used to drop it)
+      $$("[data-f]").forEach(function (b) { b.addEventListener("click", function () { location.hash = runsHash(b.getAttribute("data-f"), task); }); });
     });
   }
 

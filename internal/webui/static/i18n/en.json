@@ -1483,5 +1483,11 @@
   "rd.err_skip_paused": "Not started: the task was paused while this run was waiting, so this scheduled run was skipped.",
   "rd.waiting": "Waiting…",
   "rd.queued_at": "Queued {t}",
-  "rd.never_started": "Never started"
+  "rd.never_started": "Never started",
+  "runs.f_stopped": "Stopped",
+  "runs.f_stopped_tip": "Stopped by hand, or skipped (budget used up or task paused)",
+  "runs.f_failed_tip": "Failed or timed out",
+  "runs.more": "Load more",
+  "runs.shown_of": "Showing {n} of {total}",
+  "runs.shown": "Showing {n}"
 }

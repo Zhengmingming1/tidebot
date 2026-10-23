@@ -1198,3 +1198,61 @@ idea 1 of the 00:20 round.
 3. Stacked dialogs (picker on top of a form), carried over from 00:20.
 
 README screenshots are unaffected (the pill only shows when a draft exists).
+
+## 2026-10-23 (10:20): runs list — counts on the filters, "failed" with timeouts, load more
+
+Category: **logic correctness + UX (runs list, API)**. The last rounds were prompt drafts
+(UX), the queue budget re-check and the stop/queue work (runner); this one fixes what the
+runs list silently hid.
+
+**Done**
+
+- **The list no longer stops at 200.** It loads 100 runs at a time; below the table a 48 px
+  footer says "已显示 100 / 523 · 加载更多" ("Showing 100 of 523 · Load more") and goes away
+  when everything is shown. For the time sorts the next page starts after the last run shown
+  (`/api/runs?before=<run id>`, a keyset cursor on `(created_at, id)`), so a run that starts
+  while you read doesn't shift the pages or repeat a row; cost / tokens / duration sorts page
+  by `offset` (rows deduped by id). Pages already loaded stay when the list refreshes live or
+  re-renders from cache (up to 1000 rows).
+- **Filters say how many.** Each chip carries its count for the same task and search text
+  (`GET /api/runs/counts`, one grouped query, refreshed with the list when `/api/rev` moves).
+- **"Failed" includes timeouts** — before, a timed-out run showed under no filter except All.
+  New chip **"已停止 / Stopped"** for runs stopped by hand or skipped (budget / paused task):
+  on purpose, not a fault, so they stay out of Failed. Each grouped chip explains itself in
+  its tooltip. `?status=<exact status>` still works for links and scripts.
+- **Bug: switching the status chip dropped the task filter** ("View all" from a task page,
+  then "Failed", showed every task's failures). The task stays now. The task name moved from
+  the toolbar's right end to the page subtitle, so search, five chips and sort fit one row at
+  1024×655 in both languages (search shrinks 280 → 140 px before anything wraps).
+- Same on every OS: plain SQL + DOM; numbers through `Intl.NumberFormat`, no new OS calls.
+  All parameters bound (`IN (?,?)`, LIKE escape unchanged).
+- Verified in headless Chrome at 1024×655 (zh-CN, en) on 249 demo runs: 100 → 200 → 249,
+  no duplicates, footer hides at the end, toolbar 57 px (one row), no page errors.
+  Shots: `/workspace/shots/runs-filter-counts-1024x655.png`, `runs-load-more-1024x655.png`
+  (+ `-en-`).
+- Tests: `TestRunsFilterGroupsAndCounts` (groups, exact status, counts with search / task,
+  injection text counted as text, POST 405, long search 400), `TestRunsPaging` (keyset pages
+  across same-second runs and a run inserted between pages, `sort=old`, offset for cost,
+  `before` refused with cost sort / unknown id, cursor + filter), `TestRunsPageUI` (wiring,
+  CSS, i18n keys + placeholders).
+
+**Inspiration**
+
+- n8n `packages/cli/src/executions/execution.service.ts` `findManyAndCount()`: pages with a
+  `lastId` cursor and returns the matching `count` alongside, so the list can show "x of y"
+  and a load-more. n8n `packages/@n8n/db/src/repositories/execution.repository.ts`: `error`
+  and `crashed` are both failures, while `canceled` is "somebody stopping a run on purpose,
+  which is not a fault" — the same split as our Failed vs Stopped. No code copied.
+
+**Learned**
+
+- A status filter that maps 1:1 to DB values hides whole states the moment a new status is
+  added (timeout, skipped). Filters should be user-facing groups.
+- The SWR re-render reruns the route, so per-page state (pages loaded) has to live in the
+  view object keyed by the filter, or a background refresh throws "Load more" away.
+
+**Ideas for later**
+
+1. Date range on the runs list ("today / 7 days / custom"), reusing the keyset cursor.
+2. Select several runs → rerun / export / mark important.
+3. Home page line "N runs skipped by budget today" linking to `#/runs?status=stopped`.

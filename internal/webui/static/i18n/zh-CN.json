@@ -1483,5 +1483,11 @@
   "rd.err_skip_paused": "未启动：排队期间任务已暂停，这次定时运行已跳过。",
   "rd.waiting": "等待中…",
   "rd.queued_at": "排队于 {t}",
-  "rd.never_started": "未开始"
+  "rd.never_started": "未开始",
+  "runs.f_stopped": "已停止",
+  "runs.f_stopped_tip": "手动停止，或被跳过（预算用完或任务已暂停）",
+  "runs.f_failed_tip": "失败或超时",
+  "runs.more": "加载更多",
+  "runs.shown_of": "已显示 {n} / {total}",
+  "runs.shown": "已显示 {n}"
 }
