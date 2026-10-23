@@ -1617,3 +1617,50 @@ features; this closes two gaps in two-factor sign-in, one of them idea 1 from th
 1. Ask for a current 2FA code (or a recovery code) when turning 2FA off, not only the password.
 2. Show the lockout wait as "14:57" instead of "897 秒" in the password and 2FA dialogs.
 3. Rate-limit the 2FA setup confirm step and show "codes left" with a regenerate button.
+
+## 2026-10-24 (06:20): SQLite syncs at checkpoints, not on every write
+
+Category: **resource usage (disk I/O, core)**. The last rounds were security (2FA, password) and
+the task list UI; this one is invisible but touches every write tidebot makes.
+
+**Done**
+
+- `db.Open` now sets `synchronous(NORMAL)` on every connection. In WAL mode the default (`FULL`)
+  fsyncs on each commit; tidebot commits a lot of small rows (usage every 5 s per run, log offsets,
+  session last-seen, scheduler state). Measured on the box with 1000 one-row commits: 0.19 ms →
+  0.02 ms per commit, and the 1000+ `fsync` calls drop to the few done at checkpoints. Less SSD
+  wear and fewer wake-ups on laptops. The trade-off: after an OS crash or power cut the last
+  commits before it may roll back; the file never corrupts and an app crash loses nothing.
+- `journal_size_limit(8 MiB)`: after a checkpoint the `-wal` file is cut back instead of keeping
+  its peak size (it grows past 4 MiB when a long read blocks checkpoints, e.g. a backup).
+- Query-planner stats: `PRAGMA optimize=0x10002` (with `analysis_limit=400`) once at open, plain
+  `PRAGMA optimize` every 6 h with the retention tick and before the app closes, as the SQLite
+  docs suggest for long-lived connections. No-op when tables didn't change much.
+- Same on macOS / Windows / Linux, desktop and server: pure-Go SQLite (modernc), DSN pragmas only,
+  no paths. No UI change, so no screenshot.
+- Tests: `TestOpenConnectionPragmas` (WAL, synchronous=1, foreign keys, busy timeout, size limit —
+  also on a connection opened later by the pool), `TestWALTrimmedAndDurable` (a held reader grows
+  the WAL past 12 MiB; after the checkpoint it's ≤ 8 MiB; rows survive close + reopen). The size
+  test fails without the new pragma.
+
+**Inspiration**
+
+- louislam/uptime-kuma `server/database.js` `initSQLite()`: WAL + `synchronous = NORMAL` with the
+  comment that FULL is safer but slower; `close()` checkpoints before closing.
+- pocketbase/pocketbase `core/db_connect.go` `DefaultDBConnect()`: per-connection `_pragma=` DSN
+  with `busy_timeout` first, `journal_size_limit`, `synchronous(NORMAL)` on modernc.org/sqlite.
+  No code copied.
+
+**Learned**
+
+- `journal_size_limit` only bites when the WAL is reset, i.e. on the first write after a complete
+  checkpoint; a checkpoint alone leaves the file at full size.
+- With `SetMaxOpenConns(1)` a pragma set by `db.Exec` after open would be lost if the pool ever
+  reopened the connection; DSN `_pragma=` is the safe place.
+
+**Ideas for later**
+
+1. Show WAL size next to the database size in Storage (tooltip), and checkpoint(TRUNCATE) on
+   "Shrink" (already done) — also after a backup finishes.
+2. `cache_size`: measure RSS with the default 2 MiB vs 8 MiB on a 100 MB database before changing.
+3. Batch the per-run 5 s usage writes of concurrent runs into one transaction.

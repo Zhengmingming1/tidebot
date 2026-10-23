@@ -15,6 +15,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/db"
 )
 
 // --- retention ---------------------------------------------------------------
@@ -174,6 +175,7 @@ func (a *App) runRetention(ctx context.Context) {
 	defer t.Stop()
 	for {
 		a.retentionTick(ctx, time.Now())
+		_ = db.Optimize(ctx, a.DB)
 		select {
 		case <-ctx.Done():
 			return

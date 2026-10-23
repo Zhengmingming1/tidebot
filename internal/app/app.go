@@ -187,6 +187,9 @@ func (a *App) Close() error {
 		cancel()
 	}
 	if a.DB != nil {
+		octx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = db.Optimize(octx, a.DB)
+		cancel()
 		return a.DB.Close()
 	}
 	return nil
