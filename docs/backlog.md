@@ -1132,3 +1132,69 @@ the queue opened, listed as idea 1 of the 04:30 round.
 README screenshots are unaffected (runs list and run page look the same unless a run was
 skipped). Screenshots of the new state: `/workspace/shots/run-skipped-budget-1024x655.png`,
 `runs-list-skipped-tip-1024x655.png` (+ `-en`).
+
+## 2026-10-23 (08:20): prompt drafts survive a closed dialog or a reload
+
+Category: **UX / frontend interaction (quick run, new task)**. The last rounds were runner and
+backend work (queue budget re-check, stop/queue, live log push); this one is in the dialogs,
+idea 1 of the 00:20 round.
+
+**Done**
+
+- **A half-written prompt is no longer lost.** In a fresh quick run or new task, the prompt is
+  kept in `sessionStorage` (`tb_draft_qr`, `tb_draft_task`) 400 ms after you stop typing, and
+  right away when the dialog closes (any way: Discard, Back, route change) or the page hides.
+  Opening the dialog again — or after a reload, a crash of the tab, or an expired session and
+  a new sign-in — puts it back, with a small pill "已恢复草稿 / Draft restored" and a "清空 /
+  Clear" link at the right end of the prompt label row. When and where it was saved is in the
+  pill's tooltip (secondary meta info stays out of the layout). The row has a fixed 24 px
+  height, so the pill appearing or going doesn't move anything.
+- New task: the restored prompt goes through the usual auto-fill (name, schedule, budget are
+  inferred again), so nothing else has to be kept.
+- A successful run / create removes the draft; emptying the field removes it; "Clear" empties
+  the field, drops the draft and puts the cursor back. A restored draft doesn't count as an
+  edit for the discard guard (closing without touching it closes at once — the draft stays).
+- Not used where it would get in the way: edit & rerun, edit task and "save as task" (they
+  start from a given prompt) neither restore nor save drafts.
+- Privacy: `sessionStorage` only — the draft lives in this window and is gone when it closes;
+  sign-out and Settings → "reset UI preferences" remove all `tb_draft_*` keys. Drafts older than
+  7 days, blank, over 32 000 chars or malformed are ignored. Nothing goes to the server.
+- Same on every OS: `sessionStorage`, `pagehide` and `visibilitychange` behave the same in
+  WKWebView (macOS), WebView2 (Windows), WebKitGTK (Linux) and browsers; text is restored
+  byte for byte (CRLF from a Windows paste included).
+- Verified in headless Chrome at 1024×655 on the demo data (zh-CN and en): type → Esc →
+  Discard → reopen restores; reload restores; Esc right after typing still saves (flush on
+  close); Ctrl+Enter run clears; new task restores and re-infers the name; footer stays
+  visible. Shots: `/workspace/shots/prompt-draft-restored-1024x655.png`,
+  `prompt-draft-task-1024x655.png` (+ `-en-` versions).
+- Tests: `TestPromptDrafts` (wiring: quick run / new task only, cleared on submit, sign-out,
+  flush on close and route change, sessionStorage not localStorage, i18n keys in both
+  languages, CSS; under node: CRLF round trip, TTL, blank / over-long / corrupt drafts
+  ignored, flush runs once, clear cancels a pending save, clear-all keeps other keys).
+
+**Inspiration**
+
+- Open WebUI `src/lib/components/chat/Chat.svelte`: `saveDraft()` writes the input to
+  `sessionStorage` under `chat-input[-<chatId>]` with a 500 ms debounce (or at once before an
+  OAuth redirect), skips it above `MAX_DRAFT_LENGTH`, removes it when the text is empty;
+  `restoreChatInput()` parses it back when the chat opens and falls back to defaults on a parse
+  error; `clearDraft()` runs after sending. `MessageInput.svelte` feeds every change through
+  `onChange(chatInputDraft)`. We borrowed "debounced per-window draft, restored on open,
+  cleared on send", and added a visible "restored · clear" pill and a flush on close.
+  No code copied.
+
+**Learned**
+
+- Chrome doesn't fire `blur` when a focused textarea is removed with its dialog, so a debounce
+  alone loses the last 400 ms of typing on Esc; the save has to be flushed by the code that
+  removes the dialog (modal close and the router).
+- `sessionStorage` survives reload and a session-expiry re-login but not a closed window,
+  which is the right lifetime for unsent prompts on a shared machine.
+
+**Ideas for later**
+
+1. Drafts for the AI plugin builder description and amendment input.
+2. Keep the provider / schedule the user picked with the draft (today only the prompt).
+3. Stacked dialogs (picker on top of a form), carried over from 00:20.
+
+README screenshots are unaffected (the pill only shows when a draft exists).
