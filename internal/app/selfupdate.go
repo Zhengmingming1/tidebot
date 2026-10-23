@@ -39,8 +39,23 @@ func defaultUpdateSettings() UpdateSettings {
 	return UpdateSettings{Enabled: true, IntervalHours: 24, Channel: "stable"}
 }
 
+// Phases of the background check/apply job shown in Settings → About.
+const (
+	UpdIdle        = "idle"
+	UpdChecking    = "checking"
+	UpdDownloading = "downloading"
+	UpdInstalling  = "installing"
+	UpdRestarting  = "restarting"
+)
+
 type selfUpdate struct {
 	mu        sync.Mutex
+	phase     string // "" = idle
+	done      int64  // download progress
+	total     int64
+	checkedAt time.Time // last finished check, ok or not
+	applyErr  string
+	applyCode string
 	last      *updater.Check
 	lastErr   string
 	lastCode  string
@@ -89,15 +104,19 @@ func (a *App) updateInstall() updater.Install {
 	return updater.Detect(a.su().product, exe)
 }
 
+// CheckTimeout bounds one whole check (every source; each also has updater.AttemptTimeout).
+var CheckTimeout = 45 * time.Second
+
 // CheckForUpdate fetches and verifies the signed manifest.
 func (a *App) CheckForUpdate(ctx context.Context) (*updater.Check, error) {
 	s := a.su()
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, CheckTimeout)
 	defer cancel()
 	srcs := updater.Sources(a.NetworkSettings(ctx).Mirrors)
 	m, used, err := updater.FetchFrom(ctx, s.client, srcs, s.pubKey)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.checkedAt = time.Now()
 	if err != nil {
 		var fe *updater.FetchError
 		s.lastErr, s.lastCode, s.attempts = err.Error(), updater.Classify(err), nil
@@ -118,7 +137,20 @@ func (a *App) UpdateStatus(ctx context.Context) map[string]any {
 	s := a.su()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var checked string
+	if !s.checkedAt.IsZero() {
+		checked = s.checkedAt.UTC().Format(time.RFC3339)
+	}
+	phase := s.phase
+	if phase == "" {
+		phase = UpdIdle
+	}
 	return map[string]any{
+		"phase":         phase,
+		"progress":      map[string]int64{"done": s.done, "total": s.total},
+		"checked_at":    checked,
+		"apply_error":   s.applyErr,
+		"apply_code":    s.applyCode,
 		"current":       buildinfo.Version,
 		"official":      buildinfo.IsOfficial(),
 		"settings":      a.UpdateSettings(ctx),
@@ -134,8 +166,75 @@ func (a *App) UpdateStatus(ctx context.Context) map[string]any {
 	}
 }
 
-// ApplyUpdateNow downloads, verifies and installs, then restarts the process.
+// begin claims the job (it starts with a check); false when one is already running.
+// An update attempt clears the previous update error; a plain check keeps it.
+func (s *selfUpdate) begin(apply bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.phase != "" && s.phase != UpdIdle {
+		return false
+	}
+	s.phase, s.done, s.total = UpdChecking, 0, 0
+	if apply {
+		s.applyErr, s.applyCode = "", ""
+	}
+	return true
+}
+
+func (s *selfUpdate) setPhase(p string) { s.mu.Lock(); s.phase = p; s.mu.Unlock() }
+
+// StartUpdateCheck runs a check in the background; the UI polls UpdateStatus.
+// A check or update already in progress is left alone.
+func (a *App) StartUpdateCheck() {
+	s := a.su()
+	if !s.begin(false) {
+		return
+	}
+	go func() {
+		defer s.setPhase(UpdIdle)
+		if _, err := a.CheckForUpdate(context.Background()); err != nil {
+			a.Log.Info("update check failed", "error", err)
+		}
+	}()
+}
+
+// StartUpdateApply checks, downloads, installs and restarts in the background.
+func (a *App) StartUpdateApply() error {
+	s := a.su()
+	if !s.begin(true) {
+		return errors.New("an update check or install is already running")
+	}
+	go func() { _, _ = a.applyUpdate(context.Background()) }()
+	return nil
+}
+
+// ApplyUpdateNow downloads, verifies and installs, then restarts the process
+// (agentctl update apply: waits for the result).
 func (a *App) ApplyUpdateNow(ctx context.Context) (map[string]any, error) {
+	if !a.su().begin(true) {
+		return nil, errors.New("an update check or install is already running")
+	}
+	return a.applyUpdate(ctx)
+}
+
+// applyUpdate runs with the job claimed and releases it unless restarting.
+func (a *App) applyUpdate(ctx context.Context) (out map[string]any, err error) {
+	s := a.su()
+	restarting := false
+	defer func() {
+		s.mu.Lock()
+		if err != nil {
+			s.applyErr, s.applyCode = err.Error(), updater.Classify(err)
+			var fe *updater.FetchError
+			if errors.As(err, &fe) {
+				s.applyCode = fe.Code()
+			}
+		}
+		if !restarting {
+			s.phase = UpdIdle
+		}
+		s.mu.Unlock()
+	}()
 	c, err := a.CheckForUpdate(ctx)
 	if err != nil {
 		return nil, err
@@ -148,10 +247,14 @@ func (a *App) ApplyUpdateNow(ctx context.Context) (map[string]any, error) {
 	}
 	dctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	a.su().mu.Lock()
-	srcs := a.su().srcs
-	a.su().mu.Unlock()
-	installer, err := updater.ApplyFrom(dctx, a.su().client, c, a.Cfg.HomeDir, srcs)
+	s.mu.Lock()
+	srcs := s.srcs
+	s.phase = UpdDownloading
+	s.mu.Unlock()
+	installer, err := updater.ApplyWithProgress(dctx, s.client, c, a.Cfg.HomeDir, srcs, updater.Progress{
+		Bytes:   func(done, total int64) { s.mu.Lock(); s.done, s.total = done, total; s.mu.Unlock() },
+		Install: func() { s.setPhase(UpdInstalling) },
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -160,10 +263,14 @@ func (a *App) ApplyUpdateNow(ctx context.Context) (map[string]any, error) {
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
+		restarting = true
+		s.setPhase(UpdRestarting)
 		a.scheduleRestart(false)
 		return map[string]any{"updated": true, "to": c.Latest, "restarting": true, "via": "installer"}, nil
 	}
 	a.Log.Info("update installed; restarting", "from", c.Current, "to", c.Latest)
+	restarting = true
+	s.setPhase(UpdRestarting)
 	a.scheduleRestart(true)
 	return map[string]any{"updated": true, "to": c.Latest, "restarting": true}, nil
 }

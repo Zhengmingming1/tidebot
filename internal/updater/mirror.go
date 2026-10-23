@@ -11,7 +11,13 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
+
+// AttemptTimeout bounds one source's try at latest.json (+ .sig). Transport
+// timeouts don't cover a proxy that accepts CONNECT and then goes silent
+// (a dead Clash/V2Ray node), so each attempt gets its own deadline.
+var AttemptTimeout = 15 * time.Second
 
 // ReleasesPage is where users can always download by hand.
 var ReleasesPage = "https://github.com/" + ReleasesRepo + "/releases/latest"
@@ -144,7 +150,9 @@ func (e *FetchError) Code() string {
 func FetchFrom(ctx context.Context, hc *http.Client, srcs []Source, pub string) (*Manifest, int, error) {
 	fe := &FetchError{}
 	for i, s := range srcs {
-		m, err := Fetch(ctx, hc, s.ManifestURL(), pub)
+		actx, cancel := context.WithTimeout(ctx, AttemptTimeout)
+		m, err := Fetch(actx, hc, s.ManifestURL(), pub)
+		cancel()
 		if err == nil {
 			return m, i, nil
 		}
@@ -184,6 +192,8 @@ func Classify(err error) string {
 		return "signature"
 	case errors.Is(err, ErrChecksum):
 		return "checksum"
+	case errors.Is(err, ErrStalled):
+		return "timeout"
 	case errors.As(err, &he):
 		if he.Status == 404 {
 			return "http_404"

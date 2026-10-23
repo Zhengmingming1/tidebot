@@ -183,6 +183,20 @@ func Apply(ctx context.Context, hc *http.Client, c *Check, stateDir string) (ins
 // ApplyFrom is Apply with a list of sources tried in order for the download;
 // a file that fails the sha256 check counts as a failed source.
 func ApplyFrom(ctx context.Context, hc *http.Client, c *Check, stateDir string, srcs []Source) (installer string, err error) {
+	return ApplyWithProgress(ctx, hc, c, stateDir, srcs, Progress{})
+}
+
+// Progress reports what ApplyWithProgress is doing; both funcs may be nil.
+type Progress struct {
+	Bytes   func(done, total int64) // during the download (total from the manifest, 0 if unknown)
+	Install func()                  // download verified, files are being swapped
+}
+
+// IdleTimeout aborts a download that received no bytes for this long.
+var IdleTimeout = 30 * time.Second
+
+// ApplyWithProgress is ApplyFrom with download progress and a stall watchdog.
+func ApplyWithProgress(ctx context.Context, hc *http.Client, c *Check, stateDir string, srcs []Source, pr Progress) (installer string, err error) {
 	if !c.CanApply || c.asset == nil {
 		return "", errors.New("no applicable update")
 	}
@@ -197,7 +211,7 @@ func ApplyFrom(ctx context.Context, hc *http.Client, c *Check, stateDir string, 
 		if s.Name == "env" {
 			u = c.asset.URL
 		}
-		b, gerr := get(ctx, hc, u, 400<<20)
+		b, gerr := download(ctx, hc, u, 400<<20, c.asset.Size, pr.Bytes)
 		if gerr == nil {
 			gerr = checkSum(b, c.asset.SHA256)
 		}
@@ -216,6 +230,9 @@ func ApplyFrom(ctx context.Context, hc *http.Client, c *Check, stateDir string, 
 			return "", lastErr
 		}
 		return "", fe
+	}
+	if pr.Install != nil {
+		pr.Install()
 	}
 	in := c.Install
 	var swaps []Swap
@@ -264,6 +281,74 @@ func ApplyFrom(ctx context.Context, hc *http.Client, c *Check, stateDir string, 
 		return "", err
 	}
 	return "", nil
+}
+
+// ErrStalled is returned when a download stops receiving bytes.
+var ErrStalled = errors.New("download stalled: no data received")
+
+// download GETs url into memory, reporting progress and aborting when no bytes
+// arrive for IdleTimeout (the overall deadline still comes from ctx).
+func download(ctx context.Context, hc *http.Client, url string, max, size int64, onBytes func(done, total int64)) ([]byte, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	idle := time.AfterFunc(IdleTimeout, func() { cancel(ErrStalled) })
+	defer idle.Stop()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "tidebot-updater")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, stallErr(ctx, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, &HTTPError{URL: url, Status: resp.StatusCode, Text: resp.Status}
+	}
+	total := size
+	if total <= 0 && resp.ContentLength > 0 {
+		total = resp.ContentLength
+	}
+	var buf bytes.Buffer
+	if total > 0 && total <= max {
+		buf.Grow(int(total))
+	}
+	chunk := make([]byte, 64<<10)
+	var done int64
+	last := time.Time{}
+	for {
+		n, rerr := resp.Body.Read(chunk)
+		if n > 0 {
+			idle.Reset(IdleTimeout)
+			done += int64(n)
+			if done > max {
+				return nil, fmt.Errorf("GET %s: response too large", url)
+			}
+			buf.Write(chunk[:n])
+			if onBytes != nil && time.Since(last) > 200*time.Millisecond {
+				onBytes(done, total)
+				last = time.Now()
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return nil, stallErr(ctx, rerr)
+		}
+	}
+	if onBytes != nil {
+		onBytes(done, total)
+	}
+	return buf.Bytes(), nil
+}
+
+func stallErr(ctx context.Context, err error) error {
+	if errors.Is(context.Cause(ctx), ErrStalled) {
+		return fmt.Errorf("%w (%s)", ErrStalled, IdleTimeout)
+	}
+	return err
 }
 
 func checkSum(data []byte, want string) error {

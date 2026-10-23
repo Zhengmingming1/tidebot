@@ -1559,3 +1559,18 @@ time.ago[data-tip]:hover::after { white-space: nowrap; max-width: none; }
 @keyframes dc-nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-4px); } 70% { transform: translateX(4px); } }
 @media (prefers-reduced-motion: reduce) { .card.modal.discarding { animation: none; } }
 .card-head .rd-stop { margin-left: var(--s1); flex: none; }
+/* Settings › About › Updates: one state line, a progress bar while downloading, actions row. */
+#up-box { padding-bottom: var(--s1); }
+#set-update .up-state { display: flex; align-items: center; gap: var(--s1); margin: var(--s1) 0; min-height: 24px; flex-wrap: wrap; }
+#set-update div.up-state { display: block; }
+#set-update div.up-state p { display: flex; align-items: center; gap: var(--s1); margin: 0 0 var(--s1); }
+#set-update p.up-state.ok-text { display: inline-flex; cursor: default; }
+#set-update .up-bytes { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12px; }
+#set-update .up-bar > span { transition: width .2s linear; }
+#set-update .up-new h3 { margin: var(--s1) 0 0; }
+#set-update .up-new p { margin: 0 0 var(--s1); }
+#set-update .up-actions { display: flex; align-items: center; gap: var(--s1); margin-top: var(--s1); flex-wrap: wrap; }
+#set-update .up-actions .btn .spin { width: 12px; height: 12px; }
+#set-update .up-actions small { min-width: 0; flex: 1 1 200px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+#set-update .up-sub { margin: var(--s1) 0 0; font-size: 12px; }
+#set-update .changelog { max-height: 160px; margin: 0 0 var(--s1); }

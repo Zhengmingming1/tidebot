@@ -277,7 +277,15 @@
     if (method !== "GET") headers["X-CSRF-Token"] = state.csrf;
     var body = opts.body;
     if (body !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
-    return fetch(path, { method: method, headers: headers, body: body, credentials: "same-origin" }).then(function (res) {
+    // opts.timeout (ms): abort and reject with a readable error instead of waiting forever.
+    var ac = opts.timeout && window.AbortController ? new AbortController() : null, tm = null;
+    if (ac) tm = setTimeout(function () { ac.abort(); }, opts.timeout);
+    return fetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).catch(function (err) {
+      if (tm) clearTimeout(tm);
+      if (ac && ac.signal.aborted) { var et = new Error(T("err.req_timeout")); et.timeout = true; throw et; }
+      throw err;
+    }).then(function (res) {
+      if (tm) clearTimeout(tm);
       var ct = res.headers.get("content-type") || "";
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {
@@ -3246,8 +3254,8 @@
   }
 
   // ---------- PLUGINS ----------
-  function rpc(method, params) {
-    return api("/api/rpc/" + method, { method: "POST", body: params || {} }).then(function (r) { return r.result; });
+  function rpc(method, params, timeout) {
+    return api("/api/rpc/" + method, { method: "POST", body: params || {}, timeout: timeout }).then(function (r) { return r.result; });
   }
   function renderPlugins() {
     return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; }), rpc("plugins.catalog").catch(function () { return []; })]).then(function (res) {
@@ -3754,10 +3762,10 @@
   var SOURCE_REPO = "https://github.com/Zhengmingming1/tidebot";
   var NET_CODES = ["timeout", "dns", "tls", "proxy", "refused", "http_404", "http", "signature", "checksum", "unknown"];
   // Classified network error with a "how to fix" hint and the manual download link.
-  function netErrHtml(code, detail, attempts) {
+  function netErrHtml(code, detail, attempts, hint) {
     code = NET_CODES.indexOf(code) >= 0 ? code : "unknown";
     var h = '<div class="net-err" role="alert"><p class="err"><strong>' + esc(T("net.e." + code)) + "</strong></p>" +
-      '<p class="muted">' + esc(T("net.h." + code)) + "</p>";
+      '<p class="muted">' + esc(hint || T("net.h." + code)) + "</p>";
     if (attempts && attempts.length > 1) h += '<ul class="net-att">' + attempts.map(function (a) { return "<li><code>" + esc(a.source) + "</code> " + esc(T("net.e." + (NET_CODES.indexOf(a.code) >= 0 ? a.code : "unknown"))) + "</li>"; }).join("") + "</ul>";
     if (detail) h += '<details><summary>' + esc(T("net.detail")) + '</summary><pre class="mono">' + esc(detail) + "</pre></details>";
     return h + '<p class="net-fix"><a class="btn sm" href="#/settings/network">' + ic("globe", "sm") + esc(T("net.set_proxy")) + '</a> <a class="btn sm ghost" href="' + esc(RELEASES_PAGE) + '" target="_blank" rel="noopener">' + ic("download", "sm") + esc(T("net.manual")) + "</a></p></div>";
@@ -4085,47 +4093,12 @@
           row("up_channel", T("up.channel"), T("up.channel_sub"), "<code>stable</code>") +
           '<div id="up-box" class="pad-x" aria-live="polite"><p class="muted">…</p></div></section>';
         after = function () {
-          var paint = function (st) {
-            var s = st.settings || {}, last = st.last, inst = st.install || {}, res = st.result, h = "";
-            $("#up-auto").checked = !!s.enabled;
-            $("#up-every").value = String(s.interval_hours >= 168 ? 168 : 24);
-            if (res && res.status === "rolled_back") h += '<p class="err">' + esc(T("up.rolled_back", { v: res.to, why: res.detail || "" })) + "</p>";
-            if (st.error) h += netErrHtml(st.error_code, st.error, st.attempts);
-            if (last && last.available) {
-              h += "<h3>" + esc(T("up.avail", { v: last.latest, cur: last.current })) + "</h3>" +
-                (last.date ? '<p class="muted">' + esc(last.date) + "</p>" : "") +
-                (last.notes ? '<pre class="changelog">' + esc(last.notes) + "</pre>" : "") +
-                (last.notes_url ? '<p><a href="' + esc(last.notes_url) + '" target="_blank" rel="noopener">' + esc(T("up.notes")) + "</a></p>" : "");
-              if (last.can_apply) h += '<p><button class="btn primary" id="up-apply">' + esc(T("up.apply")) + '</button> <small class="muted">' + esc(T("up.apply_sub")) + "</small></p>";
-              else if (inst.kind === "self-built") h += '<p class="muted">' + esc(T("up.self_built")) + ' <a href="' + esc(st.releases_page || RELEASES_PAGE) + '" target="_blank" rel="noopener">' + esc(T("up.download_page")) + "</a></p>";
-              else h += '<p class="muted">' + esc(T("up.notify_only", { kind: inst.kind || "?" })) + (inst.reason ? " — " + esc(inst.reason) : "") + "</p>";
-            } else if (last && inst.kind === "self-built") {
-              h += '<p class="muted">' + esc(T("up.self_built_dev", { v: last.latest })) + ' <a href="' + esc(st.releases_page || RELEASES_PAGE) + '" target="_blank" rel="noopener">' + esc(T("up.download_page")) + "</a></p>";
-            } else if (last) {
-              h += '<p class="muted">' + esc(T("up.none", { v: st.current })) + "</p>";
-            }
-            h += '<p><button class="btn" id="up-check">' + esc(T("up.check")) + '</button> <small class="muted">' + esc(T("up.privacy")) + " " + esc(T("net.via", { p: proxyLabel(st.proxy) })) + "</small></p>";
-            $("#up-box").innerHTML = h;
-            $("#up-check").addEventListener("click", function (e) {
-              e.target.disabled = true;
-              rpc("update.check", {}).then(paint).catch(function () { return rpc("update.status", {}).then(paint); }).catch(function (err) { fail(err); e.target.disabled = false; });
-            });
-            var ap = $("#up-apply");
-            if (ap) ap.addEventListener("click", function () {
-              if (!confirm(T("up.confirm", { v: last.latest }))) return;
-              ap.disabled = true; ap.textContent = T("up.applying");
-              rpc("update.apply", {}).then(function () {
-                toast(T("up.restarting"));
-                setTimeout(function () { location.reload(); }, 8000);
-              }).catch(function (err) { fail(err); ap.disabled = false; ap.textContent = T("up.apply"); });
-            });
-          };
+          upAbout();
           var save = function () {
             rpc("update.settings", { enabled: $("#up-auto").checked, interval_hours: parseInt($("#up-every").value, 10) }).then(function () { savedMark($("#up-auto")); }).catch(fail);
           };
           $("#up-auto").addEventListener("change", save);
           $("#up-every").addEventListener("change", save);
-          rpc("update.status", {}).then(paint).catch(fail);
         };
       }
       mount('<div class="page-head"><div><h1>' + esc(T("nav.settings")) + "</h1></div></div>" + '<div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
@@ -4133,6 +4106,106 @@
       after();
       jumpTo(item);
     });
+  }
+  // Settings › About › Updates. Check and update run as a background job on the
+  // server (update.check / update.apply with async), this view polls update.status
+  // and always shows where it is: checking → up to date (time in the tooltip) /
+  // new version → downloading (bar) → installing → restarting, or a readable error
+  // with Retry. Every request has a timeout, and no native confirm(): WKWebView in
+  // the macOS app returns false from it without showing anything.
+  var UP_BUSY = ["checking", "downloading", "installing", "restarting"];
+  function upAbout() {
+    var timer = null, from = "", restartAt = 0, settled = false;
+    var box = function () { return $("#up-box"); };
+    var mb = function (n) { return (n / 1048576).toFixed(1); };
+    var poll = function (ms) {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        if (!box()) return; // left the page
+        rpc("update.status", {}, 8000).then(paint).catch(function (err) {
+          if (restartAt) return poll(1000); // server is down while it restarts
+          paint(null, err);
+        });
+      }, ms);
+    };
+    var paint = function (st, reqErr) {
+      var el = box(); if (!el) return;
+      if (!st) { // the status request itself failed: keep the last view's facts, show why
+        el.innerHTML = '<div class="up-state err" role="alert"><p class="err">' + ic("x", "sm") + esc(T("up.e_request", { e: reqErr.message })) + "</p></div>" +
+          '<div class="up-actions"><button class="btn" id="up-check">' + ic("refresh", "sm") + esc(T("err.retry")) + "</button></div>";
+        $("#up-check").addEventListener("click", check);
+        return;
+      }
+      var s = st.settings || {}, last = st.last, inst = st.install || {}, res = st.result, ph = st.phase || "idle", pr = st.progress || {}, h = "";
+      var busy = UP_BUSY.indexOf(ph) >= 0, cur = (st.current || "").replace(/^v/, "");
+      if (!settled) { $("#up-auto").checked = !!s.enabled; $("#up-every").value = String(s.interval_hours >= 168 ? 168 : 24); settled = true; }
+      if (!from) from = cur;
+      if (restartAt && !busy) { // back up: new version → reload into it; same version → it rolled back
+        if (cur !== from) { location.reload(); return; }
+        restartAt = 0;
+      }
+      if (res && res.status === "rolled_back") h += '<p class="err">' + esc(T("up.rolled_back", { v: res.to, why: res.detail || "" })) + "</p>";
+      if (ph === "checking") {
+        h += '<p class="up-state" role="status"><span class="spin"></span>' + esc(T("up.checking")) + "</p>";
+      } else if (ph === "downloading") {
+        var pct = pr.total > 0 ? Math.min(100, Math.floor(pr.done * 100 / pr.total)) : 0;
+        h += '<div class="up-state" role="status"><p>' + esc(T("up.downloading", { v: last ? last.latest : "" })) + '<span class="muted up-bytes">' + esc(pr.total > 0 ? T("up.bytes", { a: mb(pr.done), b: mb(pr.total), p: pct }) : T("up.bytes_n", { a: mb(pr.done || 0) })) + "</span></p>" +
+          '<div class="progress up-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><span data-w="' + pct + '"></span></div></div>';
+      } else if (ph === "installing") {
+        h += '<p class="up-state" role="status"><span class="spin"></span>' + esc(T("up.installing")) + "</p>";
+      } else if (ph === "restarting" || restartAt) {
+        if (!restartAt) restartAt = Date.now();
+        var slow = Date.now() - restartAt > 90000;
+        h += '<p class="up-state" role="status">' + (slow ? "" : '<span class="spin"></span>') + esc(T(slow ? "up.restart_slow" : "up.restarting")) + "</p>";
+      } else {
+        if (st.apply_error) h += netErrHtml(st.apply_code, st.apply_error, null, proxyHint(st));
+        else if (st.error) h += netErrHtml(st.error_code, st.error, st.attempts, proxyHint(st));
+        if (last && last.available) {
+          h += '<div class="up-new"><h3>' + esc(T("up.avail", { v: last.latest, cur: last.current })) + "</h3>" +
+            (last.date ? '<p class="muted">' + esc(last.date) + "</p>" : "") +
+            (last.notes ? '<pre class="changelog">' + esc(last.notes) + "</pre>" : "") +
+            (last.notes_url ? '<p><a href="' + esc(last.notes_url) + '" target="_blank" rel="noopener">' + esc(T("up.notes")) + "</a></p>" : "") + "</div>";
+          if (!last.can_apply && inst.kind === "self-built") h += '<p class="muted">' + esc(T("up.self_built")) + ' <a href="' + esc(st.releases_page || RELEASES_PAGE) + '" target="_blank" rel="noopener">' + esc(T("up.download_page")) + "</a></p>";
+          else if (!last.can_apply) h += '<p class="muted">' + esc(T("up.notify_only", { kind: inst.kind || "?" })) + (inst.reason ? " — " + esc(inst.reason) : "") + "</p>";
+        } else if (last && inst.kind === "self-built") {
+          h += '<p class="muted">' + esc(T("up.self_built_dev", { v: last.latest })) + ' <a href="' + esc(st.releases_page || RELEASES_PAGE) + '" target="_blank" rel="noopener">' + esc(T("up.download_page")) + "</a></p>";
+        } else if (last && !st.error) {
+          h += '<p class="up-state ok-text"' + (st.checked_at ? ' data-tip="' + esc(T("up.checked_at", { t: fullTime(st.checked_at) })) + '"' : "") + ">" + ic("check", "sm") + esc(T("up.none", { v: cur })) + "</p>";
+        }
+      }
+      var canApply = !busy && !restartAt && last && last.available && last.can_apply;
+      h += '<div class="up-actions">' +
+        (canApply ? '<button class="btn primary" id="up-apply">' + ic("download", "sm") + esc(T(st.apply_error ? "up.apply_retry" : "up.apply")) + "</button>" : "") +
+        '<button class="btn" id="up-check"' + (busy || restartAt ? " disabled" : "") + ">" + (ph === "checking" ? '<span class="spin"></span>' : ic("refresh", "sm")) + esc(T(st.error && !busy ? "err.retry" : "up.check")) + "</button>" +
+        '<small class="muted">' + esc(T("net.via", { p: proxyLabel(st.proxy) })) + tip(T("up.privacy")) + "</small></div>" +
+        (canApply ? '<p class="muted up-sub">' + esc(T("up.apply_sub")) + "</p>" : "");
+      el.innerHTML = h;
+      applySizes(el);
+      $("#up-check").addEventListener("click", check);
+      var ap = $("#up-apply");
+      if (ap) ap.addEventListener("click", function () {
+        confirmDialog({ title: T("up.confirm_title", { v: last.latest }), body: T("up.confirm", { v: last.latest }), ok: T("up.apply"), icon: "download" }).then(function (y) {
+          if (!y) return;
+          ap.disabled = true;
+          rpc("update.apply", { async: true }, 15000).then(function (st2) { paint(st2); }).catch(function (err) { toast(err.message, true); poll(0); });
+        });
+      });
+      if (busy || restartAt) poll(restartAt ? 1000 : 500);
+    };
+    var check = function () {
+      var b = $("#up-check"); if (b) b.disabled = true;
+      rpc("update.check", { async: true }, 15000).then(paint).catch(function (err) { paint(null, err); });
+    };
+    rpc("update.status", {}, 8000).then(paint).catch(function (err) { paint(null, err); });
+  }
+  // A stalled or dead system proxy is the usual reason a check times out on a desktop;
+  // then "you need a proxy" is the wrong advice, so say which proxy and what to try.
+  function proxyHint(st) {
+    var p = st.proxy || {};
+    if (!p.source || p.source === "none") return "";
+    var code = st.apply_error ? st.apply_code : st.error_code;
+    if (["timeout", "proxy", "refused", "tls"].indexOf(code) < 0) return "";
+    return T("up.proxy_hint", { p: p.https || p.http || "" });
   }
   function jumpTo(item) {
     if (!item) return;

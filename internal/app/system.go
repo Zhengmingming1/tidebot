@@ -424,7 +424,13 @@ func (a *App) systemRPC() map[string]rpcFunc {
 			v := a.claudeVersion()
 			return map[string]any{"version": v, "min_supported": MinClaudeVersion, "compatible": ClaudeCompatible(v)}, nil
 		},
-		"update.check": func(ctx context.Context, _ json.RawMessage) (any, error) {
+		"update.check": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			if p, _ := decode[struct {
+				Async bool `json:"async"`
+			}](raw); p.Async { // WebUI: answer at once, then poll update.status
+				a.StartUpdateCheck()
+				return a.UpdateStatus(ctx), nil
+			}
 			if _, err := a.CheckForUpdate(ctx); err != nil {
 				return nil, err
 			}
@@ -433,7 +439,17 @@ func (a *App) systemRPC() map[string]rpcFunc {
 		"claude.set_path": a.rpcSetClaudePath,
 		"update.status":   func(ctx context.Context, _ json.RawMessage) (any, error) { return a.UpdateStatus(ctx), nil },
 		"update.settings": a.rpcUpdateSettings,
-		"update.apply":    func(ctx context.Context, _ json.RawMessage) (any, error) { return a.ApplyUpdateNow(ctx) },
+		"update.apply": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			if p, _ := decode[struct {
+				Async bool `json:"async"`
+			}](raw); p.Async {
+				if err := a.StartUpdateApply(); err != nil {
+					return nil, err
+				}
+				return a.UpdateStatus(ctx), nil
+			}
+			return a.ApplyUpdateNow(ctx)
+		},
 		"sandbox.run": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			p, _ := decode[struct {
 				TaskID string `json:"task_id"`
