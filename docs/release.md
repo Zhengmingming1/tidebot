@@ -106,7 +106,7 @@ Plain GETs only, honours `HTTPS_PROXY`, nothing else is sent.
 
 ```bash
 scripts/package-server.sh 0.1.0 dist          # all server archives + .deb (needs dpkg-deb)
-scripts/package-desktop-linux.sh 0.1.0 dist   # needs Go 1.25, libgtk-3-dev, libwebkit2gtk-4.1-dev, file
+scripts/package-desktop-linux.sh 0.1.0 dist   # needs Go 1.26, libgtk-3-dev, libwebkit2gtk-4.1-dev, file
 scripts/package-desktop-macos.sh 0.1.0 dist   # macOS only
 ```
 

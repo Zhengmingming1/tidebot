@@ -14,13 +14,15 @@ tidebot 是我给自己写的一个小工具：一个常驻在本机后台的进
 - 改坏了？点一下旧版本就回去了，历史一直都在。
 - 每天花多少钱有上限，到了就停，不会半夜烧掉一个月的额度。
 
-它不是一个平台，也不打算变成平台。单用户、本地运行、一个二进制文件，空闲时大约占 13 MB 内存。
+它不是一个平台，也不打算变成平台。单用户、本地运行、一个二进制文件，空闲时大约占 30 MB 内存。
 
 ![首页](docs/images/zh-home.png)
 
 ## 截图
 
-任务详情。中间是和任务的对话，你说的话会被拆成一条条需求，确认后才会生效。同一句话拆出来的几条可以一起确认，只生成一个版本；不想要的取消勾选就行。
+下面的截图都是按 1024×655 的窗口拍的，也就是我平时在 Mac 上开着的大小。数据是演示脚本造的，不是真账号。
+
+任务详情。和任务的对话就在需求页签里：你说的话会被拆成一条条需求，确认后才会生效。同一句话拆出来的几条可以一起确认，只生成一个版本；不想要的取消勾选就行。
 
 ![任务详情](docs/images/zh-task-detail.png)
 
@@ -28,15 +30,27 @@ tidebot 是我给自己写的一个小工具：一个常驻在本机后台的进
 
 <img src="docs/images/zh-version-tree.png" width="320" alt="版本树">
 
-运行时的实时日志，用 SSE 推过来，日志里的密钥在写盘前就已经打码。
+运行时的实时日志。现在是写入即推送，新输出基本是秒到。复制、下载、全屏都在标题栏上，跑着的任务旁边有个“停止”，排队中的可以直接移出队列。日志里的密钥在写盘前就已经打码。
 
 ![实时日志](docs/images/zh-run-live.png)
 
-花费页。每日预算按你所在时区的零点重置（不是 UTC），超了会自动暂停任务并记一条事件。
+跑完的运行可以一键重跑；快速运行还能改了提示词再跑（按 `e`），或者直接存成定时任务。
+
+![运行详情](docs/images/zh-run-detail.png)
+
+快速运行。最近用过的提示词会以小标签列出来，点一下就填好；服务商记住上次的选择，Ctrl+Enter（Mac 上 ⌘+Enter）直接跑。没提交的提示词会自动存草稿，关掉弹窗或刷新页面都还在。
+
+![快速运行](docs/images/zh-quick-run.png)
+
+花费页。每个模型按自己的价格算，订阅套餐只计 Token 不计钱。每日预算按你所在时区的零点重置（不是 UTC），超了会自动暂停任务并记一条事件。选中的时间段可以导出 CSV。
 
 ![花费](docs/images/zh-spend.png)
 
-Skill 的版本和 diff。任意两个版本可以对比，回滚同样只挪指针，10 秒内能撤销。右边是优化器，它只会提候选版本，转正永远要你自己点。
+技能库。每个技能都能下载成 .zip，拿到另一台电脑上直接导入。
+
+![技能库](docs/images/zh-skills.png)
+
+Skill 的版本和 diff。任意两个版本可以对比，回滚同样只挪指针，10 秒内能撤销。任意版本都能单独下载。
 
 ![Skill 版本对比](docs/images/zh-skill-diff.png)
 
@@ -44,7 +58,7 @@ Skill 的版本和 diff。任意两个版本可以对比，回滚同样只挪指
 
 ![命令面板](docs/images/zh-palette.png)
 
-设置按“通用 / 供应商 / 预算 / 安全 / 通知 / 数据与备份 / 关于”分开，每一项都有自己的地址，比如 `#/settings/security/2fa`。两步验证可以直接在这里开：扫码、输一次验证码、存好恢复码，验证码没对上之前不会生效。
+设置按“通用 / 供应商 / 预算 / 价格目录 / 安全 / 通知 / 网络 / 数据与备份 / 关于”分开，每一项都有自己的地址，比如 `#/settings/security/2fa`。两步验证可以直接在这里开：扫码、输一次验证码、存好恢复码，验证码没对上之前不会生效。
 
 ![设置](docs/images/zh-settings.png)
 
@@ -60,21 +74,27 @@ Skill 自动优化（可选，默认关）。有三种模式：关、只提建�
 
 按钮和插件。按钮就是一键预设：绑定一个任务或者一段 prompt，首页按你排好的顺序显示，可以拖，也可以用 Alt+方向键排。插件安装时按权限逐项勾选，高风险的默认不勾，装好以后也能单独收回某一项；有配置项的插件会给一个表单，密码类字段存进去以后就读不回来。
 
-花费上限。全局、按任务、按预算桶（生产 / 灰度 / 优化 / 辅助）分别设置每日上限。每次运行前检查一次，运行时再用 `--max-budget-usd` 兜底。
+快速运行和重跑。不想建任务，就在首页点“新建快速运行”，写一句话直接跑。跑完觉得不对，可以原样重跑，也可以改了提示词再跑，满意了再一键存成定时任务。正在跑的随时能停，排队的能直接移出队列，页面上会显示排在第几个。
+
+花费上限。全局、按任务、按预算桶（生产 / 灰度 / 优化 / 辅助）分别设置每日上限。每次运行前检查一次，排队的运行轮到它时会再查一次（排队期间预算用完就跳过），运行时再用 `--max-budget-usd` 兜底。运行中每 5 秒存一次用量，进程崩了也不会丢账。
+
+按模型算钱。每次运行按实际的 Token 用量、用对应模型的价格算，不再拿 Claude 官方价格一刀切；订阅套餐（比如 Kimi Coding Plan）只记 Token。价格表会每周自动同步一次（签过名的价格目录，来源和更新时间收在“设置 → 价格目录”里），花费页可以按任务、服务商、模型分别看，也能导出 CSV。
+
+数据不会越堆越多。“设置 → 数据与备份”里能看到占了多少空间，日志和运行记录保留多久可以自己改，清理前先预览会删什么；数据目录所在的盘快满时会提醒你。
 
 任意模型服务商。只要提供 Anthropic 兼容接口就能用。内置了 Anthropic 官方、Kimi（含 Coding Plan）、DeepSeek、智谱 GLM / Z.AI、通义千问 DashScope，还有本地网关 magpie。密钥只注入到 `claude` 子进程的环境变量里，不进数据库，也不写日志。
 
-占用很小。下面是我在一台 Linux x86_64 机器上实测的数字（Go 1.24，`make build`）：
+占用不大。下面是 2026-10-23 在一台 Linux x86_64 机器上实测的数字（`go build -trimpath -ldflags="-s -w"`，即 `make build`；`scripts/measure.sh` 可以自己复现）：
 
 | 项目 | 数值 |
 |---|---|
-| `agentd` 二进制（已 strip） | 11.5 MB |
-| `agentctl` 二进制 | 3.1 MB |
-| 空闲内存 RSS（不开 WebUI） | 约 13 MB |
-| 空闲内存 RSS（开 WebUI） | 约 13.3 MB |
-| 跑过几次任务、登录过 WebUI 之后 | 约 20 MB |
-| 登录瞬间峰值（argon2id 哈希） | 约 84 MB，随即释放 |
-| WebUI 前端（JS + CSS，gzip 后） | 约 25 KB，不依赖 CDN 和框架 |
+| `agentd` 二进制（已 strip） | 16.7 MB |
+| `agentctl` 二进制 | 3.7 MB |
+| 空闲内存 RSS（不开 WebUI） | 约 27 MB |
+| 空闲内存 RSS（开 WebUI） | 约 32 MB |
+| WebUI 前端（JS + CSS，gzip 后） | 约 128 KB，不依赖 CDN 和框架；按内容哈希缓存，第二次打开不用再下载 |
+
+比最早的版本胖了一些（功能多了不少），内存这块我还会继续压。
 
 ## 架构
 
@@ -90,18 +110,23 @@ flowchart LR
     Sched[调度器<br/>cron]
     Tasks[任务 / 需求修订]
     Ver[版本库<br/>不可变版本 + 指针]
-    Cost[预算检查<br/>本地时区零点重置]
+    Cost[预算检查 + 按模型计价<br/>本地时区零点重置]
+    Queue[排队 / 停止]
     Runner[Runner]
+    Upd[更新检查<br/>价格目录同步]
     DB[(SQLite)]
   end
   Claude[claude -p<br/>stream-json]
   Provider[模型服务商<br/>Anthropic / Kimi / DeepSeek / GLM / Qwen / magpie]
+  Rel[tidebot-releases<br/>签名的 latest.json / prices.json]
 
   CLI --> IPC
   Browser --> Web
   IPC --> Tasks
   Web --> Tasks
-  Sched --> Runner
+  Sched --> Queue
+  Web --> Queue
+  Queue --> Runner
   Tasks --> Ver
   Runner --> Cost
   Runner --> Claude
@@ -109,7 +134,9 @@ flowchart LR
   Tasks --> DB
   Ver --> DB
   Cost --> DB
-  Runner -- 日志 / SSE --> Web
+  Runner -- 日志写入即推送 / SSE --> Web
+  Upd -- 每天 / 每周 --> Rel
+  Upd --> Cost
 ```
 
 ## 下载
@@ -127,13 +154,13 @@ GitHub 的 README 没法自动识别你的系统，所以只能列出来让你�
 不管装哪种，真跑任务都需要你自己装好 `claude` CLI。
 
 - **服务端（agentd + agentctl）**：下载 `tidebot-server_<版本>_<系统>_<架构>.tar.gz`（Windows 是 `.zip`），解压后放进 PATH。
-  Debian/Ubuntu 可以直接装 `.deb`：`sudo apt install ./tidebot-server_0.1.0_amd64.deb`，然后 `systemctl --user enable --now tidebot`。
+  Debian/Ubuntu 可以直接装 `.deb`：`sudo apt install ./tidebot-server_0.1.7_amd64.deb`，然后 `systemctl --user enable --now tidebot`。
 - **桌面版**：macOS 用 `.dmg`（通用包，Intel 和 Apple 芯片都行），Windows 用 `_setup.exe`（装到当前用户，不要管理员权限），
   Linux 用 `.deb` 或 `.AppImage`（AppImage 没打包 WebKitGTK，系统里得有 `libwebkit2gtk-4.1`）。
   没签名的话 macOS 第一次打开要右键 → 打开，Windows 会弹 SmartScreen。
-- **Docker**：`docker pull ghcr.io/zhengmingming1/tidebot:0.1.0`。镜像里没有 `claude` CLI，怎么加见 [docs/release.md](docs/release.md)。
+- **Docker**：`docker pull ghcr.io/zhengmingming1/tidebot:0.1.7`。镜像里没有 `claude` CLI，怎么加见 [docs/release.md](docs/release.md)。
 
-装好后 `agentctl call update.check` 能查新版本，`update.apply` 会校验 sha256 后原地替换（旧文件留成 `.prev`）。
+自动更新：桌面版和服务端每天查一次新版本（“设置 → 关于 → 更新”里可以关）。也可以手动 `agentctl update check` / `agentctl update apply`：先验更新清单的签名和安装包的 sha256，再原地替换（旧文件留成 `.prev`），新版本 90 秒内起不来会自动回滚。`.deb`、Docker 这类由包管理器管的安装只提示，不自动替换。国内连 GitHub 慢的话，“设置 → 网络”里可以配代理和下载镜像。
 
 ## 快速开始
 
@@ -196,7 +223,7 @@ webui_addr: 127.0.0.1:7420
 shutdown_grace: 5s           # 退出时等正在跑的任务收尾多久，超时就停下并记为「已停止」
 ```
 
-任务、技能、按钮、插件和触发器现在都能在 WebUI 里建：技能直接拖 zip 或文件夹进去，任务的定时可以选「每天 / 工作日 / 每周」，会列出接下来几次在本地时区的运行时间。下面的命令行照样能用。
+任务、技能、按钮、插件和触发器现在都能在 WebUI 里建：技能直接拖 zip 或文件夹进去，任务的定时可以选「每天 / 工作日 / 每周」，会列出接下来几次在本地时区的运行时间。新建任务时写完提示词，名字和定时会自动帮你填一个，每日预算也会给个建议值；加服务商时直接粘贴 Base URL 或一段环境变量也能认出来。弹窗里有没保存的修改，按 Esc 或点外面会先问你要不要放弃。下面的命令行照样能用。
 
 ## 命令行示例
 
@@ -222,8 +249,9 @@ agentctl skills pin --task <task_id> --skill <skill_id> --version <version_id>
 agentctl spend summary
 agentctl spend set-budget --scope global --max-usd 5
 
-# 手动跑一次
+# 手动跑一次；跑着的或排队的可以停掉
 agentctl tasks run --id <task_id>
+agentctl runs stop --id <run_id>
 ```
 
 命令行的提示信息也有中英文，跟随系统语言，或者用 `TIDEBOT_LANG=zh-CN` / `TIDEBOT_LANG=en` 指定。
@@ -234,6 +262,7 @@ agentctl tasks run --id <task_id>
 关掉窗口只是藏到托盘，定时任务照跑。托盘菜单从上到下是：出问题时才出现的问题区（核心没响应、今日预算用完、最近一小时有失败），正在运行几个任务，前 5 个按钮，“暂停全部调度”，局域网访问，打开窗口，退出。
 图标有三种状态：空闲、运行中、有问题。核心挂掉的话，托盘大约 3 秒内就会显示出来。
 运行完成、失败、需要确认、超预算都会弹系统通知。菜单语言跟 WebUI 里的语言设置走，没设就跟系统。
+导出 CSV、下载日志和技能时走系统自带的保存对话框，存完可以直接“在文件夹中显示”；“设置 → 数据与备份”里能一键打开数据文件夹。浏览器标签页的图标上会带个小角标，有任务在跑或刚失败一眼就能看到。
 
 ```bash
 scripts/build-desktop.sh linux        # 需要 Go 1.26、libgtk-3-dev、libwebkit2gtk-4.1-dev
@@ -249,11 +278,12 @@ bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏�
 
 已经能用的：
 
-- 定时调度、手动运行、并发上限、超时；失败重试（退避）、连续失败 3 次熔断、停机后补跑、重叠策略
+- 定时调度、手动运行、快速运行、并发上限、超时；运行可停止，排队可移出；失败重试（退避）、连续失败 3 次熔断、停机后补跑、重叠策略；退出时等正在跑的收尾
+- 运行详情一键重跑、改后重跑、存为任务；复制任务；提示词自动存草稿
 - 任务的不可变版本和回滚，版本树
 - 自然语言修改需求：拆成结构化条目、冲突检测、整批确认；条目攒多了会提议合并
 - Skill 导入、版本、钉住、回滚；自动优化（关 / 只建议 / 灰度三种模式），灰度变差会自动撤回
-- 全局 / 任务 / 预算桶三级每日花费上限，按本地时区零点重置
+- 全局 / 任务 / 预算桶三级每日花费上限，按本地时区零点重置；按模型价格计费，价格目录每周自动同步；花费导出 CSV
 - 执行防护：每个任务独立工作目录、工具白名单、危险命令拦下来等你确认、外部输入按数据包裹
 - 插件：独立进程，JSON-RPC 走 stdio，按版本安装，权限逐项批准，崩 3 次熔断；能提供 MCP 工具和触发器
 - 触发器：webhook（token 或 HMAC 签名）、文件变动、邮件和 IM（通过插件）；工作流包导入导出
@@ -263,7 +293,9 @@ bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏�
 - WebUI 中英文，CI 里会检查两份词条的 key 是否一致；命令面板和快捷键；通知按“失败 / 需要我确认 / 其他”分组
 - 登录可开两步验证（TOTP），带一次性恢复码；连续输错会告诉你还要等多久
 - 桌面版（托盘 + 窗口）
-- Linux、macOS、Windows 上 CI 都在跑测试；Windows 用命名管道做本地 IPC
+- Linux、macOS、Windows 上 CI 每次提交都跑测试；Windows 用命名管道做本地 IPC；CI 里还会用 gitleaks 扫一遍完整历史，防止把密钥提交进来
+- 自动更新：签名的更新清单 + sha256 校验，失败自动回滚；支持系统代理和下载镜像
+- 数据占用一览、保留天数可调、清理预览、磁盘空间不足提醒
 
 还没做好的：
 
