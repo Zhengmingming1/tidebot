@@ -771,6 +771,22 @@ table.cmp th, table.cmp td { padding: 6px 8px; font-size: 13px; }
 .card.hc .beat-row .bn { font-size: 13px; font-weight: 500; }
 .card.hc .hbar { grid-template-columns: repeat(10, 10px); gap: 2px; max-width: none; }
 .card.hc .hb { width: 10px; height: 10px; border-radius: 2px; }
+/* Task list: last 10 runs as a small strip, "5 min ago · 9/10 OK" under it. */
+.tl-beats { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hbar.sm { grid-template-columns: repeat(10, 6px); gap: 2px; max-width: none; width: max-content; }
+.hbar.sm .hb { width: 6px; height: 16px; border-radius: 2px; }
+.hbar.sm a.hb:hover, .hbar.sm a.hb:focus-visible { filter: brightness(.88); outline-offset: 1px; }
+.hbar.sm .hb.run { animation: tl-pulse 1.6s ease-in-out infinite; }
+@keyframes tl-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .hbar.sm .hb.run { animation: none; } }
+html.tb-hidden .hbar.sm .hb.run { animation-play-state: paused; }
+.tl-beats small { font-size: 12px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tl-rate.bad { color: var(--danger); }
+/* The name column takes what is left and ellipsizes, so the strip never pushes the table wider than the card. */
+.table td.tl-name { width: 100%; max-width: 0; }
+.table td.tl-name > .cell-main > div { min-width: 0; }
+.table td.tl-name small.clamp1 { max-width: none; }
+.table .tl-beats .hb[data-tip]:hover::after, .table .tl-beats .hb[data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; bottom: calc(100% + 6px); }
 
 .home-recent .card-head { margin-bottom: 8px; padding-top: 16px; }
 .home-recent .table th { padding-bottom: 8px; }

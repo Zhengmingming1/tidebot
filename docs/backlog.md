@@ -1506,3 +1506,57 @@ another computer.
    sessions page.
 3. Have `agentctl auth set-password` (the forgot-password reset) sign out all browser sessions too,
    once the desktop window re-creates its local session on 401.
+
+## 2026-10-24 (02:20): task list shows the last 10 runs, not just the last status
+
+Category: **UI polish + small logic fix** (task list). The last rounds were security (password),
+the task form and the task folder; this one is the list people look at most.
+
+**Done**
+
+- The "上次运行 / Last run" column is now **"最近运行 / Recent runs"**: a strip of the task's last
+  10 runs (6×16 px cells on a 2 px gap, oldest left, empty slots in sand for newer tasks; green
+  succeeded, red failed / timeout, amber skipped, blue running — pulsing, paused while the tab is
+  hidden and off with reduced motion). Each cell links to its run; hover shows time · status ·
+  duration · cost, anchored right so it stays inside the window. Under it: when the newest run
+  started (live "x 分钟前", full time in the tooltip) and **"成功 8/10 / 8/10 OK"**, red when any
+  failed. Stopped and budget-skipped runs don't count as failures (said in the tooltip). No runs:
+  "从未 / Never". Sorting by the column sorts by the newest run's time instead of the status word.
+- The task name column now takes the space that's left and ellipsizes (`width:100%; max-width:0`),
+  so the wider cell never pushes the table past the card at 1024×655 (scrollWidth 1024 in zh-CN and
+  en; it was 1033 before the fix while building this).
+- **Bug: "今日运行 / Runs today" counted the UTC date.** In Asia/Shanghai a run at 07:00 counted for
+  "yesterday". It now counts from local midnight in the display zone, like the home page KPIs.
+- **Fewer queries:** `GET /api/tasks` filled last status and runs today with two queries per task;
+  it now uses two queries for the whole list (one `ROW_NUMBER() … PARTITION BY task_id` window on
+  `idx_runs_task_created`, one `GROUP BY task_id`). New list fields `last_run_at` and `beats`
+  (omitted when empty); the task detail answer is unchanged.
+- Same on macOS / Windows / Linux, desktop window and browser: plain HTML/CSS cells, no fonts or
+  paths involved, `Ctrl`/`⌘` not used.
+- Shots: `/workspace/tidebot-shots/task-list-recent-runs-1024x655.png`,
+  `task-list-recent-runs-tip-1024x655.png`, `task-list-recent-runs-en-1024x655.png`.
+- Tests: `TestTaskListRecentRuns` (newest 10 oldest first, last status/time, local-day runs today
+  across midnight in UTC+14, archived task left out, idle task empty, detail answer untouched),
+  `TestTaskListRecentRunsUI` (wiring, CSS, i18n keys).
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/components/MonitorListItem.vue`: every monitor row in the list carries
+  `<HeartbeatBar size="small">` next to an uptime pill, so a glance at the list shows which one is
+  flaky. `src/components/HeartbeatBar.vue`: fixed number of slots with empty placeholders, narrower
+  beats for `size !== "big"`, a title per beat. We use a fixed 10 slots (no resize logic) and put
+  the success count under the strip. No code copied.
+
+**Learned**
+
+- A `small.clamp1 { max-width: 240px }` in the name column made the table's minimum width rigid;
+  any wider column elsewhere overflowed the card. Letting the flexible column have `max-width: 0`
+  is the usual table trick and keeps the ellipsis.
+- A "today" built with `time.Now().UTC().Format("2006-01-02")` is wrong for 8 hours a day in the
+  user's zone. This was the last one in non-test code; day boundaries go through `s.loc()`.
+
+**Ideas for later**
+
+1. Same small strip on the skills list (runs that used each skill) and the task detail header.
+2. Filter the task list by "failing" (last run failed / timed out), with a count like the runs list.
+3. Click the "成功 8/10" text to open the runs list filtered to that task.

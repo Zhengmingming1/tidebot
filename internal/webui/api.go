@@ -114,6 +114,9 @@ type taskDTO struct {
 	Skills        []string `json:"skills"`
 	RunsToday     int      `json:"runs_today"`
 	LastStatus    string   `json:"last_status"`
+	// List answer only: when the newest run was created and the last few runs, oldest first.
+	LastRunAt string `json:"last_run_at,omitempty"`
+	Beats     []beat `json:"beats,omitempty"`
 }
 
 func toTaskDTO(v tasksvc.TaskView) taskDTO {
@@ -496,11 +499,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, toTaskDTO(v))
 	}
-	// enrich with last status / runs today
-	today := time.Now().UTC().Format("2006-01-02")
-	for i := range out {
-		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT status FROM runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1`, out[i].ID).Scan(&out[i].LastStatus)
-		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM runs WHERE task_id=? AND substr(created_at,1,10)=?`, out[i].ID, today).Scan(&out[i].RunsToday)
+	if err := s.enrichTaskList(r.Context(), out); err != nil {
+		writeErr(w, 500, err.Error())
+		return
 	}
 	writeJSON(w, 200, out)
 }
