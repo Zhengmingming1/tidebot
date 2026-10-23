@@ -972,6 +972,7 @@
     if (h) { h.id = "modal-title"; box.setAttribute("aria-labelledby", "modal-title"); }
     var close = function () {
       if (!root.contains(box)) return;
+      draftFlush();
       root.innerHTML = ""; document.removeEventListener("keydown", onKey, true);
       if (modalGuard && modalGuard.box === box) modalGuard = null;
       if (opener && opener.focus && document.contains(opener)) opener.focus();
@@ -1217,7 +1218,7 @@
       if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
       var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
       modal('<div class="card-head"><span class="ico">' + ic(pre ? "edit" : "sparkle") + "</span><h2>" + esc(T(pre ? "qr.edit_title" : "home.quick")) + "</h2></div>" +
-        '<form id="qr"><div class="field"><span id="qr-lbl"' + (pre ? ' class="qr-lbl"' : "") + '>' + esc(T("f.prompt")) + (pre ? '<button type="button" class="linkish qr-reset hidden" id="qr-reset" data-tip="' + esc(T("qr.revert_tip")) + '">' + ic("rollback", "sm") + esc(T("qr.revert")) + "</button>" : "") + '</span><textarea name="prompt" aria-labelledby="qr-lbl" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></div>' +
+        '<form id="qr"><div class="field"><span class="qr-lbl"><span id="qr-lbl">' + esc(T("f.prompt")) + "</span>" + (pre ? '<button type="button" class="linkish qr-reset hidden" id="qr-reset" data-tip="' + esc(T("qr.revert_tip")) + '">' + ic("rollback", "sm") + esc(T("qr.revert")) + "</button>" : draftTagHtml()) + '</span><textarea name="prompt" aria-labelledby="qr-lbl" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></div>' +
         '<div class="qr-recent hidden" id="qr-recent" role="group" aria-label="' + esc(T("qr.recent")) + '"><span class="muted">' + esc(T("qr.recent")) + "</span></div>" +
         '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label>" +
         '<p class="hint">' + esc(T(pre ? "qr.edit_hint" : "qr.hint")) + "</p>" +
@@ -1233,6 +1234,7 @@
           };
           var sync = function () { fitTextarea(ta); if (reset) reset.classList.toggle("hidden", !qrEdited(orig, ta.value, form.provider.value)); };
           if (pre) { ta.value = pre.prompt; ta.setSelectionRange(ta.value.length, ta.value.length); }
+          else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });
           filterChips(); sync();
           ta.addEventListener("input", function () { filterChips(); sync(); });
           form.provider.addEventListener("change", sync);
@@ -1244,6 +1246,7 @@
             var f = e.target;
             try { localStorage.setItem("tb_qr_provider", f.provider.value); } catch (e2) {}
             api("/api/runs/quick", { method: "POST", body: { prompt: f.prompt.value, provider: f.provider.value } }).then(function (r) {
+              if (!pre) draftClear("qr");
               close(); openStarted(r, "toast.quick_started");
             }).catch(fail);
           });
@@ -1263,6 +1266,56 @@
     var max = Math.max(96, Math.round(window.innerHeight * 0.4));
     ta.style.height = "";
     ta.style.height = Math.min(max, ta.scrollHeight + 2) + "px";
+  }
+  // Prompt drafts (idea: Open WebUI Chat.svelte saveDraft / restoreChatInput / clearDraft):
+  // what you type in a fresh quick run or new task is kept in sessionStorage (this window only,
+  // gone when it closes or on sign-out), written 400 ms after you stop typing and right away
+  // when the dialog closes or the page hides. Opening the dialog again brings it back with a
+  // small "Draft restored · Clear" tag; a successful submit removes it.
+  var DRAFT_MAX = 32000, DRAFT_TTL = 7 * 864e5, draftPend = null;
+  function draftKey(kind) { return "tb_draft_" + kind; }
+  function draftLoad(kind, now) {
+    try {
+      var d = JSON.parse(sessionStorage.getItem(draftKey(kind)) || "null");
+      if (d && typeof d.text === "string" && d.text.trim() && typeof d.at === "number" && (now || Date.now()) - d.at < DRAFT_TTL) return d;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function draftSave(kind, text, now) {
+    try {
+      if (!String(text).trim() || text.length > DRAFT_MAX) sessionStorage.removeItem(draftKey(kind));
+      else sessionStorage.setItem(draftKey(kind), JSON.stringify({ text: text, at: now || Date.now() }));
+    } catch (e) { /* storage full or disabled: drafts are a nicety */ }
+  }
+  function draftClear(kind) { if (draftPend && draftPend.kind === kind) { clearTimeout(draftPend.t); draftPend = null; } try { sessionStorage.removeItem(draftKey(kind)); } catch (e) { /* ignore */ } }
+  function draftFlush() { var p = draftPend; draftPend = null; if (p) { clearTimeout(p.t); p.fn(); } }
+  function draftsClearAll() { draftPend = null; try { Object.keys(sessionStorage).filter(function (k) { return /^tb_draft_/.test(k); }).forEach(function (k) { sessionStorage.removeItem(k); }); } catch (e) { /* ignore */ } }
+  window.addEventListener("pagehide", draftFlush);
+  document.addEventListener("visibilitychange", function () { if (document.hidden) draftFlush(); });
+  // draftTagHtml goes at the right end of the prompt label row; wireDraft fills the textarea
+  // from the draft (if any) and keeps saving. onReset runs after "Clear" empties the field.
+  function draftTagHtml() {
+    return '<span class="draft-tag hidden" id="dr-tag"><span class="dr-txt" tabindex="0" data-tip="">' + esc(T("dr.restored")) + '</span><button type="button" class="linkish" id="dr-clear">' + esc(T("dr.clear")) + "</button></span>";
+  }
+  function wireDraft(root, ta, kind, onReset) {
+    var tag = $("#dr-tag", root), d = draftLoad(kind);
+    if (d && !ta.value.trim()) {
+      ta.value = d.text; ta.setSelectionRange(ta.value.length, ta.value.length);
+      $(".dr-txt", tag).setAttribute("data-tip", T("dr.tip", { t: when(new Date(d.at).toISOString()) }));
+      tag.classList.remove("hidden");
+    }
+    var save = function () { draftSave(kind, ta.value); };
+    ta.addEventListener("input", function (e) {
+      if (!e.isTrusted) return;
+      if (!ta.value.trim()) { draftClear(kind); tag.classList.add("hidden"); return; }
+      if (draftPend) clearTimeout(draftPend.t);
+      draftPend = { kind: kind, fn: save, t: setTimeout(draftFlush, 400) };
+    });
+    $("#dr-clear", root).addEventListener("click", function () {
+      draftClear(kind); ta.value = ""; tag.classList.add("hidden");
+      if (onReset) onReset();
+      ta.focus();
+    });
   }
 
   // ---------- TASKS ----------
@@ -2619,7 +2672,8 @@
     Promise.all(reqs).then(function (r) {
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
-      var promptF = fieldHtml(T("tf.prompt"), '<textarea name="prompt" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>"));
+      var drafty = !taskId && !pre.prompt;
+      var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
         (taskId ? nameF + promptF : promptF + nameF) +
         '<div class="form-row">' + fieldHtml(T("bt.skill"), '<select name="skill_id"><option value="">' + esc(T("tf.no_skill")) + "</option>" + skills.map(function (s) { return opt(s.id, s.name, s.id === tf.skill_id); }).join("") + "</select>") +
@@ -2639,6 +2693,7 @@
         };
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         loadVers();
+        if (drafty) wireDraft(root, f.prompt, "task");
         f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
         if (!taskId) wireTaskAutofill(root, f, se, skills);
         f.addEventListener("submit", function (e) {
@@ -2648,6 +2703,7 @@
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30 };
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
+            if (drafty) draftClear("task");
             close(); toast(T(taskId ? "tf.saved" : "tf.created"));
             if (taskId) refresh(); else location.hash = "#/tasks/" + enc(t.id);
           }).catch(function (err) { btn.disabled = false; fail(err); });
@@ -3766,6 +3822,7 @@
             confirmDialog({ title: T("set.reset_ui"), body: T("set.reset_ui_confirm"), ok: T("set.reset"), danger: true }).then(function (y) {
               if (!y) return;
               try { Object.keys(localStorage).filter(function (k) { return /^tb_/.test(k); }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
+              draftsClearAll();
               state.notifSeen = ""; fav.failed = 0; paintFavicon(); toast(T("set.reset_done"));
             });
           });
@@ -3815,7 +3872,7 @@
           row("session", T("set.session"), T("set.session_sub"), '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button>") + "</section>";
         after = function () {
           $("#btn-logout").addEventListener("click", function () {
-            api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; showLogin(); });
+            api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; draftsClearAll(); showLogin(); });
           });
           if ($("#tf-on")) $("#tf-on").addEventListener("click", twoFASetup);
           if ($("#tf-off")) $("#tf-off").addEventListener("click", twoFADisable);
@@ -4077,7 +4134,7 @@
     soft = soft === true;
     stopStream(); stopPoll();
     clearTimeout(scheduleRefresh._t);
-    if (!soft) { $("#modal-root").innerHTML = ""; closeDrawer(); }
+    if (!soft) { draftFlush(); $("#modal-root").innerHTML = ""; closeDrawer(); }
     var y = window.scrollY, pg = page(), sy = pg ? pg.scrollTop : 0;
     if (!soft && location.hash !== lastHash && pg) {
       // Keep the old page on screen; only show a skeleton if loading is slow.
