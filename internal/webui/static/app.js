@@ -3918,31 +3918,63 @@
   // ---------- SPEND ----------
   var taskNames = {};
   function bucketName(b) { return b.scope === "global" ? T("sp.global") : b.scope === "bucket" ? (T("bucket." + b.scope_id) === "bucket." + b.scope_id ? cap(b.scope_id) : T("bucket." + b.scope_id)) : (taskNames[b.scope_id] || T("col.task") + " " + String(b.scope_id).slice(0, 12)); }
-  var spendView = { range: "7d", by: "task" }, spendCache = {};
+  var spendView = { range: "7d", by: "task", day: "" }, spendCache = {};
+  var SPEND_RANGES = ["7d", "30d", "all"], SPEND_BYS = ["task", "provider_model", "model", "provider"];
   // Daily spend columns: every day of the range (empty days included, so the axis never
   // jumps), a rounded top value + mid gridline, the date and amount in each bar's tooltip.
-  function spendChart(days, range) {
-    var by = {}, keys = [], today = dayKey(new Date());
-    days.forEach(function (x) { by[x.day] = x.usd; });
+  // Daily bars. Each bar is a button: click / Enter picks that day and the breakdown below
+  // shows only it (click again or Esc for the whole range); ←/→/Home/End move between days
+  // (one tab stop for the chart). The picked bar stays coloured, the others fade.
+  function spendChartKeys(range, days) {
+    var keys = [], today = dayKey(new Date());
     var n = range === "7d" ? 7 : range === "30d" ? 30 : 0;
-    if (!n) { var first = days.length ? days[0].day : today; n = Math.min(90, Math.max(7, Math.round((Date.parse(today) - Date.parse(first)) / 864e5) + 1)); }
+    if (!n) { var first = days && days.length ? days[0].day : today; n = Math.min(90, Math.max(7, Math.round((Date.parse(today) - Date.parse(first)) / 864e5) + 1)); }
     for (var i = n - 1; i >= 0; i--) keys.push(dayKey(new Date(Date.now() - i * 864e5)));
+    return keys;
+  }
+  function spendDayLabel(k) { return fmtTime(k + "T12:00:00Z", { month: "short", day: "numeric", weekday: "short" }); }
+  function spendChart(days, range, sel) {
+    var by = {}, today = dayKey(new Date());
+    days.forEach(function (x) { by[x.day] = x.usd; });
+    var keys = spendChartKeys(range, days), n = keys.length;
+    if (keys.indexOf(sel) < 0) sel = "";
     var mx = Math.max.apply(null, keys.map(function (k) { return by[k] || 0; }).concat([0]));
     var top = 0;
     if (mx > 0) { var e = Math.pow(10, Math.floor(Math.log10(mx))), f = mx / e; top = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; }
     var dec = top / 2 >= 1 && (top / 2) % 1 === 0 ? 0 : top < 0.02 ? 4 : 2, step = n <= 7 ? 1 : n <= 31 ? 5 : 10;
+    var stop = sel || today; // the one bar reachable with Tab
     var cols = keys.map(function (k, idx) {
-      var v = by[k] || 0, lab = (n - 1 - idx) % step === 0;
-      var tipTxt = fmtTime(k + "T12:00:00Z", { month: "short", day: "numeric", weekday: "short" }) + " · " + (v ? usd(v, 4) : T("sp.no_spend_day"));
-      return '<div class="spc-col' + (k === today ? " today" : "") + (v ? "" : " zero") + '" data-tip="' + esc(tipTxt) + '"><span class="spc-bar" data-h="' + (top ? v / top * 100 : 0) + '"></span><small' + (lab ? "" : ' class="off"') + ">" + esc(k.slice(5).replace("-", "/")) + "</small></div>";
+      var v = by[k] || 0, lab = (n - 1 - idx) % step === 0, on = k === sel;
+      var tipTxt = spendDayLabel(k) + " · " + (v ? usd(v, 4) : T("sp.no_spend_day"));
+      return '<button type="button" class="spc-col' + (k === today ? " today" : "") + (v ? "" : " zero") + (on ? " on" : "") + '" data-day="' + esc(k) + '" aria-pressed="' + on + '" tabindex="' + (k === stop ? 0 : -1) + '" aria-label="' + esc(tipTxt) + '" data-tip="' + esc(tipTxt + "\n" + T(on ? "sp.day_unpick" : "sp.day_pick")) + '"><span class="spc-bar" data-h="' + (top ? v / top * 100 : 0) + '"></span><small' + (lab || on ? "" : ' class="off"') + ' aria-hidden="true">' + esc(k.slice(5).replace("-", "/")) + "</small></button>";
     }).join("");
-    return '<div class="spc' + (n > 31 ? " dense" : "") + '" role="img" aria-label="' + esc(T("sp.chart_aria", { n: n })) + '"><div class="spc-y" aria-hidden="true"><span>' + esc(top ? usd(top, dec) : "") + "</span><span>" + esc(top ? usd(top / 2, dec) : "") + "</span><span>" + esc(usd(0, 0)) + '</span></div><div class="spc-plot">' + cols + (top ? "" : '<p class="spc-empty">' + esc(T("sp.no_spend_range")) + "</p>") + "</div></div>";
+    return '<div class="spc' + (n > 31 ? " dense" : "") + '"><div class="spc-y" aria-hidden="true"><span>' + esc(top ? usd(top, dec) : "") + "</span><span>" + esc(top ? usd(top / 2, dec) : "") + "</span><span>" + esc(usd(0, 0)) + '</span></div><div class="spc-plot' + (sel ? " has-sel" : "") + '" role="group" aria-label="' + esc(T("sp.chart_aria", { n: n })) + '">' + cols + (top ? "" : '<p class="spc-empty">' + esc(T("sp.no_spend_range")) + "</p>") + "</div></div>";
   }
-  function renderSpend() {
+  // #/spend?range=30d&by=model&day=2026-10-22 — defaults are left out of the address.
+  function spendHash(v) {
+    var q = [];
+    if (v.range !== "7d") q.push("range=" + enc(v.range));
+    if (v.by !== "task") q.push("by=" + enc(v.by));
+    if (v.day) q.push("day=" + enc(v.day));
+    return "#/spend" + (q.length ? "?" + q.join("&") : "");
+  }
+  function spendDayOk(range, day) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day || "") || day > dayKey(new Date())) return false;
+    return range === "all" || day >= spendChartKeys(range, [])[0];
+  }
+  function spendQuery(v) { return "range=" + enc(v.range) + "&by=" + enc(v.by) + (v.day ? "&day=" + enc(v.day) : ""); }
+  function renderSpend(params) {
     spendCache = {};
+    // The address wins; plain #/spend keeps the last range and tab. A picked day only comes
+    // from the address (a stale day from an earlier visit would be confusing).
+    params = params || new URLSearchParams();
+    if (SPEND_RANGES.indexOf(params.get("range")) >= 0) spendView.range = params.get("range");
+    if (SPEND_BYS.indexOf(params.get("by")) >= 0) spendView.by = params.get("by");
+    spendView.day = spendDayOk(spendView.range, params.get("day")) ? params.get("day") : "";
+    if (location.hash.indexOf("#/spend") === 0 && location.hash !== spendHash(spendView)) { history.replaceState(null, "", spendHash(spendView)); lastHash = location.hash; }
     var spendP = api("/api/spend"); // start all while the route's cache window is open
-    var bkKey = spendView.range + "|" + spendView.by;
-    var bkP = api("/api/spend/breakdown?range=" + spendView.range + "&by=" + spendView.by).then(function (r) { spendCache[bkKey] = r; }, function () {});
+    var bkKey = spendQuery(spendView);
+    var bkP = api("/api/spend/breakdown?" + bkKey).then(function (r) { spendCache[bkKey] = r; }, function () {});
     return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
       var s = d.summary, budgets = s.budgets || [];
       var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0, max_tokens: 0 };
@@ -3973,24 +4005,60 @@
       var paintBody = function (r) {
         var rows = r.rows || [], mxd = Math.max.apply(null, (r.days || []).map(function (x) { return x.usd; }).concat([0.0001]));
         var nm = function (x) { return spendView.by === "task" ? (x.key ? (x.name || taskNames[x.key] || x.key) : T("run.adhoc_paren")) : (x.key || T("sp.unknown")); };
-        $("#sp-body").innerHTML = '<div class="sp-total"><strong>' + esc(usd(r.total_usd || 0, 4)) + "</strong>" + (r.estimated_runs ? costBadge("estimate") : "") + ' <span class="muted">' + esc(T("sp.since", { d: spendView.range === "all" ? T("sp.rall") : r.since })) + (r.estimated_runs ? " · " + T("sp.est_runs", { n: r.estimated_runs }) : "") + "</span></div>" +
-          spendChart(r.days || [], spendView.range) +
+        var dy = r.day || "", hadFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest(".spc-plot");
+        var focusDay = hadFocus ? document.activeElement.getAttribute("data-day") : "";
+        var head = dy ? '<span class="sp-day" role="status"><span>' + esc(T("sp.day_only", { d: spendDayLabel(dy) })) + '</span><button type="button" class="icon-btn sm" id="sp-day-clear" data-tip="' + esc(T("sp.day_clear")) + '" aria-label="' + esc(T("sp.day_clear")) + '">' + ic("x", "sm") + '</button></span><a class="link sp-day-runs" href="#/runs?from=' + enc(dy) + "&to=" + enc(dy) + '">' + esc(T("sp.day_runs")) + " " + ic("arrow", "sm") + "</a>"
+          : '<span class="muted">' + esc(T("sp.since", { d: spendView.range === "all" ? T("sp.rall") : r.since })) + "</span>";
+        $("#sp-body").innerHTML = '<div class="sp-total"><strong>' + esc(usd(r.total_usd || 0, 4)) + "</strong>" + (r.estimated_runs ? costBadge("estimate") : "") + " " + head + (r.estimated_runs ? ' <span class="muted">· ' + esc(T("sp.est_runs", { n: r.estimated_runs })) + "</span>" : "") + "</div>" +
+          spendChart(r.days || [], spendView.range, dy) +
           (rows.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.col_" + spendView.by)) + "</th><th>" + esc(T("nav.runs")) + "</th><th>Tokens</th><th>" + esc(T("sp.share")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows.map(function (x) {
             var sh = r.total_usd ? x.usd / r.total_usd * 100 : 0;
             var tokTip = T("sp.tok_tip", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0), r: num(x.cache_read_tokens || 0), w: num(x.cache_write_tokens || 0), q: num(x.requests || 0) });
             var badge = x.estimated_runs || x.legacy_runs ? costBadge(x.estimated_runs ? "estimate" : "legacy") : (x.subscription_runs === x.runs ? costBadge("subscription") : "");
             return "<tr><td><strong>" + esc(nm(x)) + "</strong>" + badge + "</td><td>" + esc(x.runs) + '</td><td title="' + esc(tokTip) + '">' + esc(num(x.tokens)) + '<small class="muted">' + esc(T("rd.in_out", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0) })) + (x.cache_read_tokens ? " · " + esc(T("sp.cache_n", { n: num(x.cache_read_tokens) })) : "") + '</small></td><td><div class="progress thin"><span data-w="' + sh + '"></span></div></td><td class="right"><strong>' + esc(usd(x.usd, 4)) + "</strong></td></tr>";
-          }).join("") + "</tbody></table>" : emptyState("receipt", T("sp.none_range"), ""));
+          }).join("") + "</tbody></table>" : emptyState("receipt", dy ? T("sp.none_day") : T("sp.none_range"), ""));
         applySizes($("#sp-body"));
+        var ex = $("#sp-export");
+        if (ex) ex.setAttribute("data-tip", dy ? T("sp.export_day_tip", { d: spendDayLabel(dy) }) : T("sp.export_tip"));
+        if (focusDay) { var fb = $('#sp-body [data-day="' + focusDay + '"]'); if (fb) fb.focus(); }
       };
       // cached per range+tab: switching back is instant and never flashes a loader
       var load = function () {
-        var key = spendView.range + "|" + spendView.by;
+        var key = spendQuery(spendView);
+        if (location.hash !== spendHash(spendView)) { history.replaceState(null, "", spendHash(spendView)); lastHash = location.hash; }
         if (spendCache[key]) paintBody(spendCache[key]); else if (!$("#sp-body").innerHTML) $("#sp-body").innerHTML = skeleton("list");
-        return api("/api/spend/breakdown?range=" + spendView.range + "&by=" + spendView.by).then(function (r) { spendCache[key] = r; if (key === spendView.range + "|" + spendView.by) paintBody(r); }).catch(function (e) { $("#sp-body").innerHTML = errorState(e.message); });
+        return api("/api/spend/breakdown?" + key).then(function (r) { spendCache[key] = r; if (key === spendQuery(spendView)) paintBody(r); }).catch(function (e) { $("#sp-body").innerHTML = errorState(e.message); });
       };
-      $("#sp-export").addEventListener("click", function () { downloadFile("/api/spend/export?range=" + enc(spendView.range) + "&lang=" + enc(state.lang), "tidebot-spend.csv", $("#sp-export")); });
-      $$("[data-r]").forEach(function (b) { b.addEventListener("click", function () { spendView.range = b.getAttribute("data-r"); $$("[data-r]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-checked", x === b); }); load(); }); });
+      // Pick / unpick a day. The bars change at once (no wait, no flash); the table follows
+      // when its answer is in (instant when cached).
+      var pickDay = function (k) {
+        spendView.day = k && k !== spendView.day ? k : "";
+        var plot = $("#sp-body .spc-plot");
+        if (plot) {
+          plot.classList.toggle("has-sel", !!spendView.day);
+          $$("[data-day]", plot).forEach(function (b) { var on = b.getAttribute("data-day") === spendView.day; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+        }
+        load();
+      };
+      var body = $("#sp-body");
+      body.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-day]");
+        if (b) { pickDay(b.getAttribute("data-day")); return; }
+        if (e.target.closest("#sp-day-clear")) { var cur = spendView.day; pickDay(""); var back = $('#sp-body [data-day="' + cur + '"]'); if (back) back.focus(); }
+      });
+      body.addEventListener("keydown", function (e) {
+        var b = e.target.closest && e.target.closest("[data-day]");
+        if (!b) return;
+        var all = $$("[data-day]", body), i = all.indexOf(b), j = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: all.length - 1 }[e.key];
+        if (e.key === "Escape" && spendView.day) { e.preventDefault(); pickDay(""); return; }
+        if (j == null) return;
+        e.preventDefault();
+        j = Math.max(0, Math.min(all.length - 1, j));
+        all.forEach(function (x, n) { x.tabIndex = n === j ? 0 : -1; });
+        all[j].focus();
+      });
+      $("#sp-export").addEventListener("click", function () { downloadFile("/api/spend/export?range=" + enc(spendView.range) + (spendView.day ? "&day=" + enc(spendView.day) : "") + "&lang=" + enc(state.lang), "tidebot-spend.csv", $("#sp-export")); });
+      $$("[data-r]").forEach(function (b) { b.addEventListener("click", function () { spendView.range = b.getAttribute("data-r"); if (spendView.day && !spendDayOk(spendView.range, spendView.day)) spendView.day = ""; $$("[data-r]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-checked", x === b); }); load(); }); });
       $$("[data-by]").forEach(function (b) { b.addEventListener("click", function () { spendView.by = b.getAttribute("data-by"); $$("[data-by]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-selected", x === b); }); load(); }); });
       var saveBudget = function (k) {
         var b = budgets[k];
@@ -4650,7 +4718,7 @@
       case "buttons": p = renderButtons(); break;
       case "plugins": p = renderPlugins(); break;
       case "runs": p = parts[1] ? renderRunDetail(parts[1]) : renderRuns(params); break;
-      case "spend": p = renderSpend(); break;
+      case "spend": p = renderSpend(params); break;
       case "settings": p = renderSettings(parts[1], parts[2]); break;
       default: p = renderHome();
     }

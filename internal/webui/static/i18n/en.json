@@ -1574,5 +1574,12 @@
   "rr.empty_sub": "Try another range, or clear the date filter to see all.",
   "rr.show_all": "Show all time",
   "pal.runs_today": "Today's runs",
-  "home.k_runs_tip": "Open today's runs"
+  "home.k_runs_tip": "Open today's runs",
+  "sp.day_pick": "Click to see this day only",
+  "sp.day_unpick": "Click again for the whole range",
+  "sp.day_only": "Only {d}",
+  "sp.day_clear": "Back to the whole range · Esc",
+  "sp.day_runs": "Runs that day",
+  "sp.none_day": "Nothing spent on this day.",
+  "sp.export_day_tip": "Export every run on {d} (CSV)"
 }

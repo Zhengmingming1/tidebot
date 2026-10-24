@@ -1574,5 +1574,12 @@
   "rr.empty_sub": "换个时间范围，或清除时间筛选看全部。",
   "rr.show_all": "查看全部时间",
   "pal.runs_today": "今天的运行",
-  "home.k_runs_tip": "查看今天的运行"
+  "home.k_runs_tip": "查看今天的运行",
+  "sp.day_pick": "点击只看这一天",
+  "sp.day_unpick": "再次点击查看整段时间",
+  "sp.day_only": "仅 {d}",
+  "sp.day_clear": "查看整段时间 · Esc",
+  "sp.day_runs": "当天运行",
+  "sp.none_day": "这一天没有花费。",
+  "sp.export_day_tip": "导出 {d} 的每次运行明细（CSV）"
 }

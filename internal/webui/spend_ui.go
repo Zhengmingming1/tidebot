@@ -1,11 +1,14 @@
 package webui
 
 import (
+	"errors"
 	"net/http"
 	"time"
 )
 
-// GET /api/spend/breakdown?range=7d|30d|all&by=task|model|provider
+// GET /api/spend/breakdown?range=7d|30d|all&by=task|model|provider[&day=YYYY-MM-DD]
+// day narrows the rows and totals to one calendar day of the range (a bar picked in
+// the chart); the per-day series still covers the whole range so the chart stays put.
 // Amounts are in the display currency (fixed user-set rate). Rows carry the
 // token breakdown and how many runs were estimates (missing / approximate
 // prices, legacy Claude figures) so the UI can show an 估算 badge.
@@ -39,6 +42,16 @@ func (s *Server) handleSpendBreakdown(w http.ResponseWriter, r *http.Request) {
 	if n > 0 {
 		since = time.Now().In(loc).AddDate(0, 0, -(n - 1)).Format("2006-01-02")
 	}
+	pick, err := spendDay(q.Get("day"), since)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	// rows: the whole range, or only the picked day
+	rowsWhere, rowsArg := "l.day >= ?", since
+	if pick != "" {
+		rowsWhere, rowsArg = "l.day = ?", pick
+	}
 	type row struct {
 		Key        string  `json:"key"`
 		Name       string  `json:"name"`
@@ -61,7 +74,7 @@ func (s *Server) handleSpendBreakdown(w http.ResponseWriter, r *http.Request) {
   COALESCE(SUM(l.requests),0), SUM(CASE WHEN l.source IN ('estimate','claude') THEN 1 ELSE 0 END),
   SUM(CASE WHEN l.source='legacy' THEN 1 ELSE 0 END), SUM(CASE WHEN l.source='subscription' THEN 1 ELSE 0 END)
 FROM cost_ledger l LEFT JOIN runs r ON r.id = l.run_id LEFT JOIN tasks t ON t.id = l.task_id
-WHERE l.day >= ? GROUP BY k ORDER BY SUM(`+amt+`) DESC, SUM(l.tokens) DESC LIMIT 50`, since)
+WHERE `+rowsWhere+` GROUP BY k ORDER BY SUM(`+amt+`) DESC, SUM(l.tokens) DESC LIMIT 50`, rowsArg)
 	if err != nil {
 		writeErr(w, 500, "query failed")
 		return
@@ -97,6 +110,22 @@ WHERE l.day >= ? GROUP BY k ORDER BY SUM(`+amt+`) DESC, SUM(l.tokens) DESC LIMIT
 		}
 		drows.Close()
 	}
-	writeJSON(w, 200, map[string]any{"rows": out, "days": series, "total_usd": total, "since": since,
+	writeJSON(w, 200, map[string]any{"rows": out, "days": series, "total_usd": total, "since": since, "day": pick,
 		"currency": s.fx().Display, "estimated_runs": estimated})
+}
+
+// spendDay checks the optional day= of the spend breakdown / export: empty, or a real
+// YYYY-MM-DD date that is not before the range start (since).
+func spendDay(v, since string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	t, err := time.Parse("2006-01-02", v)
+	if err != nil || t.Format("2006-01-02") != v {
+		return "", errors.New("day must be YYYY-MM-DD")
+	}
+	if v < since {
+		return "", errors.New("day is outside the range")
+	}
+	return v, nil
 }

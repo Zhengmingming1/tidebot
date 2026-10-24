@@ -1773,3 +1773,59 @@ disk I/O and security; this is idea 1 from 10-23 10:20 ("date range on the runs 
 1. Date range on the spend page reusing the same picker (today it has 7d / 30d / all).
 2. "Export these runs" (CSV) for the current filter and range.
 3. Per-day mini histogram above the calendar (runs per day, failures red), like Grafana's range picker.
+
+## 2026-10-24 (12:20): spend page — click a day in the chart to see only that day
+
+Category: **interaction / accessibility** (spend page, not touched since 10-22). The last rounds
+were the runs / task lists, SQLite and 2FA; this makes the daily chart a way in, not just a picture.
+
+**Done**
+
+- Every bar of the daily spend chart is now a button. Click (or Enter / Space) picks that day:
+  the total, the breakdown table (any tab: task, provider / model, model, provider) and the CSV
+  export narrow to it; click again, the chip's × or Esc goes back to the whole range. The picked
+  bar stays blue and its date label bold, the others fade to half; the bars switch at once and the
+  table follows when its answer is in (cached per range + tab + day, so going back is instant, no
+  skeleton, no flash).
+- Next to the total a small chip says "仅 10月21日周三 / Only Wed, Oct 21", and a "当天运行 / Runs
+  that day →" link opens `#/runs?from=…&to=…` (the date filter from the 09:20 round).
+- Keyboard: the chart is one tab stop (roving tabindex on the picked day, else today); ←/→ move
+  day by day, Home / End jump to the ends, the focused bar shows its tooltip (date · amount · what
+  a click does) and a focus ring. Screen readers get `aria-pressed` and the date + amount as label.
+- The view is in the address: `#/spend?range=30d&by=model&day=2026-10-21` (defaults left out),
+  changed with `history.replaceState`, so reload, back / forward and links reopen it; plain
+  `#/spend` keeps the last range and tab but not the day. Switching to a range that no longer
+  holds the day drops the day.
+- API: `GET /api/spend/breakdown` and `/api/spend/export` take `day=YYYY-MM-DD` (a real date not
+  before the range start, else 400); the per-day series still covers the whole range so the chart
+  doesn't move. Day goes in as a parameter. The export file is named `tidebot-spend_<day>.csv`.
+- Same on macOS / Windows / Linux, desktop window and browser: plain buttons + CSS, Intl for the
+  date, no modifier keys, transition off with reduced motion. 1024×655: chip + link on one line in
+  zh-CN and en, scrollWidth 1024.
+- Shots: `/workspace/tidebot-shots/spend-day-picked-1024x655.png`, `spend-day-keyboard-1024x655.png`,
+  `spend-day-hover-1024x655.png` (+ `-en` for the first two). Demo data only.
+- Tests: `TestSpendDay` (valid, before the range, impossible date, injection text),
+  `TestSpendBreakdownDay` (rows / total narrow, series unchanged, empty day, 400s, export rows and
+  file name), `TestSpendDayUI` (wiring, keys, CSS, i18n, no native dialogs).
+
+**Inspiration**
+
+- open-webui/open-webui `src/lib/components/admin/Analytics/ChartLine.svelte` (hovered day shows
+  the per-model split, other series fade) and `Dashboard.svelte` (leaderboard rows open a
+  per-model drill-down, `selectedModel` + `AnalyticsModelModal.svelte`). winfunc/opcode
+  `src/components/UsageDashboard.tsx` has hover-only daily bars, which is what we had. We drill
+  down in place (the table under the chart) instead of a modal, and add keyboard and the address.
+  No code copied.
+
+**Learned**
+
+- Re-rendering the chart on pick drops focus; remembering the focused day and refocusing after the
+  paint keeps arrow-key browsing smooth.
+- The server must treat the day as part of the range (reject days before `since`), otherwise a
+  stale link shows a total that the range chip doesn't explain.
+
+**Ideas for later**
+
+1. Shift-click a second bar to pick a span of days (same picker as the runs list).
+2. Stack the bars by provider (colours from the provider icons) with a legend, like Open WebUI's chart.
+3. Clicking a row in "by task" opens that task's runs for the picked day.

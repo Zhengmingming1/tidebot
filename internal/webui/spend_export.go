@@ -39,8 +39,8 @@ func fmtAmount(v float64) string {
 	return strconv.FormatFloat(math.Round(v*1e6)/1e6, 'f', -1, 64)
 }
 
-// handleSpendExport: GET /api/spend/export?range=7d|30d|all&lang=zh|en → CSV, one row
-// per run in the range, amounts in the display currency, times in the server zone.
+// handleSpendExport: GET /api/spend/export?range=7d|30d|all[&day=YYYY-MM-DD]&lang=zh|en → CSV,
+// one row per run in the range (or on that one day), amounts in the display currency, times in the server zone.
 func (s *Server) handleSpendExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "GET only")
@@ -62,10 +62,17 @@ func (s *Server) handleSpendExport(w http.ResponseWriter, r *http.Request) {
 	if n > 0 {
 		since = now.AddDate(0, 0, -(n - 1)).Format("2006-01-02")
 	}
+	day, err := spendDay(q.Get("day"), since)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	ctx := r.Context()
 	// The store runs with one connection: finish this before opening the row cursor.
-	first := since
-	if n == 0 {
+	first, last := since, "9999-12-31"
+	if day != "" {
+		first, last = day, day
+	} else if n == 0 {
 		first = ""
 		_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(MIN(day),'') FROM cost_ledger`).Scan(&first)
 		if first == "" {
@@ -76,12 +83,15 @@ func (s *Server) handleSpendExport(w http.ResponseWriter, r *http.Request) {
   COALESCE(NULLIF(l.provider,''), r.provider_name, ''), COALESCE(NULLIF(l.model,''), r.model, ''), COALESCE(r.status,''),
   l.requests, l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_write_tokens, `+s.ledgerAmt("l.")+`, l.source
 FROM cost_ledger l LEFT JOIN runs r ON r.id = l.run_id LEFT JOIN tasks t ON t.id = l.task_id
-WHERE l.day >= ? ORDER BY l.created_at ASC, l.run_id ASC LIMIT ?`, since, maxExportRows)
+WHERE l.day >= ? AND l.day <= ? ORDER BY l.created_at ASC, l.run_id ASC LIMIT ?`, first, last, maxExportRows)
 	if err != nil {
 		writeErr(w, 500, "query failed")
 		return
 	}
 	name := "tidebot-spend_" + first + "_to_" + now.Format("2006-01-02") + ".csv"
+	if day != "" {
+		name = "tidebot-spend_" + day + ".csv"
+	}
 	// Build the file in memory and only then write it: streaming would hold the store's
 	// single connection for as long as a slow client takes to read.
 	var buf bytes.Buffer
