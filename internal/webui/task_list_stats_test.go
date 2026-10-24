@@ -59,6 +59,8 @@ func TestTaskListRecentRuns(t *testing.T) {
 		LastRunAt  string `json:"last_run_at"`
 		RunsToday  int    `json:"runs_today"`
 		Beats      []beat `json:"beats"`
+		Failing    bool   `json:"failing"`
+		FailStreak int    `json:"fail_streak"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
@@ -81,11 +83,15 @@ func TestTaskListRecentRuns(t *testing.T) {
 			if tk.Beats[0].CostUSD <= 0 || tk.Beats[0].DurationMS <= 0 || tk.Beats[0].At == "" {
 				t.Fatalf("beat fields missing: %+v", tk.Beats[0])
 			}
+			// newest first: running (passed over), failed, succeeded → failing, one in a row
+			if !tk.Failing || tk.FailStreak != 1 {
+				t.Fatalf("failing = %v streak %d, want true 1", tk.Failing, tk.FailStreak)
+			}
 			if tk.RunsToday != 1 {
 				t.Fatalf("runs today = %d, want 1 (local day, not the UTC date)", tk.RunsToday)
 			}
 		case idle:
-			if len(tk.Beats) != 0 || tk.LastStatus != "" || tk.LastRunAt != "" || tk.RunsToday != 0 {
+			if len(tk.Beats) != 0 || tk.LastStatus != "" || tk.LastRunAt != "" || tk.RunsToday != 0 || tk.Failing || tk.FailStreak != 0 {
 				t.Fatalf("idle task has runs: %+v", tk)
 			}
 		default:
@@ -134,6 +140,80 @@ func TestTaskListRecentRunsUI(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, k := range []string{"col.recent_runs", "tl.beats_aria", "tl.ok_of", "tl.ok_tip", "tasks.never"} {
+			if m[k] == "" {
+				t.Errorf("%s lacks %s", f, k)
+			}
+		}
+	}
+}
+
+// A task is failing when its newest run with a result failed or timed out; stopped, skipped,
+// queued and running runs are passed over, and the streak stops at the first success.
+func TestFailStreak(t *testing.T) {
+	bs := func(sts ...string) []beat {
+		out := make([]beat, len(sts))
+		for i, st := range sts {
+			out[i] = beat{Status: st}
+		}
+		return out
+	}
+	for _, c := range []struct {
+		beats []beat
+		want  int
+	}{
+		{nil, 0},
+		{bs("succeeded"), 0},
+		{bs("failed"), 1},
+		{bs("succeeded", "failed", "timeout"), 2},
+		{bs("failed", "succeeded"), 0},
+		{bs("failed", "failed", "canceled", "skipped"), 2},
+		{bs("succeeded", "timeout", "running", "queued"), 1},
+		{bs("canceled", "skipped", "running"), 0},
+		{bs("failed", "succeeded", "failed", "canceled", "failed"), 2},
+	} {
+		if got := failStreak(c.beats); got != c.want {
+			t.Errorf("failStreak(%v) = %d, want %d", c.beats, got, c.want)
+		}
+	}
+}
+
+// The task list has a "failing" chip, counts on every chip, the filter in the address,
+// and the success rate links to the task's runs.
+func TestTaskListFailingFilterUI(t *testing.T) {
+	b, err := os.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := strings.ReplaceAll(string(b), "\r\n", "\n")
+	for _, want := range []string{
+		`["failing", "tl.f_failing", "tl.f_failing_tip"]`,
+		`function taskMatchesStatus(t, st) { return !st || (st === "failing" ? !!t.failing : t.status === st); }`,
+		`function renderTasks(params) {`,
+		`renderTasks(params); break;`,
+		`history.replaceState(null, "", tasksHash(v.status));`,
+		`c.classList.toggle("bad", x[0] === "failing" && n > 0);`,
+		`href="#/runs?task=' + enc(t.id) + '"`,
+		`T("tl.streak_tip", { n: t.fail_streak })`,
+		`go("#/tasks?status=failing")`,
+		`emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub"))`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
+	}
+	css, _ := os.ReadFile("static/styles.css")
+	for _, want := range []string{".task-f .cnt.bad { color: var(--danger);", "a.tl-rate { color: inherit;"} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("styles.css lacks %q", want)
+		}
+	}
+	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
+		raw, _ := os.ReadFile(f)
+		var m map[string]string
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range []string{"tl.f_failing", "tl.f_failing_tip", "tl.streak_tip", "tl.rate_open", "tl.no_failing", "tl.no_failing_sub", "pal.failing_tasks"} {
 			if m[k] == "" {
 				t.Errorf("%s lacks %s", f, k)
 			}

@@ -502,8 +502,9 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: none;
 /* I3: log view, runs toolbar, home dashboard */
 .lv-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: var(--s1); }
 .lv-f button { height: 28px; padding: 0 10px; font-size: 12px; }
-.lv-f .cnt, .run-f .cnt { color: var(--text-3); font-weight: 500; margin-left: 2px; font-variant-numeric: tabular-nums; }
-.run-f .active .cnt { color: var(--text-2); }
+.lv-f .cnt, .run-f .cnt, .task-f .cnt { color: var(--text-3); font-weight: 500; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.run-f .active .cnt, .task-f .active .cnt { color: var(--text-2); }
+.task-f .cnt.bad { color: var(--danger); font-weight: 600; }
 /* runs toolbar: search, five filter chips and sort stay on one row at 1024 px */
 .run-tb { flex-wrap: nowrap; }
 .run-tb .search-in { flex: 1 1 180px; min-width: 140px; max-width: 280px; }
@@ -781,6 +782,8 @@ table.cmp th, table.cmp td { padding: 6px 8px; font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .hbar.sm .hb.run { animation: none; } }
 html.tb-hidden .hbar.sm .hb.run { animation-play-state: paused; }
 .tl-beats small { font-size: 12px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.tl-rate { color: inherit; border-radius: 2px; }
+a.tl-rate:hover { text-decoration: underline; text-underline-offset: 2px; }
 .tl-rate.bad { color: var(--danger); }
 /* The name column takes what is left and ellipsizes, so the strip never pushes the table wider than the card. */
 .table td.tl-name { width: 100%; max-width: 0; }

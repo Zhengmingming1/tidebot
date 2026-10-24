@@ -41,6 +41,10 @@ func (s *Server) enrichTaskList(ctx context.Context, out []taskDTO) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	for i := range out {
+		out[i].FailStreak = failStreak(out[i].Beats)
+		out[i].Failing = out[i].FailStreak > 0
+	}
 	now := time.Now().In(s.loc())
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.loc()).UTC().Format(time.RFC3339)
 	rows, err = s.deps.DB.QueryContext(ctx, `SELECT task_id, COUNT(1) FROM runs WHERE task_id IS NOT NULL AND created_at >= ? GROUP BY task_id`, day)
@@ -59,4 +63,20 @@ func (s *Server) enrichTaskList(ctx context.Context, out []taskDTO) error {
 		}
 	}
 	return rows.Err()
+}
+
+// failStreak walks the runs newest first, skipping those without a result of their own
+// (running, queued, stopped, skipped), and counts failed / timed-out runs until the first
+// success. 0 means the task is not failing. beats come oldest first.
+func failStreak(beats []beat) int {
+	n := 0
+	for i := len(beats) - 1; i >= 0; i-- {
+		switch beats[i].Status {
+		case "failed", "timeout":
+			n++
+		case "succeeded":
+			return n
+		}
+	}
+	return n
 }

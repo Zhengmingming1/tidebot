@@ -117,6 +117,11 @@ type taskDTO struct {
 	// List answer only: when the newest run was created and the last few runs, oldest first.
 	LastRunAt string `json:"last_run_at,omitempty"`
 	Beats     []beat `json:"beats,omitempty"`
+	// List answer only: the newest run that finished on its own (succeeded, failed or timed
+	// out) failed; FailStreak counts the failed / timed-out ones in a row back from it.
+	// Stopped, skipped, queued and running runs are passed over.
+	Failing    bool `json:"failing,omitempty"`
+	FailStreak int  `json:"fail_streak,omitempty"`
 }
 
 func toTaskDTO(v tasksvc.TaskView) taskDTO {

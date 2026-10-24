@@ -558,6 +558,7 @@
       { kind: "cmd", icon: "more", label: T("pal.shortcuts"), run: function () { shortcutsHelp(); } },
       { kind: "nav", icon: "home", label: T("nav.home"), run: go("#/") },
       { kind: "nav", icon: "tasks", label: T("nav.tasks"), run: go("#/tasks") },
+      { kind: "nav", icon: "tasks", label: T("pal.failing_tasks"), run: go("#/tasks?status=failing") },
       { kind: "nav", icon: "skills", label: T("nav.skills"), run: go("#/skills") },
       { kind: "nav", icon: "runs", label: T("nav.runs"), run: go("#/runs") },
       { kind: "nav", icon: "spend", label: T("nav.spend"), run: go("#/spend") },
@@ -1172,7 +1173,7 @@
     var rate = done.length ? T("tl.ok_of", { ok: ok, n: done.length }) : "";
     var last = bs[bs.length - 1];
     return '<div class="tl-beats" role="group" aria-label="' + esc(T("tl.beats_aria", { n: bs.length, ok: ok, total: done.length, status: T("st." + last.status) })) + '">' + beatsBar(bs, "sm") +
-      "<small>" + agoHtml(t.last_run_at || last.at) + (rate ? ' · <span class="' + (ok < done.length ? "tl-rate bad" : "tl-rate") + '" data-tip="' + esc(T("tl.ok_tip")) + '">' + esc(rate) + "</span>" : "") + "</small></div>";
+      "<small>" + agoHtml(t.last_run_at || last.at) + (rate ? ' · <a class="' + (ok < done.length ? "tl-rate bad" : "tl-rate") + '" href="#/runs?task=' + enc(t.id) + '" data-tip="' + esc((t.fail_streak ? T("tl.streak_tip", { n: t.fail_streak }) + "\n" : "") + T("tl.ok_tip") + "\n" + T("tl.rate_open")) + '">' + esc(rate) + "</a>" : "") + "</small></div>";
   }
   function renderHome() {
     return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r) {
@@ -1348,9 +1349,18 @@
 
   // ---------- TASKS ----------
   var taskView = { q: "", status: "", skill: "", sort: "name", dir: 1, sel: {} };
-  function renderTasks() {
+  // TASK_FILTERS: [value, label key, tooltip key]. "failing" = the newest run with a result failed.
+  var TASK_FILTERS = [["", "runs.all_f"], ["active", "task.active"], ["paused", "task.paused"], ["failing", "tl.f_failing", "tl.f_failing_tip"]];
+  function taskMatchesStatus(t, st) { return !st || (st === "failing" ? !!t.failing : t.status === st); }
+  function tasksHash(st) { return "#/tasks" + (st ? "?status=" + enc(st) : ""); }
+  function renderTasks(params) {
+    var want = params && params.get("status");
+    if (want != null) taskView.status = TASK_FILTERS.some(function (x) { return x[0] === want; }) ? want : "";
     return api("/api/tasks").then(function (tasks) {
       var v = taskView, skills = {};
+      // The address shows the filter, so a link or reload opens the same view; replaceState
+      // changes it without a hashchange (no refetch, no repaint).
+      if (location.hash.indexOf("#/tasks") === 0 && location.hash !== tasksHash(v.status)) history.replaceState(null, "", tasksHash(v.status));
       tasks.forEach(function (t) { (t.skills || []).forEach(function (k) { skills[k] = 1; }); });
       v.sel = {};
       var sorters = {
@@ -1360,7 +1370,7 @@
       var th = function (k, label) { return '<th><button class="th-sort' + (v.sort === k ? " on" : "") + '" data-sort="' + k + '" aria-sort="' + (v.sort === k ? (v.dir > 0 ? "ascending" : "descending") : "none") + '">' + esc(label) + (v.sort === k ? '<span class="arr">' + (v.dir > 0 ? "↑" : "↓") + "</span>" : "") + "</button></th>"; };
       mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
         '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '"></label>' +
-        '<div class="filters" role="group">' + [["", T("runs.all_f")], ["active", T("task.active")], ["paused", T("task.paused")]].map(function (x) { return '<button data-st="' + x[0] + '" class="' + (x[0] === v.status ? "active" : "") + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" +
+        '<div class="filters task-f" role="group">' + TASK_FILTERS.map(function (x) { return '<button data-st="' + x[0] + '" aria-pressed="' + (x[0] === v.status) + '" class="' + (x[0] === v.status ? "active" : "") + '"' + (x[2] ? ' data-tip="' + esc(T(x[2])) + '"' : "") + ">" + esc(T(x[1])) + ' <span class="cnt" data-c="' + x[0] + '"></span></button>'; }).join("") + "</div>" +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
         '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
@@ -1368,14 +1378,20 @@
       var body = $("#tbody");
       function rows() {
         var q = v.q.trim().toLowerCase(), key = sorters[v.sort];
-        var list = tasks.filter(function (t) {
-          return (!v.status || t.status === v.status) && (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt).toLowerCase().indexOf(q) >= 0);
-        }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
+        // Counts on the chips follow the search and skill filter, not the chip itself (like the runs list).
+        var base = tasks.filter(function (t) {
+          return (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt).toLowerCase().indexOf(q) >= 0);
+        });
+        TASK_FILTERS.forEach(function (x) {
+          var n = base.filter(function (t) { return taskMatchesStatus(t, x[0]); }).length, c = $('.task-f [data-c="' + x[0] + '"]');
+          if (c) { c.textContent = num(n); c.classList.toggle("bad", x[0] === "failing" && n > 0); }
+        });
+        var list = base.filter(function (t) { return taskMatchesStatus(t, v.status); }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
           return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
             '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + esc(T("tl.next", { t: when(t.next_run_at) })) + "</small>" : "") + "</td><td>" + taskPill(t.status) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
-        }).join("") : '<tr><td colspan="8">' + (tasks.length ? emptyState("search", T("tl.no_match"), T("tl.no_match_sub")) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
+        }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
         $$("[data-runnow]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); runTaskNow(b.getAttribute("data-runnow"), b); }); });
         $$("[data-pick]", body).forEach(function (c) {
@@ -1393,7 +1409,12 @@
       }
       var qt;
       $("#tq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value; rows(); }, 120); });
-      $$("[data-st]").forEach(function (b) { b.addEventListener("click", function () { v.status = b.getAttribute("data-st"); $$("[data-st]").forEach(function (x) { x.classList.toggle("active", x === b); }); rows(); }); });
+      $$("[data-st]").forEach(function (b) { b.addEventListener("click", function () {
+        v.status = b.getAttribute("data-st");
+        $$("[data-st]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-pressed", String(x === b)); });
+        history.replaceState(null, "", tasksHash(v.status));
+        rows();
+      }); });
       $("#tsk").addEventListener("change", function (e) { v.skill = e.target.value; rows(); });
       $$("[data-sort]").forEach(function (b) { b.addEventListener("click", function () { var k = b.getAttribute("data-sort"); if (v.sort === k) v.dir = -v.dir; else { v.sort = k; v.dir = 1; } renderTasks(); }); });
       $("#tall").addEventListener("change", function (e) { $$("[data-pick]", body).forEach(function (c) { c.checked = e.target.checked; if (c.checked) v.sel[c.getAttribute("data-pick")] = 1; else delete v.sel[c.getAttribute("data-pick")]; }); batch(); });
@@ -4478,7 +4499,7 @@
     try {
     switch (parts[0]) {
       case undefined: p = renderHome(); break;
-      case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(); break;
+      case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(params); break;
       case "skills": p = parts[1] ? renderSkillDetail(parts[1], params) : renderSkills(); break;
       case "buttons": p = renderButtons(); break;
       case "plugins": p = renderPlugins(); break;

@@ -1664,3 +1664,54 @@ the task list UI; this one is invisible but touches every write tidebot makes.
    "Shrink" (already done) — also after a backup finishes.
 2. `cache_size`: measure RSS with the default 2 MiB vs 8 MiB on a 100 MB database before changing.
 3. Batch the per-run 5 s usage writes of concurrent runs into one transaction.
+
+## 2026-10-24 (08:20): task list — "failing" filter, counts on every chip, rate opens the runs
+
+Category: **UX / navigation** (task list). The last rounds were disk I/O, 2FA and the task list's
+run strip; this builds on the strip (ideas 2 and 3 from 02:20) so a broken task is one click away.
+
+**Done**
+
+- New chip **"失败中 / Failing"**: tasks whose newest run *with a result* failed or timed out.
+  Running, queued, stopped and budget-skipped runs are passed over, so a task that is just running
+  again, or was stopped by hand, keeps the verdict of its last real result. Worked out on the
+  server (`failStreak` over the 10 runs the list already loads, no new query): list fields
+  `failing` and `fail_streak` (omitted when false / 0).
+- **Counts on every chip** ("全部 5 · 已启用 5 · 已暂停 0 · 失败中 2"); like the runs list they follow
+  the search box and skill filter, not the chip itself. The failing count is red when above 0.
+- The filter is **in the address** (`#/tasks?status=failing`): reload, back/forward and links open
+  the same view. Changing the chip uses `history.replaceState`, so no hashchange, refetch or
+  repaint. Unknown values fall back to "all". Plain `#/tasks` keeps the last chip (as before).
+- **"成功 0/2 / 0/2 OK" is now a link** to that task's runs (`#/runs?task=…`); its tooltip adds
+  "已连续失败 2 次 / Failed 2 times in a row" when failing.
+- Empty failing view says so in a good way ("没有失败中的任务 · 每个任务最近一次有结果的运行都成功了").
+- Command palette: "失败中的任务 / Failing tasks".
+- Same on macOS / Windows / Linux, desktop window and browser: plain HTML/CSS, hash routes, no
+  paths or modifier keys. 1024×655: chips + skill select + count fit one row in zh-CN and en,
+  scrollWidth 1024.
+- Shots: `/workspace/tidebot-shots/task-list-failing-1024x655.png`, `task-list-failing-tip-1024x655.png`,
+  `task-list-failing-en-1024x655.png`, `task-list-failing-tip-en-1024x655.png`.
+- Tests: `TestFailStreak` (table: passes over running/queued/canceled/skipped, stops at the first
+  success), `TestTaskListRecentRuns` extended (`failing` + streak on the list answer, idle task has
+  neither), `TestTaskListFailingFilterUI` (wiring, CSS, i18n keys).
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/components/MonitorListFilter.vue`: the status filter lists Up / Down /
+  Pending / Maintenance each with its count (`$root.stats.down` …) next to Running / Paused, so
+  "what's broken" is a filter, not a scan. `src/components/MonitorList.vue` keeps `filterState` and
+  matches `monitor.status` against it. We use chips (one row fits at 1024) instead of a dropdown,
+  and put the filter in the hash. No code copied.
+
+**Learned**
+
+- "Failing" needs a definition that ignores runs without a result; otherwise every running or
+  stopped task flips state and the chip flickers while you look at it.
+- `history.replaceState` on a hash route keeps the URL honest without going through `route()`;
+  the existing soft refresh then reads the same params, so live updates keep the chip.
+
+**Ideas for later**
+
+1. Home page health card: a "失败中 N" link to `#/tasks?status=failing` when N > 0.
+2. Favicon badge / notification when a task *starts* failing (streak goes 0 → 1), not on every failure.
+3. Sort by fail streak ("most broken first") and show the streak on the task detail header.
