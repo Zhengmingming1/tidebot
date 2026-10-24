@@ -7,13 +7,17 @@ package notify
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"net/smtp"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -107,7 +111,8 @@ func (s *Service) AddChannel(ctx context.Context, kind, name string, cfg map[str
 // RemoveChannel deletes a channel, its rules and its secret.
 func (s *Service) RemoveChannel(ctx context.Context, chID string) error {
 	_, _ = s.DB.ExecContext(ctx, `DELETE FROM notify_rules WHERE channel_id=?`, chID)
-	_ = s.Secrets.Delete("notify." + chID)
+	_ = s.Secrets.Delete(secretRef(chID))
+	_ = s.Secrets.Delete(urlRef(chID))
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM notify_channels WHERE id=?`, chID)
 	return err
 }
@@ -283,19 +288,32 @@ func (s *Service) secret(c Channel) string {
 
 // Send delivers one message to one channel.
 func (s *Service) Send(ctx context.Context, c Channel, m Message) error {
+	return s.deliver(ctx, c, m, s.channelURL(c), s.secret(c))
+}
+
+// deliver sends with an explicit URL and secret (the stored ones, or a form under test).
+func (s *Service) deliver(ctx context.Context, c Channel, m Message, u, sec string) error {
 	text := m.Title
 	if m.Body != "" {
 		text += "\n" + m.Body
 	}
 	switch c.Kind {
 	case "webhook":
-		return s.postJSON(ctx, c.Config["url"], m, s.secret(c))
+		return s.postJSON(ctx, u, m, sec, "")
 	case "feishu":
-		return s.postJSON(ctx, c.Config["url"], map[string]any{"msg_type": "text", "content": map[string]string{"text": text}}, "")
+		body := map[string]any{"msg_type": "text", "content": map[string]string{"text": text}}
+		if sec != "" { // "signature verification" on the bot
+			ts, sign := feishuSign(s.Now(), sec)
+			body["timestamp"], body["sign"] = ts, sign
+		}
+		return s.postJSON(ctx, u, body, "", c.Kind)
 	case "dingtalk", "wecom":
-		return s.postJSON(ctx, c.Config["url"], map[string]any{"msgtype": "text", "text": map[string]string{"content": text}}, "")
+		if c.Kind == "dingtalk" && sec != "" { // "加签" on the robot
+			u = dingtalkSign(u, s.Now(), sec)
+		}
+		return s.postJSON(ctx, u, map[string]any{"msgtype": "text", "text": map[string]string{"content": text}}, "", c.Kind)
 	case "telegram":
-		tok := s.secret(c)
+		tok := sec
 		if tok == "" || c.Config["chat_id"] == "" {
 			return errors.New("telegram needs a bot token secret and chat_id")
 		}
@@ -303,14 +321,17 @@ func (s *Service) Send(ctx context.Context, c Channel, m Message) error {
 		if base == "" {
 			base = "https://api.telegram.org"
 		}
-		return s.postJSON(ctx, base+"/bot"+tok+"/sendMessage", map[string]string{"chat_id": c.Config["chat_id"], "text": text}, "")
+		return s.postJSON(ctx, base+"/bot"+tok+"/sendMessage", map[string]string{"chat_id": c.Config["chat_id"], "text": text}, "", c.Kind)
 	case "email":
-		return sendMail(c.Config, s.secret(c), m)
+		return sendMail(c.Config, sec, m)
 	}
 	return fmt.Errorf("unsupported channel %q", c.Kind)
 }
 
-func (s *Service) postJSON(ctx context.Context, u string, payload any, bearer string) error {
+// postJSON posts payload to u. For the chat robots (kind != "") a 200 answer can still be a
+// refusal (DingTalk keyword / IP checks, WeCom bad key, Feishu signature, Telegram chat),
+// so their JSON reply is checked too.
+func (s *Service) postJSON(ctx context.Context, u string, payload any, bearer, kind string) error {
 	if u == "" {
 		return errors.New("missing url")
 	}
@@ -329,10 +350,71 @@ func (s *Service) postJSON(ctx context.Context, u string, payload any, bearer st
 		return errors.New("request failed")
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err := robotReply(kind, body); err != nil {
+		return err
+	}
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("http %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// robotReply turns a robot's "200 but refused" JSON into an error.
+func robotReply(kind string, body []byte) error {
+	if kind == "" || len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	var r struct {
+		ErrCode     *int   `json:"errcode"` // DingTalk, WeCom
+		ErrMsg      string `json:"errmsg"`
+		Code        *int   `json:"code"` // Feishu / Lark
+		Msg         string `json:"msg"`
+		OK          *bool  `json:"ok"` // Telegram
+		Description string `json:"description"`
+		StatusCode  *int   `json:"StatusCode"` // older Feishu bots
+		StatusMsg   string `json:"StatusMessage"`
+	}
+	if json.Unmarshal(body, &r) != nil {
+		return nil
+	}
+	short := func(s string) string {
+		s = strings.TrimSpace(s)
+		if len([]rune(s)) > 160 {
+			s = string([]rune(s)[:160]) + "…"
+		}
+		return s
+	}
+	switch {
+	case r.ErrCode != nil && *r.ErrCode != 0:
+		return fmt.Errorf("errcode %d: %s", *r.ErrCode, short(r.ErrMsg))
+	case r.Code != nil && *r.Code != 0:
+		return fmt.Errorf("code %d: %s", *r.Code, short(r.Msg))
+	case r.StatusCode != nil && *r.StatusCode != 0:
+		return fmt.Errorf("code %d: %s", *r.StatusCode, short(r.StatusMsg))
+	case r.OK != nil && !*r.OK:
+		return fmt.Errorf("telegram: %s", short(r.Description))
+	}
+	return nil
+}
+
+// dingtalkSign appends timestamp + sign (HMAC-SHA256 of "ms\nsecret", base64) to the URL.
+func dingtalkSign(u string, now time.Time, secret string) string {
+	ts := strconv.FormatInt(now.UnixMilli(), 10)
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(ts + "\n" + secret))
+	sep := "&"
+	if !strings.Contains(u, "?") {
+		sep = "?"
+	}
+	return u + sep + "timestamp=" + ts + "&sign=" + url.QueryEscape(base64.StdEncoding.EncodeToString(h.Sum(nil)))
+}
+
+// feishuSign: key "seconds\nsecret", empty message, base64.
+func feishuSign(now time.Time, secret string) (string, string) {
+	ts := strconv.FormatInt(now.Unix(), 10)
+	h := hmac.New(sha256.New, []byte(ts+"\n"+secret))
+	return ts, base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
 // BuildMail renders an RFC 5322 message (exported for tests).
@@ -342,21 +424,6 @@ func BuildMail(from, to string, m Message) []byte {
 	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s\r\n",
 		clean(from), clean(to), clean("[Tidebot] "+m.Title), m.Body)
 	return []byte(b.String())
-}
-
-func sendMail(cfg map[string]string, password string, m Message) error {
-	host, port, from, to := cfg["host"], cfg["port"], cfg["from"], cfg["to"]
-	if host == "" || from == "" || to == "" {
-		return errors.New("email needs host, from, to")
-	}
-	if port == "" {
-		port = "587"
-	}
-	var auth smtp.Auth
-	if u := cfg["username"]; u != "" {
-		auth = smtp.PlainAuth("", u, password, host)
-	}
-	return smtp.SendMail(host+":"+port, auth, from, strings.Split(to, ","), BuildMail(from, to, m))
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

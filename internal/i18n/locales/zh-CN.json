@@ -45,6 +45,7 @@
   "desktop.tooltip_problem": "Tidebot（有问题需要处理）",
   "notify.breaker": "连续失败已暂停：%s",
   "notify.confirm": "危险操作待确认：%s",
+  "notify.test_body": "能看到这条，说明渠道可用。你在「设置 → 通知」里勾选的通知会发到这里。",
   "notify.test": "Tidebot 测试通知",
   "update.n.available": "tidebot %s 可以更新了",
   "update.n.rolled_back": "更新到 %s 失败，已回滚",

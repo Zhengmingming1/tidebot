@@ -45,6 +45,7 @@
   "desktop.tooltip_problem": "Tidebot (needs attention)",
   "notify.breaker": "Paused after repeated failures: %s",
   "notify.confirm": "Confirmation needed: %s",
+  "notify.test_body": "If you can read this, this channel works. Notices you picked in Settings → Notifications will arrive here.",
   "notify.test": "Tidebot test notification",
   "update.n.available": "tidebot %s is available",
   "update.n.rolled_back": "Update to %s failed and was rolled back",

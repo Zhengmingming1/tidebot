@@ -4248,6 +4248,188 @@
       rpc("storage.vacuum", {}).then(function (r) { toast(T("st.shrunk", { s: fmtBytes(r.saved_bytes) })); storagePaint(r.storage); }).catch(function (err) { fail(err); b.disabled = false; });
     });
   }
+  // ---- notification channels (Settings → Notifications) ----
+  // Add / edit / test / switch off / remove a channel without agentctl. Ideas from Uptime Kuma
+  // src/components/NotificationDialog.vue: the default name follows the type until you edit
+  // it ("钉钉 2" when "钉钉" is taken), and "Test" sends what is in the form before saving.
+  // Robot URLs carry their access token, so the page only ever gets the host back.
+  var NT_KINDS = ["feishu", "dingtalk", "wecom", "telegram", "email", "webhook"];
+  var NT_BRAND = { feishu: "br-feishu", dingtalk: "br-ding", wecom: "br-wecom", telegram: "br-tg", email: "br-mail", webhook: "br-other" };
+  var NT_ICON = { feishu: "chat", dingtalk: "chat", wecom: "chat", telegram: "send", email: "mail", webhook: "globe" };
+  var NT_GROUPS = ["failed", "confirm", "budget", "breaker", "finished", "system"];
+  // Chat robots get a one-letter mark (they would all be the same blue bubble otherwise).
+  var NT_MARK = { feishu: 1, dingtalk: 1, wecom: 1 };
+  function ntLogo(kind) { return '<span class="ap-logo sm ' + (NT_BRAND[kind] || "br-other") + '" aria-hidden="true">' + (NT_MARK[kind] ? '<b class="nt-mark">' + esc(T("nt.m." + kind)) + "</b>" : ic(NT_ICON[kind] || "bell")) + "</span>"; }
+  // ntKindFromURL: a pasted robot URL tells which kind it is.
+  function ntKindFromURL(u) {
+    var h = "";
+    try { h = new URL(String(u || "").trim()).hostname.toLowerCase(); } catch (e) { return ""; }
+    if (/(^|\.)(feishu\.cn|larksuite\.com|larkoffice\.com)$/.test(h)) return "feishu";
+    if (/(^|\.)dingtalk\.com$/.test(h)) return "dingtalk";
+    if (/^qyapi\.weixin\.qq\.com$/.test(h)) return "wecom";
+    if (/^api\.telegram\.org$/.test(h)) return "telegram";
+    return "";
+  }
+  function ntUniqueName(kind, list, selfId) {
+    var base = T("nt.k." + kind), name = base, n = 2;
+    var taken = function (x) { return (list || []).some(function (c) { return c.name === x && c.id !== selfId; }); };
+    while (taken(name)) name = base + " " + n++;
+    return name;
+  }
+  function ntErr(e) {
+    var m = /^notify: (\w+)$/.exec((e && e.message) || ""), k = m ? "nt.err." + m[1] : "";
+    return k && T(k) !== k ? T(k) : (e && e.message) || "";
+  }
+  function ntGroupsText(c) {
+    if (c.all) return T("nt.g_all");
+    return c.groups.length ? c.groups.map(function (g) { return T("nt.gs." + g); }).join(" · ") : T("nt.g_none");
+  }
+  function ntTip(c) {
+    var parts = [T("nt.k." + c.kind)];
+    var cfg = c.config || {};
+    if (c.host) parts.push(c.host);
+    if (cfg.chat_id) parts.push("chat_id " + cfg.chat_id);
+    if (cfg.to) parts.push(T("nt.f_to") + " " + cfg.to);
+    if (cfg.host) parts.push(cfg.host + (cfg.port ? ":" + cfg.port : ""));
+    if (c.has_secret) parts.push(T(c.kind === "dingtalk" || c.kind === "feishu" ? "nt.tip_signed" : "nt.tip_secret"));
+    if (c.tasks) parts.push(T("nt.tip_tasks", { n: c.tasks }));
+    return parts.join(" · ");
+  }
+  function ntListHtml(o) {
+    var chs = o.channels || [];
+    if (!chs.length) return '<div class="nt-empty">' + ic("bell", "sm") + "<span>" + esc(T("set.no_channels")) + "</span></div>";
+    return '<ul class="nt-list">' + chs.map(function (c) {
+      return '<li class="nt-ch' + (c.enabled ? "" : " off") + '" data-ch="' + esc(c.id) + '">' + ntLogo(c.kind) +
+        '<div class="grow nt-txt"><strong data-tip="' + esc(ntTip(c)) + '">' + esc(c.name) + '</strong><small>' + esc(ntGroupsText(c)) + "</small></div>" +
+        '<button class="icon-btn sm" data-nt-test="' + esc(c.id) + '" aria-label="' + esc(T("nt.test")) + '" data-tip="' + esc(T("nt.test")) + '"' + (c.enabled ? "" : " disabled") + ">" + ic("send", "sm") + "</button>" +
+        '<button class="icon-btn sm" data-nt-edit="' + esc(c.id) + '" aria-label="' + esc(T("btn.edit")) + '" data-tip="' + esc(T("btn.edit")) + '">' + ic("edit", "sm") + "</button>" +
+        '<button class="icon-btn sm" data-nt-del="' + esc(c.id) + '" aria-label="' + esc(T("btn.remove")) + '" data-tip="' + esc(T("btn.remove")) + '">' + ic("trash", "sm") + "</button>" +
+        '<button class="switch' + (c.enabled ? " on" : "") + '" data-nt-en="' + esc(c.id) + '" role="switch" aria-checked="' + !!c.enabled + '" aria-label="' + esc(T("nt.enabled", { n: c.name })) + '"></button></li>';
+    }).join("") + "</ul>";
+  }
+  // ntWire: list actions. reload() repaints the card in place (no page re-render, no flash).
+  function ntWire(box, o, reload) {
+    var byId = function (id) { return (o.channels || []).filter(function (c) { return c.id === id; })[0]; };
+    box.addEventListener("click", function (e) {
+      var b = e.target.closest("button"); if (!b || !box.contains(b)) return;
+      var id;
+      if ((id = b.getAttribute("data-nt-en"))) {
+        var on = !b.classList.contains("on"); b.disabled = true;
+        rpc("notify.channel_enable", { id: id, enabled: on }).then(function () { toast(T(on ? "nt.on_done" : "nt.off_done", { n: byId(id).name })); return reload(); }).catch(function (x) { b.disabled = false; toast(ntErr(x), true); });
+      } else if ((id = b.getAttribute("data-nt-test"))) {
+        var c = byId(id); b.disabled = true;
+        rpc("notify.channel_test", { id: id, kind: c.kind, name: c.name, config: c.config }, 30000).then(function () { toast(T("nt.test_ok", { n: c.name })); }).catch(function (x) { toast(T("nt.test_bad", { e: ntErr(x) }), true); }).then(function () { b.disabled = false; });
+      } else if ((id = b.getAttribute("data-nt-edit"))) {
+        ntModal(o, byId(id), reload);
+      } else if ((id = b.getAttribute("data-nt-del"))) {
+        var d = byId(id);
+        confirmDialog({ title: T("nt.del_title", { n: d.name }), body: T(d.tasks ? "nt.del_body_tasks" : "nt.del_body", { n: d.tasks }), ok: T("btn.remove"), danger: true }).then(function (yes) {
+          if (!yes) return;
+          rpc("notify.channel_remove", { id: id }).then(function () { toast(T("nt.del_done", { n: d.name })); return reload(); }).catch(fail);
+        });
+      }
+    });
+  }
+  // ntModal(o, ch, done): ch null = add. URL / token / password are write-only: when editing,
+  // a blank field keeps what is saved (the placeholder says so).
+  function ntModal(o, ch, done) {
+    var edit = !!ch, kind0 = edit ? ch.kind : "feishu", cfg = (ch && ch.config) || {};
+    var groups = edit ? (ch.all ? NT_GROUPS.slice() : ch.groups) : (o.defaults || ["failed", "confirm", "budget", "breaker", "system"]);
+    var kinds = '<div class="nt-kinds' + (edit ? " hidden" : "") + '" role="radiogroup" aria-label="' + esc(T("nt.kind")) + '">' + NT_KINDS.map(function (k) {
+      return '<label class="nt-kind"><input type="radio" name="kind" value="' + k + '"' + (k === kind0 ? " checked" : "") + (edit ? " disabled" : "") + ">" + ntLogo(k) + "<span>" + esc(T("nt.k." + k)) + "</span></label>";
+    }).join("") + "</div>";
+    var keep = function (has) { return edit && has ? ' placeholder="' + esc(T("nt.keep")) + '"' : ""; };
+    var inp = function (name, attrs) { return '<input name="' + name + '" autocomplete="off" spellcheck="false" ' + (attrs || "") + ">"; };
+    var f = function (k, label, inner, hint) { return '<div data-k="' + k + '">' + fieldHtml(label, inner, hint) + "</div>"; };
+    var html = '<div class="card-head"><span class="ico">' + ic("bell") + "</span><h2>" + esc(T(edit ? "nt.edit_title" : "nt.add_title")) + "</h2></div>" +
+      '<form id="nt-form" novalidate>' + (edit ? '<div class="nt-kinds one">' + ntLogo(kind0) + "<span>" + esc(T("nt.k." + kind0)) + "</span></div>" + kinds : kinds) +
+      f("url", T("nt.f_url"), inp("url", 'type="url" maxlength="2048"' + (keep(ch && ch.has_url) || ' placeholder="https://…"'))) +
+      '<p class="hint nt-hint" id="nt-hint"></p>' +
+      f("sign", T("nt.f_sign"), inp("secret_sign", 'type="password" maxlength="200"' + keep(ch && ch.has_secret)), T("nt.f_sign_tip")) +
+      f("bearer", T("nt.f_bearer"), inp("secret_bearer", 'type="password" maxlength="2000"' + keep(ch && ch.has_secret)), T("nt.f_bearer_tip")) +
+      '<div class="form-row" data-k="telegram">' + fieldHtml(T("nt.f_bot"), inp("secret_bot", 'type="password" maxlength="200"' + (keep(ch && ch.has_secret) || ' placeholder="123456:ABC…"'))) + fieldHtml(T("nt.f_chat"), inp("chat_id", 'maxlength="64" placeholder="-1001234567890" value="' + esc(cfg.chat_id || "") + '"'), T("nt.f_chat_tip")) + "</div>" +
+      '<div class="form-row" data-k="email">' + fieldHtml(T("nt.f_from"), inp("from", 'type="email" maxlength="200" placeholder="you@example.com" value="' + esc(cfg.from || "") + '"')) + fieldHtml(T("nt.f_to"), inp("to", 'maxlength="500" placeholder="you@example.com" value="' + esc(cfg.to || "") + '"'), T("nt.f_to_tip")) + "</div>" +
+      '<div class="form-row three" data-k="email">' + fieldHtml(T("nt.f_host"), inp("host", 'maxlength="200" placeholder="smtp.example.com" value="' + esc(cfg.host || "") + '"')) + fieldHtml(T("nt.f_port"), inp("port", 'inputmode="numeric" maxlength="5" placeholder="465" value="' + esc(cfg.port || "") + '"'), T("nt.f_port_tip")) + fieldHtml(T("nt.f_user"), inp("username", 'maxlength="200" value="' + esc(cfg.username || "") + '"')) + "</div>" +
+      f("email", T("nt.f_pass"), inp("secret_pass", 'type="password" maxlength="500"' + keep(ch && ch.has_secret)), T("nt.f_pass_tip")) +
+      '<p class="hint nt-hint" id="nt-mail-note"></p>' +
+      fieldHtml(T("nt.f_name"), inp("name", 'maxlength="60" required value="' + esc(edit ? ch.name : ntUniqueName(kind0, o.channels)) + '"')) +
+      '<fieldset class="nt-groups"><legend>' + esc(T("nt.f_groups")) + "</legend>" + NT_GROUPS.map(function (g) {
+        return '<label class="check"><input type="checkbox" name="g" value="' + g + '"' + (groups.indexOf(g) >= 0 ? " checked" : "") + "> <span>" + esc(T("nt.g." + g)) + "</span>" + tip(T("nt.gt." + g)) + "</label>";
+      }).join("") + "</fieldset>" +
+      (edit && ch.all ? '<p class="hint">' + esc(T("nt.all_note")) + "</p>" : "") +
+      '<p class="nt-status" id="nt-status" role="status" aria-live="polite"></p>' +
+      '<div class="actions"><button type="button" class="btn" id="nt-test">' + ic("send", "sm") + esc(T("nt.test")) + '</button><span class="grow"></span><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit">' + esc(T("btn.save")) + "</button></div></form>";
+    modal(html, function (root, close) {
+      var form = $("#nt-form", root), st = $("#nt-status", root), autoName = edit ? null : form.name.value;
+      var kind = function () { var r = $("input[name=kind]:checked", form); return r ? r.value : kind0; };
+      var show = function () {
+        var k = kind(), isURL = k !== "telegram" && k !== "email";
+        $$(".nt-kind", form).forEach(function (l) { l.classList.toggle("on", $("input", l).checked); });
+        $$("[data-k]", form).forEach(function (el) {
+          var dk = el.getAttribute("data-k");
+          var on = dk === "url" ? isURL : dk === "sign" ? (k === "dingtalk" || k === "feishu") : dk === "bearer" ? k === "webhook" : dk === k;
+          el.classList.toggle("hidden", !on);
+        });
+        $("#nt-hint", root).textContent = T("nt.h." + k);
+        if (!edit && form.name.value === autoName) { form.name.value = autoName = ntUniqueName(k, o.channels); }
+        st.textContent = ""; st.className = "nt-status";
+      };
+      $$("input[name=kind]", form).forEach(function (r) { r.addEventListener("change", show); });
+      show();
+      // Pasting a DingTalk / WeCom / Feishu robot URL picks the kind for you.
+      form.url.addEventListener("input", function () {
+        if (edit) return;
+        var k = ntKindFromURL(form.url.value);
+        if (k && k !== "telegram" && k !== kind()) { $('input[name=kind][value="' + k + '"]', form).checked = true; show(); st.textContent = T("nt.detected", { k: T("nt.k." + k) }); st.className = "nt-status ok"; }
+      });
+      // Email: the sender address fills server, port, user name and recipient (same lookup
+      // as the email plugin); fields you typed into are left alone.
+      var mine = {}, auto = {};
+      ["host", "port", "username", "to"].forEach(function (n) { form[n].addEventListener("input", function (e) { if (e.isTrusted) mine[n] = true; }); });
+      var put = function (n, v) { if (mine[n] || v == null || v === "") return; if (form[n].value && form[n].value !== auto[n]) return; form[n].value = auto[n] = String(v); };
+      var lookT;
+      form.from.addEventListener("input", function () {
+        clearTimeout(lookT);
+        var a = form.from.value.trim();
+        put("to", a);
+        if (!/@.+\./.test(a)) return;
+        lookT = setTimeout(function () {
+          apiRaw("/api/plugins/prefill", { method: "POST", body: { plugin: "email", field: "address", value: a } }).then(function (r) {
+            var note = $("#nt-mail-note", root);
+            if (!r.found) { note.textContent = T("pf.af_mail_unknown"); return; }
+            put("host", r.values.smtp_host); put("port", r.values.smtp_port); put("username", r.values.smtp_username);
+            var pn = T("pf.mp_" + r.provider) !== "pf.mp_" + r.provider ? T("pf.mp_" + r.provider) : r.provider;
+            note.textContent = T("nt.mail_found", { p: pn, s: r.values.smtp_host + ":" + r.values.smtp_port }) + (r.note ? " " + T("pf.mn_" + r.note, { p: pn }) : "");
+          }).catch(function () {});
+        }, 400);
+      });
+      var payload = function () {
+        var k = kind(), secret = k === "telegram" ? form.secret_bot.value : k === "email" ? form.secret_pass.value : k === "webhook" ? form.secret_bearer.value : k === "wecom" ? "" : form.secret_sign.value;
+        var c = {};
+        if (k === "telegram") c.chat_id = form.chat_id.value.trim();
+        if (k === "email") ["from", "to", "host", "port", "username"].forEach(function (n) { c[n] = form[n].value.trim(); });
+        return { id: edit ? ch.id : "", kind: k, name: form.name.value.trim(), url: k === "telegram" || k === "email" ? "" : form.url.value.trim(), secret: secret.trim(), config: c,
+          groups: $$("input[name=g]:checked", form).map(function (x) { return x.value; }) };
+      };
+      var busy = false;
+      $("#nt-test", root).addEventListener("click", function (e) {
+        if (busy) return; busy = true;
+        var b = e.currentTarget; b.disabled = true;
+        st.className = "nt-status"; st.textContent = T("nt.testing");
+        rpc("notify.channel_test", payload(), 30000).then(function () { st.className = "nt-status ok"; st.textContent = T("nt.test_ok_form"); })
+          .catch(function (x) { st.className = "nt-status bad"; st.textContent = T("nt.test_bad", { e: ntErr(x) }); })
+          .then(function () { busy = false; b.disabled = false; });
+      });
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (busy) return; busy = true;
+        var p = payload();
+        rpc("notify.channel_save", p).then(function () {
+          close(); toast(T(edit ? "nt.saved" : "nt.added", { n: p.name })); return done && done();
+        }).catch(function (x) { st.className = "nt-status bad"; st.textContent = ntErr(x); }).then(function () { busy = false; });
+      });
+    });
+  }
   function renderSettings(section, item) {
     section = SET_SECTIONS.indexOf(section) >= 0 ? section : "general";
     return api("/api/settings").then(function (st) {
@@ -4347,8 +4529,12 @@
             $("#nt-box").innerHTML =
               row("quiet", T("set.quiet"), T("set.quiet_sub"), '<input id="nt-quiet" maxlength="11" placeholder="22:00-08:00" value="' + esc(o.quiet || "") + '">') +
               row("digest", T("set.digest"), T("set.digest_sub"), hours) +
-              row("channels", T("set.channels"), T("set.channels_sub"), "", "agentctl notify add") +
-              '<ul class="plain-list pad-x">' + ((o.channels || []).length ? o.channels.map(function (c) { return "<li>" + ic("bell", "sm") + "<strong>" + esc(c.name) + '</strong> <span class="pill plain">' + esc(c.kind) + "</span> " + '<span class="pill ' + (c.enabled ? "ok" : "plain") + '">' + esc(T(c.enabled ? "set.on" : "set.off")) + "</span></li>"; }).join("") : '<li class="muted">' + esc(T("set.no_channels")) + "</li>") + "</ul>";
+              row("channels", T("set.channels"), T("set.channels_sub"), '<button class="btn sm" id="nt-add">' + ic("plus", "sm") + esc(T("nt.add")) + "</button>") +
+              '<div id="nt-chs">' + ntListHtml(o) + "</div>";
+            var chBox = $("#nt-chs");
+            var reload = function () { return rpc("notify.overview", {}).then(function (o2) { o.channels = o2.channels; chBox.innerHTML = ntListHtml(o); }).catch(fail); };
+            ntWire(chBox, o, reload);
+            $("#nt-add").addEventListener("click", function () { ntModal(o, null, reload); });
             $("#nt-quiet").addEventListener("change", function (e) {
               var v = e.target.value.trim();
               if (v && !/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(v)) { toast(T("set.quiet_bad"), true); return; }

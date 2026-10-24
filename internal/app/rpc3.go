@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
+	"github.com/Zhengmingming1/tidebot/internal/notify"
 )
 
 type rpcFunc = func(context.Context, json.RawMessage) (any, error)
@@ -14,19 +16,66 @@ type rpcFunc = func(context.Context, json.RawMessage) (any, error)
 // for the owner's WebUI session, through /api/rpc/<method>.
 func (a *App) extRPC() map[string]rpcFunc {
 	m := map[string]rpcFunc{
-		// Settings page: channel list without config (webhook URLs can carry tokens).
+		// Settings page: channels without URLs or secrets (robot URLs carry the access token).
 		"notify.overview": func(ctx context.Context, _ json.RawMessage) (any, error) {
-			chs, err := a.Notify.Channels(ctx)
+			list, err := a.Notify.Summaries(ctx)
 			if err != nil {
 				return nil, err
 			}
-			list := []map[string]any{}
-			for _, c := range chs {
-				list = append(list, map[string]any{"id": c.ID, "kind": c.Kind, "name": c.Name, "enabled": c.Enabled})
+			groups := []string{}
+			for _, g := range notify.EventGroups {
+				groups = append(groups, g.ID)
 			}
 			q, _ := a.settingString(ctx, "notify.quiet")
 			h, _ := a.settingString(ctx, "notify.digest_hour")
-			return map[string]any{"channels": list, "quiet": q, "digest_hour": h}, nil
+			return map[string]any{"channels": list, "quiet": q, "digest_hour": h, "groups": groups, "defaults": notify.DefaultGroups}, nil
+		},
+		// Add / edit a channel from the WebUI; URL and secret are write-only (blank keeps).
+		"notify.channel_save": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, err := decode[struct {
+				ID string `json:"id"`
+				notify.Input
+			}](raw)
+			if err != nil {
+				return nil, err
+			}
+			c, err := a.Notify.Save(ctx, p.ID, p.Input)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]string{"id": c.ID}, nil
+		},
+		"notify.channel_enable": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, _ := decode[struct {
+				ID      string `json:"id"`
+				Enabled bool   `json:"enabled"`
+			}](raw)
+			return map[string]bool{"ok": true}, a.Notify.SetEnabled(ctx, p.ID, p.Enabled)
+		},
+		// Test what is in the form (saved or not); blank URL / secret use the stored ones.
+		"notify.channel_test": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, err := decode[struct {
+				ID string `json:"id"`
+				notify.Input
+			}](raw)
+			if err != nil {
+				return nil, err
+			}
+			a.syncLang(ctx)
+			m := notify.Message{Event: "test", Key: "test", Title: i18n.T("notify.test"), Body: i18n.T("notify.test_body")}
+			if err := a.Notify.Test(ctx, p.ID, p.Input, m); err != nil {
+				return nil, err
+			}
+			return map[string]bool{"ok": true}, nil
+		},
+		"notify.channel_remove": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, _ := decode[struct {
+				ID string `json:"id"`
+			}](raw)
+			if p.ID == "" {
+				return nil, errors.New("id required")
+			}
+			return map[string]bool{"ok": true}, a.Notify.RemoveChannel(ctx, p.ID)
 		},
 		"notify.settings": a.rpcNotifySettings,
 		"backups.list":    func(ctx context.Context, _ json.RawMessage) (any, error) { return a.ListBackups(ctx) },

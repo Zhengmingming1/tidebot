@@ -1951,3 +1951,80 @@ filters, the spend chart and the task form; this one fixes a quiet bug and a bli
 1. Breaker notice: include a "Resume" button in the desktop notification / notification center.
 2. "Paused · failing" filter chip on the task list (subset of paused).
 3. Auto-resume budget pauses at the budget reset (opt-in), since the reason is now known.
+
+## 2026-10-24 (21:20): notification channels set up in the WebUI — add, test, switch off, remove
+
+Category: **missing feature / "everything from the WebUI"** (Settings → Notifications, notify
+core). The last rounds were pause reasons, the task form and list filters; this one closes a gap
+the settings page itself pointed at: "添加渠道：`agentctl notify add`" — a command that didn't
+even exist (only the raw `notify.add_channel` IPC call did).
+
+**Done**
+
+- Settings → Notifications → 通知渠道 has an "添加渠道" button. The dialog starts with a 3×2 card
+  picker (飞书 / 钉钉 / 企业微信 / Telegram / 邮件 / Webhook; native radios, so arrow keys work)
+  and shows only that kind's fields, with a one-line "where to get it" hint per kind.
+- Auto-fill: pasting a robot URL picks the kind from its host (open.feishu.cn / larksuite,
+  oapi.dingtalk.com, qyapi.weixin.qq.com) and says "已识别为钉钉机器人". The name follows the kind
+  ("钉钉", then "钉钉 2" if taken) until you type your own. For email, the sender address fills
+  SMTP server, port, user name and recipient (same lookup as the email plugin, typed fields are
+  never overwritten) and says when the provider wants an app password / 授权码.
+- "发送测试" sends what is in the form **before saving** (and, when editing, with the saved URL /
+  secret if those fields are left blank). The result shows inline under the form, not as a toast.
+  Each saved channel also has a test icon, edit, delete (in-app confirm, says per-task rules go
+  too) and an on/off switch; the card repaints in place, no page reload.
+- "发送哪些通知": six groups instead of raw event names — failed or didn't finish, needs my
+  confirmation, budget alerts, paused after failures, run succeeded (only tasks with success
+  notices on), system (update, rollback, disk low, plugin messages); each has a tooltip. Default:
+  all but "run succeeded". Stored as one all-task rule per event, so routing, quiet hours and the
+  digest work as before; per-task rules are kept on edit. A channel made with a `*` rule shows
+  "全部通知" and says saving narrows it to the ticked groups.
+- Secrets: robot URLs carry the access token, so URLs saved from the WebUI now go to the secret
+  store (`notify.<id>.url`) instead of `config_json`, like the bot token / SMTP password / signing
+  secret. The page only gets the host back (tooltip); edit fields say "已保存，留空则不修改".
+  Removing a channel deletes both secrets. Unknown config keys are dropped server-side.
+- Fixes found on the way:
+  - DingTalk and Feishu answer HTTP 200 when they refuse a message (keyword missing, bad
+    signature, bad token). That counted as delivered. Robot replies are now checked
+    (`errcode` / `code` / `StatusCode` / Telegram `ok`), so tests and real notices report e.g.
+    "code 19001: … access token invalid".
+  - Email on port 465 (what QQ / 163 / Gmail list) never worked: `smtp.SendMail` only speaks
+    STARTTLS. 465 now uses implicit TLS (TLS 1.2+); "Name <me@x>" senders and `;`-separated
+    recipients work.
+  - DingTalk "加签" and Feishu "签名校验" bots are supported (optional signing secret).
+- Errors come back as stable codes (`notify: url_bad`, …) and are shown in the UI language.
+- Same on macOS / Windows / Linux, desktop window and browser: no paths, no modifier keys, no
+  `:has()` (selected card is a class, for older WebKitGTK). 1024×655: the dialog scrolls inside,
+  header and "发送测试 / 取消 / 保存" stay visible; zh-CN and en checked.
+- Shots (demo data only): `/workspace/tidebot-shots/settings-notify-channels-zh-CN-1024x655.png`,
+  `settings-notify-add-zh-CN-1024x655.png`, `settings-notify-del-zh-CN-1024x655.png` (first two also `-en`).
+- Tests: `TestChannelSaveSummaryTest` (validation codes, URL and secrets kept out of the
+  database, groups → rules, per-task rules survive edits, blank fields keep stored values, test
+  before saving, robot refusals, DingTalk / Feishu signing, enable switch, legacy `*` channels,
+  remove clears secrets), `TestSplitAddrs`, `TestNotifyChannelsFromWebUI` (through `CallExt`:
+  overview never carries the token, a failed run reaches the channel, off stops it),
+  `TestNotifyChannelsUI` (wiring, in-app confirm, i18n for every code / kind / group).
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/components/NotificationDialog.vue`: one dialog for every provider,
+  the default name follows the type until edited (`getUniqueDefaultName` adds a number when the
+  name is taken), and the Test button sends the unsaved form (`server/server.js`
+  `testNotification`). `server/notification-providers/dingding.js` signs with
+  `timestamp + "\n" + secret` and treats any `errmsg` other than "ok" as a failure — that's what
+  showed our 200-but-refused gap. Ideas only, no code copied.
+
+**Learned**
+
+- Chat robots (DingTalk, WeCom, Feishu) report most failures in the JSON body with HTTP 200; a
+  status-code check alone says "sent" for a message nobody saw.
+- Go's `net/smtp.SendMail` has no implicit-TLS mode; port 465 needs `tls.Dial` + `smtp.NewClient`.
+
+**Ideas for later**
+
+1. Per-task channel choice in the task form ("send this task's failures to 运维群"), using the
+   per-task rules that already exist.
+2. Show the last delivery result per channel (time, ok / error) from the `notifications` table,
+   in the row tooltip.
+3. Reuse a configured WeCom / DingTalk / email plugin as a channel with one click instead of
+   pasting the URL twice.
