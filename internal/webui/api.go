@@ -851,6 +851,8 @@ func (s *Server) handleSkillSub(w http.ResponseWriter, r *http.Request) {
 		s.handleSkillDiff(w, r, id)
 	case "files":
 		s.handleSkillFiles(w, r, id)
+	case "file":
+		s.handleSkillFile(w, r, id)
 	case "export":
 		s.handleSkillExport(w, r, id)
 	case "rollback":

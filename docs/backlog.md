@@ -2028,3 +2028,65 @@ even exist (only the raw `notify.add_channel` IPC call did).
    in the row tooltip.
 3. Reuse a configured WeCom / DingTalk / email plugin as a channel with one click instead of
    pasting the URL twice.
+
+## 2026-10-25 (00:20): skill page — browse a version's files, not only their diff
+
+Category: **skills / missing feature** (skill detail page). The last rounds were all tasks,
+runs, notifications and settings; this one goes back to the skill library. Until now the only
+way to read what a skill actually contains was to download the .zip, or to compare two
+versions and read the diff — a skill with one version showed nothing at all. The
+`/api/skills/<id>/files` list existed but nothing used it (idea 4 of the 10-22 20:30 entry).
+
+**Done**
+
+- The skill page's main card has two tabs: 版本对比 (the diff, as before) and 文件. 文件 shows
+  the chosen version's files as a tree (folders first, collapsible, sizes in the tooltip) and
+  the selected file read-only with line numbers, in a box that scrolls inside itself (fits
+  1024×655; the tree and the file scroll separately).
+- Auto-pick: opens SKILL.md (or the shallowest `*/SKILL.md`, else the first file); switching
+  versions keeps the same file when it exists there. Each row in 版本树 has a folder icon that
+  opens that version's files directly.
+- File header: path, size (lines and line-ending kind — LF / CRLF (Windows) / mixed — in the
+  tooltip), copy button. Binary files and files over 256 KB show a short note and the version
+  download instead of garbage; empty files say so.
+- The address keeps the tab, version and file (`?tab=files&v=…&f=…`), so reload, back/forward
+  and a pasted link open the same view; rollback / promote reloads stay on the files tab.
+- Keyboard: ←/→ switch tabs; in the tree ↑/↓/Home/End move, → opens a folder, ← closes it or
+  jumps to its folder, Enter opens a file.
+- No flicker: switching tabs only toggles panes; opening a file keeps the previous one on screen
+  (dimmed) until the new one arrives; answers for a file that is no longer selected are
+  dropped; recently opened files (≤ 24) are kept in memory since versions never change.
+- New endpoint `GET /api/skills/<id>/file?v=<version>&path=<file>`: the path must be a key of
+  that version's own file list (no `..`, absolute or made-up paths — 404), the version must
+  belong to the skill (400), GET only. Text comes back as stored (CRLF kept) and is escaped by
+  the page; no HTTP caching, so nothing lingers in the browser cache after sign-out.
+- Same on macOS / Windows / Linux, desktop window and browser: paths are the stored `/` form,
+  monospace stack already covers Menlo / Consolas / Liberation Mono, no modifier keys involved.
+- Shots (demo data only): `/workspace/tidebot-shots/skill-files-zh-CN-1024x655.png`,
+  `skill-files-binary-zh-CN-1024x655.png`, `skill-files-en-1024x655.png`.
+- Tests: `TestSkillFileView` (CRLF / LF text, line counts, binary, oversized, traversal and
+  unknown paths, foreign version / skill, method), `TestViewSkillFileEOL`,
+  `TestSkillFileBrowserUI` (tabs, endpoint wiring, escaping, address state, i18n).
+
+**Inspiration**
+
+- siteboon/claudecodeui `src/modules/code-editor/hooks/useCodeEditorDocument.ts`: a load
+  counter (`loadGenerationRef`) so a slow read for a file you already left never lands on the
+  one you opened next, and CRLF normalised for display; `CodeEditorBinaryFile.tsx`: binary files
+  get a placeholder instead of being decoded; `src/modules/file-tree/hooks/useExpandedDirectories.ts`
+  for per-folder open state. Ideas only, no code copied.
+
+**Learned**
+
+- The import keeps files byte for byte, so a skill made on Windows really carries CRLF; showing
+  that in the tooltip explains "why does the diff mark every line" without cluttering the view.
+- A gutter `<pre>` next to a `white-space: pre` text `<pre>` keeps line numbers aligned with no
+  per-line DOM, which is plenty for files up to the 256 KB limit.
+
+**Ideas for later**
+
+1. Download a single file from the viewer (attachment, `nosniff`), handy for scripts.
+2. Search inside the open file (Ctrl/⌘+F inside the box, n / N to jump) and a "find in all files".
+3. Render SKILL.md as formatted Markdown with a "源码 / 预览" toggle.
+4. Mark files changed since the previous version in the tree (dot), and jump from a tree file to
+   its diff.

@@ -1726,5 +1726,21 @@
   "nt.h.email": "Type the sender address and the SMTP server and port are filled in for you.",
   "nt.m.feishu": "F",
   "nt.m.dingtalk": "D",
-  "nt.m.wecom": "W"
+  "nt.m.wecom": "W",
+  "sk.tab_diff": "Compare versions",
+  "sk.tab_files": "Files",
+  "fb.version": "Version",
+  "fb.tree": "Files in this version",
+  "fb.sum": "{n} files · {size}",
+  "fb.empty": "This version has no files.",
+  "fb.view_v": "Browse the files of v{n}",
+  "fb.copy": "Copy contents",
+  "fb.lines": "{n} lines",
+  "fb.eol_lf": "LF line endings",
+  "fb.eol_crlf": "CRLF line endings (Windows)",
+  "fb.eol_mixed": "Mixed line endings",
+  "fb.binary": "Binary file — can't be shown here",
+  "fb.too_large": "File too large to show here",
+  "fb.none_sub": "Download the version as .zip to open it.",
+  "fb.empty_file": "Empty file."
 }

@@ -1726,5 +1726,21 @@
   "nt.h.email": "填好发件地址，会自动识别 SMTP 服务器和端口。",
   "nt.m.feishu": "飞",
   "nt.m.dingtalk": "钉",
-  "nt.m.wecom": "企"
+  "nt.m.wecom": "企",
+  "sk.tab_diff": "版本对比",
+  "sk.tab_files": "文件",
+  "fb.version": "版本",
+  "fb.tree": "该版本的文件",
+  "fb.sum": "{n} 个文件 · {size}",
+  "fb.empty": "这个版本没有文件。",
+  "fb.view_v": "查看 v{n} 的文件",
+  "fb.copy": "复制内容",
+  "fb.lines": "{n} 行",
+  "fb.eol_lf": "LF 换行",
+  "fb.eol_crlf": "CRLF 换行（Windows）",
+  "fb.eol_mixed": "混合换行",
+  "fb.binary": "二进制文件，无法在这里预览",
+  "fb.too_large": "文件太大，无法在这里预览",
+  "fb.none_sub": "下载该版本的 .zip 后查看。",
+  "fb.empty_file": "空文件。"
 }

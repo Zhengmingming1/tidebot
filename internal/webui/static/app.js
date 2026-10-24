@@ -1793,11 +1793,13 @@
       var cur = byId[vers.current] || list[0];
       var b = params.get("b") && byId[params.get("b")] ? params.get("b") : cur.id;
       var a = params.get("a") && byId[params.get("a")] ? params.get("a") : ((byId[b] && byId[b].parent_id && byId[byId[b].parent_id]) ? byId[b].parent_id : (list[1] || cur).id);
+      var tab = params.get("tab") === "files" ? "files" : "diff";
+      var fv = params.get("v") && byId[params.get("v")] ? params.get("v") : cur.id, ff = params.get("f") || "";
       var vopt = function (sel) { return list.map(function (v) { return opt(v.id, "v" + v.no + (v.id === vers.current ? " · " + T("ver.current") : v.id === vers.canary ? " · " + T("ver.canary") : ""), v.id === sel); }).join(""); };
       var tree = '<ul class="vlist">' + list.map(function (v) {
         var isCur = v.id === vers.current, isCan = v.id === vers.canary;
         return '<li class="' + (isCur ? "cur" : "") + '"><span class="vdot' + (isCur ? " cur" : isCan ? " can" : "") + '"></span><div class="grow"><strong>v' + esc(v.no) + "</strong>" + (isCur ? ' <span class="tag perm">' + esc(T("ver.current")) + "</span>" : "") + (isCan ? ' <span class="tag next">' + esc(T("ver.canary")) + "</span>" : "") +
-          "<small>" + esc((T("src." + v.source) === "src." + v.source ? v.source : T("src." + v.source)) + " · " + when(v.created_at)) + (v.message ? " · " + esc(v.message) : "") + '</small></div><div class="row-actions"><button class="icon-btn sm" data-v-export="' + esc(v.id) + '" data-tip="' + esc(T("sk.export_tip", { n: v.no })) + '" aria-label="' + esc(T("sk.export_v", { n: v.no })) + '">' + ic("download", "sm") + '</button><button class="btn sm ghost" data-cmp="' + esc(v.id) + '">' + esc(T("diff.compare")) + "</button>" +
+          "<small>" + esc((T("src." + v.source) === "src." + v.source ? v.source : T("src." + v.source)) + " · " + when(v.created_at)) + (v.message ? " · " + esc(v.message) : "") + '</small></div><div class="row-actions"><button class="icon-btn sm" data-v-export="' + esc(v.id) + '" data-tip="' + esc(T("sk.export_tip", { n: v.no })) + '" aria-label="' + esc(T("sk.export_v", { n: v.no })) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" data-v-files="' + esc(v.id) + '" data-tip="' + esc(T("fb.view_v", { n: v.no })) + '" aria-label="' + esc(T("fb.view_v", { n: v.no })) + '">' + ic("folder", "sm") + '</button><button class="btn sm ghost" data-cmp="' + esc(v.id) + '">' + esc(T("diff.compare")) + "</button>" +
           (isCur ? "" : '<button class="btn sm" data-srb="' + esc(v.id) + '" data-no="' + esc(v.no) + '">' + ic("rollback", "sm") + esc(T("ver.rollback")) + "</button>") + "</div></li>";
       }).join("") + "</ul>";
       var modes = [["off", T("opt.m_off"), T("opt.m_off_sub")], ["propose", T("opt.m_propose"), T("opt.m_propose_sub")], ["canary", T("opt.m_canary"), T("opt.m_canary_sub")]];
@@ -1819,14 +1821,68 @@
       }).join("") : '<p class="muted">' + esc(T("opt.none")) + "</p>";
       mount('<div class="grid g-detail">' +
         '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
-        '<div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></section>" +
+        '<nav class="tabs sk-tabs" role="tablist" aria-label="' + esc(sk.name) + '">' + [["diff", T("sk.tab_diff")], ["files", T("sk.tab_files")]].map(function (x) { var on = x[0] === tab; return '<button type="button" role="tab" data-sktab="' + x[0] + '" class="' + (on ? "active" : "") + '" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' + esc(x[1]) + "</button>"; }).join("") + "</nav>" +
+        '<div id="pane-diff" class="sk-pane' + (tab === "diff" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></div>" +
+        '<div id="pane-files" class="sk-pane' + (tab === "files" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar fb-bar"><label>' + esc(T("fb.version")) + ' <select id="fb-v">' + vopt(fv) + '</select></label><small class="muted" id="fb-sum"></small></div><div class="fb"><div class="fb-tree" id="fb-tree" role="tree" aria-label="' + esc(T("fb.tree")) + '">' + skeleton("list") + '</div><div class="fb-view" id="fb-view"></div></div></div></section>' +
         '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + "</span><h3>" + esc(T("ver.tree")) + "</h3></div>" + tree + '<p class="hint mt">' + ic("info", "sm") + esc(T("ver.rb_pointer")) + "</p></section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("opt.title")) + '</h3></div><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
         '<h4 class="mt">' + esc(T("opt.proposals")) + "</h4>" + propHtml + "</section></div></div>",
         "skills", [[T("nav.skills"), "#/skills"], [sk.name]]);
+      var diffLoaded = false, filesLoaded = false, fgen = 0, tcache = {}, fcache = {}, fkeys = [];
+      // The address keeps the tab, the browsed version and file, so a reload or a shared link opens the same view.
+      var syncHash = function () {
+        var q = "a=" + enc($("#d-a").value) + "&b=" + enc($("#d-b").value);
+        if (tab === "files") q += "&tab=files&v=" + enc(fv) + (ff ? "&f=" + enc(ff) : "");
+        history.replaceState(null, "", "#/skills/" + enc(id) + "?" + q); lastHash = location.hash;
+      };
+      var showTab = function (t, noLoad) {
+        tab = t;
+        $$("[data-sktab]").forEach(function (b) { var on = b.getAttribute("data-sktab") === t; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; });
+        $("#pane-diff").classList.toggle("hidden", t !== "diff");
+        $("#pane-files").classList.toggle("hidden", t !== "files");
+        if (noLoad) return;
+        if (t === "diff" && !diffLoaded) load(); else if (t === "files" && !filesLoaded) loadTree(); else syncHash();
+      };
+      // File browser (idea: siteboon/claudecodeui file-tree + code-editor: a load counter drops answers
+      // for a file that is no longer open; binary files get a placeholder instead of garbage).
+      var loadTree = function () {
+        filesLoaded = true;
+        var g = ++fgen, v = fv, host = $("#fb-tree");
+        var got = tcache[v] ? Promise.resolve(tcache[v]) : api(base + "/files?v=" + enc(v)).then(function (l) { tcache[v] = l || []; return tcache[v]; });
+        got.then(function (list) {
+          if (g !== fgen) return;
+          var total = list.reduce(function (n, x) { return n + (x.size || 0); }, 0);
+          $("#fb-sum").textContent = T("fb.sum", { n: list.length, size: fmtBytes(total) });
+          if (!list.length) { ff = ""; host.innerHTML = '<p class="muted pad">' + esc(T("fb.empty")) + "</p>"; $("#fb-view").innerHTML = ""; syncHash(); return; }
+          var paths = list.map(function (x) { return x.path; });
+          if (paths.indexOf(ff) < 0) ff = pickSkillFile(paths);
+          host.innerHTML = browseTree(list);
+          openFile(ff);
+        }).catch(function (e) { if (g === fgen) host.innerHTML = errorState(e.message); });
+      };
+      var openFile = function (p) {
+        ff = p; syncHash();
+        $$("#fb-tree [data-file]").forEach(function (b) { var on = b.getAttribute("data-file") === p; b.classList.toggle("active", on); b.tabIndex = on ? 0 : -1; if (on) b.setAttribute("aria-selected", "true"); else b.removeAttribute("aria-selected"); });
+        var g = ++fgen, key = fv + "\n" + p, view = $("#fb-view");
+        // Keep the previous file on screen (dimmed) until the new one arrives: no blank flash.
+        if (!fcache[key]) view.classList.add("busy");
+        var got = fcache[key] ? Promise.resolve(fcache[key]) : api(base + "/file?v=" + enc(fv) + "&path=" + enc(p)).then(function (f) {
+          fcache[key] = f; fkeys.push(key);
+          if (fkeys.length > 24) delete fcache[fkeys.shift()]; // a version's files never change; keep only the recent ones
+          return f;
+        });
+        got.then(function (f) {
+          if (g !== fgen) return;
+          view.classList.remove("busy");
+          view.innerHTML = fileViewHtml(f);
+          view.scrollTop = 0;
+          var cp = $("[data-fb-copy]", view); if (cp) cp.addEventListener("click", function () { copyText(f.text || "").catch(fail); });
+          var dl = $("[data-fb-dl]", view); if (dl) dl.addEventListener("click", function () { exportSkill(id, fv, dl); });
+        }).catch(function (e) { if (g === fgen) { view.classList.remove("busy"); view.innerHTML = errorState(e.message); } });
+      };
       var load = function () {
         var qa = $("#d-a").value, qb = $("#d-b").value;
-        history.replaceState(null, "", "#/skills/" + enc(id) + "?a=" + enc(qa) + "&b=" + enc(qb)); lastHash = location.hash;
+        diffLoaded = true; syncHash();
         if (qa === qb) { $("#diff").innerHTML = '<p class="muted pad">' + esc(T("diff.same_ver")) + "</p>"; return; }
         api(base + "/diff?a=" + enc(qa) + "&b=" + enc(qb) + ($("#d-all").checked ? "&ctx=all" : "")).then(function (d) { $("#diff").innerHTML = diffView(d); }).catch(function (e) { $("#diff").innerHTML = errorState(e.message); });
       };
@@ -1834,9 +1890,9 @@
       $("#d-swap").addEventListener("click", function () { var x = $("#d-a").value; $("#d-a").value = $("#d-b").value; $("#d-b").value = x; load(); });
       $("#sk-export").addEventListener("click", function () { exportSkill(id, "", $("#sk-export")); });
       $$("[data-v-export]").forEach(function (bt) { bt.addEventListener("click", function () { exportSkill(id, bt.getAttribute("data-v-export"), bt); }); });
-      $$("[data-cmp]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = bt.getAttribute("data-cmp"); $("#d-b").value = vers.current; load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
-      $$("[data-cmp-pair]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = vers.current; $("#d-b").value = bt.getAttribute("data-cmp-pair"); load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
-      var reload = function () { renderSkillDetail(id, new URLSearchParams("a=" + $("#d-a").value + "&b=" + $("#d-b").value)); };
+      $$("[data-cmp]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = bt.getAttribute("data-cmp"); $("#d-b").value = vers.current; showTab("diff", true); load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
+      $$("[data-cmp-pair]").forEach(function (bt) { bt.addEventListener("click", function () { $("#d-a").value = vers.current; $("#d-b").value = bt.getAttribute("data-cmp-pair"); showTab("diff", true); load(); $("#diff").scrollIntoView({ block: "nearest" }); }); });
+      var reload = function () { syncHash(); renderSkillDetail(id, new URLSearchParams(location.hash.split("?")[1] || "")); };
       $$("[data-srb]").forEach(function (bt) { bt.addEventListener("click", function () {
         var vid = bt.getAttribute("data-srb"), no = bt.getAttribute("data-no"), prev = vers.current, prevNo = (byId[prev] || {}).no;
         confirmDialog({ title: T("ver.rb_title", { n: no }), body: T("ver.rb_pointer"), ok: T("ver.rollback") }).then(function (y) {
@@ -1853,8 +1909,86 @@
       $$("[data-canary]").forEach(function (bt) { bt.addEventListener("click", function () { rpc("skills.canary_start", { proposal_id: bt.getAttribute("data-canary") }).then(function () { toast(T("opt.canary_started")); reload(); }).catch(fail); }); });
       $$("[data-discard]").forEach(function (bt) { bt.addEventListener("click", function () { confirmDialog({ title: T("opt.discard_title"), body: T("opt.discard_body"), ok: T("opt.discard"), danger: true }).then(function (y) { if (y) rpc("skills.discard", { proposal_id: bt.getAttribute("data-discard") }).then(function () { toast(T("opt.discarded")); reload(); }).catch(fail); }); }); });
       $$("[data-promote]").forEach(function (bt) { bt.addEventListener("click", function () { confirmDialog({ title: T("opt.promote_title", { n: bt.getAttribute("data-no") }), body: T("opt.promote_body"), ok: T("opt.promote") }).then(function (y) { if (y) rpc("skills.promote", { proposal_id: bt.getAttribute("data-promote") }).then(function () { toast(T("opt.promoted")); reload(); }).catch(fail); }); }); });
-      load();
+      $$("[data-sktab]").forEach(function (b) {
+        b.addEventListener("click", function () { showTab(b.getAttribute("data-sktab")); });
+        b.addEventListener("keydown", function (e) {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+          e.preventDefault();
+          var nt = tab === "diff" ? "files" : "diff"; showTab(nt); $('[data-sktab="' + nt + '"]').focus();
+        });
+      });
+      $("#fb-v").addEventListener("change", function () { fv = $("#fb-v").value; loadTree(); });
+      $$("[data-v-files]").forEach(function (bt) { bt.addEventListener("click", function () {
+        fv = bt.getAttribute("data-v-files"); $("#fb-v").value = fv; showTab("files", true); loadTree();
+        $(".sk-tabs").scrollIntoView({ block: "nearest" });
+      }); });
+      var ftree = $("#fb-tree");
+      ftree.addEventListener("click", function (e) {
+        var d = e.target.closest("[data-dir]"), f = e.target.closest("[data-file]");
+        if (d) toggleDir(d); else if (f && f.getAttribute("data-file") !== ff) openFile(f.getAttribute("data-file"));
+      });
+      ftree.addEventListener("keydown", function (e) { treeKeys(ftree, e); });
+      if (tab === "files") loadTree(); else load();
     });
+  }
+  // pickSkillFile: the file to show first — SKILL.md at the top, else the shallowest SKILL.md, else the first file.
+  function pickSkillFile(paths) {
+    if (paths.indexOf("SKILL.md") >= 0) return "SKILL.md";
+    var sk = paths.filter(function (p) { return /(^|\/)SKILL\.md$/i.test(p); }).sort(function (a, b) { return a.split("/").length - b.split("/").length; })[0];
+    return sk || paths[0];
+  }
+  // browseTree renders a version's files as a clickable tree: folders first (collapsible), sizes in the tooltip.
+  function browseTree(files) {
+    var root = { d: {}, f: [] };
+    files.forEach(function (x) {
+      var parts = x.path.split("/"), n = root;
+      parts.slice(0, -1).forEach(function (p) { n = n.d[p] = n.d[p] || { d: {}, f: [] }; });
+      n.f.push({ name: parts[parts.length - 1], path: x.path, size: x.size });
+    });
+    var walk = function (n, pre) {
+      return '<ul role="group">' + Object.keys(n.d).sort().map(function (k) {
+        return '<li role="none"><button type="button" class="fb-node dir" role="treeitem" aria-expanded="true" tabindex="-1" data-dir="' + esc(pre + k) + '">' + ic("chev", "sm") + ic("folder", "sm") + "<span>" + esc(k) + "</span></button>" + walk(n.d[k], pre + k + "/") + "</li>";
+      }).join("") + n.f.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; }).map(function (f) {
+        return '<li role="none"><button type="button" class="fb-node' + (/^SKILL\.md$/i.test(f.name) ? " key" : "") + '" role="treeitem" tabindex="-1" data-file="' + esc(f.path) + '" data-tip="' + esc(f.path + " · " + fmtBytes(f.size)) + '">' + ic("doc", "sm") + "<span>" + esc(f.name) + "</span></button></li>";
+      }).join("") + "</ul>";
+    };
+    return walk(root, "");
+  }
+  function toggleDir(b, open) {
+    var ul = b.nextElementSibling, now = b.getAttribute("aria-expanded") === "true";
+    if (open === undefined) open = !now;
+    b.setAttribute("aria-expanded", String(open));
+    if (ul) ul.classList.toggle("hidden", !open);
+  }
+  // Arrow keys walk the visible rows; → opens a folder, ← closes it or moves to its folder.
+  function treeKeys(tree, e) {
+    var rows = $$(".fb-node", tree).filter(function (b) { return !b.closest("ul.hidden"); });
+    var i = rows.indexOf(document.activeElement);
+    if (i < 0) return;
+    var cur = rows[i], dir = cur.hasAttribute("data-dir"), go = function (b) { if (b) { e.preventDefault(); b.focus(); } };
+    if (e.key === "ArrowDown") go(rows[i + 1]);
+    else if (e.key === "ArrowUp") go(rows[i - 1]);
+    else if (e.key === "Home") go(rows[0]);
+    else if (e.key === "End") go(rows[rows.length - 1]);
+    else if (e.key === "ArrowRight" && dir) { e.preventDefault(); if (cur.getAttribute("aria-expanded") === "true") go(rows[i + 1]); else toggleDir(cur, true); }
+    else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      if (dir && cur.getAttribute("aria-expanded") === "true") toggleDir(cur, false);
+      else { var li = cur.parentNode.parentNode.closest("li"); go(li && li.querySelector(".fb-node")); }
+    }
+  }
+  // fileViewHtml: read-only view of one file with line numbers. Text keeps its line breaks (CRLF shown as
+  // one break); binary and very large files get a short note and the version download instead.
+  function fileViewHtml(f) {
+    var meta = [fmtBytes(f.size)];
+    if (f.kind === "text") { meta.push(T("fb.lines", { n: f.lines })); if (f.eol) meta.push(T("fb.eol_" + f.eol)); }
+    var head = '<div class="fb-head">' + ic("doc", "sm") + '<code class="fb-path">' + esc(f.path) + '</code><small class="muted fb-meta" data-tip="' + esc(meta.join(" · ")) + '">' + esc(fmtBytes(f.size)) + "</small>" +
+      (f.kind === "text" ? '<button type="button" class="icon-btn sm" data-fb-copy data-tip="' + esc(T("fb.copy")) + '" aria-label="' + esc(T("fb.copy")) + '">' + ic("copy", "sm") + "</button>" : "") + "</div>";
+    if (f.kind !== "text") return head + '<div class="fb-none">' + ic("doc", "lg") + "<strong>" + esc(T(f.kind === "binary" ? "fb.binary" : "fb.too_large")) + "</strong><small>" + esc(T("fb.none_sub")) + '</small><button type="button" class="btn sm" data-fb-dl>' + ic("download", "sm") + esc(T("sk.export")) + "</button></div>";
+    if (!f.text) return head + '<p class="muted pad">' + esc(T("fb.empty_file")) + "</p>";
+    var text = f.text.replace(/\r\n?/g, "\n").replace(/\n$/, ""), n = text.split("\n").length, nums = [];
+    for (var k = 1; k <= n; k++) nums.push(k);
+    return head + '<div class="fb-code"><pre class="fb-ln" aria-hidden="true">' + nums.join("\n") + '</pre><pre class="fb-tx" tabindex="0">' + esc(text) + "</pre></div>";
   }
   // ---------- BUTTONS ----------
   function renderButtons() {

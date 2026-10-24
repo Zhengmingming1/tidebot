@@ -272,3 +272,77 @@ func (s *Server) handleSkillFiles(w http.ResponseWriter, r *http.Request, skillI
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	writeJSON(w, 200, out)
 }
+
+// skillFileView is one file of a version as the file browser shows it. Text comes back
+// as stored (CRLF kept); the client escapes it. Binary and very large files carry no text.
+type skillFileView struct {
+	Path  string `json:"path"`
+	Size  int    `json:"size"`
+	Kind  string `json:"kind"`           // text | binary | too_large
+	Text  string `json:"text,omitempty"` // only for kind=text
+	Lines int    `json:"lines"`
+	EOL   string `json:"eol,omitempty"` // lf | crlf | mixed ("" when there is no line break)
+}
+
+func viewSkillFile(path string, b []byte) skillFileView {
+	fv := skillFileView{Path: path, Size: len(b)}
+	switch {
+	case !isText(b):
+		fv.Kind = "binary"
+		return fv
+	case len(b) > diffMaxFileBytes:
+		fv.Kind = "too_large"
+		return fv
+	}
+	fv.Kind = "text"
+	fv.Text = string(b)
+	crlf := bytes.Count(b, []byte("\r\n"))
+	lf := bytes.Count(b, []byte("\n"))
+	switch {
+	case lf == 0:
+	case crlf == lf:
+		fv.EOL = "crlf"
+	case crlf == 0:
+		fv.EOL = "lf"
+	default:
+		fv.EOL = "mixed"
+	}
+	if len(b) > 0 {
+		fv.Lines = lf
+		if b[len(b)-1] != '\n' {
+			fv.Lines++
+		}
+	}
+	return fv
+}
+
+// GET /api/skills/<id>/file?v=<version>&path=<file> returns one file of that version for
+// reading. The path must be a key of the version's own file list, so nothing outside the
+// stored version can be named (no "..", no absolute paths).
+func (s *Server) handleSkillFile(w http.ResponseWriter, r *http.Request, skillID string) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "GET only")
+		return
+	}
+	q := r.URL.Query()
+	v, p := q.Get("v"), q.Get("path")
+	if !s.skillVersionOf(r, skillID, v) {
+		writeErr(w, 400, "v must be a version of this skill")
+		return
+	}
+	if p == "" || len(p) > 1024 {
+		writeErr(w, 400, "path required")
+		return
+	}
+	fs, err := s.deps.Skills.Files(r.Context(), v)
+	if err != nil {
+		writeErr(w, 500, "cannot read version files")
+		return
+	}
+	b, ok := fs[p]
+	if !ok {
+		writeErr(w, 404, "file not in this version")
+		return
+	}
+	writeJSON(w, 200, viewSkillFile(p, b))
+}
