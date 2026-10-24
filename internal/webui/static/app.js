@@ -680,7 +680,7 @@
   }
   function shortcutsHelp() {
     var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
-    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r / g c", T("sc.goto")], ["n t / n s / n p / n b / n q", T("sc.create")], ["r / e / o", T("sc.task_keys")]];
+    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["j / k", T("sc.rows")], ["Enter / o", T("sc.open_row")], ["x / r", T("sc.row_acts")], ["/", T("sc.search")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r / g c", T("sc.goto")], ["n t / n s / n p / n b / n q", T("sc.create")], ["r / e / o", T("sc.task_keys")]];
     modal('<div class="card-head"><span class="ico">' + ic("more") + "</span><h2>" + esc(T("sc.title")) + '</h2></div><table class="tbl sc-table"><tbody>' +
       rows.map(function (r) { return "<tr><td>" + r[0].split(" / ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join(" / ") + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") +
       '</tbody></table><div class="actions"><button class="btn" id="sc-close">' + esc(T("btn.close")) + "</button></div>", function (r, close) { $("#sc-close").addEventListener("click", close); });
@@ -711,6 +711,7 @@
       return;
     }
     if (e.key === "g" || e.key === "n") { gPending = { k: e.key, valueOf: function () { return this.t; }, t: Date.now() }; return; }
+    if (kbKey(e)) return;
     // page-level single keys
     // r / e: run & edit on a task page, rerun & edit-and-rerun on a run page.
     // o: open the task's folder (desktop app, overview tab).
@@ -718,6 +719,76 @@
     if (hit && hit.classList.contains("hidden")) hit = null; // e.g. "o" in the browser, where there is no file manager
     if (hit && !hit.disabled) { e.preventDefault(); hit.click(); }
   });
+
+  // ---------- list cursor: j / k through the rows of a list page ----------
+  // Idea: Miniflux internal/ui/static/js/app.js goToListItem() + .current-item (keyboard_handler
+  // j / k / o / Enter). j / k move a highlighted row through the page's clickable rows
+  // ([data-href]: tasks, runs, skills, home and task-detail lists), Enter or o opens it, x ticks
+  // its checkbox (task list batch bar), r runs it (task list), Esc drops it, / jumps to the
+  // page's search box. The row is remembered per page (by its link, not its node), so a live
+  // repaint keeps it and coming back from a row shows where you were. Same keys on every OS.
+  // Enter / o / x / r only act on a row picked with j / k on this visit (kbLive); a row
+  // remembered from a click is only highlighted, so o on a task page still opens its folder.
+  var kbCur = {}, kbPend = 0, kbLive = "";
+  // "/" badge at the right of a list's search box; hidden while it has focus or text.
+  var KB_SLASH = '<kbd class="kb-hint" aria-hidden="true">/</kbd>';
+  function kbPage() { return (location.hash || "#/").split("?")[0]; }
+  function kbStep(n, i, d) { if (!n) return -1; if (i < 0) return d > 0 ? 0 : n - 1; return Math.max(0, Math.min(n - 1, i + d)); }
+  function kbRows() { var pg = page(); return pg ? $$("[data-href]", pg).filter(function (el) { return el.offsetParent !== null; }) : []; }
+  function kbRow(rows) { var h = kbCur[kbPage()]; if (!h) return null; return (rows || kbRows()).filter(function (el) { return el.getAttribute("data-href") === h; })[0] || null; }
+  function kbPaint(rows) {
+    var pg = page(), cur = kbRow(rows);
+    if (!pg) return cur;
+    $$(".kb-cur", pg).forEach(function (el) { if (el !== cur) { el.classList.remove("kb-cur"); el.removeAttribute("aria-current"); if (el._kbTab) { el.removeAttribute("tabindex"); el._kbTab = false; } } });
+    if (cur && !cur.classList.contains("kb-cur")) {
+      cur.classList.add("kb-cur"); cur.setAttribute("aria-current", "true");
+      if (!cur.hasAttribute("tabindex")) { cur.setAttribute("tabindex", "-1"); cur._kbTab = true; }
+    }
+    return cur;
+  }
+  function kbMove(d) {
+    var rows = kbRows(), j = kbStep(rows.length, rows.indexOf(kbRow(rows)), d);
+    if (j < 0) return false;
+    kbCur[kbPage()] = rows[j].getAttribute("data-href"); kbLive = kbPage();
+    var el = kbPaint(rows);
+    // Focus moves to the row (screen readers follow, a chip clicked before keeps no Enter).
+    if (el) { el.focus({ preventScroll: true }); el.scrollIntoView({ block: "nearest" }); }
+    return true;
+  }
+  // A focused control keeps its own Enter (buttons, links, chips); j / k / o / x work anywhere.
+  function kbFocusFree(cur) { var a = document.activeElement; return !a || a === cur || a === document.body || a === page() || !(a.closest && a.closest("a,button,input,select,textarea,summary,[tabindex],[contenteditable]")); }
+  function kbKey(e) {
+    var k = e.key;
+    if (k === "j" || k === "k") { if (kbMove(k === "j" ? 1 : -1)) { e.preventDefault(); return true; } return false; }
+    if (k === "/") {
+      var s = $$("input[type=search]", page()).filter(function (x) { return x.offsetParent !== null && !x.disabled; })[0];
+      if (s) { e.preventDefault(); s.focus(); s.select(); return true; }
+      return false;
+    }
+    var cur = kbCur[kbPage()] && kbRow();
+    if (!cur) return false;
+    if (k === "Escape") { delete kbCur[kbPage()]; kbLive = ""; kbPaint(); return true; }
+    if (kbLive !== kbPage()) return false;
+    if (k === "o" || (k === "Enter" && kbFocusFree(cur))) { e.preventDefault(); location.hash = cur.getAttribute("data-href"); return true; }
+    if (k === "x") { var c = $("input[type=checkbox][data-pick]", cur); if (c && !c.disabled) { e.preventDefault(); c.click(); return true; } return false; }
+    if (k === "r") { var b = $("[data-runnow]", cur); if (b && !b.disabled) { e.preventDefault(); b.click(); return true; } return false; }
+    return false;
+  }
+  window.addEventListener("hashchange", function () { kbLive = ""; });
+  // Clicking a row (or its link) remembers it too, so Back lands on it.
+  document.addEventListener("click", function (e) {
+    var el = e.target && e.target.closest && e.target.closest("#page [data-href]");
+    if (el) kbCur[kbPage()] = el.getAttribute("data-href");
+  }, true);
+  // Lists repaint on their own (search, sort, live polls): put the highlight back once per frame.
+  (function () {
+    var pg = page();
+    if (!pg || typeof MutationObserver === "undefined") return;
+    new MutationObserver(function () {
+      if (kbPend || !kbCur[kbPage()]) return;
+      kbPend = requestAnimationFrame(function () { kbPend = 0; kbPaint(); });
+    }).observe(pg, { childList: true, subtree: true });
+  })();
 
   // ---------- sidebar: Claude Code status ----------
   // GET /api/claude/status is cached server-side (30s) and never calls a model API.
@@ -1400,7 +1471,7 @@
       };
       var th = function (k, label) { return '<th><button class="th-sort' + (v.sort === k ? " on" : "") + '" data-sort="' + k + '" aria-sort="' + (v.sort === k ? (v.dir > 0 ? "ascending" : "descending") : "none") + '">' + esc(label) + (v.sort === k ? '<span class="arr">' + (v.dir > 0 ? "↑" : "↓") + "</span>" : "") + "</button></th>"; };
       mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
-        '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '"></label>' +
+        '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters task-f" role="group">' + TASK_FILTERS.map(function (x) { return '<button data-st="' + x[0] + '" aria-pressed="' + (x[0] === v.status) + '" class="' + (x[0] === v.status ? "active" : "") + '"' + (x[2] ? ' data-tip="' + esc(T(x[2])) + '"' : "") + ">" + esc(T(x[1])) + ' <span class="cnt" data-c="' + x[0] + '"></span></button>'; }).join("") + "</div>" +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
@@ -1760,11 +1831,12 @@
     return api("/api/skills").then(function (skills) {
       var rows = skills.length ? '<table class="table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
         skills.map(function (s) {
-          return '<tr><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + "</td><td>" + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
+          return '<tr class="click" data-href="#/skills/' + enc(s.id) + '"><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + "</td><td>" + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
             '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
         '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
+      wireRows();
       $("#sk-import").addEventListener("click", function () { skillImportModal(renderSkills); });
       $$("[data-versions]").forEach(function (b) { b.addEventListener("click", function () { location.hash = "#/skills/" + enc(b.getAttribute("data-versions")); }); });
       $$("[data-sk-export]").forEach(function (b) { b.addEventListener("click", function () { exportSkill(b.getAttribute("data-sk-export"), "", b); }); });
@@ -3802,7 +3874,7 @@
         return '<button data-f="' + x[0] + '" class="' + (x[0] === st ? "active" : "") + '"' + (x[3] ? ' data-tip="' + esc(T(x[3])) + '"' : "") + ">" + esc(T(x[1])) + (typeof n === "number" ? ' <span class="cnt" data-c="' + x[2] + '">' + esc(num(n)) + "</span>" : "") + "</button>";
       };
       mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + (task && runs[0] ? esc(T("runs.for", { name: runs[0].task_name })) + " · " : "") + esc(T("runs.times_in", { tz: tzLabel() })) + '</p></div><div class="actions"><div class="rel rr-wrap"><button type="button" class="btn rr-btn' + (rangeOn(rg) ? " on" : "") + '" id="r-range" aria-haspopup="dialog" aria-expanded="false" data-tip="' + esc(rangeTip(rg)) + '">' + ic("calendar", "sm") + "<span>" + esc(rangeLabel(rg)) + "</span>" + ic("chevDown", "sm") + '</button></div><button class="btn primary" id="r-quick">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div></div>" +
-        '<section class="card flush"><div class="toolbar run-tb"><label class="search-in">' + ic("search", "sm") + '<input id="rq" type="search" maxlength="100" placeholder="' + esc(T("runs.search")) + '" value="' + esc(v.q) + '"></label>' +
+        '<section class="card flush"><div class="toolbar run-tb"><label class="search-in">' + ic("search", "sm") + '<input id="rq" type="search" maxlength="100" placeholder="' + esc(T("runs.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters run-f">' + RUN_FILTERS.map(chip).join("") + "</div>" +
         '<select id="rsort" aria-label="' + esc(T("runs.sort")) + '">' + [["new", T("runs.s_new")], ["old", T("runs.s_old")], ["cost", T("runs.s_cost")], ["tokens", T("runs.s_tokens")], ["duration", T("runs.s_duration")]].map(function (x) { return opt(x[0], x[1], x[0] === v.sort); }).join("") + "</select>" +
         '</div><div id="rtable"></div><div class="runs-more hidden" id="rmore"></div></section>', "runs", [[T("nav.runs")]]);

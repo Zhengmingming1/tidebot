@@ -1756,3 +1756,11 @@ a.card.stat.stat-link:focus-visible { outline: none; box-shadow: var(--focus-rin
 @media (max-width: 720px) { .fb { grid-template-columns: 1fr; height: auto; } .fb-tree { max-height: 180px; border-right: 0; border-bottom: 1px solid var(--border); } .fb-code { max-height: 420px; } }
 @media (prefers-reduced-motion: reduce) { .fb-node.dir .i:first-child, .fb-view { transition: none; } }
 .fb-head .icon-btn { margin-right: -8px; }
+/* List cursor (j / k): tinted row + 3px accent bar on the left, no layout shift. */
+.table tbody tr.kb-cur td, .table tbody tr.kb-cur:hover td { background: var(--accent-50); }
+.table tbody tr.kb-cur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.kb-cur, tr.kb-cur:focus, tr.kb-cur:focus-visible { outline: none; box-shadow: none; scroll-margin: 8px; }
+li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background: var(--accent-50); box-shadow: inset 3px 0 0 var(--accent); border-radius: 6px; scroll-margin: 8px; }
+.search-in:has(.kb-hint) input { min-width: 0; }
+.search-in .kb-hint { flex: none; height: 20px; min-width: 20px; padding: 0 5px; display: inline-grid; place-items: center; font: 500 12px var(--font); color: var(--text-3); background: var(--surface); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; }
+.search-in:focus-within .kb-hint, .search-in input:not(:placeholder-shown) ~ .kb-hint { display: none; }

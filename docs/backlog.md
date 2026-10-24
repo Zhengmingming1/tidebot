@@ -2159,3 +2159,63 @@ those the breaker paused the task — which stayed paused after the disk was cle
    relying on the daily low-disk notice.
 3. Desktop tray: show "运行已暂停启动（磁盘已满）" as its own problem line while blocked.
 4. Also check the task's working folder volume when it lives on another disk.
+
+## 2026-10-25 (06:20): j / k through list rows — open, tick, run without the mouse
+
+Category: **UI interaction / keyboard** (tasks, runs, skills, home and task-detail lists). The
+last rounds were features and backend (disk floor, skill files, channels, pause reasons); this
+one picks up the keyboard line of `docs/ux-iteration-plan.md` §3 ("列表内 J/K 上下、Enter 打开"),
+which was never done: the shortcut sheet had `↑ ↓ 在列表里上下移动`, but that only worked in the
+command palette — on a list page you still had to reach for the mouse for every row.
+
+**Done**
+
+- On any page with clickable rows (`[data-href]`: task list, runs list, skills list, home
+  "running now", task-detail recent runs), **j / k** move a highlighted row (tinted
+  `--accent-50` plus a 3 px accent bar on the left, no layout shift), clamped at both ends,
+  hidden rows skipped, scrolled into view only when needed, focus moved to the row
+  (`aria-current`, `tabindex=-1` added and removed again).
+- **Enter / o** open the row, **x** ticks its checkbox (task list → the batch bar shows up),
+  **r** runs it now (task list), **Esc** drops the highlight, **/** jumps to the page's search
+  box (task and run lists show a small `/` badge in the box, hidden while focused or filled).
+- The row is remembered per page by its link, not its node: live repaints (runs list polls
+  every 2 s, search, sort, chip counts) put the highlight back once per frame through one
+  `MutationObserver`; coming back from a row (Back, or a click on the nav) shows the row you
+  opened. A click on a row is remembered the same way.
+- Enter / o / x / r only act on a row picked with j / k on this visit; a row remembered from a
+  click is only highlighted, so `o` on a task page still opens its folder and a focused button
+  or chip keeps its own Enter.
+- Skills list rows are now clickable like tasks and runs (whole row opens the skill).
+- Shortcut sheet: new lines for j / k, Enter / o, x / r and /; `↑ ↓` now says it is for the
+  palette and menus. Short enough to fit one or two lines at 1024×655 in both languages.
+- Same on macOS / Windows / Linux, desktop window and browser: plain letter keys, no ⌘ / Ctrl,
+  ignored while typing, with a modifier held, or with a dialog / the palette open; no native
+  dialogs.
+- Shot (demo data): `/workspace/tidebot-shots/list-keyboard-cursor-zh-CN-1024x655.png`.
+- Tests: `TestListKeyboardCursor` (wiring, CSS, i18n; under node with a small fake DOM:
+  clamping, hidden rows, focus / scroll, x / r clicks, repaint keeps the row, Enter opens,
+  remembered-but-not-picked row ignores o, focused button keeps Enter, Esc, /, click memory).
+
+**Inspiration**
+
+- miniflux/v2 `internal/ui/static/js/app.js`: `goToListItem(offset)` moves a `.current-item`
+  class over the visible `.items .item`, focuses it and scrolls only when it is off screen;
+  `keyboard_handler.js` + the `keyboardHandler.on("j" / "k" / "o" / "Enter" / "/")` table, with
+  keys ignored in inputs. tidebot borrows the class-on-the-row model, visible-only rows, focus
+  and "scroll only when needed", and keys the row by its link so repaints don't lose it. Ideas
+  only, no code copied.
+
+**Learned**
+
+- A `tr` with `tabindex` picks up the global `[tabindex]:focus-visible` ring, which draws
+  oddly on table rows; the cursor style turns it off and uses the left bar instead.
+- A search input with no `min-width: 0` keeps its intrinsic width in a flex row and pushes a
+  trailing badge out of a narrow box (runs toolbar at 1024 px in English).
+
+**Ideas for later**
+
+1. Shift+j / Shift+k to extend a selection range (tick several tasks), and `x` on the runs list
+   once it has bulk actions.
+2. Same cursor in the plugins and notification-channel lists (cards, not rows, today).
+3. `g g` / `G` for first / last row (Miniflux has them), and j / k on the run-detail log lines.
+4. Show the `/` badge on the skills list once it gets a search box.
