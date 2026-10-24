@@ -903,9 +903,16 @@ var runStatusGroups = map[string][]string{
 
 // runsFilter builds the WHERE part shared by the list and its counts: task, search text
 // and (unless withStatus is false) the status filter. Everything goes in as a parameter.
-func runsFilter(q url.Values, withStatus bool) (string, []any, error) {
+func runsFilter(q url.Values, withStatus bool, loc *time.Location, now time.Time) (string, []any, error) {
 	where := "WHERE 1=1"
 	var args []any
+	if from, to, ok, err := runsRange(q, loc, now); err != nil {
+		return "", nil, err
+	} else if ok {
+		// created_at is RFC3339 in UTC, so the text compares in time order
+		where += " AND r.created_at >= ? AND r.created_at < ?"
+		args = append(args, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
+	}
 	if st := q.Get("status"); withStatus && st != "" {
 		group, ok := runStatusGroups[st]
 		if !ok {
@@ -931,12 +938,66 @@ func runsFilter(q url.Values, withStatus bool) (string, []any, error) {
 	return where, args, nil
 }
 
+// runsRange turns the runs-list time filter into [from, to) instants. Days are calendar
+// days in the scheduler's time zone (the zone every time on the page is shown in):
+// range=today | yesterday | 7d | 30d (today and the days before it), or from=/to= as
+// YYYY-MM-DD, both days included; either end may be left out. ok is false for no filter.
+func runsRange(q url.Values, loc *time.Location, now time.Time) (from, to time.Time, ok bool, err error) {
+	if loc == nil {
+		loc = time.Local
+	}
+	now = now.In(loc)
+	day0 := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	switch rg := q.Get("range"); rg {
+	case "", "all":
+	case "today":
+		return day0, day0.AddDate(0, 0, 1), true, nil
+	case "yesterday":
+		return day0.AddDate(0, 0, -1), day0, true, nil
+	case "7d":
+		return day0.AddDate(0, 0, -6), day0.AddDate(0, 0, 1), true, nil
+	case "30d":
+		return day0.AddDate(0, 0, -29), day0.AddDate(0, 0, 1), true, nil
+	default:
+		return from, to, false, errors.New("range must be today, yesterday, 7d or 30d")
+	}
+	fs, ts := strings.TrimSpace(q.Get("from")), strings.TrimSpace(q.Get("to"))
+	if fs == "" && ts == "" {
+		return from, to, false, nil
+	}
+	parse := func(name, v string) (time.Time, error) {
+		d, err := time.ParseInLocation("2006-01-02", v, loc)
+		if err != nil {
+			return d, fmt.Errorf("%s must be a date like 2026-10-24", name)
+		}
+		return d, nil
+	}
+	from = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	to = day0.AddDate(0, 0, 1)
+	if fs != "" {
+		if from, err = parse("from", fs); err != nil {
+			return
+		}
+	}
+	if ts != "" {
+		var d time.Time
+		if d, err = parse("to", ts); err != nil {
+			return
+		}
+		to = d.AddDate(0, 0, 1)
+	}
+	if !to.After(from) {
+		return from, to, false, errors.New("from must not be after to")
+	}
+	return from, to, true, nil
+}
+
 // handleRuns lists runs, newest first by default. Paging: for the time sorts the next
 // page starts after the last run shown (before=<run id>, a keyset cursor, so runs that
 // start while you scroll don't shift the pages); the other sorts use offset.
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	where, args, err := runsFilter(q, true)
+	where, args, err := runsFilter(q, true, s.loc(), time.Now())
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
@@ -989,7 +1050,7 @@ func (s *Server) handleRunCounts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 405, "GET only")
 		return
 	}
-	where, args, err := runsFilter(r.URL.Query(), false)
+	where, args, err := runsFilter(r.URL.Query(), false, s.loc(), time.Now())
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return

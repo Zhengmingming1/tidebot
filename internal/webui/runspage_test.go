@@ -155,7 +155,7 @@ func TestRunsPageUI(t *testing.T) {
 		`["failed", "st.failed", "failed", "runs.f_failed_tip"]`,
 		`"/api/runs/counts?"`,
 		`"&before=" + enc(list[list.length - 1].id) : "&offset=" + list.length`,
-		`location.hash = runsHash(b.getAttribute("data-f"), task);`,
+		`location.hash = runsHash(b.getAttribute("data-f"), task, rg);`,
 		`T("runs.shown_of", { n: num(shown.length), total: num(total) })`,
 		`if (my !== v.seq || !$("#rtable")) return;`,
 		`if (key !== v.key) { v.key = key; v.n = RUNS_PAGE; }`,

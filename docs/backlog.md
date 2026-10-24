@@ -1715,3 +1715,61 @@ run strip; this builds on the strip (ideas 2 and 3 from 02:20) so a broken task 
 1. Home page health card: a "失败中 N" link to `#/tasks?status=failing` when N > 0.
 2. Favicon badge / notification when a task *starts* failing (streak goes 0 → 1), not on every failure.
 3. Sort by fail streak ("most broken first") and show the streak on the task detail header.
+
+## 2026-10-24 (09:20): runs list — filter by date (quick ranges + a small calendar)
+
+Category: **missing feature** (runs page, API). The last rounds were UX/navigation (task list),
+disk I/O and security; this is idea 1 from 10-23 10:20 ("date range on the runs list").
+
+**Done**
+
+- Runs page head has a date button next to "新建快速运行": **全部时间 / 今天 / 昨天 / 最近 7 天 /
+  最近 30 天** apply at once; a month calendar picks any span (click the first day, then the last;
+  hover previews the span, future days are greyed out, today has a dot). Apply / Clear in the
+  footer. Keyboard: arrows move by day / week (across months), Enter picks, Esc closes and gives
+  focus back to the button. The button turns blue and shows the span ("10月12日 – 10月22日",
+  "Oct 12 – Oct 22", year added when it isn't this year); the exact bounds and zone are in its
+  tooltip, not on the page.
+- Days are calendar days in the scheduler's zone, resolved **on the server** (`runsRange`), so the
+  client and server agree on "today" and the home page "今日运行" count matches `range=today`.
+  API: `GET /api/runs?range=today|yesterday|7d|30d` or `from=/to=YYYY-MM-DD` (both days included,
+  either may be left out); bad values are a 400. Bounds go in as parameters
+  (`created_at >= ? AND created_at < ?`; RFC3339 UTC text sorts in time order).
+- The status chip counts, search, sort, keyset "load more" and the task filter all follow the range;
+  the range is in the address (`#/runs?range=7d`, `#/runs?from=…&to=…`), so reload / back / links
+  keep it and switching chips keeps it.
+- Empty range says so ("最近 7 天没有运行") with a "查看全部时间" button.
+- Home page "今日运行" card is now a link to today's runs; command palette has "今天的运行".
+- New index `runs(created_at)` (migration 010): the list's newest-first order and the range no
+  longer scan the whole table when no task filter is set.
+- Same on macOS / Windows / Linux, desktop window and browser: no native date input (WebKitGTK
+  and WKWebView differ there), plain buttons + CSS grid, Intl for month / weekday names (Monday
+  first in zh-CN, Sunday in en), no modifier keys. 1024×655: popover 384×320 under the button,
+  page scrollWidth 1024 in zh-CN and en.
+- Shots: `/workspace/tidebot-shots/runs-range-pick-1024x655.png`, `runs-range-applied-1024x655.png`,
+  `runs-range-empty-1024x655.png`, `home-runs-today-link-1024x655.png` (+ `-en` for each).
+- Tests: `TestRunsRange` (table in a fixed UTC+8 zone: presets, open ends, swapped / bad dates,
+  injection text, an instant that is already tomorrow in UTC+8), `TestRunsDateRangeFilter` (list,
+  counts, search, status, keyset paging both ways, dashboard "today" agrees, 400s),
+  `TestRunsDateRangeUI` (wiring, CSS, i18n keys).
+
+**Inspiration**
+
+- n8n-io/n8n `packages/frontend/editor-ui/src/features/execution/executions/components/ExecutionsFilter.vue`
+  and `executions.utils.ts`: start / end date pickers in the executions filter, turned into
+  `startedAfter` / `startedBefore` for the query and counted as an active filter (badge), with
+  date changes debounced. We keep whole days, resolve them on the server in the scheduler's zone,
+  add one-click quick ranges and keep the range in the hash. No code copied.
+
+**Learned**
+
+- Letting the client send instants would make "today" depend on the browser's zone; sending day
+  keys and resolving them next to the data keeps every count on the page consistent.
+- A hover preview must not rebuild the grid (the element under the pointer would be replaced and
+  `mouseenter` fires again); toggling classes keeps it stable.
+
+**Ideas for later**
+
+1. Date range on the spend page reusing the same picker (today it has 7d / 30d / all).
+2. "Export these runs" (CSV) for the current filter and range.
+3. Per-day mini histogram above the calendar (runs per day, failures red), like Grafana's range picker.
