@@ -31,6 +31,40 @@ type taskForm struct {
 	// Workspace: the task's own working folder, "" = the per-task default. nil (field
 	// left out, e.g. an older page) keeps the folder the task has.
 	Workspace *string `json:"workspace,omitempty"`
+	// Policy: retries, catch-up and success notices. nil (left out) keeps what the task has.
+	Policy *taskPolicyForm `json:"policy,omitempty"`
+}
+
+// taskPolicyForm is the part of policy.Policy the task form edits. Priority, allowed
+// tools and side effects are left as they are.
+type taskPolicyForm struct {
+	RetryMax            int    `json:"retry_max"`
+	Catchup             string `json:"catchup"`
+	CatchupGraceMinutes int    `json:"catchup_grace_minutes"`
+	NotifySuccess       bool   `json:"notify_success"`
+}
+
+// maxCatchupGrace: missed runs older than a week are not worth running any more.
+const maxCatchupGrace = 7 * 24 * 60
+
+func validatePolicyForm(p *taskPolicyForm) error {
+	if p.RetryMax < 0 || p.RetryMax > 5 {
+		return errors.New("retries must be 0-5")
+	}
+	switch p.Catchup {
+	case "skip", "run_once", "run_all":
+	default:
+		return errors.New("unknown catch-up mode")
+	}
+	if p.CatchupGraceMinutes < 1 || p.CatchupGraceMinutes > maxCatchupGrace {
+		return errors.New("catch-up window must be 1 minute to 7 days")
+	}
+	return nil
+}
+
+// policyFormOf is the editable policy of a task (defaults when it has none yet).
+func policyFormOf(p policy.Policy) taskPolicyForm {
+	return taskPolicyForm{RetryMax: p.RetryMax, Catchup: p.Catchup, CatchupGraceMinutes: p.CatchupGraceMinutes, NotifySuccess: p.NotifySuccess}
 }
 
 func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID string) error {
@@ -40,6 +74,11 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 			return err
 		}
 		f.Workspace = &ws
+	}
+	if f.Policy != nil {
+		if err := validatePolicyForm(f.Policy); err != nil {
+			return err
+		}
 	}
 	f.Name = strings.TrimSpace(f.Name)
 	f.Prompt = strings.TrimSpace(f.Prompt)
@@ -103,6 +142,14 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 	}
 	if err := s.deps.Tasks.SetStatus(ctx, taskID, st, "webui"); err != nil {
 		return err
+	}
+	if f.Policy != nil && s.deps.DB != nil {
+		ps := &policy.Store{DB: s.deps.DB}
+		p := ps.Get(ctx, taskID) // keeps priority, tools, side effects and the failure count
+		p.RetryMax, p.Catchup, p.CatchupGraceMinutes, p.NotifySuccess = f.Policy.RetryMax, f.Policy.Catchup, f.Policy.CatchupGraceMinutes, f.Policy.NotifySuccess
+		if err := ps.Put(ctx, p); err != nil {
+			return err
+		}
 	}
 	if s.deps.Cost != nil {
 		return s.deps.Cost.UpsertBudget(ctx, cost.Budget{Scope: "task", ScopeID: taskID, Period: "day", Bucket: "",
@@ -228,7 +275,10 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 		}
 	}
 	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(max_usd,0) FROM budgets WHERE scope='task' AND scope_id=? AND period='day' AND bucket=''`, id).Scan(&f.BudgetUSD)
-	return map[string]any{"form": f}, nil
+	p := (&policy.Store{DB: s.deps.DB}).Get(ctx, id)
+	pf := policyFormOf(p)
+	f.Policy = &pf
+	return map[string]any{"form": f, "fail_streak": p.ConsecutiveFailures, "breaker_at": policy.BreakerThreshold}, nil
 }
 
 // handleCronPreview: GET /api/scheduler/preview?cron=...&tz=...&n=5 → next run times.

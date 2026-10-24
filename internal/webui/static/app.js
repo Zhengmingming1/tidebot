@@ -2782,12 +2782,44 @@
     check();
     return { problem: function () { return problem; } };
   }
+  // Retries & missed runs (task_policies), folded under the form like Uptime Kuma's
+  // "Retries" block: the folded line says what the current choices mean, the long
+  // explanations sit in tooltips. Priority / tools / side effects are not edited here.
+  var GRACE_MIN = [60, 360, 720, 1440, 4320, 10080];
+  function graceLabel(m) { return m % 1440 === 0 ? T("tf.grace_d", { n: m / 1440 }) : m % 60 === 0 ? T("tf.grace_h", { n: m / 60 }) : T("tf.grace_m", { n: m }); }
+  function policySummary(p) {
+    var parts = [p.retry_max > 0 ? T("tf.sum_retry", { n: p.retry_max }) : T("tf.sum_noretry"), T(p.catchup === "skip" ? "tf.sum_skip" : p.catchup === "run_all" ? "tf.sum_all" : "tf.sum_once")];
+    if (p.notify_success) parts.push(T("tf.sum_notify"));
+    return parts.join(" · ");
+  }
+  function policyFieldsHtml(p, streak, brkAt) {
+    var graces = GRACE_MIN.indexOf(p.catchup_grace_minutes) < 0 ? GRACE_MIN.concat([p.catchup_grace_minutes]).sort(function (a, b) { return a - b; }) : GRACE_MIN;
+    var retries = [0, 1, 2, 3, 4, 5].map(function (n) { return opt(n, n ? T("tf.retry_n", { n: n }) : T("tf.retry_0"), n === p.retry_max); }).join("");
+    var warn = streak > 0;
+    return '<details class="sec-adv tf-pol"' + (warn ? " open" : "") + '><summary><span class="tf-pol-t">' + esc(T("tf.pol")) + "</span>" + tip(T("tf.pol_tip", { n: brkAt })) +
+      '<span class="tf-pol-sum" id="tf-pol-sum">' + esc(policySummary(p)) + "</span></summary>" +
+      (warn ? '<p class="notice warn tf-pol-streak">' + ic("info", "sm") + esc(T("tf.streak", { n: streak, m: Math.max(1, brkAt - streak) })) + "</p>" : "") +
+      '<div class="form-row">' + fieldHtml(T("tf.retry"), '<select name="retry_max">' + retries + "</select>", T("tf.retry_tip")) +
+      fieldHtml(T("tf.catchup"), '<select name="catchup">' + opt("skip", T("tf.cu_skip"), p.catchup === "skip") + opt("run_once", T("tf.cu_once"), p.catchup === "run_once") + opt("run_all", T("tf.cu_all"), p.catchup === "run_all") + "</select>", T("tf.catchup_tip")) + "</div>" +
+      '<div class="form-row">' + fieldHtml(T("tf.grace"), '<select name="catchup_grace_minutes"' + (p.catchup === "skip" ? " disabled" : "") + ">" + graces.map(function (m) { return opt(m, graceLabel(m), m === p.catchup_grace_minutes); }).join("") + "</select>", T("tf.grace_tip")) +
+      '<label class="check tf-pol-ok"><input type="checkbox" name="notify_success"' + (p.notify_success ? " checked" : "") + "> " + esc(T("tf.notify_ok")) + tip(T("tf.notify_ok_tip")) + "</label></div></details>";
+  }
+  function readPolicyFields(f) {
+    return { retry_max: parseInt(f.retry_max.value, 10) || 0, catchup: f.catchup.value, catchup_grace_minutes: parseInt(f.catchup_grace_minutes.value, 10) || 360, notify_success: f.notify_success.checked };
+  }
+  function wirePolicyFields(root, f) {
+    var sum = $("#tf-pol-sum", root);
+    var sync = function () { f.catchup_grace_minutes.disabled = f.catchup.value === "skip"; sum.textContent = policySummary(readPolicyFields(f)); };
+    ["retry_max", "catchup", "notify_success"].forEach(function (n) { f[n].addEventListener("change", sync); });
+  }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings")];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
     Promise.all(reqs).then(function (r) {
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
+      var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
       var drafty = !taskId && !pre.prompt;
       var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
@@ -2799,7 +2831,7 @@
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
         '<div class="form-row">' + fieldHtml(T("tf.budget_c", { c: curSym(state.currency || "USD") }), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint"), taskId ? "" : '<span class="af-pill hidden" id="af-budget" data-tip="">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
-        wsFieldHtml(tf.workspace || "") +
+        wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
@@ -2815,12 +2847,13 @@
         f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
         if (!taskId) wireTaskAutofill(root, f, se, skills);
         var ws = wireWsField(root, f.workspace, taskId);
+        wirePolicyFields(root, f);
         f.addEventListener("submit", function (e) {
           e.preventDefault();
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, provider: f.provider.value, cron: se.value(),
-            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim() };
+            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f) };
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
             if (drafty) draftClear("task");

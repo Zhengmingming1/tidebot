@@ -1669,3 +1669,14 @@ a.card.stat.stat-link:hover { border-color: var(--border-strong); box-shadow: va
 a.card.stat.stat-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (prefers-reduced-motion: reduce) { a.card.stat.stat-link { transition: none; } }
 .rr-btn[aria-expanded="true"][data-tip]::after, .rr-btn[aria-expanded="true"][data-tip]:hover::after { display: none; }
+
+/* 2026-10-24: task form — retries & missed runs, folded; the line says what's chosen */
+.tf-pol { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 12px; }
+.tf-pol > summary { display: flex; align-items: center; gap: var(--s1); min-height: 40px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.tf-pol > summary .info-tip { margin-left: -4px; }
+.tf-pol-sum { margin-left: auto; font-weight: 400; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tf-pol[open] { padding-bottom: 12px; }
+.tf-pol > .form-row { margin-top: 12px; }
+.tf-pol .tf-pol-streak { margin: 4px 0 0; }
+.tf-pol .tf-pol-ok { align-self: end; min-height: 40px; }
+.tf-pol select:disabled { opacity: .55; cursor: not-allowed; }

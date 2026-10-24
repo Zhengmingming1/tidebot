@@ -162,7 +162,7 @@ func TestTaskFormWorkspaceUI(t *testing.T) {
 	for _, want := range []string{
 		`wsFieldHtml(tf.workspace || "")`,
 		`var ws = wireWsField(root, f.workspace, taskId);`,
-		`workspace: f.workspace.value.trim() }`,
+		`workspace: f.workspace.value.trim(), policy: readPolicyFields(f) }`,
 		`if (ws.problem()) {`,
 		`"/api/tasks/workspace-check?path="`,
 		`api("/api/desktop/pick-folder", { method: "POST", body: { start: start } })`,

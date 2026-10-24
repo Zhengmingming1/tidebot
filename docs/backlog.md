@@ -1829,3 +1829,62 @@ were the runs / task lists, SQLite and 2FA; this makes the daily chart a way in,
 1. Shift-click a second bar to pick a span of days (same picker as the runs list).
 2. Stack the bars by provider (colours from the provider icons) with a legend, like Open WebUI's chart.
 3. Clicking a row in "by task" opens that task's runs for the picked day.
+
+## 2026-10-24 (15:20): task form — retries, missed runs and success notices editable in the WebUI
+
+Category: **missing feature / "everything from the WebUI"** (task form, API). The last rounds were
+list filters and the spend chart; this one closes a gap: the per-task run policy (`task_policies`:
+retries, catch-up, success notices) existed since phase 2 but could only be changed with
+`agentctl call policy.set`.
+
+**Done**
+
+- The new / edit task dialog has a folded "失败与补跑 / Retries & missed runs" box under the working
+  folder. Folded, its line says what is chosen ("重试 2 次 · 错过补一次", "no retry · skip missed ·
+  notify on success") and updates as you change things; the breaker rule (3 failures in a row →
+  paused) is in the ⓘ tooltip, not on the page.
+- Inside: **失败重试** 不重试 / 最多 1–5 次 (tooltip: only temporary errors, ~1 min then ~5 min);
+  **错过的运行** 跳过 / 补跑一次 / 逐个补跑（最多 5 次）; **补跑期限** 1 h / 6 h / 12 h / 1 d / 3 d / 7 d
+  (an odd stored value is kept as its own option; greyed out when "skip"); **成功时也通知**.
+- When the task is already failing the box opens by itself with a warning line
+  "已连续失败 2 次，再失败 1 次会自动暂停。".
+- API: `GET /api/tasks/{id}/form` returns `form.policy`, `fail_streak`, `breaker_at`;
+  `POST /api/tasks` and `PUT /api/tasks/{id}` take an optional `policy`
+  (`retry_max` 0–5, `catchup` skip|run_once|run_all, `catchup_grace_minutes` 1–10080,
+  `notify_success`). Left out = unchanged (older pages keep working). Priority, allowed tools,
+  side effects and the failure count are never touched by the form. Values are validated before
+  anything is written; SQL is the existing parameterized upsert.
+- Priority ("urgent may run on battery") is deliberately **not** shown: nothing reads it yet
+  (`policy.AllowedOnBattery` has no caller), and a switch that does nothing is worse than none.
+- Same on macOS / Windows / Linux, desktop window and browser: native `<select>` / checkbox /
+  `<details>`, no paths or modifier keys. 1024×655: the box fits the dialog, footer buttons stay
+  visible, page scrollWidth 1024 in zh-CN and en.
+- Shots: `/workspace/shots/task-policy-open-1024x655.png`, `task-policy-changed-1024x655.png`,
+  `task-policy-new-collapsed-1024x655.png` (+ `-en` for the first two). Demo data only.
+- Tests: `TestTaskFormPolicy` (defaults shown, create with policy, edit keeps priority / tools /
+  failure count, leaving `policy` out changes nothing, six bad bodies incl. injection text → 400 and
+  nothing written), `TestTaskFormPolicyUI` (wiring, JS defaults equal `policy.Default`, CSS, i18n,
+  no native dialogs).
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/pages/EditMonitor.vue`: "Retries" sits next to the interval with a
+  one-line description, the retry interval only appears when retries > 0, and "Resend notification
+  if down X times" says in its label what the number means ("resend every 3 times" / "disabled").
+  We fold the block (most people keep defaults), put the meaning on the folded line, disable the
+  window when it doesn't apply, and keep long explanations in tooltips. No code copied.
+
+**Learned**
+
+- An optional pointer field (`policy` omitted vs. present) lets a form grow without breaking an
+  older open tab: its PUT just leaves the policy alone.
+- `policy.Store.Put` already preserves `consecutive_failures`; reading the row first and changing
+  only the four form fields is what keeps the CLI-only fields (priority, tools) safe.
+
+**Ideas for later**
+
+1. Wire `priority` for real (skip non-urgent scheduled runs on battery / low-power mode on all three
+   OSes), then show it in this box.
+2. Make the breaker threshold per task (3 now, fixed) and show "paused by breaker" with a
+   one-click "reset and resume" on the task page.
+3. Show the policy summary as a tooltip on the task detail header, so you don't need to open Edit.
