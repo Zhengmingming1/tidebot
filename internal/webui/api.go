@@ -22,6 +22,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/auth"
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
 )
@@ -122,6 +123,12 @@ type taskDTO struct {
 	// Stopped, skipped, queued and running runs are passed over.
 	Failing    bool `json:"failing,omitempty"`
 	FailStreak int  `json:"fail_streak,omitempty"`
+	// Paused tasks: why (user, breaker, budget, pack, plugin; "" = unknown, paused before
+	// tidebot kept the reason), a short detail (error class, budget reason, plugin id) and when.
+	PauseKind   string `json:"pause_kind,omitempty"`
+	PauseDetail string `json:"pause_detail,omitempty"`
+	PausedAt    string `json:"paused_at,omitempty"`
+	BreakerAt   int    `json:"breaker_at,omitempty"` // breaker pauses: failures in a row that tripped it
 }
 
 func toTaskDTO(v tasksvc.TaskView) taskDTO {
@@ -131,6 +138,12 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 		NextRunAt: v.Task.NextRunAt.String, LastFiredAt: v.Task.LastFiredAt.String,
 		CreatedAt: v.Task.CreatedAt, UpdatedAt: v.Task.UpdatedAt,
 		Constraints: []string{}, ConstraintIDs: []string{}, Skills: []string{},
+	}
+	if v.Task.Status == "paused" {
+		d.PauseKind, d.PauseDetail, d.PausedAt = v.Task.PauseKind, v.Task.PauseDetail, v.Task.PausedAt.String
+		if d.PauseKind == tasksvc.PauseBreaker {
+			d.BreakerAt = policy.BreakerThreshold
+		}
 	}
 	if v.CurrentVersion != nil {
 		d.VersionNo = v.CurrentVersion.VersionNo

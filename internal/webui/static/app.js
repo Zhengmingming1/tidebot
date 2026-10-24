@@ -421,9 +421,33 @@
     if (/remaining daily budget is zero/.test(d)) return T("be.zero", { name: name || T("sp.scope_global") });
     return d;
   }
-  function taskPill(st) {
+  // Why a paused task is paused: the pill says it in a word, the tooltip in a sentence.
+  var PAUSE_KINDS = ["user", "breaker", "budget", "pack", "plugin"];
+  function pauseKind(t) { return t && t.status === "paused" && PAUSE_KINDS.indexOf(t.pause_kind) >= 0 ? t.pause_kind : ""; }
+  function pauseClass(c) { return state.dict["pz.cls." + c] ? T("pz.cls." + c) : T("pz.cls.unknown"); }
+  function pauseWhy(t) {
+    var k = pauseKind(t), at = t.paused_at ? when(t.paused_at) : "";
+    if (!k) return "";
+    if (k === "breaker") return T("pz.why_breaker", { n: t.breaker_at || 3, t: at, c: pauseClass(t.pause_detail) });
+    if (k === "budget") return T("pz.why_budget", { t: at, r: budgetWhy(t.pause_detail || "") });
+    if (k === "plugin") return T("pz.why_plugin", { t: at, p: t.pause_detail || "" });
+    if (k === "pack") return T("pz.why_pack");
+    return at ? T("pz.why_user", { t: at }) : "";
+  }
+  function taskPill(st, t, small) {
     var m = { active: ["ok", T("task.active")], paused: ["warn", T("task.paused")], archived: ["", T("task.archived")] }[st] || ["", st];
-    return '<span class="pill ' + m[0] + '">' + esc(m[1]) + "</span>";
+    var k = pauseKind(t), why = k ? pauseWhy(t) : "";
+    if (k && k !== "user") m = [k === "pack" ? "info" : "warn", T("pz.pill_" + k)];
+    return '<span class="pill ' + m[0] + (small ? " sm" : "") + (why ? ' pz-pill"' + (small ? "" : ' tabindex="0"') + ' data-tip="' + esc(why) + '" aria-label="' + esc(m[1] + " · " + why) : "") + '">' + esc(m[1]) + "</span>";
+  }
+  // Task page: an automatic pause (failures, budget, plugin) gets one line saying what
+  // happened and what resuming does; a pause by hand needs no explanation.
+  function pauseNotice(t) {
+    var k = pauseKind(t);
+    if (!k || k === "user") return "";
+    var body = k === "breaker" ? T("pz.note_breaker", { n: t.breaker_at || 3, c: pauseClass(t.pause_detail) }) : k === "budget" ? T("pz.note_budget") : k === "plugin" ? T("pz.note_plugin", { p: t.pause_detail || "" }) : T("pz.note_pack");
+    var link = k === "breaker" ? '<a class="link" href="#/runs?task=' + enc(t.id) + '&status=failed">' + esc(T("pz.see_failed")) + "</a>" : k === "budget" ? '<a class="link" href="#/spend">' + esc(T("pz.see_spend")) + "</a>" : "";
+    return '<p class="notice ' + (k === "pack" ? "" : "warn ") + 'pz-note" id="pz-note"' + (t.paused_at ? ' data-tip="' + esc(pauseWhy(t)) + '"' : "") + ">" + ic(k === "pack" ? "info" : "pause", "sm") + "<span>" + esc(body) + "</span>" + link + "</p>";
   }
   function triggerText(tr) {
     return { cron: T("trig.cron"), manual: T("trig.manual"), quick: T("trig.quick"), button: T("trig.button") }[tr] || T("trig.other", { t: tr });
@@ -1213,7 +1237,7 @@
           return '<li><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
         }).join("") + "</ul>" : '<p class="hc-empty">' + ic("calendar", "sm") + "<span><strong>" + esc(T("home.no_sched")) + "</strong> · " + esc(T("home.no_sched_sub")) + "</span></p>";
         if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.slice(0, 5).map(function (t) {
-          return '<div class="beat-row"><a href="#/tasks/' + enc(t.id) + '" class="bn">' + esc(t.name) + (t.status === "paused" ? ' <span class="pill warn sm">' + esc(T("task.paused")) + "</span>" : "") + "</a>" + beatsBar(t.beats) + "</div>";
+          return '<div class="beat-row"><a href="#/tasks/' + enc(t.id) + '" class="bn">' + esc(t.name) + (t.status === "paused" ? " " + taskPill("paused", t, true) : "") + "</a>" + beatsBar(t.beats) + "</div>";
         }).join("") + "</div>";
         $("#recent").innerHTML = runsTable((o.runs || []).slice(0, 5));
         applySizes(page()); wireRows(page());
@@ -1395,7 +1419,7 @@
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
           return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
-            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + esc(T("tl.next", { t: when(t.next_run_at) })) + "</small>" : "") + "</td><td>" + taskPill(t.status) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
+            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + esc(T("tl.next", { t: when(t.next_run_at) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
         $$("[data-runnow]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); runTaskNow(b.getAttribute("data-runnow"), b); }); });
@@ -1609,10 +1633,10 @@
       }).join("") + "</ul>" : emptyState("runs", T("runs.none"), "");
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
+        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
         '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span></div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause">' + ic("pause", "sm") + esc(T("td.pause")) + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
-        '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" +
+        '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" + pauseNotice(t) +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
         taskTab(tab, t, items, vers, runs) + "</section>" +
         '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
@@ -1657,7 +1681,15 @@
       });
       $("#t-del").addEventListener("click", function () { confirmDialog({ title: T("td.del_title"), body: T("td.confirm_del", { n: t.name }), ok: T("td.delete"), danger: true, typeName: t.name }).then(function (y) { if (y) api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); }); });
       var tg = $("#t-toggle");
-      tg.addEventListener("click", function () { api(base + "/" + tg.getAttribute("data-act"), { method: "POST", body: {} }).then(reload).catch(fail); });
+      tg.addEventListener("click", function () {
+        var act = tg.getAttribute("data-act"), k = pauseKind(t);
+        tg.disabled = true;
+        api(base + "/" + act, { method: "POST", body: {} }).then(function () {
+          if (act === "resume" && k === "breaker") toast(T("pz.resumed_reset"));
+          else if (act === "resume" && k === "budget") toast(T("pz.resumed_budget"));
+          reload();
+        }).catch(function (e) { tg.disabled = false; fail(e); });
+      });
       var sel = function () { return $$(".req-sel").filter(function (c) { return c.checked; }); };
       var bar = function () {
         var on = sel(), perm = on.some(function (c) { return c.getAttribute("data-scope") === "permanent"; });

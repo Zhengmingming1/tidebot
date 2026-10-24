@@ -11,6 +11,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
 // EventBreakerTripped: a task was paused after consecutive failures.
@@ -52,7 +53,9 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 	}
 	_, tripped, _ := a.Policy.RecordOutcome(ctx, task.ID, err == nil)
 	if tripped {
-		_ = a.Cost.PauseTask(ctx, task.ID, "circuit breaker")
+		if a.Tasks != nil {
+			_ = a.Tasks.Pause(ctx, task.ID, tasksvc.PauseBreaker, class)
+		}
 		a.Events.Emit(Event{Kind: EventBreakerTripped, TaskID: task.ID, TaskName: task.Name, Detail: class})
 	}
 }

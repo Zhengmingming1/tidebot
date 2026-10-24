@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -158,7 +159,8 @@ func (s *Service) Get(ctx context.Context, taskID string) (TaskView, error) {
 func (s *Service) List(ctx context.Context) ([]TaskView, error) {
 	rows, err := s.Store.DB.QueryContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
-  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at
+  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
+  pause_kind, pause_detail, paused_at
 FROM tasks ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -168,7 +170,8 @@ FROM tasks ORDER BY created_at DESC`)
 		var t db.Task
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 			&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
-			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
+			&t.PauseKind, &t.PauseDetail, &t.PausedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -194,17 +197,73 @@ FROM tasks ORDER BY created_at DESC`)
 	return out, nil
 }
 
-// SetStatus pauses or resumes a task.
+// Why a task is paused (tasks.pause_kind).
+const (
+	PauseUser    = "user"    // by hand (WebUI, agentctl)
+	PauseBreaker = "breaker" // consecutive failures (detail: error class)
+	PauseBudget  = "budget"  // a budget cap was hit (detail: the budget reason)
+	PausePack    = "pack"    // imported from a pack, waiting for review
+	PausePlugin  = "plugin"  // its trigger plugin was uninstalled (detail: plugin id)
+)
+
+// SetStatus pauses (by hand) or resumes / archives a task; see SetStatusWhy.
 func (s *Service) SetStatus(ctx context.Context, taskID, status, reason string) error {
+	_ = reason
+	return s.SetStatusWhy(ctx, taskID, status, PauseUser, "")
+}
+
+// Pause pauses a task and records why. A task that is already paused keeps its
+// first reason (a breaker trip after a manual pause does not relabel it).
+func (s *Service) Pause(ctx context.Context, taskID, kind, detail string) error {
+	return s.SetStatusWhy(ctx, taskID, "paused", kind, detail)
+}
+
+// SetStatusWhy changes the status. Going to paused records kind / detail / time unless
+// the task was paused already; leaving paused clears them. Resuming a paused task also
+// clears its consecutive-failure count, so a task the breaker stopped gets the full
+// number of tries again instead of being paused by its very next failure.
+func (s *Service) SetStatusWhy(ctx context.Context, taskID, status, kind, detail string) error {
 	switch status {
 	case "active", "paused", "archived":
 	default:
 		return fmt.Errorf("invalid status %q", status)
 	}
-	_, err := s.Store.DB.ExecContext(ctx, `
-UPDATE tasks SET status=?, updated_at=? WHERE id=?`, status, nowUTC(), taskID)
-	_ = reason
-	return err
+	for len(detail) > 300 { // keep it short and valid UTF-8
+		_, n := utf8.DecodeLastRuneInString(detail)
+		detail = detail[:len(detail)-n]
+	}
+	tx, err := s.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var old string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id=?`, taskID).Scan(&old); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // nothing to change (same as the plain UPDATE before)
+		}
+		return err
+	}
+	now := nowUTC()
+	switch {
+	case status == "paused" && old == "paused":
+		_, err = tx.ExecContext(ctx, `UPDATE tasks SET updated_at=? WHERE id=?`, now, taskID)
+	case status == "paused":
+		_, err = tx.ExecContext(ctx, `UPDATE tasks SET status='paused', pause_kind=?, pause_detail=?, paused_at=?, updated_at=? WHERE id=?`,
+			kind, detail, now, now, taskID)
+	default:
+		_, err = tx.ExecContext(ctx, `UPDATE tasks SET status=?, pause_kind='', pause_detail='', paused_at=NULL, updated_at=? WHERE id=?`,
+			status, now, taskID)
+	}
+	if err != nil {
+		return err
+	}
+	if status == "active" && old == "paused" {
+		if _, err := tx.ExecContext(ctx, `UPDATE task_policies SET consecutive_failures=0 WHERE task_id=?`, taskID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Rollback moves current pointer to versionID (no new version).

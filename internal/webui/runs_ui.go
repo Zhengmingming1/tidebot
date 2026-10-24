@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/policy"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
 // rerun: POST /api/runs/<id>/rerun — a task run reruns the task; an ad-hoc run reruns its prompt.
@@ -127,13 +129,23 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Name   string `json:"name"`
 		Status string `json:"status"`
 		Beats  []beat `json:"beats"`
+		// paused rows: why and when (the pill's word and tooltip)
+		PauseKind   string `json:"pause_kind,omitempty"`
+		PauseDetail string `json:"pause_detail,omitempty"`
+		PausedAt    string `json:"paused_at,omitempty"`
+		BreakerAt   int    `json:"breaker_at,omitempty"`
 	}
 	tasks := []trow{}
-	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, name, status FROM tasks WHERE status IN ('active','paused') ORDER BY name`)
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, name, status, pause_kind, pause_detail, COALESCE(paused_at, '') FROM tasks WHERE status IN ('active','paused') ORDER BY name`)
 	if err == nil {
 		for rows.Next() {
 			var t trow
-			if rows.Scan(&t.ID, &t.Name, &t.Status) == nil {
+			if rows.Scan(&t.ID, &t.Name, &t.Status, &t.PauseKind, &t.PauseDetail, &t.PausedAt) == nil {
+				if t.Status != "paused" {
+					t.PauseKind, t.PauseDetail, t.PausedAt = "", "", ""
+				} else if t.PauseKind == tasksvc.PauseBreaker {
+					t.BreakerAt = policy.BreakerThreshold
+				}
 				t.Beats = beats[t.ID]
 				if t.Beats == nil {
 					t.Beats = []beat{}

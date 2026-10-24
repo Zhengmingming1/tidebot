@@ -24,6 +24,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
 type ctxKey string
@@ -87,7 +88,7 @@ func (a *App) pauseDependents(ctx context.Context, pluginID string) {
 	}
 	rows.Close()
 	for _, t := range ids {
-		if err := a.Tasks.SetStatus(ctx, t, "paused", "plugin uninstalled: "+pluginID); err == nil {
+		if err := a.Tasks.Pause(ctx, t, tasksvc.PausePlugin, pluginID); err == nil {
 			a.Log.Info("paused task: plugin uninstalled", "task_id", t, "plugin", pluginID)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/id"
@@ -387,11 +388,16 @@ VALUES(?,?,?,?, 'logged', ?)`, id.New("ntf"), "budget_"+kind, scope+":"+scopeID,
 	return nil
 }
 
-// PauseTask marks a task paused for budget reasons.
+// PauseTask marks a task paused for budget reasons and records the reason
+// (pause_kind 'budget'); a task that is paused already keeps its first reason.
 func (s *Service) PauseTask(ctx context.Context, taskID, reason string) error {
+	if len(reason) > 300 {
+		reason = strings.ToValidUTF8(reason[:300], "")
+	}
+	now := nowUTC()
 	_, err := s.DB.ExecContext(ctx, `
-UPDATE tasks SET status='paused', updated_at=? WHERE id=?`, nowUTC(), taskID)
-	_ = reason
+UPDATE tasks SET status='paused', pause_kind='budget', pause_detail=?, paused_at=?, updated_at=?
+WHERE id=? AND status <> 'paused'`, reason, now, now, taskID)
 	return err
 }
 

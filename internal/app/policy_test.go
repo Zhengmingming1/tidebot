@@ -50,4 +50,23 @@ func TestRetryThenBreaker(t *testing.T) {
 	if !found {
 		t.Fatal("no breaker event")
 	}
+	// The pause says why and when.
+	if tk.PauseKind != "breaker" || tk.PauseDetail != "authentication_failed" || !tk.PausedAt.Valid {
+		t.Fatalf("pause reason %q %q %v", tk.PauseKind, tk.PauseDetail, tk.PausedAt)
+	}
+	// Resuming starts the failure count over: one more failure does not pause it again.
+	if err := a.Tasks.SetStatus(ctx, task.ID, "active", "user"); err != nil {
+		t.Fatal(err)
+	}
+	if n := a.Policy.Get(ctx, task.ID).ConsecutiveFailures; n != 0 {
+		t.Fatalf("failures after resume = %d", n)
+	}
+	a.runWithPolicy(ctx, task, "cron", "production", 0)
+	tk, _ = a.Store.GetTask(ctx, task.ID)
+	if tk.Status != "active" || tk.PauseKind != "" || tk.PausedAt.Valid {
+		t.Fatalf("paused again by one failure after resume: %s %q", tk.Status, tk.PauseKind)
+	}
+	if n := a.Policy.Get(ctx, task.ID).ConsecutiveFailures; n != 1 {
+		t.Fatalf("failures = %d", n)
+	}
 }

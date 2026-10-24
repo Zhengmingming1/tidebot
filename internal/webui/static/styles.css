@@ -1680,3 +1680,11 @@ a.card.stat.stat-link:focus-visible { outline: none; box-shadow: var(--focus-rin
 .tf-pol .tf-pol-streak { margin: 4px 0 0; }
 .tf-pol .tf-pol-ok { align-self: end; min-height: 40px; }
 .tf-pol select:disabled { opacity: .55; cursor: not-allowed; }
+
+/* paused task: why, in a word (pill + tooltip) and, for automatic pauses, one line on the task page */
+.pill.pz-pill { cursor: help; }
+.pz-note { align-items: center; margin-top: var(--s2); }
+.pz-note + .tabs { margin-top: var(--s2); }
+.pz-note > svg { flex: none; }
+.pz-note > span { flex: 1; min-width: 0; }
+.pz-note > .link { flex: none; white-space: nowrap; }

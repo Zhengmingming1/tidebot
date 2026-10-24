@@ -30,6 +30,11 @@ type Task struct {
 	LastFiredAt    sql.NullString
 	CreatedAt      string
 	UpdatedAt      string
+	// PauseKind says why a paused task is paused (user, breaker, budget, pack, plugin);
+	// PauseDetail is a short machine detail (error class, budget reason, plugin id).
+	PauseKind   string
+	PauseDetail string
+	PausedAt    sql.NullString
 }
 
 // Run is one execution of a task (or ad-hoc prompt).
@@ -106,12 +111,14 @@ func nullDefault(v, d string) string {
 func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 	row := s.DB.QueryRowContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
-  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at
+  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
+  pause_kind, pause_detail, paused_at
 FROM tasks WHERE id = ?`, id)
 	var t Task
 	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 		&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
-		&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
+		&t.PauseKind, &t.PauseDetail, &t.PausedAt); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -121,7 +128,8 @@ FROM tasks WHERE id = ?`, id)
 func (s *Store) ListDueTasks(ctx context.Context, now time.Time) ([]Task, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
-  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at
+  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
+  pause_kind, pause_detail, paused_at
 FROM tasks
 WHERE status = 'active' AND cron_expr != '' AND next_run_at IS NOT NULL AND next_run_at <= ?
 ORDER BY next_run_at ASC`, now.UTC().Format(time.RFC3339))
@@ -134,7 +142,8 @@ ORDER BY next_run_at ASC`, now.UTC().Format(time.RFC3339))
 		var t Task
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 			&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
-			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
+			&t.PauseKind, &t.PauseDetail, &t.PausedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

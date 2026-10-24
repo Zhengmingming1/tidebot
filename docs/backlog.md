@@ -1888,3 +1888,66 @@ retries, catch-up, success notices) existed since phase 2 but could only be chan
 2. Make the breaker threshold per task (3 now, fixed) and show "paused by breaker" with a
    one-click "reset and resume" on the task page.
 3. Show the policy summary as a tooltip on the task detail header, so you don't need to open Edit.
+
+## 2026-10-24 (18:20): paused tasks say why — and resuming starts the failure count over
+
+Category: **logic / correctness** (pause reasons, circuit breaker). The last rounds were list
+filters, the spend chart and the task form; this one fixes a quiet bug and a blind spot.
+
+**Done**
+
+- Bug: after the breaker paused a task (3 failures in a row) and you resumed it, the failure count
+  stayed at 3, so the very next failure paused it again. Resuming a paused task (WebUI, agentctl,
+  saving the form as enabled) now clears `consecutive_failures`; saving an already active task does
+  not touch it.
+- Every pause now records why and when: new columns `tasks.pause_kind` (user / breaker / budget /
+  pack / plugin), `pause_detail` (error class, budget reason, plugin id; ≤300 bytes, cut on a rune
+  boundary) and `paused_at` (migration 011). Pausing an already paused task keeps the first reason
+  (a breaker trip after a manual pause does not relabel it, nor does editing a paused task).
+  Leaving paused / archiving clears them. Tasks paused before this have an empty kind and just say
+  "paused". The reason strings that `SetStatus` and `Cost.PauseTask` used to accept and drop are
+  now stored; the breaker uses `Tasks.Pause(…, breaker, class)` instead of the budget pause.
+- WebUI: the status pill says it in a word — 失败暂停 / Paused · failing, 预算暂停 / Paused · budget,
+  待启用 / To review, 插件暂停 / Paused · plugin, plain 已暂停 for a manual pause — and the tooltip
+  (hover or keyboard focus) gives the sentence: when, and the localized error class or budget
+  reason. Same on the task list, task page and home heartbeat rows (`/api/tasks`,
+  `/api/tasks/{id}`, `/api/dashboard` carry `pause_kind`, `pause_detail`, `paused_at`,
+  `breaker_at`).
+- Task page, automatic pauses only: one full-width line under the header, e.g.
+  "连续失败 3 次（认证失败），已自动暂停。修好后点「恢复」，失败计数会清零。" with a link to the
+  task's failed runs (breaker) or the spend page (budget). Resume shows a toast saying the count
+  was reset (or, for budget, that it may pause again). No native dialogs.
+- Same on macOS / Windows / Linux, desktop window and browser: plain SQL + CSS tooltips, no paths,
+  no modifier keys. 1024×655: the line fits on one row in zh-CN and en, page scrollWidth 1024.
+- Shots: `/workspace/tidebot-shots/task-paused-breaker-1024x655.png`,
+  `task-list-pause-reason-1024x655.png` (+ `-en`). Demo data only.
+- Tests: `TestPauseReason` (tasksvc: kinds, first reason kept, resume resets the count,
+  active→active doesn't, rune-safe cut, injection text stored verbatim, archive clears),
+  `TestRetryThenBreaker` extended (breaker records the class; after resume one failure doesn't
+  pause again), `TestPauseReasonAPI` (detail / list / dashboard, budget pause, resume via CSRF,
+  manual pause = user, editing keeps the reason), `TestPauseReasonUI` (wiring, escaping, CSS,
+  i18n incl. every error class, no native dialogs).
+
+**Inspiration**
+
+- n8n-io/n8n `packages/cli/src/active-workflow-manager.ts` + `activation-errors.service`: when a
+  trigger fails, the workflow is deactivated and the error is registered per workflow, then cleared
+  on successful re-activation; `packages/frontend/editor-ui/src/features/workflows/components/
+  WorkflowActivationErrorMessage.vue` shows it on demand. louislam/uptime-kuma
+  `src/pages/Details.vue` has the paused-monitor Resume button in the header. We keep the reason
+  on the task row, show it in a word + tooltip, and clear the failure count on resume. No code
+  copied.
+
+**Learned**
+
+- Status writes came from three places with a `reason` argument that was silently dropped
+  (`_ = reason`); a single transition function (old status → new) is the right place for "only
+  on change" side effects like the reset.
+- SQLite `UPDATE … SET` reads old values, but a read-then-write in one transaction is clearer when
+  the side effect touches another table.
+
+**Ideas for later**
+
+1. Breaker notice: include a "Resume" button in the desktop notification / notification center.
+2. "Paused · failing" filter chip on the task list (subset of paused).
+3. Auto-resume budget pauses at the budget reset (opt-in), since the reason is now known.

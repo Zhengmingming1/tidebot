@@ -217,7 +217,7 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 		if _, err := a.Tasks.UpdateSpec(ctx, tv.Task.ID, spec, "pack", "imported from pack "+p.Name); err != nil {
 			return nil, err
 		}
-		_ = a.Tasks.SetStatus(ctx, tv.Task.ID, "paused", "imported pack: review before enabling")
+		_ = a.Tasks.Pause(ctx, tv.Task.ID, tasksvc.PausePack, "")
 		res.TaskIDs = append(res.TaskIDs, tv.Task.ID)
 	}
 	ids, _ := json.Marshal(res.TaskIDs)

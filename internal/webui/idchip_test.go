@@ -17,7 +17,7 @@ func TestIDChip(t *testing.T) {
 	}
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
-		`taskPill(t.status) + idChip(T("td.task_id"), t.id)`,
+		`taskPill(t.status, t) + idChip(T("td.task_id"), t.id)`,
 		`idChip(T("sk.id"), s.id)`,
 		`idChip(T("rd.run_id"), r.id)`,
 		`T("td.sched_tip"`,
