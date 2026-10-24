@@ -290,6 +290,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	}
 	// A run that waited for a slot is checked again before it starts: runs ahead
 	// of it may have used up the day's budget, or the task was paused meanwhile.
+	opts.StartCheck = a.diskStartCheck
 	opts.BeforeStart = func(sctx context.Context, o *runner.Options) error {
 		if !a.taskStillRunnable(sctx, o.TaskID, o.TriggerKind) {
 			return errTaskInactive

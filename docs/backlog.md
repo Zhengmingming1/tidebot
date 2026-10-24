@@ -2090,3 +2090,72 @@ versions and read the diff — a skill with one version showed nothing at all. T
 3. Render SKILL.md as formatted Markdown with a "源码 / 预览" toggle.
 4. Mark files changed since the previous version in the tree (dot), and jump from a tree file to
    its diff.
+
+## 2026-10-25 (03:20): runs don't start on an almost full disk — skipped with the reason
+
+Category: **logic / correctness + resource usage** (runner, Settings › Data › Storage). The last
+rounds were features and list UX (skill files, notification channels, pause reasons, task form);
+this one picks up idea 2 of the 10-21 16:00 low-disk entry. The low-disk warning only said
+"clean up soon"; a run started with a few MB left still launched Claude Code and then failed
+half-way (cut-off log, SQLite write errors, partial artifacts), was retried, and after three of
+those the breaker paused the task — which stayed paused after the disk was cleaned.
+
+**Done**
+
+- New runner hook `Options.StartCheck`, run for **every** run once it has its slot (queued or
+  not), before `BeforeStart`. A "no" ends the run as skipped through the existing
+  `finishSkipped` path: run row `skipped`, no start time, no cost, log line, slot passed on.
+- `App.diskStartCheck`: measures the data volume fresh (one `statfs` / `GetDiskFreeSpaceEx`, not
+  the 15-minute cache) and refuses under the minimum, with the message
+  `skipped: disk full: <free bytes>/<minimum bytes>`. It refreshes the cached disk status (tray,
+  storage card) and sends the `disk_low` notice if due (the watcher's daily throttle applies).
+  A disk that can't be measured never blocks (same as before on unsupported platforms).
+- Skipped for a full disk = not the task's fault: no retry, no breaker strike, no "run failed"
+  notice. Once space is back, the next run starts normally — nothing to resume by hand.
+- Settings › Data › Storage has a new row 最少保留空间 / Keep free at least: 不检查, 100 MB,
+  200 MB, 500 MB (default), 1 GB. Saved through `storage.settings` (`min_free_mb`, 0..1024,
+  validated server-side; other values rejected, a corrupt stored value falls back to 500).
+  The ceiling is the low-disk warning's lowest threshold (1 GiB), so a blocked disk is always
+  also "low" and the tray / bell already point at it.
+- While blocked, the storage card shows a red notice ("磁盘只剩 312 MB，低于最少保留空间
+  500 MB，新运行暂不启动……") instead of the yellow low-disk one; the rules (checked at each
+  start, not a failure, no retry, no pause) are in its ⓘ tooltip.
+- A run skipped this way explains itself in the viewer's language on the status pill tooltip and
+  the run page ("未启动：数据所在磁盘只剩 X，低于最少保留空间 Y。在「设置 › 数据 › 存储空间」
+  清理……").
+- Same on macOS / Windows / Linux, desktop window and browser: the measurement is the existing
+  cross-platform `internal/diskspace`; the UI is a plain `<select>` and text, no paths or
+  modifier keys. 1024×655 checked in zh-CN and en (the row fits on one line in both).
+- Shots (demo data, disk status faked in the browser): `/workspace/tidebot-shots/storage-min-free-zh-CN-1024x655.png`,
+  `storage-min-free-en-1024x655.png`.
+- Tests: `TestStartCheckSkipsUnqueuedRun` (runner: skipped row, BeforeStart not called, slot
+  freed), `TestDiskFloorSkipsRuns` (4 scheduled runs skipped with the figures, no retry, no
+  breaker, no failed event, one disk_low notice, cache refreshed; runs again once space is
+  freed; 0 = off; unknown disk never blocks), `TestDiskFloorSetting` (default, 1 GB → blocked,
+  bad values rejected, retention untouched, corrupt value falls back), `TestDiskFloorUI`
+  (wiring, the page's pattern matches the stored message, i18n in both languages).
+
+**Inspiration**
+
+- Sonarr/Sonarr `src/NzbDrone.Core/MediaFiles/EpisodeImport/Specifications/FreeSpaceSpecification.cs`:
+  a "minimum free space" setting checked right before each import, rejecting with a specific
+  reason ("Not enough free space"), skippable by a setting, and accepting when the free space
+  can't be determined (`freeSpace` has no value → accept). tidebot borrows the check-at-start,
+  the explicit reason and the fail-open rule. Ideas only, no code copied.
+
+**Learned**
+
+- The runner already had a clean "turned away at the slot" path for budgets; a second hook
+  (`StartCheck`, every run) was cleaner than making `BeforeStart` run twice for unqueued runs,
+  which would have logged and notified budget breaches twice.
+- Budget-skipped queued runs still count as a breaker failure in `runWithPolicy`; disk-full
+  skips must not, or a cleaned-up disk leaves tasks paused.
+
+**Ideas for later**
+
+1. When a run is refused for a full disk, run the retention cleanup once (throttled, e.g.
+   once per 30 min) and re-check before giving up; say "freed X" in the notice.
+2. Group "skipped: disk full" runs in the bell ("3 runs skipped, disk almost full") instead of
+   relying on the daily low-disk notice.
+3. Desktop tray: show "运行已暂停启动（磁盘已满）" as its own problem line while blocked.
+4. Also check the task's working folder volume when it lives on another disk.

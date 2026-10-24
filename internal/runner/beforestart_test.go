@@ -88,3 +88,34 @@ func TestBeforeStartRecheckOnSlot(t *testing.T) {
 		t.Fatalf("slot leaked: busy=%d", busy)
 	}
 }
+
+// StartCheck runs for every run, queued or not, before BeforeStart: a "no" (e.g. the
+// data disk is almost full) ends the run as skipped and frees the slot.
+func TestStartCheckSkipsUnqueuedRun(t *testing.T) {
+	skipOnWindows(t)
+	r, sqlDB, dir := drainRunner(t, 1)
+	r.LogDir = t.TempDir()
+	o := drainOpts(slowClaude(t, dir, "0"), dir)
+	ids := make(chan string, 1)
+	o.OnStart = func(id string) { ids <- id }
+	var before atomic.Int32
+	o.BeforeStart = func(context.Context, *Options) error { before.Add(1); return nil }
+	o.StartCheck = func(context.Context) error { return errors.New("disk full: 1/2") }
+	res, err := r.RunOnce(context.Background(), o)
+	id := recvID(t, ids)
+	if !errors.Is(err, ErrSkipped) || res.Status != "skipped" || before.Load() != 0 {
+		t.Fatalf("res %+v err %v before=%d", res, err, before.Load())
+	}
+	var msg string
+	var startedNull bool
+	_ = sqlDB.QueryRow(`SELECT error_message, started_at IS NULL FROM runs WHERE id=?`, id).Scan(&msg, &startedNull)
+	if msg != "skipped: disk full: 1/2" || !startedNull {
+		t.Fatalf("row %q startedNull=%v", msg, startedNull)
+	}
+	// Check passes: the next run starts and succeeds in the freed slot.
+	o.StartCheck = func(context.Context) error { return nil }
+	o.OnStart = nil
+	if res, err := r.RunOnce(context.Background(), o); err != nil || res.Status != "succeeded" {
+		t.Fatalf("second: %+v %v", res, err)
+	}
+}

@@ -407,6 +407,8 @@
     // A queued run turned away when it got its slot: why is in the viewer's language,
     // the exact cap figures follow as-is.
     if (/^skipped: task paused/.test(msg)) return T("rd.err_skip_paused");
+    var dk = /^skipped: disk full: (\d+)\/(\d+)/.exec(msg);
+    if (dk) return T("rd.err_skip_disk", { f: fmtBytes(Number(dk[1])), m: mbLabel(Math.round(Number(dk[2]) / 1048576)) });
     var b = /^skipped: budget blocked: (.*)$/.exec(msg);
     if (b) return T("rd.err_skip_budget", { why: budgetWhy(b[1]) });
     return /^interrupted:/.test(msg) ? T("rd.err_interrupted") : msg;
@@ -4307,6 +4309,8 @@
   var ST_DAYS = [7, 14, 30, 60, 90, 180, 365, 0];
   var ST_KEEP = [0, 5, 10, 20, 50, 100];
   var ST_CAP_GB = [1, 2, 5, 10, 20, 50, 0];
+  var ST_MIN_FREE_MB = [0, 100, 200, 500, 1024];
+  function mbLabel(mb) { return mb >= 1024 && mb % 1024 === 0 ? mb / 1024 + " GB" : mb + " MB"; }
   function stOpts(list, cur, label) {
     if (list.indexOf(cur) < 0) list = list.concat([cur]);
     return list.map(function (v) { return opt(v, label(v), v === cur); }).join("");
@@ -4320,6 +4324,7 @@
       r("artifact_days", T("st.artifact_days_sub"), sel("st-art", "artifact_days")) +
       r("keep_per_task", T("st.keep_per_task_sub"), sel("st-keep", "keep_per_task")) +
       r("max_total", T("st.max_total_sub"), sel("st-cap", "max_total")) +
+      r("min_free", T("st.min_free_sub"), sel("st-minfree", "min_free")) +
       r("clean", "…", '<button class="btn sm" id="st-clean" disabled>' + ic("trash", "sm") + esc(T("st.clean_btn")) + "</button>") +
       r("shrink", "…", '<button class="btn sm" id="st-shrink" disabled>' + ic("database", "sm") + esc(T("st.shrink_btn")) + "</button>") + "</section>";
   }
@@ -4339,13 +4344,16 @@
     // Free space on the data volume: in the tooltip normally, as a notice only when low.
     var dk = v.disk, diskLine = dk ? T("st.disk_free", { f: fmtBytes(dk.free_bytes), t: fmtBytes(dk.total_bytes) }) : "";
     $("#st-total").innerHTML = esc(T("st.total", { s: fmtBytes(total) })) + tip(T("st.where") + "\n" + (diskLine ? diskLine + "\n" : "") + last);
-    $("#st-disk").innerHTML = dk && dk.low ? '<p class="notice warn" role="status">' + ic("database", "sm") + "<span>" + esc(T("st.disk_low", { f: fmtBytes(dk.free_bytes) })) + tip(T("st.disk_low_tip", { th: fmtBytes(dk.threshold_bytes) })) + "</span></p>" : "";
+    // Under the minimum free space runs don't start: that outranks the "low" warning.
+    $("#st-disk").innerHTML = dk && v.blocked ? '<p class="notice bad" role="status">' + ic("database", "sm") + "<span>" + esc(T("st.disk_blocked", { f: fmtBytes(dk.free_bytes), m: mbLabel(v.min_free_mb || 0) })) + tip(T("st.disk_blocked_tip")) + "</span></p>"
+      : dk && dk.low ? '<p class="notice warn" role="status">' + ic("database", "sm") + "<span>" + esc(T("st.disk_low", { f: fmtBytes(dk.free_bytes) })) + tip(T("st.disk_low_tip", { th: fmtBytes(dk.threshold_bytes) })) + "</span></p>" : "";
     var day = function (n) { return n ? T("st.days", { n: n }) : T("st.forever"); };
     $("#st-log").innerHTML = stOpts(ST_DAYS, p.log_days, day);
     $("#st-art").innerHTML = stOpts(ST_DAYS, p.artifact_days, day);
     $("#st-keep").innerHTML = stOpts(ST_KEEP, p.keep_per_task, function (n) { return n ? T("st.runs", { n: n }) : T("st.none"); });
     var gb = Math.round((p.max_total_bytes || 0) / 1073741824 * 100) / 100;
     $("#st-cap").innerHTML = stOpts(ST_CAP_GB, gb, function (n) { return n ? n + " GB" : T("st.no_cap"); });
+    $("#st-minfree").innerHTML = stOpts(ST_MIN_FREE_MB, v.min_free_mb, function (n) { return n ? mbLabel(n) : T("st.min_free_off"); });
     $$("[data-st]").forEach(function (el) { el.disabled = false; });
     var pv = v.preview || {}, cl = $("#st-clean"), sh = $("#st-shrink");
     $("#st-clean-sub").textContent = pv.files ? T("st.clean_sub", { n: pv.files, s: fmtBytes(pv.bytes) }) : T("st.clean_none");
@@ -4365,7 +4373,9 @@
     $$("[data-st]").forEach(function (el) {
       el.addEventListener("change", function () {
         var k = el.getAttribute("data-st"), n = Number(el.value), body = {};
-        if (k === "max_total") body.max_total_bytes = Math.round(n * 1073741824); else body[k] = n;
+        if (k === "max_total") body.max_total_bytes = Math.round(n * 1073741824);
+        else if (k === "min_free") body.min_free_mb = n;
+        else body[k] = n;
         rpc("storage.settings", body).then(function (v) { storagePaint(v); savedMark(el); }).catch(function (e) { fail(e); rpc("storage.get", {}).then(storagePaint); });
       });
     });

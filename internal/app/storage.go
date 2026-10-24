@@ -89,6 +89,10 @@ type StorageView struct {
 	} `json:"preview"` // what "Clean up now" would delete under the current policy
 	Last *CleanupRecord `json:"last,omitempty"`
 	Disk *DiskStatus    `json:"disk,omitempty"` // volume holding the data folder; absent if unknown
+	// MinFreeMB: runs don't start below this much free space (0 = no check).
+	MinFreeMB        int  `json:"min_free_mb"`
+	DefaultMinFreeMB int  `json:"default_min_free_mb"`
+	Blocked          bool `json:"blocked"` // free space is under MinFreeMB right now
 }
 
 // StorageUsage measures the data folder. It never lists file names or paths.
@@ -141,8 +145,10 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 	if last.At != "" {
 		v.Last = &last
 	}
+	v.MinFreeMB, v.DefaultMinFreeMB = a.MinFreeMB(ctx), DefaultMinFreeMB
 	if d, ok := a.DiskStatus(); ok {
 		v.Disk = &d
+		v.Blocked = v.MinFreeMB > 0 && d.Free < uint64(v.MinFreeMB)<<20
 	}
 	return v, nil
 }
@@ -181,9 +187,18 @@ func (a *App) storageRPC() map[string]rpcFunc {
 				ArtifactDays  *int   `json:"artifact_days"`
 				KeepPerTask   *int   `json:"keep_per_task"`
 				MaxTotalBytes *int64 `json:"max_total_bytes"`
+				MinFreeMB     *int   `json:"min_free_mb"`
 			}](raw)
 			if err != nil {
 				return nil, errors.New("bad request")
+			}
+			if in.MinFreeMB != nil {
+				if err := validMinFree(*in.MinFreeMB); err != nil {
+					return nil, err
+				}
+				if err := a.saveJSONSetting(ctx, setDiskMinFree, *in.MinFreeMB); err != nil {
+					return nil, err
+				}
 			}
 			p := a.RetentionSettings(ctx)
 			if in.LogDays != nil {

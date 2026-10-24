@@ -31,9 +31,9 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 	mu.(*sync.Mutex).Lock()
 	err := a.runTaskTrigger(ctx, task, trigger, bucket)
 	mu.(*sync.Mutex).Unlock()
-	if errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrStoppedByUser) || errors.Is(err, errTaskInactive) {
-		// quitting, a user stop, or a task paused while its run waited is not the
-		// task's fault: no retry, no breaker strike
+	if errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrStoppedByUser) || errors.Is(err, errTaskInactive) || errors.Is(err, errDiskFull) {
+		// quitting, a user stop, a task paused while its run waited or a full disk
+		// is not the task's fault: no retry, no breaker strike
 		return
 	}
 	if a.Policy == nil {

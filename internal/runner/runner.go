@@ -59,6 +59,10 @@ type Options struct {
 	// can tighten the options (e.g. a smaller cost cap) or return an error to not
 	// start at all. Such a run ends as skipped (see ErrSkipped) and frees the slot.
 	BeforeStart func(ctx context.Context, o *Options) error
+	// StartCheck, if set, runs for every run once it has its slot (queued or not),
+	// before BeforeStart. Conditions of the machine rather than the run, e.g. the
+	// data disk being almost full: an error ends the run as skipped, never started.
+	StartCheck func(ctx context.Context) error
 }
 
 // Result is the outcome of one run.
@@ -314,6 +318,11 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	}
 	defer r.slots.release()
 
+	if opts.StartCheck != nil {
+		if why := opts.StartCheck(runCtx); why != nil {
+			return r.finishSkipped(runID, opts, logW, why)
+		}
+	}
 	if waited && opts.BeforeStart != nil {
 		if why := opts.BeforeStart(runCtx, &opts); why != nil {
 			return r.finishSkipped(runID, opts, logW, why)
@@ -465,12 +474,12 @@ func (r *Runner) finishUnstarted(runID string, opts Options, logW io.Writer, why
 	return res, err
 }
 
-// ErrSkipped wraps the reason a queued run was not started when it got its slot
-// (Options.BeforeStart said no). The run row ends as skipped, with no start time
+// ErrSkipped wraps the reason a run was not started when it got its slot
+// (Options.StartCheck or Options.BeforeStart said no). The run row ends as skipped, with no start time
 // and no cost.
 var ErrSkipped = errors.New("skipped")
 
-// finishSkipped records a queued run that BeforeStart turned away. The stored
+// finishSkipped records a run that StartCheck / BeforeStart turned away. The stored
 // message is "skipped: <why>" so the WebUI can explain it in the viewer's language.
 func (r *Runner) finishSkipped(runID string, opts Options, logW io.Writer, why error) (Result, error) {
 	msg := "skipped: " + why.Error()
