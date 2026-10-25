@@ -410,7 +410,7 @@
     var dk = /^skipped: disk full: (\d+)\/(\d+)/.exec(msg);
     if (dk) return T("rd.err_skip_disk", { f: fmtBytes(Number(dk[1])), m: mbLabel(Math.round(Number(dk[2]) / 1048576)) });
     var b = /^skipped: budget blocked: (.*)$/.exec(msg);
-    if (b) return T("rd.err_skip_budget", { why: budgetWhy(b[1]) });
+    if (b) return T(/ cap held by \d+ running /.test(b[1]) ? "rd.err_skip_held" : "rd.err_skip_budget", { why: budgetWhy(b[1]) });
     return /^interrupted:/.test(msg) ? T("rd.err_interrupted") : msg;
   }
   // A core budget reason ("global/ daily USD cap reached (5.1/5.0)") in the viewer's language.
@@ -418,6 +418,8 @@
     var sc = /^(global|task|bucket)\//.exec(d), name = sc ? T("sp.scope_" + sc[1]) : "";
     var m = /daily (USD|CNY) cap reached \(([\d.]+)\/([\d.]+)\)/.exec(d);
     if (m) { var sym = m[1] === "CNY" ? "¥" : "$"; return T("be.usd_cap", { name: name, used: sym + m[2], cap: sym + m[3] }); }
+    m = /daily (USD|CNY) cap held by (\d+) running \(([\d.]+)\+([\d.]+)\/([\d.]+)\)/.exec(d);
+    if (m) { var hs = m[1] === "CNY" ? "¥" : "$"; return T("be.held", { name: name, n: m[2], used: hs + m[3], held: hs + m[4], cap: hs + m[5] }); }
     m = /daily token cap reached \((\d+)\/(\d+)\)/.exec(d);
     if (m) return T("be.token_cap", { name: name, used: m[1], cap: m[2] });
     if (/remaining daily budget is zero/.test(d)) return T("be.zero", { name: name || T("sp.scope_global") });
@@ -508,7 +510,7 @@
   // Structured notifications (key + params) render in the viewer's language;
   // legacy rows only have server-rendered text and fall back to it.
   function notifText(n) {
-    if (!n.key) return { t: notifTitle(n), b: n.body || "" };
+    if (!n.key) return { t: notifTitle(n), b: /^budget_/.test(n.event || "") ? budgetWhy(n.body || "") : n.body || "" };
     var p = {}, src = n.params || {};
     Object.keys(src).forEach(function (k) { p[k] = src[k]; });
     if (!p.name) p.name = T("ntf.quick_task");
@@ -4262,17 +4264,18 @@
       mount('<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
         '<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("time.today")) + "</small><strong>" + esc(usd(s.total_usd, 4)) + "</strong><span>" + esc(global.max_usd ? T("sp.pct_of", { p: Math.round(gp), m: usd(global.max_usd) }) : T("sp.no_cap")) + "</span></div>" +
-        '<div class="card stat"><small>' + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd)) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +
+        '<div class="card stat"' + (global.max_usd && global.held_usd > 0 ? ' data-tip="' + esc(T("sp.remaining_held_tip", { cap: usd(global.max_usd), used: usd(s.total_usd, 4), held: usd(global.held_usd, 4) })) + '"' : "") + "><small>" + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd - (global.held_usd || 0))) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(s.total_tokens)) + "</strong><span>" + esc(global.max_tokens ? T("sp.tok_cap", { n: num(global.max_tokens) }) : T("sp.no_tok_cap")) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.runs_today")) + "</small><strong>" + esc(runsToday) + "</strong><span>" + esc(plural(d.top_tasks.length, "sp.sources_one", "sp.sources_many")) + "</span></div></div>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" + '<button class="icon-btn" id="sp-export" data-tip="' + esc(T("sp.export_tip")) + '" aria-label="' + esc(T("sp.export")) + '">' + ic("download", "sm") + "</button></div>" +
         '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["provider_model", T("sp.by_provider_model")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
         '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + '</h2></div><div class="grow">' + budgets.map(function (b, k) {
-          var p = pct(b.used_usd, b.max_usd);
-          return '<div class="budget-row"><div><strong>' + esc(bucketName(b)) + '</strong> <span class="muted">· ' + esc(T("sp.per_" + b.period)) + '</span></div><div class="right">' + esc(usd(b.used_usd, 4)) + ' <span class="muted">/ ' + (b.max_usd ? esc(usd(b.max_usd)) : "∞") + '</span></div><div class="progress' + cls(p) + '" role="progressbar" aria-valuenow="' + Math.round(p) + '" aria-valuemin="0" aria-valuemax="100"><span data-w="' + p + '"></span></div>' +
+          var p = pct(b.used_usd, b.max_usd), hp = b.held_usd > 0 && b.max_usd ? Math.min(100 - p, pct(b.held_usd, b.max_usd)) : 0;
+          var htip = hp > 0 ? ' data-tip="' + esc(T("sp.held_tip", { n: b.held_runs, held: usd(b.held_usd, 4) })) + '"' : "";
+          return '<div class="budget-row"><div><strong>' + esc(bucketName(b)) + '</strong> <span class="muted">· ' + esc(T("sp.per_" + b.period)) + '</span></div><div class="right"' + htip + ">" + esc(usd(b.used_usd, 4)) + (hp > 0 ? '<span class="held-mark" aria-hidden="true"> +' + esc(usd(b.held_usd, 2)) + "</span>" : "") + ' <span class="muted">/ ' + (b.max_usd ? esc(usd(b.max_usd)) : "∞") + '</span></div><div class="progress' + cls(p) + (hp > 0 ? " split" : "") + '" role="progressbar" aria-valuenow="' + Math.round(p) + '" aria-valuemin="0" aria-valuemax="100"><span data-w="' + p + '"></span>' + (hp > 0 ? '<span class="held" data-w="' + hp + '"></span>' : "") + "</div>" +
             '<div class="budget-act"><label>' + esc(T("sp.on_breach")) + ' <select data-bact="' + k + '">' + opt("pause_notify", T("sp.a_pause"), b.action !== "block_notify") + opt("block_notify", T("sp.a_block"), b.action === "block_notify") + '</select></label><label>' + esc(T("sp.warn_at")) + ' <select data-bwarn="' + k + '">' + [50, 70, 80, 90, 100].map(function (n) { return opt(n, n + "%", (b.warn_at_pct || 80) === n); }).join("") + "</select></label></div></div>";
         }).join("") + '<p class="hint">' + esc(T("sp.breach_hint")) + "</p></div></section>" +
-        '<section class="card flush fill"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("sp.events")) + "</h2></div>" + (d.events.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.when")) + "</th><th>" + esc(T("sp.scope")) + "</th><th>" + esc(T("sp.detail")) + "</th></tr></thead><tbody>" + d.events.map(function (e) { return '<tr><td class="nowrap">' + esc(when(e.at)) + '</td><td><span class="pill bad">' + esc(T("sp.scope_" + e.scope)) + "</span></td><td>" + esc(e.code ? T("be." + e.code, { name: e.name, used: e.used, cap: e.cap }) : e.detail) + "<small>" + esc(T("sp.action", { a: T("act." + e.action) === "act." + e.action ? e.action : T("act." + e.action) })) + "</small></td></tr>"; }).join("") + "</tbody></table>" : emptyState("shield", T("sp.no_breach"), T("sp.no_breach_sub"))) + "</section></div>",
+        '<section class="card flush fill"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("sp.events")) + "</h2></div>" + (d.events.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.when")) + "</th><th>" + esc(T("sp.scope")) + "</th><th>" + esc(T("sp.detail")) + "</th></tr></thead><tbody>" + d.events.map(function (e) { return '<tr><td class="nowrap">' + esc(when(e.at)) + '</td><td><span class="pill bad">' + esc(T("sp.scope_" + e.scope)) + "</span></td><td>" + esc(e.code ? T("be." + e.code, { name: e.name || T("sp.scope_" + e.scope), used: e.used, cap: e.cap, held: e.held, n: e.n }) : e.detail) + "<small>" + esc(T("sp.action", { a: T("act." + e.action) === "act." + e.action ? e.action : T("act." + e.action) })) + "</small></td></tr>"; }).join("") + "</tbody></table>" : emptyState("shield", T("sp.no_breach"), T("sp.no_breach_sub"))) + "</section></div>",
         "spend", [[T("nav.spend")]]);
       applySizes(page());
       var paintBody = function (r) {

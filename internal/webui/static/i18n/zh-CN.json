@@ -1752,5 +1752,12 @@
   "fb.binary": "二进制文件，无法在这里预览",
   "fb.too_large": "文件太大，无法在这里预览",
   "fb.none_sub": "下载该版本的 .zip 后查看。",
-  "fb.empty_file": "空文件。"
+  "fb.empty_file": "空文件。",
+  "be.held": "{name}：剩余预算已被 {n} 个进行中的运行预留（已用 {used}，预留 {held}，上限 {cap}）",
+  "rd.err_skip_held": "未启动：今日剩余预算已被正在进行的运行预留。{why}。它们结束后按实际花费结算，之后的运行会正常开始，任务不会被暂停。",
+  "notif.budget_held": "预算已被预留",
+  "notif.budget_cap": "预算超限",
+  "act.skip": "跳过本次",
+  "sp.held_tip": "{n} 个进行中的运行预留了 {held}（各自单次上限中尚未花掉的部分），结束后按实际花费结算。",
+  "sp.remaining_held_tip": "上限 {cap} − 已用 {used} − 运行中预留 {held}。同时开始的运行共享剩余预算，不会一起超支。"
 }

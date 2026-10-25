@@ -63,6 +63,11 @@ type Options struct {
 	// before BeforeStart. Conditions of the machine rather than the run, e.g. the
 	// data disk being almost full: an error ends the run as skipped, never started.
 	StartCheck func(ctx context.Context) error
+	// AtStart, if set, runs for every run last, right before Claude Code is
+	// launched (after StartCheck and BeforeStart). It may tighten the options
+	// (e.g. the cost cap once runs already going are counted) or return an error:
+	// the run then ends as skipped, like with BeforeStart.
+	AtStart func(ctx context.Context, o *Options) error
 }
 
 // Result is the outcome of one run.
@@ -328,6 +333,11 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 			return r.finishSkipped(runID, opts, logW, why)
 		}
 	}
+	if opts.AtStart != nil {
+		if why := opts.AtStart(runCtx, &opts); why != nil {
+			return r.finishSkipped(runID, opts, logW, why)
+		}
+	}
 
 	if opts.Timeout > 0 {
 		var stop context.CancelFunc
@@ -475,7 +485,7 @@ func (r *Runner) finishUnstarted(runID string, opts Options, logW io.Writer, why
 }
 
 // ErrSkipped wraps the reason a run was not started when it got its slot
-// (Options.StartCheck or Options.BeforeStart said no). The run row ends as skipped, with no start time
+// (Options.StartCheck, BeforeStart or AtStart said no). The run row ends as skipped, with no start time
 // and no cost.
 var ErrSkipped = errors.New("skipped")
 

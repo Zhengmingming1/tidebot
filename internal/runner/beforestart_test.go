@@ -119,3 +119,43 @@ func TestStartCheckSkipsUnqueuedRun(t *testing.T) {
 		t.Fatalf("second: %+v %v", res, err)
 	}
 }
+
+// AtStart runs for every run, last (after StartCheck and BeforeStart): a "no"
+// skips the run, a "yes" may tighten its options; StartCheck's "no" comes first.
+func TestAtStartRunsForEveryRun(t *testing.T) {
+	skipOnWindows(t)
+	r, sqlDB, dir := drainRunner(t, 1)
+	r.LogDir = t.TempDir()
+	o := drainOpts(slowClaude(t, dir, "0"), dir)
+	var order []string
+	o.StartCheck = func(context.Context) error { order = append(order, "check"); return nil }
+	o.AtStart = func(context.Context, *Options) error {
+		order = append(order, "at")
+		return errors.New("budget blocked: global/ daily USD cap held by 1 running (0.1000+0.9000/1.0000)")
+	}
+	ids := make(chan string, 1)
+	o.OnStart = func(id string) { ids <- id }
+	res, err := r.RunOnce(context.Background(), o)
+	id := recvID(t, ids)
+	if !errors.Is(err, ErrSkipped) || res.Status != "skipped" || strings.Join(order, ",") != "check,at" {
+		t.Fatalf("res %+v err %v order %v", res, err, order)
+	}
+	var msg string
+	_ = sqlDB.QueryRow(`SELECT error_message FROM runs WHERE id=?`, id).Scan(&msg)
+	if !strings.HasPrefix(msg, "skipped: budget blocked: ") || !strings.Contains(msg, "held by 1 running") {
+		t.Fatalf("row %q", msg)
+	}
+	// StartCheck says no: AtStart is not asked.
+	order = nil
+	o.OnStart = nil
+	o.StartCheck = func(context.Context) error { order = append(order, "check"); return errors.New("disk full: 1/2") }
+	if _, err := r.RunOnce(context.Background(), o); !errors.Is(err, ErrSkipped) || strings.Join(order, ",") != "check" {
+		t.Fatalf("err %v order %v", err, order)
+	}
+	// AtStart tightens the options of a run that never queued.
+	o = drainOpts(slowClaude(t, dir, "0.8"), dir)
+	o.AtStart = func(_ context.Context, op *Options) error { op.Timeout = 150 * time.Millisecond; return nil }
+	if res, _ := r.RunOnce(context.Background(), o); res.Status != "timeout" {
+		t.Fatalf("tightened: %+v", res)
+	}
+}

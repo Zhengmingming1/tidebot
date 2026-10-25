@@ -166,6 +166,11 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .progress > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
 .progress.warn > span { background: var(--warn); }
 .progress.bad > span { background: var(--danger); }
+/* budget held by runs going: striped segment after what is spent */
+.progress.split { display: flex; }
+.progress.split > span:first-child { border-radius: 4px 0 0 4px; }
+.progress > span.held { background: repeating-linear-gradient(135deg, rgba(31, 95, 214, .34) 0 3px, rgba(31, 95, 214, .14) 3px 6px); border-radius: 0 4px 4px 0; box-shadow: inset 1px 0 0 var(--surface); }
+.held-mark { color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* ---------- tables ---------- */
 .table { width: 100%; border-collapse: collapse; }

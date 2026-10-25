@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/id"
@@ -45,6 +46,9 @@ type Service struct {
 	Now func() time.Time
 	// FX returns the display currency and fixed exchange rate (nil = DefaultFX).
 	FX func() pricing.FX
+
+	holds   holdSet    // caps of admitted runs not yet spent (see hold.go)
+	admitMu sync.Mutex // ReserveRun: check and hold as one step
 }
 
 // GetFX returns the current display currency / rate.
@@ -178,6 +182,9 @@ type CheckResult struct {
 	Currency     string  // display currency of RunMaxUSD
 	BreachScope  string
 	BreachAction string
+	// Held (ReserveRun only): the budget is not used up, but what is left is held
+	// by runs already going. Not the task's fault: skipped, the task stays on.
+	Held bool
 }
 
 // CheckBeforeRun validates global/task/bucket daily caps and returns per-run max.
@@ -423,6 +430,9 @@ type BudgetView struct {
 	Currency  string  `json:"currency"`
 	MaxTokens int64   `json:"max_tokens"`
 	UsedUSD   float64 `json:"used_usd"`
+	// HeldUSD: unspent caps of runs going now (in Currency), HeldRuns: how many.
+	HeldUSD   float64 `json:"held_usd"`
+	HeldRuns  int     `json:"held_runs"`
 	UsedTok   int64   `json:"used_tokens"`
 	Action    string  `json:"action"`
 	WarnAtPct int     `json:"warn_at_pct"`
@@ -482,7 +492,12 @@ SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens
 	brows.Close()
 	for _, r := range list {
 		usedUSD, usedTok, _ := s.sumDay(ctx, day, r.Scope, r.ScopeID, r.Bucket, f.Display)
-		buds = append(buds, BudgetView{
+		var held float64
+		var heldN int
+		if r.Period == "day" && day == s.Today() {
+			held, heldN = s.Held(r.Scope, r.ScopeID, r.Bucket, f.Display)
+		}
+		buds = append(buds, BudgetView{HeldUSD: held, HeldRuns: heldN,
 			Scope: r.Scope, ScopeID: r.ScopeID, Period: r.Period, Bucket: r.Bucket, Currency: f.Display,
 			MaxUSD: f.Convert(r.MaxUSD, r.Cur, f.Display), MaxTokens: r.MaxTokens, UsedUSD: usedUSD, UsedTok: usedTok, Action: r.Action, WarnAtPct: r.Warn,
 		})

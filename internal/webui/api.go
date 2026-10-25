@@ -1364,10 +1364,13 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		Kind   string `json:"kind"`
 		Detail string `json:"detail"`
 		Action string `json:"action"`
-		// Structured form of Detail so the UI can translate it (code: usd_cap | token_cap | zero).
+		// Structured form of Detail so the UI can translate it (code: usd_cap | token_cap | held | zero).
 		Code string `json:"code,omitempty"`
 		Used string `json:"used,omitempty"`
 		Cap  string `json:"cap,omitempty"`
+		// code held: what the runs going held, and how many there were
+		Held string `json:"held,omitempty"`
+		N    string `json:"n,omitempty"`
 	}
 	events := []evRow{}
 	rows, err := s.deps.DB.QueryContext(ctx, `SELECT e.at, e.scope, COALESCE(e.scope_id,''), COALESCE(t.name,''), e.kind, e.detail, e.action_taken
@@ -1384,6 +1387,7 @@ FROM budget_events e LEFT JOIN tasks t ON e.scope='task' AND t.id=e.scope_id ORD
 					e.Detail = strings.ReplaceAll(e.Detail, sid, e.Name)
 				}
 				e.Code, e.Used, e.Cap = parseBudgetDetail(e.Detail)
+				e.Held, e.N = parseHeldDetail(e.Detail)
 				events = append(events, e)
 			}
 		}
@@ -1627,7 +1631,23 @@ func (s *Server) handleLanguage(w http.ResponseWriter, r *http.Request) {
 var (
 	reUSDCap   = regexp.MustCompile(`daily (USD|CNY) cap reached \(([\d.]+)/([\d.]+)\)`)
 	reTokenCap = regexp.MustCompile(`daily token cap reached \((\d+)/(\d+)\)`)
+	reUSDHeld  = regexp.MustCompile(`daily (USD|CNY) cap held by (\d+) running \(([\d.]+)\+([\d.]+)/([\d.]+)\)`)
 )
+
+// parseHeldDetail reads a "held by runs going" refusal: how much they hold and how many.
+func parseHeldDetail(d string) (held, n string) {
+	if m := reUSDHeld.FindStringSubmatch(d); m != nil {
+		return curSym(m[1]) + m[4], m[2]
+	}
+	return "", ""
+}
+
+func curSym(c string) string {
+	if c == "CNY" {
+		return "¥"
+	}
+	return "$"
+}
 
 // parseBudgetDetail turns the stored English breach text into a code + numbers.
 func parseBudgetDetail(d string) (code, used, limit string) {
@@ -1640,6 +1660,9 @@ func parseBudgetDetail(d string) (code, used, limit string) {
 	}
 	if m := reTokenCap.FindStringSubmatch(d); m != nil {
 		return "token_cap", m[1], m[2]
+	}
+	if m := reUSDHeld.FindStringSubmatch(d); m != nil {
+		return "held", curSym(m[1]) + m[3], curSym(m[1]) + m[5]
 	}
 	if strings.Contains(d, "remaining daily budget is zero") {
 		return "zero", "", ""

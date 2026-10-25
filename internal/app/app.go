@@ -279,6 +279,10 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	}
 	// Keep Claude Code from self-updating mid-run; version is recorded per run.
 	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
+	// The run's cap is held against the daily budgets from its start until it ends
+	// (see cost.ReserveRun), so runs going at the same time share what is left.
+	var hold atomic.Pointer[cost.Hold]
+	defer func() { hold.Load().Release() }()
 	if a.Cost != nil {
 		// Keep the ledger current while the run goes, so budgets and the spend page
 		// see a long run's cost before it ends, and a crash doesn't lose it.
@@ -286,6 +290,12 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			wctx, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			defer done()
 			_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(runID, opts.TaskID, bucket, prof.Name, prof.Model, c))
+			hold.Load().SetSpent(c.Amount, c.Currency)
+		}
+		opts.AtStart = func(sctx context.Context, o *runner.Options) error {
+			h, err := a.holdRunBudget(sctx, o, bucket, prof)
+			hold.Store(h)
+			return err
 		}
 	}
 	// A run that waited for a slot is checked again before it starts: runs ahead
@@ -358,12 +368,7 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 			return 0, nil, err
 		}
 		if !chk.OK {
-			_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, "cap", chk.Reason, chk.BreachAction)
-			a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: taskID, TaskName: a.taskName(taskID), Detail: chk.Reason})
-			if taskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
-				_ = a.Cost.PauseTask(ctx, taskID, chk.Reason)
-			}
-			return 0, nil, fmt.Errorf("budget blocked: %s", chk.Reason)
+			return 0, nil, a.budgetBreach(ctx, taskID, bucket, chk)
 		}
 		if chk.Warn {
 			a.Log.Warn("budget warning", "detail", chk.WarnDetail)
@@ -396,6 +401,50 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 		return 0, nil, fmt.Errorf("budget blocked: %w", err)
 	}
 	return runMax, cc, nil
+}
+
+// errBudgetHeld: what is left of a daily budget is held by runs already going.
+// Not the task's fault: the run is skipped, no retry, no breaker strike, no pause.
+var errBudgetHeld = errors.New("budget blocked")
+
+// budgetBreach logs and notifies a refused run and (per the budget's action)
+// pauses the task. A Held refusal is only logged: the task stays on.
+func (a *App) budgetBreach(ctx context.Context, taskID, bucket string, chk cost.CheckResult) error {
+	if chk.Held {
+		_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, "held", chk.Reason, chk.BreachAction)
+		a.Log.Info("run skipped: budget held by running runs", "task_id", taskID, "detail", chk.Reason)
+		return fmt.Errorf("%w: %s", errBudgetHeld, chk.Reason)
+	}
+	_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, "cap", chk.Reason, chk.BreachAction)
+	a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: taskID, TaskName: a.taskName(taskID), Detail: chk.Reason})
+	if taskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
+		_ = a.Cost.PauseTask(ctx, taskID, chk.Reason)
+	}
+	return fmt.Errorf("budget blocked: %s", chk.Reason)
+}
+
+// holdRunBudget runs right before a run launches: it holds the run's money cap
+// against the daily budgets and lowers it to what runs already going left over.
+// Runs without a money cap (subscriptions) hold nothing.
+func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket string, prof provider.Profile) (*cost.Hold, error) {
+	if o.Cost == nil || o.Cost.MaxAmount <= 0 {
+		return nil, nil
+	}
+	h, capAmt, chk, err := a.Cost.ReserveRun(ctx, o.TaskID, bucket, o.Cost.MaxAmount, o.Cost.Currency)
+	if err != nil {
+		a.Log.Warn("budget hold", "error", err) // a read error must not drop the run
+		return nil, nil
+	}
+	if !chk.OK {
+		return nil, a.budgetBreach(ctx, o.TaskID, bucket, chk)
+	}
+	if capAmt < o.Cost.MaxAmount {
+		cc := *o.Cost
+		cc.MaxAmount = capAmt
+		o.Cost = &cc
+		o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, a.cachedFX().Convert(capAmt, cc.Currency, a.cachedFX().Display))
+	}
+	return h, nil
 }
 
 func isMockBin(bin string) bool {

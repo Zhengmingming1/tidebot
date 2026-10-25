@@ -1752,5 +1752,12 @@
   "fb.binary": "Binary file — can't be shown here",
   "fb.too_large": "File too large to show here",
   "fb.none_sub": "Download the version as .zip to open it.",
-  "fb.empty_file": "Empty file."
+  "fb.empty_file": "Empty file.",
+  "be.held": "{name}: what's left is held by {n} running run(s) ({used} spent, {held} held, cap {cap})",
+  "rd.err_skip_held": "Not started: the rest of today's budget is held by runs already going. {why}. They settle at what they actually spend, later runs start normally and the task isn't paused.",
+  "notif.budget_held": "Budget held",
+  "notif.budget_cap": "Budget breached",
+  "act.skip": "skip this run",
+  "sp.held_tip": "{n} running run(s) hold {held} (the unspent part of their per-run caps); they settle at what they actually spend.",
+  "sp.remaining_held_tip": "Cap {cap} − spent {used} − held by running runs {held}. Runs that start together share what's left instead of each overspending it."
 }

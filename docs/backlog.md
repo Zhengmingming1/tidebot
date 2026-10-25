@@ -2219,3 +2219,76 @@ command palette — on a list page you still had to reach for the mouse for ever
 2. Same cursor in the plugins and notification-channel lists (cards, not rows, today).
 3. `g g` / `G` for first / last row (Miniflux has them), and j / k on the run-detail log lines.
 4. Show the `/` badge on the skills list once it gets a search box.
+
+## 2026-10-25 (09:20): runs going at the same time share what is left of a budget
+
+Category: **logic / correctness (cost control)**. The last rounds were UI and keyboard (j / k,
+skill files, channels) and the disk floor; this one picks up idea 1 of the 10-23 06:20 entry
+("budget reservations"). Every run's cap was "what is left of today's budget", read from the
+ledger when it was admitted. Two runs admitted together (cron at the same minute, a manual run
+next to a scheduled one, max concurrency 2+) each got the **whole** remainder: with $0.30 left,
+two runs could spend $0.60 between them, and the daily cap was overshot by one run per slot.
+
+**Done**
+
+- New `cost.ReserveRun` (+ `Hold`, `Held`, in `internal/cost/hold.go`): the last budget step
+  before a run launches. Under one lock it reads every daily money budget the run counts
+  against (global, its bucket, its task), subtracts what the runs already going **still hold**
+  (their cap minus what they have spent so far — the live ledger already counts that part, so
+  nothing is counted twice), lowers the run's cap to the room left and holds it until the run
+  ends. Holds are in memory only (they die with the process, like the runs).
+- Less than a cent left once the running runs are counted → the run is **skipped**, not failed:
+  run row `skipped` with `skipped: budget blocked: global/ daily USD cap held by 2 running
+  (3.1248+1.8600/5.0000)`, a `held` budget event with action "skip", no pause, no retry, no
+  breaker strike, no "budget breached" notice. The next run after they end starts normally.
+- A cap already reached at that moment is the normal breach (budget's own action), shared with
+  the request-time check through `App.budgetBreach`.
+- What a run spends moves from its hold to the ledger as it goes (`OnUsage` → `SetSpent`); the
+  hold is released after the final ledger write, also for stopped, failed, skipped and quit runs.
+  A hold from before midnight doesn't count against the new day.
+- Subscription runs (no money cap) hold nothing; Anthropic's `--max-budget-usd` gets the lowered
+  cap too.
+- New runner hook `Options.AtStart`, run for **every** run last (after `StartCheck` and
+  `BeforeStart`), so unqueued runs also get a visible skipped row instead of vanishing.
+- Spend page: the budget row shows the held part as a light striped segment after the spent
+  part and "+$1.35" next to the amount; the tooltip says how many runs hold how much. The
+  "remaining" card is cap − spent − held, explained in its tooltip only when something is held.
+- Run page / pill tooltip explain the held skip in the viewer's language (different text from a
+  real budget stop: "任务不会被暂停"); spend events and the notification center translate the
+  held reason; global events no longer start with an empty name ("：已达…" → "全局：已达…").
+- Same on macOS / Windows / Linux, desktop and browser: pure Go + CSS gradient, no paths or keys.
+- Shot (demo data, held figures faked in the browser since the demo provider is a subscription):
+  `/workspace/tidebot-shots/budget-held-zh-CN-1024x655.png`.
+- Tests: `TestReserveRunSharesRemainder` (second run gets only the rest, third held, spend moves
+  from hold to ledger once, release gives it back, Summary shows held), `TestReserveRunScopesAndCurrency`
+  (task / bucket only count their own holds, CNY caps, no cap holds nothing),
+  `TestReserveRunBreachAndNewDay`, `TestReserveRunConcurrent` (20 goroutines never hold more
+  than the cap), `TestAtStartRunsForEveryRun` (runner order and skip), `TestConcurrentRunsShareBudget`
+  (app, metered provider: second run skipped with the reason, task active, no strike, no retry,
+  no breach notice, runs again after the first one stops), `TestSubscriptionRunHoldsNothing`,
+  `TestBudgetHeldUI` (Go and JS patterns match the core's text, i18n in both languages).
+
+**Inspiration**
+
+- BerriAI/litellm `litellm/proxy/hooks/parallel_request_limiter_v3.py`: `reserve_tpm_tokens`
+  reserves the estimated tokens against every limited scope **before** the upstream call ("so
+  concurrent requests cannot all observe 'under limit' before any of them increments the
+  counter"), all-or-nothing; post-call reconciliation applies only the actual − reserved delta;
+  `_refund_reserved_tokens` gives back a reservation; a `reservation_released` flag makes the
+  first release win. tidebot borrows check-and-reserve as one step, reserve per scope,
+  reconcile against actual spend and idempotent release. Ideas only, no code copied.
+
+**Learned**
+
+- The live ledger (10-22 12:00) made this cheap: a hold only needs to carry the *unspent* part,
+  so a long run's hold shrinks on its own and the totals are never counted twice.
+- `.progress` has `overflow: hidden`, so a CSS tooltip on the bar itself is clipped; the tooltip
+  sits on the amount instead.
+
+**Ideas for later**
+
+1. Instead of skipping a held-off scheduled run, wait (bounded) for a running run to release
+   its hold and start then.
+2. Show "预留 $x" in the Home "running now" row and the run page's live cost while it runs.
+3. Hold quota-based subscription runs against the provider's request / token window the same way.
+4. Fix the budget-row selects wrapping under their labels at 1024 px (seen in the shot).
