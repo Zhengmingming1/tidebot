@@ -542,6 +542,14 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	ctx := r.Context()
+	if id == "export" && len(parts) == 1 && r.Method == http.MethodGet {
+		s.exportTasks(w, r)
+		return
+	}
+	if id == "import" && len(parts) == 1 && r.Method == http.MethodPost {
+		s.importTasks(w, r)
+		return
+	}
 	if id == "batch" && len(parts) == 1 && r.Method == http.MethodPost {
 		s.handleTaskBatch(w, r)
 		return

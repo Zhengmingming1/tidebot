@@ -2506,3 +2506,70 @@ just like on the desk.
    `PowerRegisterSuspendResumeNotification`), the other half of §12's "即将睡眠时不启动新运行".
 3. Show the task priority as a small icon on the task list (bolt = urgent, leaf = background).
 4. Let the low-battery threshold be chosen (10 / 20 / 30 %) next to the mode.
+
+## 2026-10-26 (00:00): tasks move between computers — export to a JSON file, import with a preview
+
+Category: **feature** (Tasks page, new API). The last rounds were power saving (cross-platform /
+resource), notification delivery state (correctness) and budget rows (UI). A user with tidebot
+on a Mac and on a Linux server had to retype every task (instruction, schedule, retries,
+budget…) on the second machine; there was also no way to keep tasks outside the database.
+
+**Done**
+
+- `GET /api/tasks/export[?ids=…]` → `tidebot-tasks-YYYYMMDD.json` (date in the WebUI's time
+  zone): `{kind: "tidebot.tasks", version: 1, exported_at, app, tasks: […]}`; each task keeps
+  name, goal (only when it differs from the instruction), instruction, requirement texts,
+  schedule, on/off, timeout, daily budget, per-run cap, model access *by name*, skill by id +
+  name, allowed tools and run policy (retries, catch-up, success notice, priority).
+  Never exported: working folder (a local path and personal; paths differ between OSes), task
+  ids, run history, trigger / webhook tokens, notification channels, keys.
+- `POST /api/tasks/import {file, apply, pick, enable}`: `apply=false` only checks and writes
+  nothing; each row says the name it gets here and notes — `renamed` (a live task has the
+  name; numbered "名 2" like Duplicate, also between rows of the same file),
+  `provider_missing` (falls back to the default access), `skill_missing` (matched by id, then
+  by name; else left unbound) — or the reason it can't be imported (same validation as the
+  task form). `apply=true` creates the ticked rows; imported tasks are **paused** unless
+  "turn schedules on as in the file" is ticked. A row that fails half way is archived, not
+  left half made. File ≤ 4 MB, ≤ 200 tasks; a file from a newer format version is refused.
+- Tasks page: Import / Export in the page head (export disabled with no tasks), Export in the
+  batch bar for the ticked rows. Import dialog: drop zone or file picker (`.json`), pasting
+  the file's text also works (remote desktop / SSH sessions); preview list with a checkbox per
+  row, notes as small amber tags with the detail in the tooltip, the file's app version and
+  export time in the tooltip of the count line; footer "导入 N 个任务" follows the ticks.
+  Downloads go through the existing `downloadFile` (native Save dialog in the desktop app).
+- Same on macOS / Windows / Linux, desktop window and browser: no paths in the file, BOM and
+  CRLF tolerated on read, no shortcuts, no native dialogs; zh-CN and en; 1024×655 checked in
+  both (scrollWidth 1024, footer button bottom at 595 px, the list scrolls inside 280 px).
+- Shots: `/workspace/tidebot-shots/2026-10-26-task-import.png`, `…-task-import-en.png`,
+  `…-task-export.png`, `…-task-export-en.png`.
+- Tests: `TestTaskExportImport` (no folder / id leaks, all vs. picked export, unknown id 404,
+  preview writes nothing, numbering across the DB and the file, missing provider / skill,
+  invalid cron row, untitled row named from the first line, apply keeps constraints with new
+  ids, tools, timeout, skill, policy, budget, paused by default, `enable` keeps on/off, bad
+  files 400, CSRF 403), `TestNumberedName`, `TestTaskTransferUI`.
+
+**Inspiration**
+
+- n8n-io/n8n `packages/cli/src/commands/import/workflow.ts`: imported workflows are deactivated
+  unless `--activeState=fromJson` is given → tidebot imports paused, with an opt-in checkbox.
+- langgenius/dify `api/services/app_dsl_service.py`: the DSL carries `kind` + `version`
+  (`check_version_compatibility`), secrets are left out of exports unless asked
+  (`include_secret=False`), and `check_dependencies` reports plugins missing on the target
+  ("leaked dependencies") → tidebot's `kind`/`version` header, no secrets or local paths at
+  all, and the per-row `provider_missing` / `skill_missing` notes. Ideas only, no code copied.
+
+**Learned**
+
+- A task's skill binding stores only the id; ids differ per machine, so the export adds the
+  skill name and the import matches by id first, then by name.
+- Re-using `validateTaskForm` for each row kept import rules identical to the form (cron,
+  limits, provider, skill), so the preview can't promise what the create would refuse.
+
+**Ideas for later**
+
+1. Bundle the bound skills into the export (a .zip with the JSON and each skill version) so a
+   task with a skill moves in one file.
+2. "Replace existing task with the same name" as an import mode (new version instead of a
+   numbered copy), like Dify's overwrite import.
+3. `agentctl tasks export / import` using the same format, for scripted setups.
+4. Command palette entries "导出全部任务" / "导入任务".

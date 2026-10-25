@@ -1475,12 +1475,12 @@
         version: function (t) { return t.version_no; }, last: function (t) { return t.last_run_at || ""; }, today: function (t) { return t.runs_today; }
       };
       var th = function (k, label) { return '<th><button class="th-sort' + (v.sort === k ? " on" : "") + '" data-sort="' + k + '" aria-sort="' + (v.sort === k ? (v.dir > 0 ? "ascending" : "descending") : "none") + '">' + esc(label) + (v.sort === k ? '<span class="arr">' + (v.dir > 0 ? "↑" : "↓") + "</span>" : "") + "</button></th>"; };
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn ghost" id="t-import" data-tip="' + esc(T("tx.import_tip")) + '">' + ic("upload", "sm") + esc(T("tx.import")) + '</button><button class="btn ghost" id="t-export" data-tip="' + esc(T("tx.export_tip")) + '"' + (tasks.length ? "" : " disabled") + ">" + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
         '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters task-f" role="group">' + TASK_FILTERS.map(function (x) { return '<button data-st="' + x[0] + '" aria-pressed="' + (x[0] === v.status) + '" class="' + (x[0] === v.status ? "active" : "") + '"' + (x[2] ? ' data-tip="' + esc(T(x[2])) + '"' : "") + ">" + esc(T(x[1])) + ' <span class="cnt" data-c="' + x[0] + '"></span></button>'; }).join("") + "</div>" +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
-        '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
+        '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm" id="tb-export" data-tip="' + esc(T("tx.export_tip")) + '">' + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
         '<table class="table"><thead><tr><th class="ck"><input type="checkbox" id="tall" aria-label="' + esc(T("tl.select_all")) + '"></th>' + th("name", T("col.task")) + th("schedule", T("col.schedule")) + th("status", T("col.status")) + th("version", T("col.version")).replace("<th>", '<th class="c-opt">') + th("last", T("col.recent_runs")) + th("today", T("col.runs_today")).replace("<th>", '<th class="c-opt">') + '<th class="c-act"></th></tr></thead><tbody id="tbody"></tbody></table></section>', "tasks", [[T("nav.tasks")]]);
       var body = $("#tbody");
       function rows() {
@@ -1541,7 +1541,78 @@
         else go();
       }); });
       $("#t-new").addEventListener("click", function () { taskFormModal(null); });
+      $("#t-import").addEventListener("click", function () { taskImportModal(refresh); });
+      $("#t-export").addEventListener("click", function (e) { exportTasks([], e.currentTarget); });
+      $("#tb-export").addEventListener("click", function (e) { exportTasks(Object.keys(v.sel), e.currentTarget); });
       rows();
+    });
+  }
+  // ---------- task export / import ----------
+  // One JSON file per export: what the tasks do, never this machine's folders, history,
+  // tokens or keys. Import checks first (nothing written), shows what changes, then
+  // creates the ticked rows — paused unless asked otherwise.
+  function exportTasks(ids, btn) {
+    return downloadFile("/api/tasks/export" + (ids.length ? "?ids=" + ids.map(enc).join(",") : ""), "tidebot-tasks.json", btn);
+  }
+  var TX_NOTES = { renamed: "tx.n_renamed", provider_missing: "tx.n_provider", skill_missing: "tx.n_skill" };
+  function taskImportModal(done) {
+    modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("tx.title")) + "</h2></div>" +
+      '<div class="drop" id="tx-drop">' + ic("upload", "lg") + "<strong>" + esc(T("tx.drop")) + "</strong><small>" + esc(T("tx.drop_sub")) + '</small><div class="row-actions"><label class="btn sm">' + esc(T("up.pick_file")) + '<input type="file" class="hidden" id="tx-file" accept=".json,application/json" data-noguard></label></div></div>' +
+      '<div id="tx-prev"></div><div class="actions" id="tx-foot"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
+      var prev = $("#tx-prev", root), foot = $("#tx-foot", root), z = $("#tx-drop", root), doc = null, rows = [];
+      var load = function (text) {
+        var d = null;
+        try { d = JSON.parse(String(text).replace(/^\uFEFF/, "")); } catch (e) { d = null; }
+        if (!d || typeof d !== "object" || d.kind !== "tidebot.tasks") { toast(T("tx.not_file"), true); return; }
+        api("/api/tasks/import", { method: "POST", body: { file: d } }).then(function (r) { doc = d; rows = r.tasks || []; show(r); }).catch(fail);
+      };
+      var readFile = function (file) {
+        if (!file) return;
+        if (file.size > 4 * 1048576) { toast(T("tx.too_big"), true); return; }
+        var fr = new FileReader();
+        fr.onload = function () { load(fr.result); };
+        fr.onerror = function () { toast(T("tx.not_file"), true); };
+        fr.readAsText(file);
+      };
+      ["dragenter", "dragover"].forEach(function (ev) { z.addEventListener(ev, function (e) { e.preventDefault(); z.classList.add("over"); }); });
+      z.addEventListener("dragleave", function () { z.classList.remove("over"); });
+      z.addEventListener("drop", function (e) { e.preventDefault(); z.classList.remove("over"); readFile(e.dataTransfer.files && e.dataTransfer.files[0]); });
+      var inp = $("#tx-file", root);
+      inp.addEventListener("change", function () { readFile(inp.files[0]); inp.value = ""; });
+      // Pasting the file's text works too (handy over remote desktop / SSH).
+      root.addEventListener("paste", function (e) {
+        var t = e.clipboardData && e.clipboardData.getData("text");
+        if (t && /^\s*\{/.test(t) && !/^(INPUT|TEXTAREA)$/.test((e.target && e.target.tagName) || "")) { e.preventDefault(); load(t); }
+      });
+      function show(r) {
+        var ok = rows.filter(function (x) { return !x.error; }).length;
+        z.classList.add("compact");
+        prev.innerHTML = '<p class="muted tx-meta" data-tip="' + esc((r.app || "") + (r.exported_at ? " · " + fullTime(r.exported_at) : "")) + '">' + esc(T("tx.found", { n: rows.length, ok: ok })) + "</p>" +
+          '<ul class="tx-list">' + rows.map(function (x) {
+            var notes = (x.notes || []).map(function (n) { return TX_NOTES[n] ? '<span class="tag sm warn" data-tip="' + esc(T(TX_NOTES[n] + "_tip", { n: x.from || "" })) + '">' + esc(T(TX_NOTES[n])) + "</span>" : ""; }).join("");
+            return '<li class="' + (x.error ? "bad" : "") + '"><label class="check"><input type="checkbox" data-noguard data-tx="' + x.index + '"' + (x.error ? " disabled" : " checked") + ' aria-label="' + esc(x.name) + '"></label><div class="tx-main"><div class="tx-name"><strong class="ell">' + esc(x.name) + "</strong>" + notes + "</div>" +
+              '<small class="ell">' + (x.error ? esc(T("tx.cant", { e: x.error })) : esc((x.cron ? cronHuman(x.cron) + " · " : T("tx.no_cron") + " · ") + (x.prompt || ""))) + "</small></div></li>";
+          }).join("") + "</ul>" +
+          '<label class="check tx-enable"><input type="checkbox" id="tx-en" data-noguard> ' + esc(T("tx.enable")) + "</label>";
+        foot.innerHTML = '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="tx-go"></button>';
+        $$("[data-close]", foot).forEach(function (b) { b.addEventListener("click", close); });
+        var go = $("#tx-go", foot);
+        var picked = function () { return $$("[data-tx]", prev).filter(function (c) { return c.checked && !c.disabled; }).map(function (c) { return +c.getAttribute("data-tx"); }); };
+        var count = function () { var n = picked().length; go.textContent = T("tx.go", { n: n }); go.disabled = !n; };
+        $$("[data-tx]", prev).forEach(function (c) { c.addEventListener("change", count); });
+        count();
+        go.addEventListener("click", function () {
+          var pick = picked(), on = $("#tx-en", prev).checked;
+          go.disabled = true;
+          api("/api/tasks/import", { method: "POST", body: { file: doc, apply: true, pick: pick, enable: on } }).then(function (res) {
+            var bad = (res.tasks || []).filter(function (x) { return x.error && pick.indexOf(x.index) >= 0; }).length;
+            close();
+            toast(T(on ? "tx.done_on" : "tx.done", { n: res.created }) + (bad ? " · " + T("tx.some_failed", { n: bad }) : ""), !!bad);
+            done();
+          }).catch(function (e) { go.disabled = false; fail(e); });
+        });
+        go.focus();
+      }
     });
   }
   // ---------- TASK DETAIL ----------
