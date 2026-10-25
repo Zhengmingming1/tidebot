@@ -31,17 +31,46 @@
   --shadow-hover: 0 2px 4px rgba(27, 35, 51, .06), 0 8px 24px rgba(27, 35, 51, .08);
   --sidebar-w: 240px;
   --topbar-h: 64px;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Latin face first, then each OS's CJK face (macOS / Windows / Linux), then colour emoji, so
+     a Chinese task name in the English UI and an emoji in a log look the same on all three. */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
   --focus-ring: 0 0 0 3px rgba(31, 95, 214, .4);
   --overlay: rgba(27, 35, 51, .28);
   --code-bg: #f1ede5;
   --dur-fast: 120ms;
   --dur: 200ms;
   --ease: cubic-bezier(.2, 0, 0, 1);
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  /* Mono: SF Mono / Cascadia Mono (Windows 11) / Consolas / DejaVu (most Linux); CJK in logs
+     falls back to the same UI faces instead of the browser's default serif. */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", monospace;
+  --sb-thumb: #d9d3c7;
+  --sb-thumb-hover: #b8b0a1;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+/* ---------- same look on macOS / Windows / Linux ----------
+   Light controls even under a dark GTK / Windows theme, the accent on native checkboxes and
+   radios (GTK themes paint them orange or green otherwise). */
+:root { color-scheme: light; accent-color: var(--accent); }
+/* One thin sand scrollbar in every engine: WKWebView / Safari, WebView2 / Chrome, WebKitGTK.
+   scrollbar-width / -color are left to Firefox only: Chromium 121+ ignores the
+   ::-webkit-scrollbar rules once they are set. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner, ::-webkit-resizer { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sb-thumb) padding-box; border: 2px solid transparent; border-radius: var(--radius-pill); min-height: 32px; }
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background-color: var(--sb-thumb-hover); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--sb-thumb) transparent; }
+}
+/* The page always keeps its 8px scrollbar lane, so switching between a short page (tasks) and
+   a long one (runs) — or a list growing past the window — never shifts the layout sideways.
+   overflow-y: scroll rather than scrollbar-gutter: WKWebView leaves no gutter for a styled
+   scrollbar; the track is transparent and no thumb is drawn while nothing scrolls. */
+html { overflow-y: scroll; }
+/* Scrolling to the end of a dialog, drawer or popup list doesn't carry on into the page behind. */
+.modal, .drawer-body, .popover, .search-results, #pal-list, .notif-center, .icon-grid, .presets,
+.ap-rail, .ap-grid, .ai-body, .ai-flist, .ai-log, .ai-code, .tree, .fb-tree, .fb-code, .tx-list,
+.desc-box, .changelog, .cc-searched ul { overscroll-behavior: contain; }
 body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-600); }
@@ -389,7 +418,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .lang-btn:hover { background: var(--bg-sunk); color: var(--text); }
 .lang-sel { height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-size: 13px; }
 .login-lang { display: flex; justify-content: center; margin-top: 16px; }
-:lang(zh-CN) body, html:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", Roboto, sans-serif; }
+:lang(zh-CN) body, html:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Segoe UI", Roboto, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"; }
 
 .stat{display:flex;flex-direction:column;gap:2px;padding:6px 0}
 .stat strong{font-size:1.15em}

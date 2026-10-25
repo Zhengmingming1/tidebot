@@ -2573,3 +2573,77 @@ budget…) on the second machine; there was also no way to keep tasks outside th
    numbered copy), like Dify's overwrite import.
 3. `agentctl tasks export / import` using the same format, for scripted setups.
 4. Command palette entries "导出全部任务" / "导入任务".
+
+## 2026-10-26 (04:20): same scrollbar, fonts and native controls on macOS / Windows / Linux
+
+Category: **cross-platform / UI polish** (styles only). The last rounds were all features
+(task export/import, power, notification state, budgets). Earlier layout checks ran in headless
+Chrome, which hides scrollbars, so one thing was never seen: on Windows (WebView2 / Edge /
+Chrome) and Linux (WebKitGTK, Chrome) the page scrollbar is a 15–17 px grey bar that comes and
+goes with the page length. Measured at 1024×655 with real scrollbars: the content was 1024 px
+wide on Tasks, Skills and Settings › Providers and 1009 px on Home, Runs, Plugins, Spend — every
+switch between them moved the whole page 15 px sideways, the "跳动" we promised away.
+
+**Done**
+
+- One thin sand scrollbar everywhere: 8 px lane, transparent track, `--border-strong`-coloured
+  pill thumb (2 px inset), darker on hover; `::-webkit-scrollbar` covers WKWebView / Safari,
+  WebView2 / Chrome and WebKitGTK, `scrollbar-width: thin` + `scrollbar-color` only inside
+  `@supports not selector(::-webkit-scrollbar)` (Firefox), because Chromium 121+ ignores the
+  webkit rules on any element that has the standard properties.
+- `html { overflow-y: scroll }`: the page always keeps its 8 px lane, so the content is 1016 px
+  wide on every page in both languages (was 1024 / 1009), no horizontal overflow anywhere
+  (checked Home, Tasks, Runs, Skills, Plugins, Spend, Settings, Providers, Budgets; zh-CN + en);
+  the new-task dialog still fits (bottom 639, Create button at 614 of 655).
+- `overscroll-behavior: contain` on dialogs, drawers, popovers, the command palette, the
+  notification centre and the file / task lists inside dialogs: wheeling past the end of the
+  palette list used to scroll the page behind by 521 px, now 0. The log and the amendment
+  thread keep handing the wheel on to the page.
+- `:root { color-scheme: light; accent-color: var(--accent) }`: native selects, date pickers
+  and scrollbars stay light under a dark GTK / Windows theme, and checkboxes / radios are the
+  tidebot blue instead of the GTK theme's orange or green.
+- Font stacks: the English UI now has each OS's CJK face (PingFang SC / Hiragino, Microsoft
+  YaHei UI, Noto Sans CJK SC / Source Han Sans / WenQuanYi) so a Chinese task name isn't drawn in
+  a random fallback on Linux; colour emoji faces after `sans-serif` (digits never come from
+  them); mono adds Cascadia Mono (Windows 11), DejaVu Sans Mono / Noto Sans Mono (Linux) and a
+  CJK fallback for Chinese in logs.
+- Shots (real scrollbars, `--hide-scrollbars` off): `/workspace/tidebot-shots/2026-10-26-scrollbars.png`,
+  `…-scrollbars-en.png`, `…-scrollbars-run.png`, `…-scrollbars-run-en.png`, `…-scrollbars-modal.png`.
+  flicker-check: same as before the change (CLS ≤ 0.002 on the settings tabs).
+- Test: `TestCrossPlatformCSS` (webkit scrollbar rules, the Firefox properties only inside the
+  `@supports` block and no `scrollbar-gutter`, the page lane not taken away by an html / body
+  rule, color-scheme + accent-color, the overscroll list and that the log isn't in it, CJK +
+  emoji faces in both UI stacks with emoji after the generic, the mono stack per OS ending in
+  `monospace`, every `font-family` with a generic fallback, balanced braces).
+
+**Inspiration**
+
+- farion1231/cc-switch `src/index.css`: thin always-visible `::-webkit-scrollbar` with a
+  padding-box thumb, the note that setting `scrollbar-width` / `scrollbar-color` makes WebView2
+  ignore the webkit rules, and `.scroll-stable` using `overflow-y: scroll` instead of
+  `scrollbar-gutter: stable` because WKWebView reserves no gutter for a styled scrollbar.
+- CherryHQ/cherry-studio `src/renderer/assets/styles/scrollbar.css` (scrollbar colours as
+  variables, transparent track / corner) and `src/renderer/assets/styles/font.css` (separate
+  Windows stack with Microsoft YaHei UI, Cascadia Code for code, emoji faces at the end).
+- open-webui/open-webui `src/app.css`: transparent `::-webkit-resizer` / scrollbar corner so
+  textareas don't show a grey square. Ideas only, no code copied.
+
+**Learned**
+
+- Headless Chrome (Playwright adds `--hide-scrollbars`) lays pages out at the full 1024 px, so
+  every earlier "fits 1024×655" check was 15 px more generous than a real Windows window.
+  Screenshot scripts should launch with `ignore_default_args=["--hide-scrollbars"]`.
+- The palette list leaked its wheel to the page only after reaching its end, which is exactly
+  when a user keeps scrolling; `overscroll-behavior` fixes it without locking the body (locking
+  would drop the scrollbar lane and shift the page again).
+
+**Ideas for later**
+
+1. Make `scripts/flicker-check.py` launch with real scrollbars and also report the content
+   width per page, so a width jump fails the check.
+2. The flicker check still sees ~60 skeleton frames on a skill detail page (also before this
+   change): prefetch the skill on hover of its row, like the task rows.
+3. Hide the thumb until the pointer is over a pane (Cherry Studio's `showOnHover`) for the
+   small inner lists, keeping the page bar always visible.
+4. Lock the page behind an open dialog without losing the lane (`overflow: hidden` +
+   `padding-right: 8px` on html while `.modal-bg` is present).
