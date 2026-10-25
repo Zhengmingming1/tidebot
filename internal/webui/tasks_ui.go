@@ -35,13 +35,14 @@ type taskForm struct {
 	Policy *taskPolicyForm `json:"policy,omitempty"`
 }
 
-// taskPolicyForm is the part of policy.Policy the task form edits. Priority, allowed
-// tools and side effects are left as they are.
+// taskPolicyForm is the part of policy.Policy the task form edits. Allowed tools and
+// side effects are left as they are; Priority "" (an older page) keeps the task's.
 type taskPolicyForm struct {
 	RetryMax            int    `json:"retry_max"`
 	Catchup             string `json:"catchup"`
 	CatchupGraceMinutes int    `json:"catchup_grace_minutes"`
 	NotifySuccess       bool   `json:"notify_success"`
+	Priority            string `json:"priority,omitempty"` // urgent | normal | background (power saving)
 }
 
 // maxCatchupGrace: missed runs older than a week are not worth running any more.
@@ -59,12 +60,17 @@ func validatePolicyForm(p *taskPolicyForm) error {
 	if p.CatchupGraceMinutes < 1 || p.CatchupGraceMinutes > maxCatchupGrace {
 		return errors.New("catch-up window must be 1 minute to 7 days")
 	}
+	switch p.Priority {
+	case "", "urgent", "normal", "background":
+	default:
+		return errors.New("priority must be urgent, normal or background")
+	}
 	return nil
 }
 
 // policyFormOf is the editable policy of a task (defaults when it has none yet).
 func policyFormOf(p policy.Policy) taskPolicyForm {
-	return taskPolicyForm{RetryMax: p.RetryMax, Catchup: p.Catchup, CatchupGraceMinutes: p.CatchupGraceMinutes, NotifySuccess: p.NotifySuccess}
+	return taskPolicyForm{RetryMax: p.RetryMax, Catchup: p.Catchup, CatchupGraceMinutes: p.CatchupGraceMinutes, NotifySuccess: p.NotifySuccess, Priority: p.Priority}
 }
 
 func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID string) error {
@@ -145,8 +151,11 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 	}
 	if f.Policy != nil && s.deps.DB != nil {
 		ps := &policy.Store{DB: s.deps.DB}
-		p := ps.Get(ctx, taskID) // keeps priority, tools, side effects and the failure count
+		p := ps.Get(ctx, taskID) // keeps tools, side effects and the failure count
 		p.RetryMax, p.Catchup, p.CatchupGraceMinutes, p.NotifySuccess = f.Policy.RetryMax, f.Policy.Catchup, f.Policy.CatchupGraceMinutes, f.Policy.NotifySuccess
+		if f.Policy.Priority != "" {
+			p.Priority = f.Policy.Priority
+		}
 		if err := ps.Put(ctx, p); err != nil {
 			return err
 		}

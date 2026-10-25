@@ -1807,3 +1807,9 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .search-in:has(.kb-hint) input { min-width: 0; }
 .search-in .kb-hint { flex: none; height: 20px; min-width: 20px; padding: 0 5px; display: inline-grid; place-items: center; font: 500 12px var(--font); color: var(--text-3); background: var(--surface); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; }
 .search-in:focus-within .kb-hint, .search-in input:not(:placeholder-shown) ~ .kb-hint { display: none; }
+/* Settings › General › Power: reading as a pill at the right of the card head, the
+   tooltip opens leftwards so it stays inside a 1024 px window. */
+.pwr-now { margin-left: auto; display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
+.pwr-now [data-tip]:hover::after, .pwr-now [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
+#set-power .notice { margin: var(--s1) 0 0; }
+#pwr-mode { min-width: 200px; }

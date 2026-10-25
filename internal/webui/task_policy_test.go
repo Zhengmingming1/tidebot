@@ -114,7 +114,7 @@ func TestTaskFormPolicyUI(t *testing.T) {
 		`policy: readPolicyFields(f) };`,
 		`f.catchup_grace_minutes.disabled = f.catchup.value === "skip";`,
 		// new-task defaults mirror policy.Default
-		`{ retry_max: ` + itoa(d.RetryMax) + `, catchup: "` + d.Catchup + `", catchup_grace_minutes: ` + itoa(d.CatchupGraceMinutes) + `, notify_success: false }`,
+		`{ retry_max: ` + itoa(d.RetryMax) + `, catchup: "` + d.Catchup + `", catchup_grace_minutes: ` + itoa(d.CatchupGraceMinutes) + `, notify_success: false, priority: "` + d.Priority + `" }`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lacks %q", want)

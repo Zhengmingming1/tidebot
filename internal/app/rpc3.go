@@ -283,6 +283,9 @@ func (a *App) extRPC() map[string]rpcFunc {
 	for k, v := range a.storageRPC() {
 		m[k] = v
 	}
+	for k, v := range a.powerRPC() {
+		m[k] = v
+	}
 	// Skill optimizer (review / canary) is reachable from the WebUI too.
 	a.registerSkillRPC(func(n string, h func(context.Context, json.RawMessage) (any, error)) { m[n] = h })
 	return m

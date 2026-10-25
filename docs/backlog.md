@@ -2421,3 +2421,88 @@ noticed missing alerts.
 3. A small per-channel history (last 10 sends) in the edit dialog, from the `notifications` table.
 4. Healthchecks disables a channel on a permanent error (e.g. WeCom "invalid webhook key");
    tidebot could offer "停用此渠道" in the tooltip instead of doing it silently.
+
+## 2026-10-25 (20:00): unplugged laptop — scheduled runs that can wait, wait for power
+
+Category: **cross-platform behavior + resource usage** (core runner gate, Settings › General,
+task form). The last rounds were notification status (correctness), budget rows (UI) and budget
+holds (logic). final-plan §12 promised "电源感知": on battery or low battery only urgent tasks
+run. `policy.AllowedOnBattery` existed but nothing called it and nothing read the battery, so a
+MacBook on the train started every 30-minute Claude Code session (a CPU core busy for minutes)
+just like on the desk.
+
+**Done**
+
+- New `internal/power`: one reading = known / has battery / on battery / percent / OS power
+  saver. macOS: `/usr/bin/pmset -g batt` (full path: PATH is minimal when started from Finder),
+  plus `pmset -g` for Low Power Mode (`lowpowermode 1` up to 13, `powermode 1` later) only while
+  unplugged; Windows: `GetSystemPowerStatus` via `x/sys/windows` (no cgo; `SystemStatusFlag` =
+  battery saver); Linux: `/sys/class/power_supply` (Mains / USB-C online, system battery
+  `capacity` / `status`, device batteries like mice ignored) and `platform_profile = low-power`.
+  Unknown (containers, BSD, read errors) never holds anything back. Parsers are plain functions
+  tested on every OS (CRLF too).
+- Rule: task priority urgent / normal / background. Settings › General › Power, mode
+  「电量低时」(default): background waits whenever on battery, normal waits at ≤ 20 % or with
+  the power saver on; 「用电池时」: everything but urgent waits on battery; 「不限制」: off.
+  Only scheduled runs (cron + their retries) are held; Run now, buttons, webhooks, plugin
+  triggers and `agentctl tasks run` always start (that RPC used the "cron" trigger; it now says
+  "manual", like the WebUI's Run now).
+- A held run ends as skipped with `skipped: power saving: <battery|low|saver> <pct>` (no
+  retry, no breaker strike, no "failed" notice), explained in the runs list / run page in the
+  viewer's language. The task is remembered; a watcher goroutine starts only then, reads the
+  power once a minute and stops when nothing waits (zero polling otherwise). Power back (or a
+  looser mode chosen) → each waiting task runs once, unless its missed-runs policy is "skip"
+  or its catch-up window has passed — the same rules as a missed schedule.
+- Readings are cached 15 s so a 09:00 burst of tasks spawns pmset once.
+- Settings › General › Power card: mode select (saved on change, saved mark), the reading as
+  a pill in the card head (用电池 · 18 %, warn colour when low; 接电源 / 无电池 / 无法读取), the
+  rules in the row text, details in the pill tooltip; "N 个任务在等电源" notice when any wait.
+- Task form › 失败与补跑: retries / missed runs / window now share one row of three, the new
+  priority select ("紧急 · 用电池也照常运行" / "普通 · 电量低时等待" / "后台 · 等接上电源再跑")
+  sits next to "notify on success", so the block is no taller. The folded summary adds 紧急 /
+  仅接电源时运行. An older page that sends no priority keeps the task's.
+- Same on macOS / Windows / Linux, desktop window and browser: plain CSS, no paths in the UI,
+  no shortcuts, no native dialogs; zh-CN and en; 1024×655 checked in both (scrollWidth 1024; the
+  en select fits on the row after shortening "On low battery").
+- Shots (demo data, power reading faked in the browser since the box has no battery):
+  `/workspace/tidebot-shots/2026-10-25-power-saving.png`, `2026-10-25-power-saving-en.png`,
+  `2026-10-25-power-saving-taskform.png`.
+- Tests: `TestParsePmsetBatt`, `TestParsePmsetLowPower`, `TestReadSysfs` (unplugged with a
+  mouse battery, plugged, USB-C charger, server, no mains entry, missing root),
+  `TestFromWindows`, `TestPowerHold` (13 mode × priority × reading cases, runs on Windows too),
+  `TestPowerSavingHoldsScheduledRuns` (4 held runs without strike or failed event, manual and
+  urgent run, background vs normal at 80 %, catch-up once on power, "skip" and an expired
+  window not caught up, watcher stops), `TestPowerSettings` (default, webhook not held, retry
+  held in battery mode, turning it off releases at once, bad / corrupt values),
+  `TestTaskFormPriority`, `TestPowerUI` (markup, wiring, runErr pattern against the core
+  message, i18n both languages, label length). `newTestApp` pins the reading to "unknown" so
+  other tests don't depend on the CI machine's battery.
+
+**Inspiration**
+
+- duplicati/duplicati `Duplicati/Library/Utility/Power/PowerSupply.cs`,
+  `LinuxPowerSupplyState.cs` (Mains online → AC, no Mains at all → AC, all Mains offline →
+  battery), `MacOSPowerSupplyState.cs` (`pmset -g batt` "'AC Power'" / "'Battery Power'", ioreg
+  fallback), `WindowsPowerSupplyState.cs` (WMI `Win32_Battery`), and `Library/Main/Options.cs`
+  `disable-on-battery` (only scheduled backups skipped, manual ones run, unknown = run).
+  tidebot borrows the per-OS sources, "unknown never blocks" and "scheduled only"; it reads
+  Windows through `GetSystemPowerStatus` instead of WMI (no COM, also gives battery saver), and
+  adds the battery percentage / OS power saver tier, per-task priorities and the catch-up when
+  power is back. Ideas only, no code copied.
+
+**Learned**
+
+- `agentctl tasks run` was recorded as a "cron" run; any rule keyed on the trigger (this one,
+  `taskStillRunnable`) treated a hand-started run as scheduled.
+- macOS 14 renamed `lowpowermode` to `powermode` (1 = low, 2 = high on some MacBook Pros);
+  matching only "1" keeps High Power Mode from counting as a saver.
+- Linux lists Bluetooth mice and headsets under `power_supply` as `type=Battery` with
+  `scope=Device`; without that filter a desktop with a mouse looked like a laptop.
+
+**Ideas for later**
+
+1. Tray: a problem-area line "3 个任务在等电源" with "现在就跑" (one click releases them).
+2. Don't start new runs right before sleep (macOS `IOPMAssertion` / Windows
+   `PowerRegisterSuspendResumeNotification`), the other half of §12's "即将睡眠时不启动新运行".
+3. Show the task priority as a small icon on the task list (bolt = urgent, leaf = background).
+4. Let the low-battery threshold be chosen (10 / 20 / 30 %) next to the mode.

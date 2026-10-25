@@ -67,8 +67,9 @@ type App struct {
 	Plugins    *plugin.Store
 	PluginHost *plugin.Host
 
-	trig *triggerState
-	disk diskWatch
+	trig  *triggerState
+	disk  diskWatch
+	power powerWatch
 
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
@@ -300,7 +301,13 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	}
 	// A run that waited for a slot is checked again before it starts: runs ahead
 	// of it may have used up the day's budget, or the task was paused meanwhile.
-	opts.StartCheck = a.diskStartCheck
+	taskID, trigger := opts.TaskID, opts.TriggerKind
+	opts.StartCheck = func(sctx context.Context) error {
+		if err := a.diskStartCheck(sctx); err != nil {
+			return err
+		}
+		return a.powerStartCheck(sctx, taskID, trigger) // scheduled runs of non-urgent tasks on battery
+	}
 	opts.BeforeStart = func(sctx context.Context, o *runner.Options) error {
 		if !a.taskStillRunnable(sctx, o.TaskID, o.TriggerKind) {
 			return errTaskInactive
@@ -449,10 +456,6 @@ func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket strin
 
 func isMockBin(bin string) bool {
 	return bin != "" && (strings.Contains(bin, "mock-claude") || bin == "true")
-}
-
-func (a *App) runTask(ctx context.Context, task db.Task) error {
-	return a.runTaskTrigger(ctx, task, "cron", cost.BucketProduction)
 }
 
 func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket string) error {

@@ -143,7 +143,9 @@ func (a *App) rpcTasksRun(ctx context.Context, params json.RawMessage) (any, err
 	if err != nil {
 		return nil, err
 	}
-	return nil, a.runTask(ctx, *task)
+	// Started by hand (agentctl tasks run): like Run now in the WebUI, not held back
+	// by power saving and allowed on a paused task.
+	return nil, a.runTaskTrigger(ctx, *task, "manual", cost.BucketProduction)
 }
 
 func (a *App) rpcTasksVersions(ctx context.Context, params json.RawMessage) (any, error) {

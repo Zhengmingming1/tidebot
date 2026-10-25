@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/config"
+	"github.com/Zhengmingming1/tidebot/internal/power"
 )
 
 func mockClaude() string {
@@ -36,6 +37,8 @@ func newTestApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.Close() })
+	// Tests don't depend on the CI machine's battery (power saving tests set their own).
+	a.power.read = func() power.State { return power.Unknown }
 	if err := a.SeedBuiltinProviders(context.Background()); err != nil {
 		t.Fatal(err)
 	}

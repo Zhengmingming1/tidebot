@@ -123,6 +123,7 @@
     list: '<path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/>',
     edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
     eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+    battery: '<rect width="16" height="10" x="2" y="7" rx="2" ry="2"/><path d="M22 11v2"/><path d="M6 11v2"/><path d="M10 11v2"/>',
     lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
   };
   function ic(name, cls) { return '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[name] || P.circle) + "</svg>"; }
@@ -407,6 +408,8 @@
     // A queued run turned away when it got its slot: why is in the viewer's language,
     // the exact cap figures follow as-is.
     if (/^skipped: task paused/.test(msg)) return T("rd.err_skip_paused");
+    var pw = /^skipped: power saving: (battery|low|saver) (-?\d+)/.exec(msg);
+    if (pw) return T("rd.err_skip_power_" + pw[1], { p: Number(pw[2]) >= 0 ? pw[2] + "%" : "—" });
     var dk = /^skipped: disk full: (\d+)\/(\d+)/.exec(msg);
     if (dk) return T("rd.err_skip_disk", { f: fmtBytes(Number(dk[1])), m: mbLabel(Math.round(Number(dk[2]) / 1048576)) });
     var b = /^skipped: budget blocked: (.*)$/.exec(msg);
@@ -3026,11 +3029,13 @@
   }
   // Retries & missed runs (task_policies), folded under the form like Uptime Kuma's
   // "Retries" block: the folded line says what the current choices mean, the long
-  // explanations sit in tooltips. Priority / tools / side effects are not edited here.
+  // explanations sit in tooltips. Tools / side effects are not edited here.
   var GRACE_MIN = [60, 360, 720, 1440, 4320, 10080];
+  var TF_PRIOS = ["urgent", "normal", "background"];
   function graceLabel(m) { return m % 1440 === 0 ? T("tf.grace_d", { n: m / 1440 }) : m % 60 === 0 ? T("tf.grace_h", { n: m / 60 }) : T("tf.grace_m", { n: m }); }
   function policySummary(p) {
     var parts = [p.retry_max > 0 ? T("tf.sum_retry", { n: p.retry_max }) : T("tf.sum_noretry"), T(p.catchup === "skip" ? "tf.sum_skip" : p.catchup === "run_all" ? "tf.sum_all" : "tf.sum_once")];
+    if (p.priority === "urgent" || p.priority === "background") parts.push(T("tf.sum_pr_" + p.priority));
     if (p.notify_success) parts.push(T("tf.sum_notify"));
     return parts.join(" · ");
   }
@@ -3041,18 +3046,21 @@
     return '<details class="sec-adv tf-pol"' + (warn ? " open" : "") + '><summary><span class="tf-pol-t">' + esc(T("tf.pol")) + "</span>" + tip(T("tf.pol_tip", { n: brkAt })) +
       '<span class="tf-pol-sum" id="tf-pol-sum">' + esc(policySummary(p)) + "</span></summary>" +
       (warn ? '<p class="notice warn tf-pol-streak">' + ic("info", "sm") + esc(T("tf.streak", { n: streak, m: Math.max(1, brkAt - streak) })) + "</p>" : "") +
-      '<div class="form-row">' + fieldHtml(T("tf.retry"), '<select name="retry_max">' + retries + "</select>", T("tf.retry_tip")) +
-      fieldHtml(T("tf.catchup"), '<select name="catchup">' + opt("skip", T("tf.cu_skip"), p.catchup === "skip") + opt("run_once", T("tf.cu_once"), p.catchup === "run_once") + opt("run_all", T("tf.cu_all"), p.catchup === "run_all") + "</select>", T("tf.catchup_tip")) + "</div>" +
-      '<div class="form-row">' + fieldHtml(T("tf.grace"), '<select name="catchup_grace_minutes"' + (p.catchup === "skip" ? " disabled" : "") + ">" + graces.map(function (m) { return opt(m, graceLabel(m), m === p.catchup_grace_minutes); }).join("") + "</select>", T("tf.grace_tip")) +
+      '<div class="form-row three">' + fieldHtml(T("tf.retry"), '<select name="retry_max">' + retries + "</select>", T("tf.retry_tip")) +
+      fieldHtml(T("tf.catchup"), '<select name="catchup">' + opt("skip", T("tf.cu_skip"), p.catchup === "skip") + opt("run_once", T("tf.cu_once"), p.catchup === "run_once") + opt("run_all", T("tf.cu_all"), p.catchup === "run_all") + "</select>", T("tf.catchup_tip")) +
+      fieldHtml(T("tf.grace"), '<select name="catchup_grace_minutes"' + (p.catchup === "skip" ? " disabled" : "") + ">" + graces.map(function (m) { return opt(m, graceLabel(m), m === p.catchup_grace_minutes); }).join("") + "</select>", T("tf.grace_tip")) + "</div>" +
+      // Priority decides what waits on battery (Settings › General › Power); the
+      // option says it in plain words, the tooltip has the rule and the setting.
+      '<div class="form-row">' + fieldHtml(T("tf.prio"), '<select name="priority">' + TF_PRIOS.map(function (k) { return opt(k, T("tf.pr_" + k), k === (p.priority || "normal")); }).join("") + "</select>", T("tf.prio_tip", { n: 20 })) +
       '<label class="check tf-pol-ok"><input type="checkbox" name="notify_success"' + (p.notify_success ? " checked" : "") + "> " + esc(T("tf.notify_ok")) + tip(T("tf.notify_ok_tip")) + "</label></div></details>";
   }
   function readPolicyFields(f) {
-    return { retry_max: parseInt(f.retry_max.value, 10) || 0, catchup: f.catchup.value, catchup_grace_minutes: parseInt(f.catchup_grace_minutes.value, 10) || 360, notify_success: f.notify_success.checked };
+    return { retry_max: parseInt(f.retry_max.value, 10) || 0, catchup: f.catchup.value, catchup_grace_minutes: parseInt(f.catchup_grace_minutes.value, 10) || 360, notify_success: f.notify_success.checked, priority: f.priority.value };
   }
   function wirePolicyFields(root, f) {
     var sum = $("#tf-pol-sum", root);
     var sync = function () { f.catchup_grace_minutes.disabled = f.catchup.value === "skip"; sum.textContent = policySummary(readPolicyFields(f)); };
-    ["retry_max", "catchup", "notify_success"].forEach(function (n) { f[n].addEventListener("change", sync); });
+    ["retry_max", "catchup", "notify_success", "priority"].forEach(function (n) { f[n].addEventListener("change", sync); });
   }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
@@ -3061,7 +3069,7 @@
     Promise.all(reqs).then(function (r) {
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
-      var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
+      var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
       var drafty = !taskId && !pre.prompt;
       var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
@@ -4538,6 +4546,44 @@
       rpc("storage.vacuum", {}).then(function (r) { toast(T("st.shrunk", { s: fmtBytes(r.saved_bytes) })); storagePaint(r.storage); }).catch(function (err) { fail(err); b.disabled = false; });
     });
   }
+  // ---- Settings › General › Power ----
+  // Scheduled runs of tasks that can wait are held back on an unplugged laptop and run
+  // once when power is back; urgent tasks and runs you start always go. The idea is
+  // Duplicati's "disable-on-battery" (scheduled only, manual still runs, unknown power
+  // = run); the three task priorities and the low-battery tier are tidebot's. The
+  // current reading is a pill in the card head, its details in the tooltip.
+  var PWR_MODES = ["off", "low", "battery"];
+  function powerCardHtml() {
+    return '<section class="card" id="set-power"><div class="card-head"><span class="ico">' + ic("battery") + "</span><h2>" + esc(T("pwr.title")) + '</h2><span class="pwr-now" id="pwr-now"></span></div>' +
+      '<div class="set-row" id="set-power_mode"><div class="lbl"><strong>' + esc(T("pwr.mode")) + '</strong><small id="pwr-sub">…</small></div>' +
+      '<select id="pwr-mode" aria-label="' + esc(T("pwr.mode")) + '" disabled><option>…</option></select></div><div id="pwr-wait"></div></section>';
+  }
+  // The reading in a word ("电池 · 62%"); kind is the pill colour.
+  function powerNow(s) {
+    s = s || {};
+    var pct = s.percent >= 0 ? " · " + s.percent + "%" : "";
+    if (!s.known) return { kind: "plain", text: T("pwr.unknown") };
+    if (!s.on_battery) return { kind: s.has_battery ? "ok" : "plain", text: T(s.has_battery ? "pwr.ac" : "pwr.no_battery") + (s.has_battery ? pct : "") };
+    return { kind: s.saver || (s.percent >= 0 && s.percent <= 20) ? "warn" : "info", text: T(s.saver ? "pwr.saver" : "pwr.battery") + pct };
+  }
+  function powerPaint(v) {
+    var sel = $("#pwr-mode");
+    if (!sel || !v) return;
+    var now = powerNow(v.state), mode = PWR_MODES.indexOf(v.mode) >= 0 ? v.mode : "low";
+    $("#pwr-now").innerHTML = '<span class="pill ' + now.kind + '" tabindex="0" data-tip="' + esc(T("pwr.now_tip", { n: v.low_pct || 20 })) + '">' + esc(now.text) + "</span>";
+    sel.innerHTML = PWR_MODES.map(function (k) { return opt(k, T("pwr.m_" + k) + (k === v.default_mode ? T("pwr.recommended") : ""), k === mode); }).join("");
+    sel.disabled = false;
+    $("#pwr-sub").textContent = T("pwr.sub_" + mode, { n: v.low_pct || 20 });
+    $("#pwr-wait").innerHTML = v.waiting > 0 ? '<p class="notice warn" role="status">' + ic("clock", "sm") + "<span>" + esc(T("pwr.waiting", { n: v.waiting })) + tip(T("pwr.waiting_tip")) + "</span></p>" : "";
+  }
+  function powerWire() {
+    var sel = $("#pwr-mode");
+    if (!sel) return;
+    rpc("power.get", {}).then(powerPaint).catch(fail);
+    sel.addEventListener("change", function () {
+      rpc("power.settings", { mode: sel.value }).then(function (v) { powerPaint(v); savedMark(sel); }).catch(function (e) { fail(e); rpc("power.get", {}).then(powerPaint); });
+    });
+  }
   // ---- notification channels (Settings → Notifications) ----
   // Add / edit / test / switch off / remove a channel without agentctl. Ideas from Uptime Kuma
   // src/components/NotificationDialog.vue: the default name follows the type until you edit
@@ -4756,11 +4802,13 @@
           row("webui", T("set.addr"), T(st.allow_lan ? "set.lan_on" : "set.lan_off"), "<code>" + esc(st.addr) + "</code>") +
           row("https", "HTTPS", T("set.https_sub"), '<span class="pill ' + (st.tls ? "ok" : "plain") + '">' + esc(T(st.tls ? "set.enabled" : "set.off")) + "</span>") +
           row("idle", T("set.idle"), T("set.idle_sub"), "<span>" + esc(T("set.min", { n: st.idle_minutes })) + "</span>") + "</section>" +
+          powerCardHtml() +
           '<section class="card danger-zone" id="set-danger"><div class="card-head"><span class="ico">' + ic("bolt") + "</span><h2>" + esc(T("set.danger")) + "</h2></div>" +
           row("webui_off", T("set.webui_on"), T("set.webui_on_sub"), '<button class="btn danger sm" id="dz-webui">' + esc(T("set.turn_off")) + "</button>", "agentctl webui on") +
           row("reset_ui", T("set.reset_ui"), T("set.reset_ui_sub"), '<button class="btn danger sm" id="dz-reset">' + esc(T("set.reset")) + "</button>") + "</section>";
         after = function () {
           $("#set-lang").addEventListener("change", function (e) { setLanguage(e.target.value).then(function () { savedMark($("#set-lang")); }); });
+          powerWire();
           $("#dz-webui").addEventListener("click", function () {
             confirmDialog({ title: T("set.off_title"), body: T("set.confirm_off"), ok: T("set.turn_off"), danger: true }).then(function (y) { if (y) api("/api/webui", { method: "POST", body: { enabled: false } }).then(function () { toast(T("toast.webui_off")); }).catch(fail); });
           });
