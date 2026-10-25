@@ -4192,6 +4192,62 @@
   }
   // ---------- SPEND ----------
   var taskNames = {};
+  // One budget row on the spend page. The cap is a button: click (or Enter) edits it in place.
+  function budgetRow(b, k) {
+    var pct = b.max_usd ? Math.min(100, b.used_usd / b.max_usd * 100) : 0, hp = b.held_usd > 0 && b.max_usd ? Math.min(100 - pct, b.held_usd / b.max_usd * 100) : 0;
+    var htip = hp > 0 ? ' data-tip="' + esc(T("sp.held_tip", { n: b.held_runs, held: usd(b.held_usd, 4) })) + '"' : "";
+    var name = bucketName(b), capTxt = b.max_usd ? usd(b.max_usd) : "∞";
+    return '<div class="bud-row" role="row" data-brow="' + k + '"><span class="bud-name" role="cell"' + (b.scope === "task" ? ' title="' + esc(name) + '"' : "") + "><strong>" + esc(name) + '</strong><span class="muted"> · ' + esc(T("sp.per_" + b.period)) + "</span></span>" +
+      '<span role="cell"><span class="progress' + (pct >= 100 ? " bad" : pct >= 80 ? " warn" : "") + (hp > 0 ? " split" : "") + '" role="progressbar" aria-valuenow="' + Math.round(pct) + '" aria-valuemin="0" aria-valuemax="100"><span data-w="' + pct + '"></span>' + (hp > 0 ? '<span class="held" data-w="' + hp + '"></span>' : "") + "</span></span>" +
+      '<span class="bud-amt right" role="cell"><span' + htip + ">" + esc(usd(b.used_usd, 4)) + (hp > 0 ? '<span class="held-mark" aria-hidden="true"> +' + esc(usd(b.held_usd, 2)) + "</span>" : "") + '</span> <span class="muted">/</span> <button type="button" class="cap-edit" data-bcap="' + k + '" data-tip="' + esc(T("sp.cap_tip")) + '" aria-label="' + esc(T("sp.cap_aria", { name: name, v: capTxt })) + '">' + esc(capTxt) + "</button></span>" +
+      '<span role="cell"><select data-bact="' + k + '" aria-label="' + esc(name + " · " + T("sp.on_breach")) + '">' + opt("pause_notify", T("sp.a_pause"), b.action !== "block_notify") + opt("block_notify", T("sp.a_block"), b.action === "block_notify") + "</select></span>" +
+      '<span role="cell"><select data-bwarn="' + k + '" aria-label="' + esc(name + " · " + T("sp.warn_at")) + '">' + [50, 70, 80, 90, 100].map(function (n) { return opt(n, n + "%", (b.warn_at_pct || 80) === n); }).join("") + "</select></span></div>";
+  }
+  // "12.5", "12,5", "$12.50", "¥ 12" -> 12.5; "" -> null (keep); anything else -> NaN.
+  function parseCap(v) {
+    v = String(v || "").replace(/[\s$¥￥,]/g, function (c) { return c === "," ? "." : ""; });
+    if (!v) return null;
+    return /^\d{1,7}(\.\d{0,4})?$/.test(v) ? Math.round(parseFloat(v) * 1e4) / 1e4 : NaN;
+  }
+  // In-place cap editor (idea: n8n N8nInlineTextEdit — outline on hover without moving the
+  // text, the input grows with what is typed, Enter / blur submit, Esc cancels, empty reverts).
+  // Setting 0 turns the cap off, so that one asks first in the app's own dialog.
+  function editCap(btn, b, save) {
+    if (!btn || btn.classList.contains("editing")) return;
+    var old = b.max_usd ? String(Math.round(b.max_usd * 1e4) / 1e4) : "", name = bucketName(b);
+    var wrap = document.createElement("span");
+    wrap.className = "cap-in";
+    wrap.innerHTML = '<span class="cap-sym">' + esc(curSym(state.currency || "USD")) + '</span><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" data-noguard aria-label="' + esc(T("sp.cap_aria", { name: name, v: old || "∞" })) + '">';
+    var inp = wrap.querySelector("input");
+    inp.value = old; inp.placeholder = "∞";
+    var fit = function () { inp.size = Math.max(4, Math.min(12, inp.value.length + 1)); };
+    fit();
+    btn.classList.add("editing"); btn.hidden = true;
+    btn.parentNode.insertBefore(wrap, btn);
+    inp.focus(); inp.select();
+    var done = false;
+    var back = function (refocus) { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); btn.hidden = false; btn.classList.remove("editing"); if (refocus !== false) btn.focus(); };
+    // blur = the user went elsewhere: save a valid value, drop a bad one, never pull focus back
+    var end = function (commit, blur) {
+      if (done) return;
+      var v = parseCap(inp.value);
+      if (commit && v !== null && isNaN(v)) { if (blur) { done = true; back(false); return; } inp.setAttribute("aria-invalid", "true"); wrap.classList.add("bad"); toast(T("sp.cap_bad"), true); inp.focus(); return; }
+      done = true;
+      if (!commit || v === null || inp.value.trim() === old || v === (old ? parseCap(old) : 0)) { back(!blur); return; }
+      var go = v > 0 ? Promise.resolve(true) : confirmDialog({ title: T("sp.cap_off_title", { name: name }), body: T("sp.cap_off_body"), ok: T("sp.cap_off_ok"), icon: "wallet", danger: true });
+      go.then(function (ok) {
+        if (!ok) { back(); return; }
+        inp.disabled = true;
+        return save(v).then(function () { toast(v > 0 ? T("sp.cap_saved", { name: name, v: usd(v) }) : T("sp.cap_off_done", { name: name })); }, function (e) { back(); fail(e); });
+      });
+    };
+    inp.addEventListener("input", function () { inp.removeAttribute("aria-invalid"); wrap.classList.remove("bad"); fit(); });
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done = true; back(); }
+      else if (e.key === "Enter") { e.preventDefault(); end(true); }
+    });
+    inp.addEventListener("blur", function () { end(true, true); });
+  }
   function bucketName(b) { return b.scope === "global" ? T("sp.global") : b.scope === "bucket" ? (T("bucket." + b.scope_id) === "bucket." + b.scope_id ? cap(b.scope_id) : T("bucket." + b.scope_id)) : (taskNames[b.scope_id] || T("col.task") + " " + String(b.scope_id).slice(0, 12)); }
   var spendView = { range: "7d", by: "task", day: "" }, spendCache = {};
   var SPEND_RANGES = ["7d", "30d", "all"], SPEND_BYS = ["task", "provider_model", "model", "provider"];
@@ -4269,13 +4325,11 @@
         '<div class="card stat"><small>' + esc(T("col.runs_today")) + "</small><strong>" + esc(runsToday) + "</strong><span>" + esc(plural(d.top_tasks.length, "sp.sources_one", "sp.sources_many")) + "</span></div></div>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" + '<button class="icon-btn" id="sp-export" data-tip="' + esc(T("sp.export_tip")) + '" aria-label="' + esc(T("sp.export")) + '">' + ic("download", "sm") + "</button></div>" +
         '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["provider_model", T("sp.by_provider_model")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
-        '<div class="grid g2"><section class="card fill"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + '</h2></div><div class="grow">' + budgets.map(function (b, k) {
-          var p = pct(b.used_usd, b.max_usd), hp = b.held_usd > 0 && b.max_usd ? Math.min(100 - p, pct(b.held_usd, b.max_usd)) : 0;
-          var htip = hp > 0 ? ' data-tip="' + esc(T("sp.held_tip", { n: b.held_runs, held: usd(b.held_usd, 4) })) + '"' : "";
-          return '<div class="budget-row"><div><strong>' + esc(bucketName(b)) + '</strong> <span class="muted">· ' + esc(T("sp.per_" + b.period)) + '</span></div><div class="right"' + htip + ">" + esc(usd(b.used_usd, 4)) + (hp > 0 ? '<span class="held-mark" aria-hidden="true"> +' + esc(usd(b.held_usd, 2)) + "</span>" : "") + ' <span class="muted">/ ' + (b.max_usd ? esc(usd(b.max_usd)) : "∞") + '</span></div><div class="progress' + cls(p) + (hp > 0 ? " split" : "") + '" role="progressbar" aria-valuenow="' + Math.round(p) + '" aria-valuemin="0" aria-valuemax="100"><span data-w="' + p + '"></span>' + (hp > 0 ? '<span class="held" data-w="' + hp + '"></span>' : "") + "</div>" +
-            '<div class="budget-act"><label>' + esc(T("sp.on_breach")) + ' <select data-bact="' + k + '">' + opt("pause_notify", T("sp.a_pause"), b.action !== "block_notify") + opt("block_notify", T("sp.a_block"), b.action === "block_notify") + '</select></label><label>' + esc(T("sp.warn_at")) + ' <select data-bwarn="' + k + '">' + [50, 70, 80, 90, 100].map(function (n) { return opt(n, n + "%", (b.warn_at_pct || 80) === n); }).join("") + "</select></label></div></div>";
-        }).join("") + '<p class="hint">' + esc(T("sp.breach_hint")) + "</p></div></section>" +
-        '<section class="card flush fill"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("sp.events")) + "</h2></div>" + (d.events.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.when")) + "</th><th>" + esc(T("sp.scope")) + "</th><th>" + esc(T("sp.detail")) + "</th></tr></thead><tbody>" + d.events.map(function (e) { return '<tr><td class="nowrap">' + esc(when(e.at)) + '</td><td><span class="pill bad">' + esc(T("sp.scope_" + e.scope)) + "</span></td><td>" + esc(e.code ? T("be." + e.code, { name: e.name || T("sp.scope_" + e.scope), used: e.used, cap: e.cap, held: e.held, n: e.n }) : e.detail) + "<small>" + esc(T("sp.action", { a: T("act." + e.action) === "act." + e.action ? e.action : T("act." + e.action) })) + "</small></td></tr>"; }).join("") + "</tbody></table>" : emptyState("shield", T("sp.no_breach"), T("sp.no_breach_sub"))) + "</section></div>",
+        // Budgets: one aligned row per scope (column heads instead of a label on every select),
+        // the cap edits in place. Full width, so the events table below gets room too.
+        '<section class="card bud-card"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + "</h2>" + tip(T("sp.breach_hint")) + '<a class="link" href="#/settings/budgets">' + esc(T("sp.bud_settings")) + "</a></div>" +
+          (budgets.length ? '<div class="bud-grid" role="table" aria-label="' + esc(T("sp.budgets")) + '"><div class="bud-head" role="row"><span role="columnheader">' + esc(T("sp.scope")) + '</span><span role="columnheader">' + esc(T("time.today")) + '</span><span role="columnheader" class="right">' + esc(T("sp.used_cap")) + '</span><span role="columnheader">' + esc(T("sp.on_breach")) + '</span><span role="columnheader">' + esc(T("sp.warn_at")) + "</span></div>" + budgets.map(function (b, k) { return budgetRow(b, k); }).join("") + "</div>" : emptyState("wallet", T("sp.no_budgets"), "")) + "</section>" +
+        '<section class="card flush sp-events"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("sp.events")) + "</h2></div>" + (d.events.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.when")) + "</th><th>" + esc(T("sp.scope")) + "</th><th>" + esc(T("sp.detail")) + "</th></tr></thead><tbody>" + d.events.map(function (e) { return '<tr><td class="nowrap">' + esc(when(e.at)) + '</td><td><span class="pill bad">' + esc(T("sp.scope_" + e.scope)) + "</span></td><td>" + esc(e.code ? T("be." + e.code, { name: e.name || T("sp.scope_" + e.scope), used: e.used, cap: e.cap, held: e.held, n: e.n }) : e.detail) + "<small>" + esc(T("sp.action", { a: T("act." + e.action) === "act." + e.action ? e.action : T("act." + e.action) })) + "</small></td></tr>"; }).join("") + "</tbody></table>" : emptyState("shield", T("sp.no_breach"), T("sp.no_breach_sub"))) + "</section>",
         "spend", [[T("nav.spend")]]);
       applySizes(page());
       var paintBody = function (r) {
@@ -4336,11 +4390,28 @@
       $("#sp-export").addEventListener("click", function () { downloadFile("/api/spend/export?range=" + enc(spendView.range) + (spendView.day ? "&day=" + enc(spendView.day) : "") + "&lang=" + enc(state.lang), "tidebot-spend.csv", $("#sp-export")); });
       $$("[data-r]").forEach(function (b) { b.addEventListener("click", function () { spendView.range = b.getAttribute("data-r"); if (spendView.day && !spendDayOk(spendView.range, spendView.day)) spendView.day = ""; $$("[data-r]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-checked", x === b); }); load(); }); });
       $$("[data-by]").forEach(function (b) { b.addEventListener("click", function () { spendView.by = b.getAttribute("data-by"); $$("[data-by]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-selected", x === b); }); load(); }); });
-      var saveBudget = function (k) {
-        var b = budgets[k];
-        api("/api/budgets", { method: "POST", body: { scope: b.scope, scope_id: b.scope_id, period: b.period, bucket: b.bucket, max_usd: b.max_usd, max_tokens: b.max_tokens, action: $('[data-bact="' + k + '"]').value, warn_at_pct: +$('[data-bwarn="' + k + '"]').value } }).then(function () { toast(T("sp.budget_saved")); }).catch(fail);
+      // Only the field that changed is sent; the server keeps the rest.
+      var postBudget = function (k, patch) {
+        var b = budgets[k], req = { scope: b.scope, scope_id: b.scope_id, period: b.period, bucket: b.bucket };
+        Object.keys(patch).forEach(function (x) { req[x] = patch[x]; });
+        return api("/api/budgets", { method: "POST", body: req });
       };
-      $$("[data-bact],[data-bwarn]").forEach(function (sel) { sel.addEventListener("change", function () { saveBudget(+(sel.getAttribute("data-bact") || sel.getAttribute("data-bwarn"))); }); });
+      $$("[data-bact],[data-bwarn]").forEach(function (sel) {
+        sel.addEventListener("change", function () {
+          var a = sel.hasAttribute("data-bact"), k = +(sel.getAttribute(a ? "data-bact" : "data-bwarn"));
+          postBudget(k, a ? { action: sel.value } : { warn_at_pct: +sel.value }).then(function () { budgets[k][a ? "action" : "warn_at_pct"] = a ? sel.value : +sel.value; toast(T("sp.budget_saved")); }).catch(fail);
+        });
+      });
+      $$("[data-bcap]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var k = +btn.getAttribute("data-bcap");
+          editCap(btn, budgets[k], function (v) {
+            return postBudget(k, { max_usd: v }).then(function () {
+              return refresh().then(function () { var nb = $('[data-bcap="' + k + '"]'); if (nb) nb.focus(); });
+            });
+          });
+        });
+      });
       load();
     });
   }
@@ -4707,12 +4778,12 @@
           $$("[data-bud]").forEach(function (inp) {
             inp.addEventListener("change", function () {
               var k = inp.getAttribute("data-bud"), v = inp.value, req;
-              if (k === "g_usd" || k === "g_tok") {
-                var u = $('[data-bud="g_usd"]').value, t = $('[data-bud="g_tok"]').value;
-                req = { scope: "global", period: "day", max_usd: parseFloat(u) || 0, max_tokens: parseInt(t, 10) || 0 };
-              } else {
+              // only the changed cap: the server keeps the others and "on breach" / "warn at"
+              if (k === "g_usd") req = { scope: "global", period: "day", max_usd: Math.max(0, parseFloat(v) || 0) };
+              else if (k === "g_tok") req = { scope: "global", period: "day", max_tokens: Math.max(0, parseInt(v, 10) || 0) };
+              else {
                 var sid = inp.getAttribute("data-sid");
-                req = { scope: "bucket", scope_id: sid, bucket: sid, period: "day", max_usd: parseFloat(v) || 0 };
+                req = { scope: "bucket", scope_id: sid, bucket: sid, period: "day", max_usd: Math.max(0, parseFloat(v) || 0) };
               }
               api("/api/budgets", { method: "POST", body: req }).then(function () { savedMark(inp); }).catch(fail);
             });

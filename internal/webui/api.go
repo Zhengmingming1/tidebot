@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -1539,33 +1540,20 @@ func (s *Server) handleWebUIToggle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
+	// Fields left out keep what the budget has now: changing the cap in Settings must not
+	// reset "on breach" / "warn at" chosen on the spend page, and the other way round.
 	var body struct {
-		Scope     string  `json:"scope"`
-		ScopeID   string  `json:"scope_id"`
-		Period    string  `json:"period"`
-		Bucket    string  `json:"bucket"`
-		MaxUSD    float64 `json:"max_usd"`
-		MaxTokens int64   `json:"max_tokens"`
-		Action    string  `json:"action"`
-		WarnAtPct int     `json:"warn_at_pct"`
+		Scope     string   `json:"scope"`
+		ScopeID   string   `json:"scope_id"`
+		Period    string   `json:"period"`
+		Bucket    string   `json:"bucket"`
+		MaxUSD    *float64 `json:"max_usd"`
+		MaxTokens *int64   `json:"max_tokens"`
+		Action    *string  `json:"action"`
+		WarnAtPct *int     `json:"warn_at_pct"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body); err != nil {
 		writeErr(w, 400, "bad json")
-		return
-	}
-	// pause_notify: block the run and pause the task; block_notify: block the run, keep the task on.
-	if body.Action == "" {
-		body.Action = "pause_notify"
-	}
-	if body.Action != "pause_notify" && body.Action != "block_notify" {
-		writeErr(w, 400, "action must be pause_notify or block_notify")
-		return
-	}
-	if body.WarnAtPct == 0 {
-		body.WarnAtPct = 80
-	}
-	if body.WarnAtPct < 1 || body.WarnAtPct > 100 {
-		writeErr(w, 400, "warn_at_pct must be 1-100")
 		return
 	}
 	if body.Scope == "" {
@@ -1580,11 +1568,55 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad scope")
 		return
 	}
-	b := cost.Budget{
-		Scope: body.Scope, ScopeID: body.ScopeID, Period: body.Period, Bucket: body.Bucket,
-		MaxUSD:    sql.NullFloat64{Float64: body.MaxUSD, Valid: body.MaxUSD > 0},
-		MaxTokens: sql.NullInt64{Int64: body.MaxTokens, Valid: body.MaxTokens > 0},
-		Action:    body.Action, WarnAtPct: body.WarnAtPct,
+	if body.Period != "day" && body.Period != "run" {
+		writeErr(w, 400, "bad period")
+		return
+	}
+	b, err := s.deps.Cost.FindBudget(r.Context(), body.Scope, body.ScopeID, body.Period, body.Bucket)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		b = cost.Budget{Scope: body.Scope, ScopeID: body.ScopeID, Period: body.Period, Bucket: body.Bucket, Action: "pause_notify", WarnAtPct: 80}
+	}
+	if b.Action == "" {
+		b.Action = "pause_notify"
+	}
+	if b.WarnAtPct == 0 {
+		b.WarnAtPct = 80
+	}
+	if body.MaxUSD != nil {
+		v := *body.MaxUSD
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1e6 {
+			writeErr(w, 400, "max_usd must be 0-1000000")
+			return
+		}
+		b.MaxUSD = sql.NullFloat64{Float64: math.Round(v*1e4) / 1e4, Valid: v > 0}
+		b.Currency = "" // new amount is in the display currency
+	}
+	if body.MaxTokens != nil {
+		v := *body.MaxTokens
+		if v < 0 || v > 1e12 {
+			writeErr(w, 400, "max_tokens must be 0-1000000000000")
+			return
+		}
+		b.MaxTokens = sql.NullInt64{Int64: v, Valid: v > 0}
+	}
+	// pause_notify: block the run and pause the task; block_notify: block the run, keep the task on.
+	if body.Action != nil && *body.Action != "" {
+		if *body.Action != "pause_notify" && *body.Action != "block_notify" {
+			writeErr(w, 400, "action must be pause_notify or block_notify")
+			return
+		}
+		b.Action = *body.Action
+	}
+	if body.WarnAtPct != nil && *body.WarnAtPct != 0 {
+		if *body.WarnAtPct < 1 || *body.WarnAtPct > 100 {
+			writeErr(w, 400, "warn_at_pct must be 1-100")
+			return
+		}
+		b.WarnAtPct = *body.WarnAtPct
 	}
 	if err := s.deps.Cost.UpsertBudget(r.Context(), b); err != nil {
 		writeErr(w, 500, err.Error())

@@ -1759,5 +1759,16 @@
   "notif.budget_cap": "预算超限",
   "act.skip": "跳过本次",
   "sp.held_tip": "{n} 个进行中的运行预留了 {held}（各自单次上限中尚未花掉的部分），结束后按实际花费结算。",
-  "sp.remaining_held_tip": "上限 {cap} − 已用 {used} − 运行中预留 {held}。同时开始的运行共享剩余预算，不会一起超支。"
+  "sp.remaining_held_tip": "上限 {cap} − 已用 {used} − 运行中预留 {held}。同时开始的运行共享剩余预算，不会一起超支。",
+  "sp.used_cap": "已用 / 上限",
+  "sp.bud_settings": "预算设置",
+  "sp.no_budgets": "还没有预算",
+  "sp.cap_tip": "点击修改上限，填 0 取消上限",
+  "sp.cap_aria": "{name}上限：{v}，点击修改",
+  "sp.cap_bad": "请输入金额，例如 5 或 2.50",
+  "sp.cap_off_title": "不再限制「{name}」的花费？",
+  "sp.cap_off_body": "取消后这一项不再按金额拦截运行，也不再发预算提醒。之后可随时再设。",
+  "sp.cap_off_ok": "不设上限",
+  "sp.cap_saved": "{name}上限已改为 {v}。",
+  "sp.cap_off_done": "已取消{name}的金额上限。"
 }

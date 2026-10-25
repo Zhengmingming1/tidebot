@@ -304,10 +304,41 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .bars .bar span { display: block; width: 100%; max-width: 32px; background: var(--accent-100); border-radius: 4px 4px 0 0; min-height: 2px; }
 .bars .bar.today span { background: var(--accent); }
 .bars .bar small { font-size: 12px; color: var(--text-3); }
-.budget-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 6px var(--s2); align-items: center; padding: 12px 0; border-top: 1px solid var(--border); }
-.budget-row:first-child { border-top: 0; padding-top: 0; }
-.budget-row .progress { grid-column: 1 / -1; }
-.budget-row strong { font-weight: 600; }
+/* budgets: one aligned row per scope, column heads instead of a label per select */
+.bud-grid { display: grid; grid-template-columns: minmax(112px, 1.3fr) minmax(80px, 1fr) 192px 176px 80px; align-items: center; }
+.bud-head, .bud-row { display: contents; }
+.bud-head > span:not(:last-child), .bud-row > span:not(:last-child) { padding-right: 16px; }
+.bud-head > span { font-size: 12px; font-weight: 600; color: var(--text-3); padding-bottom: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bud-row > span { min-width: 0; height: 48px; display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+.bud-row:last-child > span { border-bottom: 0; }
+.bud-row > span > .progress { flex: 1; }
+.bud-row select { height: 32px; width: 100%; padding: 0 10px; font-size: 13px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background-color: var(--surface); color: var(--text); font-family: inherit; outline: none; min-width: 0; }
+.bud-name { gap: 4px; white-space: nowrap; overflow: hidden; }
+.bud-name strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.bud-amt { justify-content: flex-end; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bud-head > .right { text-align: right; }
+/* the cap reads as text; hover / focus draw a box around it without moving it (idea: n8n InlineTextEdit) */
+.cap-edit { position: relative; border: 0; background: none; padding: 0; margin: 0; font: inherit; color: var(--text-2); cursor: pointer; font-variant-numeric: tabular-nums; }
+.cap-edit::before { content: ""; position: absolute; inset: -4px -6px; border-radius: 6px; border: 1px solid transparent; transition: border-color .12s, background-color .12s; z-index: -1; }
+.cap-edit:hover::before { border-color: var(--border-strong); background: var(--surface); }
+.cap-edit:focus-visible { outline: none; }
+.cap-edit:focus-visible::before { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.bud-amt { isolation: isolate; }
+.cap-in { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 6px; margin: 0 -6px 0 0; border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.cap-in .cap-sym { color: var(--text-3); }
+.cap-in input { border: 0; outline: none; padding: 0; height: 24px; width: auto; min-width: 0; font: inherit; font-variant-numeric: tabular-nums; background: transparent; color: var(--text); text-align: right; }
+.cap-in input:focus-visible { box-shadow: none; }
+.cap-in input[aria-invalid="true"] { color: var(--danger); }
+.cap-in.bad { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
+.sp-events .table td { vertical-align: top; }
+@media (max-width: 800px) {
+  .bud-grid { display: block; }
+  .bud-head { display: none; }
+  .bud-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "n a" "p p" "s w"; gap: 8px 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .bud-row > span { height: auto; border-bottom: 0; }
+  .bud-row > span:nth-child(1) { grid-area: n; } .bud-row > span:nth-child(2) { grid-area: p; } .bud-row > span:nth-child(3) { grid-area: a; }
+  .bud-row > span:nth-child(4) { grid-area: s; } .bud-row > span:nth-child(5) { grid-area: w; width: 96px; }
+}
 
 /* ---------- settings ---------- */
 .set-row { display: flex; align-items: center; gap: var(--s2); padding: var(--s2) 0; border-top: 1px solid var(--border); }
@@ -668,8 +699,6 @@ table.cmp th, table.cmp td { padding: 6px 8px; font-size: 13px; }
 .sp-day-runs { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; margin-left: auto; }
 .sp-bars { height: 120px; margin-bottom: var(--s2); }
 .progress.thin { height: 6px; min-width: 80px; }
-.budget-act { display: flex; gap: var(--s2); flex-wrap: wrap; font-size: 12px; color: var(--text-2); margin-top: 6px; }
-.budget-act select { height: 28px; font-size: 12px; width: auto; padding: 0 8px; }
 .card.stat { padding: var(--s2) var(--s3); gap: 4px; }
 
 /* ---------- I6: command palette ---------- */

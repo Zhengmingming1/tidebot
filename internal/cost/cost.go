@@ -265,6 +265,11 @@ func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, run
 	return out, nil
 }
 
+// FindBudget returns the budget row for a scope (sql.ErrNoRows when there is none).
+func (s *Service) FindBudget(ctx context.Context, scope, scopeID, period, bucket string) (Budget, error) {
+	return s.findBudget(ctx, scope, scopeID, period, bucket)
+}
+
 func (s *Service) findBudget(ctx context.Context, scope, scopeID, period, bucket string) (Budget, error) {
 	row := s.DB.QueryRowContext(ctx, `
 SELECT id, scope, scope_id, period, max_usd, max_tokens, action, warn_at_pct, bucket, currency

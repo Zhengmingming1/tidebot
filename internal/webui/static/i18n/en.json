@@ -719,8 +719,8 @@
   "sk.export": "Download .zip",
   "sk.export_v": "Download v{n} as .zip",
   "sk.export_tip": "Download v{n} as a .zip — import it on another computer as is",
-  "sp.a_block": "block this run only",
-  "sp.a_pause": "block and pause the task",
+  "sp.a_block": "Block run only",
+  "sp.a_pause": "Block, pause task",
   "sp.action": "Action · {a}",
   "sp.breach_hint": "Either way the run that would go over is blocked and you get a notification. Bars turn yellow at 80% and red at 100%.",
   "sp.breakdown": "Where the money went",
@@ -1759,5 +1759,16 @@
   "notif.budget_cap": "Budget breached",
   "act.skip": "skip this run",
   "sp.held_tip": "{n} running run(s) hold {held} (the unspent part of their per-run caps); they settle at what they actually spend.",
-  "sp.remaining_held_tip": "Cap {cap} − spent {used} − held by running runs {held}. Runs that start together share what's left instead of each overspending it."
+  "sp.remaining_held_tip": "Cap {cap} − spent {used} − held by running runs {held}. Runs that start together share what's left instead of each overspending it.",
+  "sp.used_cap": "Used / cap",
+  "sp.bud_settings": "Budget settings",
+  "sp.no_budgets": "No budgets yet",
+  "sp.cap_tip": "Click to change the cap; 0 removes it",
+  "sp.cap_aria": "{name} cap: {v}, click to change",
+  "sp.cap_bad": "Enter an amount, like 5 or 2.50",
+  "sp.cap_off_title": "Remove the {name} cap?",
+  "sp.cap_off_body": "Runs in this scope are no longer stopped by spend and you get no budget notices for it. You can set a cap again any time.",
+  "sp.cap_off_ok": "Remove cap",
+  "sp.cap_saved": "{name} cap set to {v}.",
+  "sp.cap_off_done": "{name} cap removed."
 }

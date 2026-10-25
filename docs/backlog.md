@@ -2292,3 +2292,75 @@ two runs could spend $0.60 between them, and the daily cap was overshot by one r
 2. Show "预留 $x" in the Home "running now" row and the run page's live cost while it runs.
 3. Hold quota-based subscription runs against the provider's request / token window the same way.
 4. Fix the budget-row selects wrapping under their labels at 1024 px (seen in the shot).
+
+## 2026-10-25 (12:00): spend page budgets — one aligned row each, the cap edits in place
+
+Category: **UI polish / interaction** (spend page, settings › budgets). The last rounds were
+mostly features and backend (budget holds, j / k, disk floor, skill files, channels). This one
+picks up idea 4 of 09:20: at 1024 px the budget card put "超出后" and "提醒阈值" on lines of
+their own with the selects wrapping under them, so four budgets took the whole window. While
+fixing it, a real bug turned up: saving a cap in Settings › Budgets sent no action / warn level,
+and the server filled in the defaults, so **changing the global cap silently reset "on breach"
+to "pause the task" and "warn at" to 80 %** (and a bucket cap wiped the bucket's token cap).
+
+**Done**
+
+- Budgets card is full width with one 48 px row per scope on a shared grid: scope · period, bar,
+  used / cap (right-aligned, tabular numbers), "on breach" select, "warn at" select. Column heads
+  replace the label next to every select; the breach explanation moved to the ⓘ tip; a "预算设置"
+  link goes to Settings › Budgets. 5 budgets now take ~340 px (card included) instead of ~800 px. Task names that
+  don't fit are cut with "…" and shown in full on hover.
+- Budget events sit full width below, cells top-aligned, so the detail column no longer wraps
+  into five lines.
+- The cap is a button that reads as text: hover / focus draws a box around it without moving
+  anything, tooltip "点击修改上限，填 0 取消上限". Click or Enter opens a small input in place
+  (currency sign in front, grows with the text). Enter or leaving the field saves, Esc cancels,
+  empty or unchanged puts the old value back. Accepts `5`, `2.50`, `12,5`, `$7.25`, `¥ 30`; a bad
+  value turns the box red with a message and stays open (leaving it then just drops it). `0`
+  asks first in the app's own dialog ("不再限制「辅助」的花费？" / "不设上限"). After saving, the page
+  refreshes in place (scroll kept, no skeleton), focus returns to the cap, toast says the new cap.
+- `/api/budgets` is now a partial update: any of `max_usd`, `max_tokens`, `action`, `warn_at_pct`
+  left out keeps its current value (new budgets still get pause / 80 %). Also validates
+  `max_usd` 0..1 000 000 (rounded to 4 decimals), `max_tokens` 0..10¹², period `day` / `run`.
+  The spend page and Settings send only the field that changed. Parameterized SQL as before.
+- English action labels shortened ("Block, pause task" / "Block run only") so they fit the 160 px
+  select; zh-CN unchanged.
+- Under 800 px each row folds into three lines (name + amount, bar, the two selects).
+- Same on macOS / Windows / Linux, desktop window and browser: plain CSS grid (`display:
+  contents` rows, no `:has()` for older WebKitGTK), the outline uses `::before` so the
+  `[data-tip]::after` tooltip still works, no modifier keys, no native dialogs. 1024×655 checked
+  in zh-CN and en: no cell overflows, page scrollWidth 1024.
+- Shots (demo data, spend figures faked in the browser since the demo provider is a
+  subscription): `/workspace/tidebot-shots/budget-rows-cap-edit-zh-CN-1024x655.png`,
+  `budget-rows-cap-editing-zh-CN-1024x655.png`, `budget-rows-cap-edit-en-1024x655.png`.
+- Tests: `TestBudgetPartialUpdate` (cap change keeps action / warn / token cap, token cap off,
+  warn change keeps caps, 0 turns the cap off, new bucket gets defaults and 4-decimal rounding,
+  7 bad requests rejected without touching the budget), `TestBudgetRowsUI` (markup, in-app
+  confirm, only the changed field posted from both pages, CSS, i18n in both languages, label
+  length; `parseCap` under node: 14 inputs).
+
+**Inspiration**
+
+- n8n-io/n8n `packages/frontend/@n8n/design-system/src/components/N8nInlineTextEdit/InlineTextEdit.vue`:
+  the preview text gets a box drawn by a pseudo-element on hover / focus so nothing shifts, the
+  input width follows a hidden measuring span between a min and max, `submit-mode="both"`
+  (Enter and blur submit), cancel restores the model value, an empty value is not submitted.
+  tidebot borrows the no-shift outline, grow-with-text width (via `size`), Enter / blur / Esc
+  and "empty reverts". Ideas only, no code copied.
+
+**Learned**
+
+- A form POST that sends "all fields" from a page that only shows some of them is how the
+  settings page reset the breach action: partial updates on the server are the safer default.
+- The shared tooltip is `[data-tip]::after`; any decoration on an element with `data-tip` has
+  to use `::before`, or the tooltip text renders on top of it.
+- Grid rows with `display: contents` can't take `order` per row on small screens; folding them
+  means switching the row back to its own grid.
+
+**Ideas for later**
+
+1. Add a budget for any task from the spend page (a "+" row with a task picker) instead of
+   only from the task form.
+2. Edit the global token cap the same way (it is only in Settings today).
+3. Undo in the toast after removing a cap (8 s, puts the old cap back).
+4. Same inline edit for the per-run cap and timeout on the task page.
