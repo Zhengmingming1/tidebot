@@ -62,6 +62,7 @@ type Summary struct {
 	Groups    []string          `json:"groups"`
 	All       bool              `json:"all"`   // a "*" rule (agentctl): every event
 	Tasks     int               `json:"tasks"` // per-task rules, kept as they are
+	Last      *Delivery         `json:"last,omitempty"`
 }
 
 // public config keys per kind (everything else is dropped)
@@ -245,6 +246,9 @@ func (s *Service) Save(ctx context.Context, chID string, in Input) (Channel, err
 		_, err = tx.ExecContext(ctx, `INSERT INTO notify_channels(id, kind, name, config_json, enabled, created_at) VALUES(?,?,?,?,1,?)`, c.ID, c.Kind, c.Name, string(b), nowUTC())
 	} else {
 		_, err = tx.ExecContext(ctx, `UPDATE notify_channels SET name=?, config_json=? WHERE id=?`, c.Name, string(b), c.ID)
+		if err == nil && !sameSetup(old, in) {
+			err = resetDelivery(ctx, tx, c.ID)
+		}
 	}
 	if err != nil {
 		return Channel{}, err
@@ -310,9 +314,14 @@ func (s *Service) Test(ctx context.Context, chID string, in Input, m Message) er
 	if sec == "" && hasSecret {
 		sec = s.secret(old)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	tctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	return s.deliver(ctx, c, m, u, sec)
+	start := time.Now()
+	err := s.deliver(tctx, c, m, u, sec)
+	if chID != "" && sameSetup(old, in) {
+		s.record(ctx, chID, start, err)
+	}
+	return err
 }
 
 // Summaries lists channels for the settings page (no URLs, no secrets).
@@ -335,10 +344,14 @@ func (s *Service) Summaries(ctx context.Context) ([]Summary, error) {
 		}
 	}
 	rows.Close()
+	last, err := s.deliveries(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := []Summary{}
 	for _, c := range chs {
 		x := Summary{ID: c.ID, Kind: c.Kind, Name: c.Name, Enabled: c.Enabled, Config: map[string]string{}, Groups: []string{},
-			HasSecret: c.Config["secret_ref"] != ""}
+			HasSecret: c.Config["secret_ref"] != "", Last: last[c.ID]}
 		for _, k := range publicKeys[c.Kind] {
 			if v := c.Config[k]; v != "" {
 				x.Config[k] = v

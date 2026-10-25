@@ -4585,12 +4585,28 @@
     if (c.tasks) parts.push(T("nt.tip_tasks", { n: c.tasks }));
     return parts.join(" · ");
   }
+  // ntLastHtml: how the last send to this channel went (healthchecks' "Delivered / Failed,
+  // 2 hours ago" column). The row says only the state and when; the error, the time it took
+  // and the last success sit in the tooltip.
+  function ntLastHtml(c) {
+    var d = c.last;
+    if (!d || !d.at) return '<span class="nt-last none" tabindex="0" data-tip="' + esc(T("nt.last_never_tip")) + '"><i class="nt-dot" aria-hidden="true"></i>' + esc(T("nt.last_never")) + "</span>";
+    var tip = [T(d.ok ? "nt.last_ok_tip" : "nt.last_bad_tip", { t: when(d.at) })];
+    if (d.ms > 0) tip.push(T("nt.last_ms", { n: d.ms < 1000 ? d.ms + " ms" : (d.ms / 1000).toFixed(1) + " s" }));
+    if (!d.ok) {
+      if (d.error) tip.push(ntErr({ message: d.error }));
+      tip.push(d.ok_at ? T("nt.last_ok_at", { t: when(d.ok_at) }) : T("nt.last_ok_never"));
+    }
+    var label = esc(T(d.ok ? "nt.last_ok" : d.streak > 1 ? "nt.last_bad_n" : "nt.last_bad", { n: d.streak })) + " · ";
+    return '<span class="nt-last ' + (d.ok ? "ok" : "bad") + '" tabindex="0" data-tip="' + esc(tip.join("\n")) + '"><i class="nt-dot" aria-hidden="true"></i>' + label +
+      '<span data-ago="' + esc(d.at) + '">' + esc(ago(d.at)) + "</span></span>";
+  }
   function ntListHtml(o) {
     var chs = o.channels || [];
     if (!chs.length) return '<div class="nt-empty">' + ic("bell", "sm") + "<span>" + esc(T("set.no_channels")) + "</span></div>";
     return '<ul class="nt-list">' + chs.map(function (c) {
       return '<li class="nt-ch' + (c.enabled ? "" : " off") + '" data-ch="' + esc(c.id) + '">' + ntLogo(c.kind) +
-        '<div class="grow nt-txt"><strong data-tip="' + esc(ntTip(c)) + '">' + esc(c.name) + '</strong><small>' + esc(ntGroupsText(c)) + "</small></div>" +
+        '<div class="grow nt-txt"><strong data-tip="' + esc(ntTip(c)) + '">' + esc(c.name) + '</strong><small>' + esc(ntGroupsText(c)) + "</small></div>" + ntLastHtml(c) +
         '<button class="icon-btn sm" data-nt-test="' + esc(c.id) + '" aria-label="' + esc(T("nt.test")) + '" data-tip="' + esc(T("nt.test")) + '"' + (c.enabled ? "" : " disabled") + ">" + ic("send", "sm") + "</button>" +
         '<button class="icon-btn sm" data-nt-edit="' + esc(c.id) + '" aria-label="' + esc(T("btn.edit")) + '" data-tip="' + esc(T("btn.edit")) + '">' + ic("edit", "sm") + "</button>" +
         '<button class="icon-btn sm" data-nt-del="' + esc(c.id) + '" aria-label="' + esc(T("btn.remove")) + '" data-tip="' + esc(T("btn.remove")) + '">' + ic("trash", "sm") + "</button>" +
@@ -4608,7 +4624,10 @@
         rpc("notify.channel_enable", { id: id, enabled: on }).then(function () { toast(T(on ? "nt.on_done" : "nt.off_done", { n: byId(id).name })); return reload(); }).catch(function (x) { b.disabled = false; toast(ntErr(x), true); });
       } else if ((id = b.getAttribute("data-nt-test"))) {
         var c = byId(id); b.disabled = true;
-        rpc("notify.channel_test", { id: id, kind: c.kind, name: c.name, config: c.config }, 30000).then(function () { toast(T("nt.test_ok", { n: c.name })); }).catch(function (x) { toast(T("nt.test_bad", { e: ntErr(x) }), true); }).then(function () { b.disabled = false; });
+        rpc("notify.channel_test", { id: id, kind: c.kind, name: c.name, config: c.config }, 30000).then(function () { toast(T("nt.test_ok", { n: c.name })); }).catch(function (x) { toast(T("nt.test_bad", { e: ntErr(x) }), true); }).then(function () {
+          var had = document.activeElement === b; b.disabled = false;
+          return Promise.resolve(reload()).then(function () { var nb = had && $('[data-nt-test="' + id + '"]', box); if (nb) nb.focus(); });
+        });
       } else if ((id = b.getAttribute("data-nt-edit"))) {
         ntModal(o, byId(id), reload);
       } else if ((id = b.getAttribute("data-nt-del"))) {

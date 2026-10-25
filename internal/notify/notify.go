@@ -287,8 +287,12 @@ func (s *Service) secret(c Channel) string {
 }
 
 // Send delivers one message to one channel.
+// The result is kept on the channel row (last delivery, failures in a row).
 func (s *Service) Send(ctx context.Context, c Channel, m Message) error {
-	return s.deliver(ctx, c, m, s.channelURL(c), s.secret(c))
+	start := time.Now()
+	err := s.deliver(ctx, c, m, s.channelURL(c), s.secret(c))
+	s.record(context.WithoutCancel(ctx), c.ID, start, err)
+	return err
 }
 
 // deliver sends with an explicit URL and secret (the stored ones, or a form under test).

@@ -2364,3 +2364,60 @@ to "pause the task" and "warn at" to 80 %** (and a bucket cap wiped the bucket's
 2. Edit the global token cap the same way (it is only in Settings today).
 3. Undo in the toast after removing a cap (8 s, puts the old cap back).
 4. Same inline edit for the per-run cap and timeout on the task page.
+
+## 2026-10-25 (15:20): notification channels show how their last send went
+
+Category: **correctness / observability** (Settings › Notifications, notify core). The last
+rounds were budget holds (logic) and the budget rows (UI). Idea 2 of 10-24 21:20: once a channel
+was saved, nothing in the WebUI said whether notices still arrived. A DingTalk robot that
+started refusing (keyword check, IP allow-list, rotated token) failed silently until someone
+noticed missing alerts.
+
+**Done**
+
+- Each channel row has a status cell between the name and the buttons: green dot + "已送达 · 2
+  小时前", red "发送失败 · 1 分钟前" / "连续失败 3 次 · …", hollow "未发送过". The relative time
+  ticks with the shared `[data-ago]` ticker. Details only in the tooltip (anchored right, also on
+  keyboard focus): local time, time taken, the cleaned error, the last success or "还没有成功送达过".
+- Core: migration `012_notify_delivery.sql` adds `last_at / last_ok / last_error / last_ms /
+  last_ok_at / fail_streak` to `notify_channels`. `Service.Send` (dispatch, digest, legacy
+  `notify.test`) records every send; `Test` records only when the form equals the saved setup
+  (the list's test button), so trying unsaved values never colours the row. Saving a new
+  address / secret / config forgets the old result; rename or regroup keeps it.
+- Errors are stored cleaned: URLs reduced to their host (robot URLs carry access tokens,
+  `user:pass@` dropped), Telegram-style bot tokens masked, whitespace folded, 200 runes max.
+- The list's test button refreshes the row in place (no remount flash) and keeps focus.
+- Same on macOS / Windows / Linux, desktop window and browser: plain CSS, no paths, no
+  modifier keys, no native dialogs; times in the WebUI's time zone. zh-CN and en for every string;
+  1024×655 checked in both languages (scrollWidth 1024).
+- Shot (demo data, local fake robot): `/workspace/tidebot-shots/2026-10-25-notify-last-delivery.png`.
+- Tests: `TestChannelLastDelivery` (ok, two refusals → streak 2 with the last success kept,
+  unsaved form test ignored, saved test clears the streak, rename keeps / new URL resets, no
+  token stored), `TestCleanErr` (Telegram path token, DingTalk query token, `user:pass@`, bare bot
+  token, whitespace, length cut), `TestNotifyLastDeliveryUI` (markup, tooltip, in-place refresh,
+  CSS, i18n in both languages, label length).
+
+**Inspiration**
+
+- healthchecks/healthchecks `hc/api/models.py` (`Channel.notify`: every send, test sends too,
+  updates `last_notify`, `last_notify_duration` and `last_error` on the channel row) and
+  `templates/front/channels.html` ("Failed, 2 hours ago" in red with the error in a tooltip,
+  "Delivered, …", "Never"). tidebot borrows the per-channel last result, the duration and the
+  short-state-plus-tooltip layout, and adds the failure streak and last success. Ideas only, no
+  code copied.
+
+**Learned**
+
+- `postJSON` already never echoed the URL, but SMTP / `net` errors can; cleaning at the one
+  place that stores errors is cheaper than auditing every transport.
+- A test of edited form values must not change the saved row's state, or "test before save"
+  would paint a broken channel green.
+
+**Ideas for later**
+
+1. After N failures in a row (e.g. 5), raise one in-app notice "「钉钉 · 运维群」连续 5 次发送失败"
+   (bell + desktop), never through the failing channel itself.
+2. Show a red dot on Settings › Notifications in the settings nav while a channel is failing.
+3. A small per-channel history (last 10 sends) in the edit dialog, from the `notifications` table.
+4. Healthchecks disables a channel on a permanent error (e.g. WeCom "invalid webhook key");
+   tidebot could offer "停用此渠道" in the tooltip instead of doing it silently.

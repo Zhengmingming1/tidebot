@@ -1735,6 +1735,15 @@ a.card.stat.stat-link:focus-visible { outline: none; box-shadow: var(--focus-rin
 #nt-form .actions .grow { flex: 1; }
 .nt-txt strong { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: flex-start; max-width: 100%; }
 .nt-txt small { color: var(--text-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* last delivery: dot + state + when; error, time taken and last success in the tooltip */
+.nt-last { flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 96px; justify-content: flex-end; margin-right: var(--s1); font-size: 12px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; border-radius: var(--radius-sm); outline: none; }
+.nt-last:focus-visible { box-shadow: var(--focus-ring); }
+.nt-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; box-sizing: border-box; border: 1.5px solid var(--border-strong); }
+.nt-last.ok .nt-dot { background: var(--ok); border-color: var(--ok); }
+.nt-last.bad { color: var(--danger); font-weight: 500; }
+.nt-last.bad .nt-dot { background: var(--danger); border-color: var(--danger); }
+.nt-ch.off .nt-last { opacity: .55; }
+.nt-last[data-tip]:hover::after, .nt-last[data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
 .nt-empty { display: flex; align-items: center; gap: var(--s1); padding: var(--s2) 0 0; color: var(--text-3); border-top: 1px solid var(--border); }
 .nt-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s1); }
 .nt-kinds.one { display: flex; align-items: center; gap: var(--s1); font-weight: 600; }
