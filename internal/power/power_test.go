@@ -74,7 +74,7 @@ func TestReadSysfs(t *testing.T) {
 	}
 	// USB-C charger online, mains adapter offline: still on AC.
 	writeSupply(t, root, "AC", map[string]string{"online": "0"})
-	writeSupply(t, root, "ucsi-source-psy-USBC000:001", map[string]string{"type": "USB", "online": "1"})
+	writeSupply(t, root, "ucsi-source-psy-USBC000-001", map[string]string{"type": "USB", "online": "1"})
 	if got := ReadSysfs(root, ""); got.OnBattery {
 		t.Fatalf("usb-c %+v", got)
 	}
