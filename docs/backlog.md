@@ -2647,3 +2647,67 @@ switch between them moved the whole page 15 px sideways, the "跳动" we promise
    small inner lists, keeping the page bar always visible.
 4. Lock the page behind an open dialog without losing the lane (`overflow: hidden` +
    `padding-right: 8px` on html while `.modal-bg` is present).
+
+## 2026-10-26 (08:40): open pages before the click — intent prefetch, read-only RPCs keep the page cache
+
+Category: **performance (browser + server over a network)**. The last rounds were
+cross-platform styles, task export/import and power; this one picks up idea 2 from 04:20
+(skill detail loads late) and makes it general. On the same machine every request is ~1 ms so
+nothing showed, but the server version is used over LAN / the internet, where each detail
+page waited one round trip after the click, and the Plugins and skill pages emptied the whole
+page cache because their read-only RPCs went out as POST and every POST counted as a write.
+
+**Done**
+
+- Intent prefetch: resting the pointer on an internal link or `[data-href]` row for 60 ms
+  (mousemove restarts the clock, so sweeping across a list loads nothing), pressing it
+  (`pointerdown` / `touchstart`, before the click lands), tabbing to it (`focusin`) or picking
+  the row with j / k loads that page's first requests into the page cache. Covered: Home, Tasks,
+  task detail (each tab, same paths as the render via `taskDetailPaths`), run detail, Skills and
+  skill detail (including its three read RPCs). Addresses with filters (`?…`) are left out.
+- The render takes a prefetched answer younger than 10 s as is (no second request); older ones
+  are served and revalidated like any cached page. A 4xx refusal (e.g. "no canary to compare")
+  is kept for the same 10 s so the page doesn't ask again; 5xx / network errors are dropped.
+- Guards: only when signed in, tab visible, not the current page, not on Save-Data, at most 6
+  in flight, never inside a dialog; keys the cache already holds (≤ 5 min) are skipped; a
+  write while a prefetch is in flight (cache generation moved) discards its answer; a 401 from
+  a prefetch doesn't open the sign-in screen (`quiet`).
+- Read-only RPCs (`dashboard`, `plugins.list/catalog/get/config_get`, `triggers.list`,
+  `backup(s).list`, `notify.overview`, `pricing.get`, `pricing.catalog.get`, `storage.get`,
+  `power.get`, `network.get`, `skills.proposals/compare`, plus `skills.optimize_settings`
+  without `mode` via `rpcRead`) no longer clear the page cache and are cached/deduped like GETs.
+- Measured (Chrome, DevTools latency emulation, 1024×655): click → content with 150 ms latency
+  task 204 → 94 ms, skill 195 → 65 ms, run 192 → 75 ms; with 400 ms latency ~800 → 70–150 ms
+  (no skeleton). Back to Tasks after Plugins and a skill page at 400 ms: 795 → 20 ms.
+  flicker-check unchanged (only the known skill-detail inner skeleton). No visual change, so no
+  screenshot. Same code path on macOS / Windows / Linux, desktop window and browser (DOM events
+  only, no shortcuts, no native dialogs, no new strings).
+- Tests: `TestIntentPrefetch` (route → requests table incl. tab and encoded ids, skipped
+  routes, every guard, render uses the prefetch without a request, stale prefetch revalidated,
+  4xx kept / 5xx not, write race discards, read RPCs keep and share the cache, write RPCs drop
+  it, in-flight cap released, no re-render from a prefetch); `TestListKeyboardCursor` checks j
+  prefetches the picked row.
+
+**Inspiration**
+
+- sveltejs/kit `packages/kit/src/runtime/client/client.js` (`setup_preload`): `mouseover` arms a
+  `mousemove` "pointer comes to rest" timer (20 ms), `mousedown` / `touchstart` preload at tap
+  priority, no preload for the current URL, nothing when `navigator.connection.saveData`.
+- open-webui/open-webui `src/app.html`: `<body data-sveltekit-preload-data="hover">` — the whole
+  app opts into hover preloading. Ideas only, no code copied.
+
+**Learned**
+
+- Playwright's sync `page.route` with `time.sleep` serialises every request; use CDP
+  `Network.emulateNetworkConditions` to add latency per request instead.
+- The prefetch must not refresh keys the page cache already serves: the render returns the
+  cached copy at once and relies on its own revalidation to repaint; a prefetch landing in
+  between would update the cache silently and the page would stay stale.
+
+**Ideas for later**
+
+1. Prefetch the runs list too (needs the same URL builder `renderRuns` uses for its filters).
+2. Server side: mark read-only RPCs in the registry and let the UI fetch the list, instead of a
+   hand-kept `RPC_READS` array.
+3. Viewport prefetch for the first few rows of Home's running list (SvelteKit's `viewport`
+   priority), only on fast connections.

@@ -244,13 +244,16 @@
   // resolve at once from cache (no blank frame between tabs), then refetch in
   // the background; if the data changed the page re-renders softly (scroll and
   // focus kept). Any write clears the cache.
-  var swr = { on: false, cache: {}, order: [], pending: {}, timer: null };
-  function swrPut(path, data) {
-    if (!swr.cache[path]) { swr.order.push(path); if (swr.order.length > 80) delete swr.cache[swr.order.shift()]; }
-    var str = JSON.stringify(data), changed = swr.cache[path] && swr.cache[path].s !== str;
-    swr.cache[path] = { s: str, t: Date.now() };
+  var swr = { on: false, cache: {}, order: [], pending: {}, timer: null, gen: 0 };
+  // pf: filled by an intent prefetch (hover / press / focus / j-k on a link) shortly before the
+  // click, so the page renders from it without asking the server a second time.
+  function swrPut(key, data, pf) {
+    if (!swr.cache[key]) { swr.order.push(key); if (swr.order.length > 80) delete swr.cache[swr.order.shift()]; }
+    var str = JSON.stringify(data), changed = swr.cache[key] && swr.cache[key].s !== str;
+    swr.cache[key] = { s: str, t: Date.now(), pf: !!pf };
     return changed;
   }
+  function swrClear() { swr.cache = {}; swr.order = []; swr.gen++; }
   function swrRerender() {
     clearTimeout(swr.timer);
     swr.timer = setTimeout(function () {
@@ -259,17 +262,26 @@
       route(true);
     }, 120);
   }
+  var SWR_PF_MS = 10000, SWR_MAX_MS = 5 * 60 * 1000;
+  // opts.cacheKey: a read that goes out as POST (read-only RPC) shares the same cache.
+  // opts.read: a POST that changes nothing, so it doesn't drop the cache either.
   function api(path, opts) {
     opts = opts || {};
-    if ((opts.method || "GET") === "GET" && swr.on && !opts.fresh) {
-      var c = swr.cache[path];
-      if (c && swr.soft && Date.now() - c.t < 3000) return Promise.resolve(JSON.parse(c.s)); // just refreshed: no loop
-      var net = swr.pending[path] || (swr.pending[path] = apiRaw(path, opts).then(function (d) { delete swr.pending[path]; if (swrPut(path, d)) swrRerender(); return d; }, function (e) { delete swr.pending[path]; throw e; }));
-      if (c && Date.now() - c.t < 5 * 60 * 1000) { net.catch(function () {}); return Promise.resolve(JSON.parse(c.s)); }
+    var method = opts.method || "GET", key = method === "GET" ? path : opts.cacheKey || "";
+    if (key && swr.on && !opts.fresh) {
+      var c = swr.cache[key], age = c ? Date.now() - c.t : Infinity;
+      if (c && c.err) {
+        // A prefetched refusal (e.g. "no canary to compare") stands for a moment like an answer does.
+        if (c.pf && age < SWR_PF_MS) { var pe = new Error(c.err.m); pe.status = c.err.status; pe.data = c.err.data; return Promise.reject(pe); }
+        c = null; age = Infinity;
+      }
+      if (c && ((swr.soft && age < 3000) || (c.pf && age < SWR_PF_MS))) return Promise.resolve(JSON.parse(c.s)); // just refreshed / prefetched: no second trip
+      var net = swr.pending[key] || (swr.pending[key] = apiRaw(path, opts).then(function (d) { delete swr.pending[key]; if (swrPut(key, d)) swrRerender(); return d; }, function (e) { delete swr.pending[key]; throw e; }));
+      if (c && age < SWR_MAX_MS) { net.catch(function () {}); return Promise.resolve(JSON.parse(c.s)); }
       return net.then(function (d) { return JSON.parse(JSON.stringify(d)); });
     }
     return apiRaw(path, opts).then(function (d) {
-      if ((opts.method || "GET") !== "GET") { swr.cache = {}; swr.order = []; }
+      if (method !== "GET" && !opts.read) swrClear();
       return d;
     });
   }
@@ -292,7 +304,7 @@
       var ct = res.headers.get("content-type") || "";
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {
-        if (res.status === 401 && path !== "/api/login") { showLogin(); var e1 = new Error(T("err.sign_in")); e1.auth = true; throw e1; }
+        if (res.status === 401 && path !== "/api/login" && !opts.quiet) { showLogin(); var e1 = new Error(T("err.sign_in")); e1.auth = true; throw e1; }
         if (!res.ok) { var e2 = new Error((data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
         return data;
       });
@@ -755,6 +767,7 @@
     var rows = kbRows(), j = kbStep(rows.length, rows.indexOf(kbRow(rows)), d);
     if (j < 0) return false;
     kbCur[kbPage()] = rows[j].getAttribute("data-href"); kbLive = kbPage();
+    prefetchRoute(kbCur[kbPage()]);
     var el = kbPaint(rows);
     // Focus moves to the row (screen readers follow, a chip clicked before keeps no Enter).
     if (el) { el.focus({ preventScroll: true }); el.scrollIntoView({ block: "nearest" }); }
@@ -1771,10 +1784,15 @@
     el.addEventListener("click", start);
     el.addEventListener("keydown", function (e) { if (e.key === "Enter" && !el.classList.contains("editing")) { e.preventDefault(); start(); } });
   }
+  // The task page's first requests; the intent prefetch asks for exactly these.
+  function taskDetailPaths(id, tab) {
+    var base = "/api/tasks/" + enc(id);
+    return [base, base + "/amendments", base + "/versions", base + "/runs?limit=" + (tab === "runs" ? 50 : 6)];
+  }
   function renderTaskDetail(id, tab) {
     tab = tab || "overview";
     var base = "/api/tasks/" + enc(id);
-    return Promise.all([api(base), api(base + "/amendments"), api(base + "/versions"), api(base + "/runs?limit=" + (tab === "runs" ? 50 : 6))]).then(function (r) {
+    return Promise.all(taskDetailPaths(id, tab).map(function (u) { return api(u); })).then(function (r) {
       var t = r[0], items = r[1] || [], vers = r[2], runs = r[3] || [];
       var mini = runs.length ? '<ul class="mini-runs">' + runs.map(function (x) {
         var d = x.status === "succeeded" ? "" : (x.status === "running" || x.status === "queued") ? "run" : "bad";
@@ -1934,7 +1952,7 @@
   }
   function renderSkillDetail(id, params) {
     var base = "/api/skills/" + enc(id);
-    return Promise.all([api("/api/skills"), api(base + "/versions"), rpc("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), rpc("skills.proposals", { skill_id: id }).catch(function () { return []; }), rpc("skills.compare", { skill_id: id }).catch(function () { return null; })]).then(function (r) {
+    return Promise.all([api("/api/skills"), api(base + "/versions"), rpcRead("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), rpc("skills.proposals", { skill_id: id }).catch(function () { return []; }), rpc("skills.compare", { skill_id: id }).catch(function () { return null; })]).then(function (r) {
       var sk = (r[0] || []).filter(function (x) { return x.id === id; })[0];
       if (!sk) throw new Error(T("sk.not_found"));
       var vers = r[1], oset = r[2] || { mode: "off" }, props = r[3] || [], cmp = r[4];
@@ -3717,9 +3735,15 @@
   }
 
   // ---------- PLUGINS ----------
-  function rpc(method, params, timeout) {
-    return api("/api/rpc/" + method, { method: "POST", body: params || {}, timeout: timeout }).then(function (r) { return r.result; });
+  // Pure reads: they neither drop the page cache nor wait for the network when cached.
+  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "network.get", "skills.proposals", "skills.compare"];
+  function rpcKey(method, params) { return "rpc:" + method + ":" + JSON.stringify(params || {}); }
+  function rpcCall(method, params, timeout, read) {
+    return api("/api/rpc/" + method, { method: "POST", body: params || {}, timeout: timeout, read: read, cacheKey: read ? rpcKey(method, params) : "" }).then(function (r) { return r.result; });
   }
+  function rpc(method, params, timeout) { return rpcCall(method, params, timeout, RPC_READS.indexOf(method) >= 0); }
+  // For a method that reads or writes depending on its params (e.g. skills.optimize_settings).
+  function rpcRead(method, params) { return rpcCall(method, params, undefined, true); }
   function renderPlugins() {
     return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; }), rpc("plugins.catalog").catch(function () { return []; })]).then(function (res) {
       var d = res[0] || {}, plugins = res[1] || [], trig = res[2] || [], baks = res[3] || [], tname = {}, cat = res[5] || [];
@@ -5363,6 +5387,77 @@
         });
       });
   }
+
+  // ---------- intent prefetch ----------
+  // Resting the pointer on a link for a moment, pressing it, tabbing to it or picking its row
+  // with j / k loads that page's data into the page cache, so the click renders at once
+  // (no skeleton on a slow link). Only reads, at most 6 at a time, nothing on Save-Data, a
+  // hidden tab or the page already shown; a 401 here never opens the sign-in screen.
+  var PF_REST_MS = 60, PF_MAX = 6, pf = { busy: 0, el: null, t: null };
+  function pfGet(path) { return { key: path, run: function () { return apiRaw(path, { quiet: true }); } }; }
+  function pfRpc(method, params) { return { key: rpcKey(method, params), run: function () { return apiRaw("/api/rpc/" + method, { method: "POST", body: params || {}, quiet: true }); } }; }
+  function pfDecode(x) { try { return decodeURIComponent(x); } catch (e) { return ""; } }
+  // Same requests the page's render starts with; routes with filters in the address are left out.
+  function prefetchReqs(hash) {
+    var h = String(hash || "").replace(/^#\/?/, ""), qi = h.indexOf("?");
+    if (qi >= 0) return [];
+    var parts = h.split("/").filter(Boolean).map(pfDecode);
+    if (parts.some(function (x) { return !x; })) return [];
+    var id = parts[1];
+    switch (parts[0]) {
+      case undefined: return [pfGet("/api/overview"), pfGet("/api/dashboard")];
+      case "tasks": return id ? taskDetailPaths(id, parts[2] || "overview").map(pfGet) : [pfGet("/api/tasks")];
+      case "runs": return id ? [pfGet("/api/runs/" + enc(id))] : [];
+      case "skills": return id ? [pfGet("/api/skills"), pfGet("/api/skills/" + enc(id) + "/versions"), pfRpc("skills.optimize_settings", { skill_id: id }), pfRpc("skills.proposals", { skill_id: id }), pfRpc("skills.compare", { skill_id: id })] : [pfGet("/api/skills")];
+    }
+    return [];
+  }
+  function prefetchRoute(hash) {
+    var conn = navigator.connection;
+    if (!state.csrf || document.hidden || !hash || hash === (location.hash || "#/") || (conn && conn.saveData)) return 0;
+    var n = 0, gen = swr.gen;
+    prefetchReqs(hash).forEach(function (q) {
+      var c = swr.cache[q.key];
+      // Anything the page cache would serve already opens at once (and revalidates as before).
+      if (swr.pending[q.key] || (c && Date.now() - c.t < SWR_MAX_MS) || pf.busy >= PF_MAX) return;
+      n++; pf.busy++;
+      var done = function () { pf.busy--; delete swr.pending[q.key]; };
+      // A write while this was in flight (gen moved) means the answer may predate it: don't keep it.
+      var pr = swr.pending[q.key] = q.run().then(function (d) { done(); if (gen === swr.gen) swrPut(q.key, d, true); return d; }, function (e) {
+        done();
+        // Keep a server refusal (4xx) so the page doesn't ask again; network errors and 5xx are just dropped.
+        if (gen === swr.gen && e.status >= 400 && e.status < 500 && e.status !== 401 && !swr.cache[q.key]) { swr.order.push(q.key); swr.cache[q.key] = { err: { m: e.message, status: e.status, data: e.data }, t: Date.now(), pf: true }; }
+        throw e;
+      });
+      pr.catch(function () {});
+    });
+    return n;
+  }
+  function pfTarget(el) {
+    var a = el && el.closest && el.closest('a[href^="#/"], [data-href^="#/"]');
+    if (!a || a.closest("#modal-root")) return "";
+    return a.getAttribute("data-href") || a.getAttribute("href") || "";
+  }
+  (function () {
+    var clear = function () { clearTimeout(pf.t); pf.t = null; pf.el = null; };
+    // Wait for the pointer to rest (mousemove restarts the clock), so sweeping across a list loads nothing.
+    document.addEventListener("mouseover", function (e) {
+      var h = pfTarget(e.target);
+      if (!h) { clear(); return; }
+      if (h === pf.el) return;
+      clear(); pf.el = h;
+      pf.t = setTimeout(function () { pf.t = null; prefetchRoute(h); }, PF_REST_MS);
+    });
+    document.addEventListener("mousemove", function (e) {
+      if (!pf.el || pfTarget(e.target) !== pf.el) return;
+      var h = pf.el;
+      clearTimeout(pf.t); pf.t = setTimeout(function () { pf.t = null; prefetchRoute(h); }, PF_REST_MS);
+    }, { passive: true });
+    var now = function (e) { var h = pfTarget(e.target); if (h) prefetchRoute(h); };
+    document.addEventListener("pointerdown", now, true);
+    document.addEventListener("touchstart", now, { passive: true, capture: true });
+    document.addEventListener("focusin", now);
+  })();
 
   // ---------- router ----------
   var lastHash = null;

@@ -100,6 +100,8 @@ Object.defineProperty(document, "activeElement", { get: function () { return foc
 var window = { addEventListener: function (n, f) { listeners["w" + n] = f; } };
 var MutationObserver = function (f) { this.observe = function () { listeners.mo = f; }; };
 var requestAnimationFrame = function (f) { f(); return 0; };
+var prefetched = [];
+function prefetchRoute(h) { prefetched.push(h); }
 ` + block + `
 function key(k) { var e = { key: k, prevented: false, preventDefault: function () { this.prevented = true; } }; return { used: kbKey(e), prevented: e.prevented }; }
 var rows = $$("[data-href]").filter(function (r) { return r.offsetParent; });
@@ -107,6 +109,7 @@ if (kbStep(0, -1, 1) !== -1 || kbStep(3, -1, 1) !== 0 || kbStep(3, -1, -1) !== 2
 if (key("o").used || key("x").used || key("Enter").used) bad.push("keys acted with no row picked");
 key("j");
 if (!rows[0].classList.contains("kb-cur") || rows[0].getAttribute("aria-current") !== "true" || focused !== rows[0] || !rows[0].scrolled) bad.push("first j did not pick, focus and scroll row a");
+if (prefetched.join() !== "#/tasks/a") bad.push("j did not prefetch the picked row: " + prefetched);
 key("j"); key("j"); key("j");
 if (!rows[2].classList.contains("kb-cur") || rows[0].classList.contains("kb-cur")) bad.push("j did not stop at the last visible row");
 if (hidden.classList.contains("kb-cur")) bad.push("hidden row picked");
