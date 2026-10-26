@@ -16,7 +16,7 @@ func mockClaude() string {
 	return filepath.Join(filepath.Dir(f), "..", "..", "testdata", "mock-claude", "claude")
 }
 
-func newTestApp(t *testing.T) *App {
+func newTestApp(t testing.TB) *App {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("mock claude is a shell script; app tests run on unix")

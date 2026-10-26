@@ -327,9 +327,12 @@ func (s *shell) buildTray() {
 }
 
 // pollTray re-checks health every 2s: the core must answer on its IPC socket within
-// 1s, so a dead daemon shows up as a problem in under 5s. The menu is rebuilt only
-// when something visible changed, and follows the language setting.
+// 1s, so a dead daemon shows up as a problem in under 5s. The tray model (and the
+// language setting) is only re-read when app.TrayRev moved: nothing written, same
+// minute, same liveness / pause / disk means the menu would look the same. The menu
+// is rebuilt only when something visible changed.
 func (s *shell) pollTray(ctx context.Context) {
+	var gate app.TrayGate
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	for {
@@ -349,6 +352,9 @@ func (s *shell) pollTray(ctx context.Context) {
 		alive := s.daemonDead
 		if alive == nil {
 			alive = s.core.PingIPC(time.Second)
+		}
+		if !gate.Changed(s.core.TrayRev(ctx, alive, time.Now())) {
+			continue
 		}
 		lang := s.languageSetting()
 		st := s.core.TrayStatus(ctx, alive)

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,7 +54,7 @@ func (a *App) PingIPC(timeout time.Duration) error {
 			return
 		}
 		defer c.Close()
-		done <- c.Call("status", nil, nil)
+		done <- c.Call("ping", nil, nil)
 	}()
 	select {
 	case err := <-done:
@@ -61,6 +62,41 @@ func (a *App) PingIPC(timeout time.Duration) error {
 	case <-time.After(timeout):
 		return fmt.Errorf("ipc: no answer within %s", timeout)
 	}
+}
+
+// TrayRev is a cheap "might the tray look different?" token: SQLite's total_changes() on the
+// store's only connection (moves on any write: runs, usage, budgets, settings incl. language),
+// the minute (the "failed in the last hour" window and the budget day roll over with time),
+// liveness, the pause state and the last disk reading (both in memory). Same token → the
+// tray would render the same, so the 2 s poll skips TrayStatus and its queries. A failed read
+// returns a token that never repeats, so the tray recomputes rather than going stale.
+func (a *App) TrayRev(ctx context.Context, daemonErr error, now time.Time) string {
+	var n int64
+	if err := a.DB.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&n); err != nil {
+		return "err." + strconv.FormatInt(now.UnixNano(), 10)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d.%d.%t", n, now.Unix()/60, daemonErr != nil)
+	if a.Sched != nil {
+		p, until := a.Sched.PauseState(now)
+		fmt.Fprintf(&b, ".p%t.%d", p, until.Unix())
+	}
+	if d := a.lastDisk(); d != nil {
+		fmt.Fprintf(&b, ".d%t.%d", d.Low, d.Free>>20)
+	}
+	return b.String()
+}
+
+// TrayGate remembers the last TrayRev token: Changed is true the first time and whenever
+// the token moved. Not safe for concurrent use (the tray polls from one goroutine).
+type TrayGate struct{ last string }
+
+func (g *TrayGate) Changed(tok string) bool {
+	if tok != "" && tok == g.last {
+		return false
+	}
+	g.last = tok
+	return true
 }
 
 // TrayStatus gathers the tray model. daemonErr is the result of the liveness
@@ -86,7 +122,10 @@ func (a *App) TrayStatus(ctx context.Context, daemonErr error) TrayStatus {
 	}
 	var failed int
 	since := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
-	_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM runs WHERE status IN ('failed','timeout') AND COALESCE(finished_at, created_at) >= ?`, since).Scan(&failed)
+	// = COALESCE(finished_at, created_at) >= since, split so both halves are index ranges.
+	_ = a.DB.QueryRowContext(ctx, `SELECT
+ (SELECT COUNT(1) FROM runs WHERE status IN ('failed','timeout') AND finished_at >= ?) +
+ (SELECT COUNT(1) FROM runs WHERE status IN ('failed','timeout') AND finished_at IS NULL AND created_at >= ?)`, since, since).Scan(&failed)
 	if failed > 0 {
 		st.Problems = append(st.Problems, TrayProblem{Key: "desktop.p.failed", N: failed})
 	}

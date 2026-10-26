@@ -22,6 +22,7 @@ import (
 // RegisterRPC wires JSON-RPC methods onto the IPC server.
 func (a *App) RegisterRPC(srv *ipc.Server) {
 	srv.Register("status", a.rpcStatus)
+	srv.Register("ping", a.rpcPing)
 	srv.Register("providers.list", a.rpcProvidersList)
 	srv.Register("tasks.list", a.rpcTasksList)
 	srv.Register("tasks.get", a.rpcTasksGet)
@@ -51,6 +52,12 @@ func (a *App) RegisterRPC(srv *ipc.Server) {
 	srv.Register("auth.totp_setup", a.rpcAuthTOTPSetup)
 	srv.Register("auth.totp_disable", a.rpcAuthTOTPDisable)
 	a.registerRPC2(srv)
+}
+
+// rpcPing is the tray's liveness probe (every 2 s): it only proves the IPC server answers.
+// No database read and no runtime.ReadMemStats (a stop-the-world pause), unlike "status".
+func (a *App) rpcPing(context.Context, json.RawMessage) (any, error) {
+	return map[string]bool{"ok": true}, nil
 }
 
 func (a *App) rpcStatus(ctx context.Context, _ json.RawMessage) (any, error) {

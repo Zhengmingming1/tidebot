@@ -2778,3 +2778,71 @@ hours" runs that would not happen), and the pause had no end — easy to forget 
 3. Recurring quiet hours (e.g. no scheduled runs 23:00–07:00), Uptime Kuma's recurring windows.
 4. `agentctl scheduler pause 1h | resume | status` as a friendlier wrapper over `call`.
 5. A notification when a timed pause ends and N due tasks start catching up.
+
+## 2026-10-26 (16:00): desktop tray idles for real — change-gated poll, light ping, indexed spend queries
+
+Category: **resource usage** (desktop app idle footprint, SQLite query plans). The last rounds
+were features (pause all, export / import) and UI (prefetch, cross-platform styles). The
+desktop app sits in the tray all day, and its 2 s tray poll did the full tray model every
+time: count running runs, `Cost.Summary` (today's spend per bucket plus one sum per budget),
+count failures of the last hour, read the language setting, and ping the core with the IPC
+`status` call (a DB count plus `runtime.ReadMemStats`, a stop-the-world pause). On a
+database with 20k runs / ledger rows (a few months of hourly tasks) one tray model took
+**13.9 ms** — 30 times a minute, with nobody looking.
+
+**Done**
+
+- `app.TrayRev(ctx, daemonErr, now)`: a cheap "might the tray look different?" token —
+  SQLite `total_changes()` on the store's single connection (any write: runs, usage, budgets,
+  settings incl. language), the Unix minute (the 1-hour failure window and the budget day
+  roll over with time), liveness, the pause state and the last disk reading (both in memory).
+  `app.TrayGate` remembers the last token; the desktop `pollTray` skips the tray model and the
+  language read while it stays the same. A failed read gives a never-repeating token
+  (recompute rather than go stale).
+- New IPC `ping` (answers `{"ok":true}`: no DB, no ReadMemStats); `PingIPC` uses it. `status`
+  is unchanged for `agentctl`. The daemon-down check stays at 2 s (detected in < 5 s).
+- Migration 013: `idx_cost_created`, `idx_cost_task_created` on `cost_ledger` (every spend
+  range query — budgets, today's spend, spend by task — filtered on `created_at` with no
+  index and scanned the whole ledger) and `idx_runs_status_finished`; the tray's "failed in the
+  last hour" query is split into two index ranges with the same `COALESCE(finished_at,
+  created_at)` meaning.
+- Measured (`BenchmarkTrayPoll`, 20k runs + 20k ledger rows, Linux x86): tray model 13.9 ms →
+  1.1 ms; an idle poll is now `TrayRev` ≈ 4 µs + ping (handler 24 µs → 0.02 µs). Idle tray CPU
+  per minute ≈ 420 ms → ~1–2 ms (one recompute per minute for the time window). The spend
+  queries behind Home, the spend page and the pre-run budget check get the same indexes.
+- No visible change, so no screenshot. Same code path on macOS / Windows / Linux (the tray poll
+  is shared; `ping` goes over the unix socket or the Windows named pipe like any call).
+- Tests: `TestTrayGate` (pure, runs on Windows too), `TestTrayRev` (reads and `TrayStatus` don't
+  move the token; minute, daemon down, run start / fail, language, spend, pause / timed pause /
+  resume / pause running out, disk low / freed all do), `TestTrayGateFollowsStatus` (30 idle polls
+  compute once; every change reaches the tray on the next poll), `TestPingRPCIsLight` (pings
+  through the real IPC server don't write), `TestTrayRecentFailuresWindow` (split query keeps the
+  old semantics incl. NULL `finished_at`, stopped / succeeded excluded),
+  `TestTrayQueriesUseIndexes` (EXPLAIN QUERY PLAN names the new indexes).
+
+**Inspiration**
+
+- farion1231/cc-switch `src-tauri/src/tray.rs` (`refresh_tray_if_problems_changed`,
+  `refresh_tray_if_status_changed`): the tray status is recomputed on events (hover, the routing
+  service starting / stopping) with a 1 s throttle and the menu rebuilt only when the collected
+  status differs from `LAST_STATUS`. We already rebuilt only on change; the new part is not
+  collecting at all unless a cheap token moved. Ideas only, no code copied.
+
+**Learned**
+
+- A liveness probe should be the cheapest call the server has: `status` looked harmless, but
+  `ReadMemStats` stops the world and ran every 2 s.
+- `COALESCE(a, b) >= ?` can't use an index; `a >= ? OR (a IS NULL AND b >= ?)` written as two
+  `COUNT`s can (NULLs sit at the front of the index).
+- `go test -bench` with a `testing.TB` app helper is enough to put a number on idle cost; the
+  surprise (13.9 ms) came from a missing index, not from the poll rate.
+
+**Ideas for later**
+
+1. Drive the tray from the app's event bus (run started / finished, settings saved) and drop the
+   2 s DB token check to a 30 s safety net; keep the 2 s ping only for liveness.
+2. `rpcStatus` / Home `dashboard`: same token-gated cache server-side, so several open tabs share
+   one `Cost.Summary` per change.
+3. Audit the other `COALESCE(finished_at, created_at)` filters (runs list date ranges, task
+   "last run") for the same split.
+4. Ship `BenchmarkTrayPoll`-style numbers in CI as a guard (fail if idle tray poll > 1 ms).
