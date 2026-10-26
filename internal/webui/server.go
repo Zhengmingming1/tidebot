@@ -68,6 +68,8 @@ type Deps struct {
 	Ext func(ctx context.Context, method string, raw json.RawMessage) (any, error)
 	// ClaudeStatus reports local Claude Code / provider health (cached; force re-checks).
 	ClaudeStatus func(ctx context.Context, force bool) any
+	// SchedPause (optional) is the "all schedules paused" state shown on Home and in the sidebar.
+	SchedPause func(ctx context.Context) any
 }
 
 // Server is a togglable HTTP listener.

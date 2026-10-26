@@ -42,6 +42,7 @@
   "desktop.tooltip": "Tidebot",
   "desktop.pick_folder": "选择任务的工作文件夹",
   "desktop.tooltip_paused": "Tidebot（已暂停）",
+  "desktop.tooltip_paused_until": "Tidebot（已暂停，%s 恢复）",
   "desktop.tooltip_problem": "Tidebot（有问题需要处理）",
   "notify.breaker": "连续失败已暂停：%s",
   "notify.confirm": "危险操作待确认：%s",

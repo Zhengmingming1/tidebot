@@ -600,6 +600,12 @@
       { kind: "cmd", icon: "bolt", label: T("bt.new"), keys: "n b", run: function () { goClick("#/buttons", "#b-add"); } },
       { kind: "cmd", icon: "globe", label: T("pal.lang_to", { l: state.lang === "zh-CN" ? "English" : "简体中文" }), run: function () { setLanguage(state.lang === "zh-CN" ? "en" : "zh-CN"); } },
       { kind: "cmd", icon: "bell", label: T("pal.notifications"), run: function () { setTimeout(toggleNotif, 0); } },
+    ].concat(spState && spState.paused ? [
+      { kind: "cmd", icon: "play", label: T("spz.pal_resume"), run: function () { setSchedPause(false); } }
+    ] : [
+      { kind: "cmd", icon: "pause", label: T("spz.pal_pause"), run: function () { setSchedPause(true, "1h"); } },
+      { kind: "cmd", icon: "pause", label: T("spz.pal_pause_manual"), run: function () { setSchedPause(true, "manual"); } }
+    ]).concat([
       { kind: "cmd", icon: "more", label: T("pal.shortcuts"), run: function () { shortcutsHelp(); } },
       { kind: "nav", icon: "home", label: T("nav.home"), run: go("#/") },
       { kind: "nav", icon: "tasks", label: T("nav.tasks"), run: go("#/tasks") },
@@ -610,7 +616,7 @@
       { kind: "nav", icon: "spend", label: T("nav.spend"), run: go("#/spend") },
       { kind: "nav", icon: "settings", label: T("nav.settings"), run: go("#/settings") },
       { kind: "nav", icon: "database", label: T("nav.settings") + " › " + T("st.title"), run: go("#/settings/data/storage") }
-    ].concat(SET_SECTIONS.map(function (k) { return { kind: "nav", icon: "settings", label: T("nav.settings") + " › " + T("setnav." + k), run: go("#/settings/" + k) }; }));
+    ]).concat(SET_SECTIONS.map(function (k) { return { kind: "nav", icon: "settings", label: T("nav.settings") + " › " + T("setnav." + k), run: go("#/settings/" + k) }; }));
   }
   function palMatch(label, q) { return !q || label.toLowerCase().indexOf(q.toLowerCase()) >= 0; }
   function openPalette() {
@@ -816,8 +822,8 @@
   function fmtMem(b) { return b ? (b >= 1073741824 ? (b / 1073741824).toFixed(1) + " GB" : Math.round(b / 1048576) + " MB") : "—"; }
   function loadCC(force) {
     if (!force && cc.st && Date.now() - cc.at < 15000) { paintCC(); return Promise.resolve(cc.st); }
-    var p = force ? api("/api/claude/status", { method: "POST", body: {} }) : api("/api/claude/status");
-    return p.then(function (st) { cc.st = st; cc.err = false; cc.at = Date.now(); paintCC(); return st; })
+    var p = force ? api("/api/claude/status", { method: "POST", body: {} }) : api("/api/claude/status"), asked = Date.now();
+    return p.then(function (st) { cc.st = st; cc.err = false; cc.at = Date.now(); spAdopt(st.sched, asked); paintCC(); return st; })
       .catch(function (e) { if (e.auth) return; cc.err = true; cc.at = Date.now(); paintCC(); });
   }
   function ccView() {
@@ -838,13 +844,136 @@
     var v = ccView();
     document.documentElement.classList.toggle("tb-busy", v.state === "running");
     setDocTitle({ running: v.state === "running" && cc.st ? cc.st.sessions.length : 0, alert: v.state === "warning" || v.state === "missing" || v.state === "down" });
-    box.innerHTML = '<button class="cc-card cc-' + v.state + '" id="cc-btn" aria-haspopup="dialog" aria-expanded="false" title="' + esc(v.head + (v.sub ? " · " + v.sub : "")) + '">' +
+    box.innerHTML = spPillHtml() + '<button class="cc-card cc-' + v.state + '" id="cc-btn" aria-haspopup="dialog" aria-expanded="false" title="' + esc(v.head + (v.sub ? " · " + v.sub : "")) + '">' +
       '<span class="dot" aria-hidden="true"></span><span class="cc-txt"><strong>' + esc(v.head) + "</strong>" + (v.sub ? "<small>" + esc(v.sub) + "</small>" : "") + "</span></button>" +
       '<span class="sr-only" aria-live="polite" id="cc-live"></span>';
     if (cc.prevState && cc.prevState !== v.state) $("#cc-live").textContent = v.head;
     cc.prevState = v.state;
     $("#cc-btn").addEventListener("click", function (e) { e.stopPropagation(); toggleCCPop(); });
+    var pill = $("#spz-pill"); if (pill) pill.addEventListener("click", function (e) { e.stopPropagation(); spMenu(pill, "up"); });
     if ($("#cc-pop")) fillCCPop();
+  }
+
+  // ---------- pause all schedules ----------
+  // One switch for every schedule, for a holiday, a demo or a flaky provider (idea: Uptime
+  // Kuma's maintenance windows — "manual" until switched off or a window with an end, picked
+  // from quick lengths: server/model/maintenance.js getStatus, src/pages/EditMaintenance.vue
+  // setQuickDuration). A timed pause ends by itself; runs by hand, buttons and webhooks still
+  // go; tasks that came due follow their own missed-runs setting on resume. Shown in the
+  // sidebar on every page (fed by the status poll) and on Home's "next 24 hours".
+  var SPZ_FOR = ["1h", "4h", "tomorrow", "manual"];
+  var spState = null, spAt = 0;
+  // spAdopt keeps the newest answer: a status poll that left before a change doesn't undo it.
+  // Returns true when what's shown changes.
+  function spAdopt(v, asked) {
+    if (!v || (asked || 0) < spAt) return false;
+    var sig = function (x) { return x ? [!!x.paused, x.until || "", x.since || "", x.due || 0].join("|") : ""; };
+    var changed = sig(v) !== sig(spState);
+    spState = v; spAt = asked || Date.now();
+    return changed;
+  }
+  function spEnds(v) { return v.until ? T("spz.ends", { t: when(v.until) }) : T("spz.ends_manual"); }
+  function spTip(v) {
+    var t = [spEnds(v)];
+    if (v.since) t.push(T("spz.tip_since", { t: when(v.since) }));
+    if (v.due) t.push(T("spz.note_due", { n: v.due }));
+    return t.join("\n");
+  }
+  function spPillHtml() {
+    var v = spState;
+    if (!v || !v.paused) return "";
+    return '<button class="spz-pill" id="spz-pill" aria-haspopup="menu" aria-expanded="false" data-tip="' + esc(spTip(v)) + '" aria-label="' + esc(T("spz.pill") + " · " + spEnds(v)) + '">' + ic("pause", "sm") +
+      '<span class="spz-txt"><strong>' + esc(T("spz.pill")) + "</strong><small>" + esc(v.until ? T("spz.pill_until", { t: when(v.until) }) : T("spz.pill_manual")) + "</small></span></button>";
+  }
+  // spApply shows a new state everywhere at once: sidebar, Home's card, the open menu.
+  function spApply(v) {
+    spAdopt(v, Date.now());
+    paintCC();
+    paintHomePause();
+  }
+  // setSchedPause(true, "1h" | "4h" | "tomorrow" | "manual") or setSchedPause(false).
+  function setSchedPause(on, choice) {
+    var prev = spState;
+    return rpc("scheduler.pause.set", on ? { paused: true, "for": choice } : { paused: false }).then(function (v) {
+      spApply(v);
+      if (on && !(prev && prev.paused)) toastUndo(v.until ? T("spz.t_paused_until", { t: when(v.until) }) : T("spz.t_paused"), function () { setSchedPause(false); });
+      else if (on) toast(v.until ? T("spz.t_paused_until", { t: when(v.until) }) : T("spz.t_paused"));
+      else toast(prev && prev.due ? T("spz.t_resumed_due", { n: prev.due }) : T("spz.t_resumed"));
+      return v;
+    }).catch(fail);
+  }
+  // spMenu: a small menu at the anchor ("up" opens above it, for the sidebar). Arrow keys
+  // move, Enter / Space pick, Esc or a click outside closes and gives focus back.
+  function spMenu(anchor, dir) {
+    var old = $("#spz-menu");
+    if (old) { old._close(); return; }
+    api("/api/rpc/scheduler.pause.get", { method: "POST", body: {}, read: true }).then(function (r) {
+      var v = r.result;
+      if (!v || $("#spz-menu") || !document.contains(anchor)) return;
+      spAdopt(v, Date.now());
+      var opts = v.options || SPZ_FOR.map(function (f) { return { "for": f }; });
+      var item = function (o) {
+        return '<button type="button" role="menuitem" class="spz-item" data-for="' + esc(o["for"]) + '"><span>' + esc(T("spz.f_" + o["for"])) + "</span><small>" + esc(o.until ? T("spz.ends", { t: when(o.until) }) : T("spz.ends_manual")) + "</small></button>";
+      };
+      var m = document.createElement("div");
+      m.id = "spz-menu"; m.className = "popover spz-menu"; m.setAttribute("role", "menu"); m.setAttribute("aria-label", T(v.paused ? "spz.menu_title_on" : "spz.menu_title"));
+      m.innerHTML = '<div class="spz-head">' + ic("pause", "sm") + "<div><strong>" + esc(T(v.paused ? "spz.menu_title_on" : "spz.menu_title")) + "</strong>" + (v.paused ? "<small>" + esc(spEnds(v)) + "</small>" : "") + "</div></div>" +
+        (v.paused ? '<button type="button" role="menuitem" class="spz-item spz-resume" data-resume="1"><span>' + ic("play", "sm") + esc(T("spz.resume")) + "</span></button><div class=\"spz-sep\">" + esc(T("spz.change")) + "</div>" : "") +
+        opts.map(item).join("") +
+        '<p class="spz-note">' + ic("info", "sm") + "<span>" + esc(T("spz.note")) + " " + esc(v.paused && v.due ? T("spz.note_due", { n: v.due }) : T("spz.note_resume")) + "</span></p>";
+      document.body.appendChild(m);
+      var r0 = anchor.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+      var left = dir === "up" ? r0.left : r0.right - w;
+      left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+      var top = dir === "up" ? r0.top - h - 8 : r0.bottom + 8;
+      if (dir !== "up" && top + h > window.innerHeight - 8) top = Math.max(8, r0.top - h - 8);
+      if (top < 8) top = 8;
+      m.style.left = Math.round(left) + "px"; m.style.top = Math.round(top) + "px";
+      anchor.setAttribute("aria-expanded", "true");
+      var items = $$('[role="menuitem"]', m);
+      var close = function (refocus) {
+        m.remove(); anchor.setAttribute("aria-expanded", "false");
+        document.removeEventListener("click", off, true); document.removeEventListener("keydown", key, true); window.removeEventListener("hashchange", m._close);
+        if (refocus && document.contains(anchor)) anchor.focus();
+      };
+      m._close = function () { close(false); };
+      var off = function (e) { if (!m.contains(e.target) && !anchor.contains(e.target)) close(false); };
+      var key = function (e) {
+        var i = items.indexOf(document.activeElement);
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
+        else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+        else if (e.key === "Home" || e.key === "End") { e.preventDefault(); items[e.key === "Home" ? 0 : items.length - 1].focus(); }
+        else if (e.key === "Tab") close(false);
+      };
+      m.addEventListener("click", function (e) {
+        var b = e.target.closest('[role="menuitem"]');
+        if (!b) return;
+        close(true);
+        if (b.hasAttribute("data-resume")) setSchedPause(false); else setSchedPause(true, b.getAttribute("data-for"));
+      });
+      setTimeout(function () { document.addEventListener("click", off, true); document.addEventListener("keydown", key, true); }, 0);
+      window.addEventListener("hashchange", m._close);
+      items[0].focus();
+    }).catch(fail);
+  }
+  // Home › next 24 hours: the card's pause button, the "paused" line and runs the pause holds back.
+  function paintHomePause() {
+    var btn = $("#spz-home"), ban = $("#spz-banner"), v = spState || {};
+    if (!btn || !ban) return;
+    btn.classList.toggle("on", !!v.paused);
+    btn.innerHTML = ic("pause", "sm");
+    btn.setAttribute("aria-label", T(v.paused ? "spz.btn_on" : "spz.btn"));
+    btn.setAttribute("data-tip", v.paused ? T("spz.btn_on") + "\n" + spTip(v) : T("spz.btn_tip"));
+    ban.innerHTML = v.paused ? '<p class="notice warn spz-banner">' + ic("pause", "sm") + '<span><strong>' + esc(T("spz.banner")) + "</strong> · " + esc(spEnds(v)) + '</span><button type="button" class="btn sm" id="spz-resume">' + ic("play", "sm") + esc(T("spz.resume")) + "</button></p>" : "";
+    var rb = $("#spz-resume"); if (rb) rb.addEventListener("click", function () { setSchedPause(false); });
+    var end = v.paused ? (v.until ? new Date(v.until).getTime() : Infinity) : 0;
+    $$("#next24 .timeline li[data-at]").forEach(function (li) {
+      var held = new Date(li.getAttribute("data-at")).getTime() < end;
+      li.classList.toggle("held", held);
+      var tag = $(".tl-held", li);
+      if (held && !tag) $(".tl-name small", li).insertAdjacentHTML("beforeend", '<span class="tl-held"> · ' + esc(T("spz.held")) + "</span>");
+      if (!held && tag) tag.remove();
+    });
   }
   // ---------- tab title ----------
   // "<status> <page> – tidebot", the shape of n8n's useDocumentTitle (status prefix +
@@ -1294,6 +1423,7 @@
       "<small>" + agoHtml(t.last_run_at || last.at) + (rate ? ' · <a class="' + (ok < done.length ? "tl-rate bad" : "tl-rate") + '" href="#/runs?task=' + enc(t.id) + '" data-tip="' + esc((t.fail_streak ? T("tl.streak_tip", { n: t.fail_streak }) + "\n" : "") + T("tl.ok_tip") + "\n" + T("tl.rate_open")) + '">' + esc(rate) + "</a>" : "") + "</small></div>";
   }
   function renderHome() {
+    var askedH = Date.now();
     return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r) {
       var o = r[0], d = r[1];
       renderStatus(o);
@@ -1307,11 +1437,11 @@
         '<div class="qa-row">' + qa.join("") + "</div>" +
         (noTasks ? '<section class="card">' + '<div class="empty">' + ic("tasks") + "<strong>" + esc(T("home.empty_title")) + "</strong>" + esc(T("home.empty_sub")) + '<div class="mt"><button class="btn primary" id="home-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div></section>" : "") +
         '<div class="home-mid' + (noTasks ? " two" : "") + '"><section class="card hc"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("home.running")) + '</h2><span class="link muted" id="run-n"></span></div><div id="running"></div></section>' +
-        '<section class="card hc"><div class="card-head"><span class="ico">' + ic("calendar") + "</span><h2>" + esc(T("home.next24")) + '</h2><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("arrow", "sm") + '</a></div><div id="next24"></div><div class="hc-foot">' + ic("info", "sm") + "<span>" + esc(T("home.times_in", { tz: tzLabel() })) + "</span></div></section>" +
+        '<section class="card hc"><div class="card-head"><span class="ico">' + ic("calendar") + "</span><h2>" + esc(T("home.next24")) + '</h2><button type="button" class="icon-btn sm spz-home" id="spz-home" aria-haspopup="menu" aria-expanded="false"></button><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("arrow", "sm") + '</a></div><div id="spz-banner"></div><div id="next24"></div><div class="hc-foot">' + ic("info", "sm") + "<span>" + esc(T("home.times_in", { tz: tzLabel() })) + "</span></div></section>" +
         (noTasks ? "" : '<section class="card hc"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.health")) + '</h2><span class="link muted">' + esc(T("home.health_sub")) + '</span></div><div id="beats"></div></section>') + "</div>" +
         '<section class="card flush home-recent"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("arrow", "sm") + '</a></div><div id="recent"></div></section></div>', "home", []);
       applyColors(page());
-      var paint = function (o, d) {
+      var paint = function (o, d, asked) {
         var k = d.kpi, rate = k.runs_today ? Math.round(k.succeeded_today / k.runs_today * 100) + "%" : "—", left = k.budget_usd ? Math.max(0, k.budget_usd - k.spent_today) : null;
         var bp = k.budget_usd ? Math.min(100, k.spent_today / k.budget_usd * 100) : 0;
         $("#kpis").innerHTML = [[T("home.k_runs"), num(k.runs_today), T("home.k_runs_sub", { n: k.succeeded_today })], [T("home.k_rate"), rate, T("time.today")], [T("home.k_spent"), usd(k.spent_today, 2), k.budget_usd ? T("home.pct_budget", { p: Math.round(bp) }) : T("home.no_budget")], [T("home.k_left"), left == null ? "∞" : usd(left, 2), T("sp.global_daily")]].map(function (x, i) {
@@ -1325,15 +1455,18 @@
           return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + (x.status === "queued" ? esc(x.queue_pos ? T("st.queued_n", { n: x.queue_pos }) : T("st.queued")) : tAgo("home.started_ago", null, "t", x.started_at || x.created_at)) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
         }).join("") + "</ul>" : '<p class="hc-empty">' + ic("checkc", "sm") + "<span><strong>" + esc(T("home.idle")) + "</strong> · " + esc(T("home.idle_sub")) + "</span></p>";
         $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.slice(0, 4).map(function (s) {
-          return '<li><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
+          return '<li data-at="' + esc(s.at) + '"><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
         }).join("") + "</ul>" : '<p class="hc-empty">' + ic("calendar", "sm") + "<span><strong>" + esc(T("home.no_sched")) + "</strong> · " + esc(T("home.no_sched_sub")) + "</span></p>";
+        if (d.sched_pause && spAdopt(d.sched_pause, asked || Date.now())) paintCC();
+        paintHomePause();
         if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.slice(0, 5).map(function (t) {
           return '<div class="beat-row"><a href="#/tasks/' + enc(t.id) + '" class="bn">' + esc(t.name) + (t.status === "paused" ? " " + taskPill("paused", t, true) : "") + "</a>" + beatsBar(t.beats) + "</div>";
         }).join("") + "</div>";
         $("#recent").innerHTML = runsTable((o.runs || []).slice(0, 5));
         applySizes(page()); wireRows(page());
       };
-      paint(o, d);
+      paint(o, d, askedH);
+      var spb = $("#spz-home"); if (spb) spb.addEventListener("click", function (e) { e.stopPropagation(); spMenu(spb, "down"); });
       $$("[data-btn]").forEach(function (b) { b.addEventListener("click", function () { runButton(b.getAttribute("data-btn"), b); }); });
       $("#qa-new").addEventListener("click", quickRunModal);
       if ($("#home-new")) $("#home-new").addEventListener("click", function () { taskFormModal(null); });

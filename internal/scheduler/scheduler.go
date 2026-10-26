@@ -5,7 +5,6 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/db"
@@ -25,7 +24,14 @@ type Scheduler struct {
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
-	paused  atomic.Bool
+	pmu     sync.Mutex
+	paused  bool
+	// pausedUntil is when a timed pause ends (zero = until resumed by hand).
+	pausedUntil time.Time
+
+	// OnAutoResume, when set, is called once (from the poll loop) after a timed pause ran
+	// out and firing started again, so the owner can forget the stored pause.
+	OnAutoResume func()
 
 	// Gate, when set, may defer a due task (e.g. on battery / about to sleep).
 	// A deferred task is left due and retried on the next tick; its schedule is not advanced.
@@ -36,11 +42,62 @@ type Scheduler struct {
 	Catchup func(task db.Task, missed []time.Time, now time.Time) int
 }
 
-// SetPaused pauses or resumes firing of due tasks (manual runs are unaffected).
-func (s *Scheduler) SetPaused(p bool) { s.paused.Store(p) }
+// SetPaused pauses (until resumed by hand) or resumes firing of due tasks (manual runs
+// are unaffected).
+func (s *Scheduler) SetPaused(p bool) { s.PauseUntil(p, time.Time{}) }
 
-// Paused reports whether the scheduler is paused.
-func (s *Scheduler) Paused() bool { return s.paused.Load() }
+// PauseUntil pauses firing until the given time (zero = until resumed by hand), or
+// resumes when p is false. Tasks that come due meanwhile stay due; once firing starts
+// again each follows its own missed-run policy (catch-up once / all / skip).
+func (s *Scheduler) PauseUntil(p bool, until time.Time) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	s.paused = p
+	s.pausedUntil = time.Time{}
+	if p {
+		s.pausedUntil = until
+	}
+}
+
+// Paused reports whether the scheduler is paused right now (a timed pause that has run
+// out counts as resumed even before the next poll clears it).
+func (s *Scheduler) Paused() bool {
+	p, _ := s.PauseState(time.Now())
+	return p
+}
+
+// PausedUntil is when the current timed pause ends; zero when not paused or paused
+// until resumed by hand.
+func (s *Scheduler) PausedUntil() time.Time {
+	_, u := s.PauseState(time.Now())
+	return u
+}
+
+// PauseState reports, at now, whether firing is paused and until when (zero = by hand).
+func (s *Scheduler) PauseState(now time.Time) (bool, time.Time) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	if !s.paused || (!s.pausedUntil.IsZero() && !now.Before(s.pausedUntil)) {
+		return false, time.Time{}
+	}
+	return true, s.pausedUntil
+}
+
+// expirePause clears a timed pause whose end has passed; true when this call cleared it.
+func (s *Scheduler) expirePause(now time.Time) bool {
+	s.pmu.Lock()
+	if !s.paused || s.pausedUntil.IsZero() || now.Before(s.pausedUntil) {
+		s.pmu.Unlock()
+		return false
+	}
+	s.paused, s.pausedUntil = false, time.Time{}
+	s.pmu.Unlock()
+	s.log.Info("scheduler pause ended, firing resumes")
+	if s.OnAutoResume != nil {
+		s.OnAutoResume()
+	}
+	return true
+}
 
 // New creates a scheduler. tick defaults to 15s.
 func New(store *db.Store, log *slog.Logger, tick time.Duration, run RunnerFunc) *Scheduler {
@@ -98,7 +155,9 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) poll(ctx context.Context) {
-	if s.paused.Load() {
+	now := time.Now()
+	s.expirePause(now)
+	if p, _ := s.PauseState(now); p {
 		return
 	}
 	due, err := s.store.ListDueTasks(ctx, time.Now())

@@ -154,9 +154,6 @@ func main() {
 	sh.lastLang = lang
 
 	core.Sched.Gate = powerGate(core.Log)
-	if v, _ := core.Auth.GetSetting(ctx, "desktop.scheduler_paused"); v == "true" {
-		core.Sched.SetPaused(true)
-	}
 	core.SetUpdateProduct("desktop")
 	core.WebUI.PickFile = func(title string) (string, error) {
 		return sh.app.Dialog.OpenFile().SetTitle(title).CanChooseFiles(true).ShowHiddenFiles(true).PromptForSingleSelection()
@@ -398,6 +395,8 @@ func (s *shell) tooltip() string {
 	switch {
 	case len(s.status.Problems) > 0:
 		return i18n.T("desktop.tooltip_problem")
+	case s.status.Paused && s.status.Until != "":
+		return i18n.T("desktop.tooltip_paused_until", s.status.Until)
 	case s.core.Sched.Paused():
 		return i18n.T("desktop.tooltip_paused")
 	case s.status.Running > 0:
@@ -455,9 +454,10 @@ func (s *shell) refreshMenu() {
 	m.AddSeparator()
 	m.AddCheckbox(i18n.T("desktop.pause_all"), s.core.Sched.Paused()).OnClick(func(*application.Context) {
 		p := !s.core.Sched.Paused()
-		s.core.Sched.SetPaused(p)
-		_ = s.core.Auth.SetSetting(s.ctx, "desktop.scheduler_paused", fmt.Sprint(p))
-		s.status.Paused = p
+		if _, err := s.core.SetSchedPause(s.ctx, p, "manual"); err != nil {
+			s.core.Log.Warn("tray pause", "error", err)
+		}
+		s.status.Paused, s.status.Until = p, ""
 		s.tray.SetTooltip(s.tooltip())
 		s.refreshMenu()
 	})

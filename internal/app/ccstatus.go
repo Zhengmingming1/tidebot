@@ -70,6 +70,8 @@ type CCStatus struct {
 	Searched []string `json:"searched,omitempty"`
 	Note     string   `json:"note,omitempty"`
 	Custom   bool     `json:"custom_path"` // a path was set by hand
+	// Sched is the "all schedules paused" state, so the sidebar can show it on every page.
+	Sched *SchedPauseView `json:"sched,omitempty"`
 }
 
 // CCState maps the facts to one headline state (pure; unit tested).

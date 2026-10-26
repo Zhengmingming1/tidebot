@@ -2711,3 +2711,70 @@ page cache because their read-only RPCs went out as POST and every POST counted 
    hand-kept `RPC_READS` array.
 3. Viewport prefetch for the first few rows of Home's running list (SvelteKit's `viewport`
    priority), only on fast connections.
+
+## 2026-10-26 (12:00): pause every schedule at once — for an hour, until tomorrow 9:00 or until resumed
+
+Category: **feature / "everything from the WebUI" + cross-platform parity** (core scheduler,
+Home, sidebar, command palette, desktop tray). The last rounds were performance (intent
+prefetch), cross-platform styles and task export / import. "Pause all schedules" existed only
+as a checkbox in the desktop tray: the server version (agentd, browser) had no way to do it at
+all, the WebUI never showed that the tray had paused everything (Home kept listing "next 24
+hours" runs that would not happen), and the pause had no end — easy to forget after a holiday.
+
+**Done**
+
+- Core: `scheduler.PauseUntil(on, until)` (zero = until resumed by hand); a timed pause ends
+  by itself on the next tick and calls `OnAutoResume` once; `PauseState(now)` treats a pause past
+  its end as over even before the tick clears it. Pause state behind a mutex (was an atomic flag).
+- `internal/app/schedpause.go`: lengths `1h`, `4h`, `tomorrow` (09:00 next day in the
+  scheduling timezone, DST-safe), `manual`; stored in setting `scheduler.pause` (end + start),
+  restored at start-up for agentd and the desktop app alike; a timed pause that ran out while
+  tidebot was off is over; the tray's old `desktop.scheduler_paused` flag moves over once.
+  Pausing again keeps the start time. `Due` counts active tasks that came due meanwhile (same
+  predicate as `ListDueTasks`). RPC `scheduler.pause.get` / `scheduler.pause.set` (WebUI and
+  `agentctl call scheduler.pause.set '{"paused":true,"for":"1h"}'`).
+- Nothing new on resume: due tasks follow each one's existing missed-runs setting (skip / once /
+  all within the grace period). Runs by hand, buttons and webhooks are not affected.
+- WebUI: a pause button in Home › Next 24 hours opens a small menu (each length shows its end,
+  e.g. "今天 16:10 恢复"; arrow keys / Home / End / Enter / Esc, focus returns to the button);
+  while paused the card shows one amber line "全部定时已暂停 · 明天 9:00 恢复 [立即恢复]" and
+  dims the runs the pause holds back ("暂停中"); the sidebar shows an amber "定时已暂停" pill on
+  every page (fed by the existing 30 s status poll — no new request), whose menu has "立即恢复"
+  and "改为 …"; command palette: pause 1 h / until resumed, or resume. Start time, end and
+  the due count are in the tooltip, not inline. Pausing toasts with Undo; resuming says how
+  many due tasks will catch up or skip. A status answer that left before a change can't undo
+  it (`spAdopt` keeps the newest).
+- Desktop tray: the checkbox uses the same core call (pause until resumed); the tooltip says
+  "Tidebot（已暂停，14:05 恢复）" for a timed pause from the WebUI; the tray menu follows a pause /
+  auto-resume made elsewhere (state is in the tray signature).
+- Fits 1024×655 (menu 280 px, flips above when there is no room below; sidebar pill collapses
+  to its icon under 960 px); zh-CN + en strings; no native dialogs. flicker-check unchanged
+  (only the known skill-detail inner skeleton). Shots: `/workspace/tidebot-shots/2026-10-26-pause-all.png`
+  (+ `-menu`, `-sidebar`, `-en`).
+- Tests: `TestPauseUntilEndsByItself` (scheduler: holds, ends once, past-end poll fires, manual
+  never ends, resume clears), `TestSchedPauseEnd` (lengths, timezone, DST, bad input, tray
+  time — runs on Windows too), `TestSchedPauseState` (persist + restart, expired, legacy flag,
+  extend keeps start, due count, RPC, tray), `TestSchedPauseUI` (wiring, no native dialogs,
+  i18n keys, dashboard field, node: newest answer wins, pill / tooltip text, escaping).
+
+**Inspiration**
+
+- louislam/uptime-kuma `server/model/maintenance.js` (`getStatus`: a "manual" maintenance
+  is active until switched off, a single window is active between its start and end) and
+  `src/pages/EditMaintenance.vue` (`setQuickDuration`: one-click 15 / 30 / 60 min lengths
+  instead of typing an end time). Ideas only, no code copied.
+
+**Learned**
+
+- The demo binary embeds the static files: after a CSS/JS change, rebuild (`scripts/demo-webui.sh`)
+  before taking screenshots, or the shot shows the old styles.
+- `scripts/flicker-check.py` launches Playwright's bundled Chromium, which isn't installed on the
+  box; running it with `channel="chrome"` works.
+
+**Ideas for later**
+
+1. Tasks page and task detail: show "下次 …" as held (and the sidebar pill's state) while paused.
+2. Pause one task "until …" with the same lengths (today only pause / resume by hand).
+3. Recurring quiet hours (e.g. no scheduled runs 23:00–07:00), Uptime Kuma's recurring windows.
+4. `agentctl scheduler pause 1h | resume | status` as a friendlier wrapper over `call`.
+5. A notification when a timed pause ends and N due tasks start catching up.

@@ -29,6 +29,7 @@ type TrayStatus struct {
 	Problems []TrayProblem
 	Running  int
 	Paused   bool
+	Until    string // "15:04" (or "01-02 15:04" on another day) when a timed pause ends
 	Icon     string
 }
 
@@ -38,7 +39,7 @@ func (t TrayStatus) Signature() string {
 	for _, p := range t.Problems {
 		fmt.Fprintf(&b, "%s:%d;", p.Key, p.N)
 	}
-	fmt.Fprintf(&b, "r%d p%v i%s", t.Running, t.Paused, t.Icon)
+	fmt.Fprintf(&b, "r%d p%v u%s i%s", t.Running, t.Paused, t.Until, t.Icon)
 	return b.String()
 }
 
@@ -65,7 +66,12 @@ func (a *App) PingIPC(timeout time.Duration) error {
 // TrayStatus gathers the tray model. daemonErr is the result of the liveness
 // check (PingIPC, or the daemon's Serve having returned); non-nil means down.
 func (a *App) TrayStatus(ctx context.Context, daemonErr error) TrayStatus {
-	st := TrayStatus{Paused: a.Sched != nil && a.Sched.Paused()}
+	st := TrayStatus{}
+	if a.Sched != nil {
+		now := time.Now()
+		p, until := a.Sched.PauseState(now)
+		st.Paused, st.Until = trayPauseEnd(p, until, a.Cfg.Location(), now)
+	}
 	if daemonErr != nil {
 		st.Problems = append(st.Problems, TrayProblem{Key: "desktop.p.daemon_down"})
 	}
@@ -96,4 +102,16 @@ func (a *App) TrayStatus(ctx context.Context, daemonErr error) TrayStatus {
 		st.Icon = TrayIdle
 	}
 	return st
+}
+
+// trayPauseEnd formats a timed pause's end for the tray tooltip in the scheduling timezone.
+func trayPauseEnd(paused bool, until time.Time, loc *time.Location, now time.Time) (bool, string) {
+	if !paused || until.IsZero() {
+		return paused, ""
+	}
+	u, n := until.In(loc), now.In(loc)
+	if u.Year() == n.Year() && u.YearDay() == n.YearDay() {
+		return true, u.Format("15:04")
+	}
+	return true, u.Format("01-02 15:04")
 }

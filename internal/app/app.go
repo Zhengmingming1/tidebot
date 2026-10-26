@@ -156,6 +156,8 @@ func Open(cfg config.Config) (*App, error) {
 		log.Info("2fa secret encrypted at rest", "rows", n)
 	}
 	a.applyProviderSettings(context.Background())
+	a.Sched.OnAutoResume = a.onSchedPauseEnded
+	a.loadSchedPause(context.Background())
 	// Restore webui.enabled from settings if present.
 	if v, err := a.Auth.GetSetting(context.Background(), "webui.enabled"); err == nil && v != "" {
 		a.Cfg.WebUIEnabled = v == "true" || v == "1"
@@ -167,8 +169,14 @@ func Open(cfg config.Config) (*App, error) {
 		StopRun:  func(id string) (string, error) { return a.StopRun(context.Background(), id) },
 		QueuePos: a.Runner.QueuePos,
 		LogPath:  a.Runner.LogPath, LogWait: a.Runner.LogWait, Location: cfg.Location(),
-		Ext:           a.CallExt,
-		ClaudeStatus:  func(ctx context.Context, force bool) any { return a.ClaudeStatus(ctx, force) },
+		Ext: a.CallExt,
+		ClaudeStatus: func(ctx context.Context, force bool) any {
+			st := a.ClaudeStatus(ctx, force)
+			sp := a.SchedPauseBrief(ctx)
+			st.Sched = &sp
+			return st
+		},
+		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
 		QuickRunSkill: a.startQuickRunSkill,
 		Providers:     providerAdmin{a},
 		Public:        map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},

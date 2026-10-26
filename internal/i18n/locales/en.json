@@ -42,6 +42,7 @@
   "desktop.tooltip": "Tidebot",
   "desktop.pick_folder": "Choose the task's working folder",
   "desktop.tooltip_paused": "Tidebot (paused)",
+  "desktop.tooltip_paused_until": "Tidebot (paused until %s)",
   "desktop.tooltip_problem": "Tidebot (needs attention)",
   "notify.breaker": "Paused after repeated failures: %s",
   "notify.confirm": "Confirmation needed: %s",

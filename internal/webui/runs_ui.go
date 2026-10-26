@@ -166,8 +166,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			maxUSD = b.MaxUSD
 		}
 	}
-	writeJSON(w, 200, map[string]any{
+	out := map[string]any{
 		"running": running, "next": next, "tasks": tasks,
 		"kpi": map[string]any{"runs_today": total, "succeeded_today": ok, "spent_today": sum.TotalUSD, "budget_usd": maxUSD},
-	})
+	}
+	if s.deps.SchedPause != nil {
+		out["sched_pause"] = s.deps.SchedPause(ctx)
+	}
+	writeJSON(w, 200, out)
 }
