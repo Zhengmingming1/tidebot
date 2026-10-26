@@ -2846,3 +2846,64 @@ database with 20k runs / ledger rows (a few months of hourly tasks) one tray mod
 3. Audit the other `COALESCE(finished_at, created_at)` filters (runs list date ranges, task
    "last run") for the same split.
 4. Ship `BenchmarkTrayPoll`-style numbers in CI as a guard (fail if idle tray poll > 1 ms).
+
+## 2026-10-26 (20:00): pause one task for a while — it resumes by itself, and the next run says when "pause all" holds it
+
+The 12:00 run let you pause every schedule for an hour or until tomorrow, but a single task
+could only be paused until you remembered to resume it. And while "pause all" was on, the task
+list and the task page still promised "下次 明天 3:00" for runs the pause would hold back.
+
+**Done**
+
+- Task page: **Pause** opens the same small menu as "pause all" (1 hour, 4 hours, until 9:00
+  tomorrow, until resumed), each line showing when it would end; keyboard as before (arrows,
+  Enter, Esc gives focus back). The toast has Undo. The menu code is now one `pzMenu` shared by
+  both, so they can't drift apart.
+- A timed pause is stored on the task (`pause_kind = 'snooze'`, end in `pause_detail`, no
+  migration). The pill reads 限时暂停 / Snoozed, its tooltip gives the end and the start; the task
+  list's schedule cell and the Overview's schedule row say "明天 0:08 恢复 · 下次 明天 18:00".
+- The scheduler's poll calls a `Wake` hook first (also while every schedule is paused), which
+  resumes tasks whose end has passed; a snooze that ran out while tidebot was off ends on the
+  first tick. Waking (or resuming early) **skips** the fire times inside the snooze instead of
+  catching up — a snooze means "not during this time". A plain pause by hand still follows the
+  task's missed-run setting, unchanged.
+- Snoozing again changes the end and keeps the start; "until resumed" turns it into a plain pause.
+  An automatic pause (failures, budget, plugin, import review) can't be overwritten by a snooze
+  (`ErrPausedOther`). WebUI goes through the new ext RPC `task.pause_for` (CSRF, owner session);
+  `agentctl call tasks.pause {"id","for":"4h"}` does the same.
+- While "pause all" is on, the task list's "下次 …" and the Overview's next run are dimmed with
+  "· 暂停中" (tooltip: when the pause ends) if the pause holds that run back; repainted in place
+  when the pause starts / ends (status poll or the menu), no reload. A task paused any other way
+  shows "暂停中，不按计划运行" instead of a cron preview that would not happen.
+- Tests: `TestTaskSnooze` (end / extend / manual / skip on wake and on early resume, a time still
+  ahead kept, plain pause still catches up, automatic pause and archived tasks refused),
+  `TestWakeRunsWhilePaused`, `TestTaskPauseFor` (RPC answer, bad length, agentctl form, wake
+  during "pause all"), `TestTaskPauseUI` (static + node: held / not held around the pause end,
+  manual pause holds all, escaping, snooze pill). Same Go and JS paths on macOS / Windows / Linux;
+  times are RFC3339 UTC strings and shown in the scheduling timezone.
+- Screenshot: `/workspace/tidebot-shots/2026-10-26-task-pause-for.png` (1024×655, task page with
+  the menu open). README screenshots are unaffected (the Pause button only gained a caret).
+
+**Inspiration**
+
+- louislam/uptime-kuma `server/model/monitor.js` (`isUnderMaintenance`, the beat loop marks a
+  check inside a maintenance window as MAINTENANCE rather than queueing it) and
+  `server/model/maintenance.js` / `monitor_maintenance`: a maintenance window can target single
+  monitors, and nothing is owed afterwards — hence "skip, don't catch up" for a snooze.
+- louislam/uptime-kuma `src/pages/EditMaintenance.vue` (`setQuickDuration` 15 / 30 / 60 / 120 /
+  240 min buttons) and `src/pages/Details.vue` (Pause on the monitor page): quick lengths instead
+  of a date picker. Ideas only, no code copied.
+
+**Learned**
+
+- The "next run" a page shows is a promise; every pause (global, per task, automatic) has to be
+  folded into it, or the UI says something the scheduler won't do.
+- Reusing the free-text `pause_detail` column for the end time avoided a migration; comparing
+  RFC3339 UTC strings in SQL is safe as long as every writer uses the same format.
+
+**Ideas for later**
+
+1. `agentctl tasks pause --for 4h` flag (today only `agentctl call`).
+2. Snooze from the task list (row menu / `p` key in the j/k cursor) and the batch bar.
+3. A notice when a snooze ends ("「Clean Logs」已恢复，下次 18:00"), opt-in per task.
+4. "Skip next run only" as a fifth choice (advance `next_run_at` once, no pause).

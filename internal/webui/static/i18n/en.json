@@ -1859,5 +1859,15 @@
   "tx.go": "Import {n} tasks",
   "tx.done": "Imported {n} tasks, all paused",
   "tx.done_on": "Imported {n} tasks",
-  "tx.some_failed": "{n} failed"
+  "tx.some_failed": "{n} failed",
+  "pz.pill_snooze": "Snoozed",
+  "pz.why_snooze": "Paused by you until {u} · since {t}\nScheduled runs in between are skipped",
+  "tpz.title": "Pause this task",
+  "tpz.note": "Resumes by itself. Scheduled runs in between are skipped, not caught up, and triggers or webhooks won't start it; you can still run it by hand.",
+  "tpz.note_nocron": "Resumes by itself. Triggers and webhooks won't start it meanwhile; you can still run it by hand.",
+  "tpz.wakes": "resumes {t}",
+  "tpz.t_until": "Task paused, resumes {t}",
+  "tpz.t_manual": "Task paused until you resume it",
+  "tpz.t_resumed": "Resumed; scheduled runs during the pause were skipped",
+  "tpz.no_next": "paused — won't run on schedule"
 }

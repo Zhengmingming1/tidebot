@@ -1897,3 +1897,6 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .spz-note svg { flex: none; margin-top: 1px; }
 .sidebar-status .spz-pill strong { color: var(--warn); }
 .spz-pill[aria-expanded="true"]::after, .spz-home[aria-expanded="true"]::after { display: none; }
+/* a task's next run that "pause all" holds back, and the task Pause button's menu caret */
+.nx.held { opacity: .7; }
+#t-toggle[data-act="pause"] svg:last-child { width: 12px; height: 12px; margin-left: -2px; opacity: .7; }

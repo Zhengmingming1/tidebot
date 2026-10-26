@@ -441,7 +441,7 @@
     return d;
   }
   // Why a paused task is paused: the pill says it in a word, the tooltip in a sentence.
-  var PAUSE_KINDS = ["user", "breaker", "budget", "pack", "plugin"];
+  var PAUSE_KINDS = ["user", "snooze", "breaker", "budget", "pack", "plugin"];
   function pauseKind(t) { return t && t.status === "paused" && PAUSE_KINDS.indexOf(t.pause_kind) >= 0 ? t.pause_kind : ""; }
   function pauseClass(c) { return state.dict["pz.cls." + c] ? T("pz.cls." + c) : T("pz.cls.unknown"); }
   function pauseWhy(t) {
@@ -451,6 +451,7 @@
     if (k === "budget") return T("pz.why_budget", { t: at, r: budgetWhy(t.pause_detail || "") });
     if (k === "plugin") return T("pz.why_plugin", { t: at, p: t.pause_detail || "" });
     if (k === "pack") return T("pz.why_pack");
+    if (k === "snooze") return T("pz.why_snooze", { u: when(t.pause_detail), t: at });
     return at ? T("pz.why_user", { t: at }) : "";
   }
   function taskPill(st, t, small) {
@@ -463,7 +464,7 @@
   // happened and what resuming does; a pause by hand needs no explanation.
   function pauseNotice(t) {
     var k = pauseKind(t);
-    if (!k || k === "user") return "";
+    if (!k || k === "user" || k === "snooze") return "";
     var body = k === "breaker" ? T("pz.note_breaker", { n: t.breaker_at || 3, c: pauseClass(t.pause_detail) }) : k === "budget" ? T("pz.note_budget") : k === "plugin" ? T("pz.note_plugin", { p: t.pause_detail || "" }) : T("pz.note_pack");
     var link = k === "breaker" ? '<a class="link" href="#/runs?task=' + enc(t.id) + '&status=failed">' + esc(T("pz.see_failed")) + "</a>" : k === "budget" ? '<a class="link" href="#/spend">' + esc(T("pz.see_spend")) + "</a>" : "";
     return '<p class="notice ' + (k === "pack" ? "" : "warn ") + 'pz-note" id="pz-note"' + (t.paused_at ? ' data-tip="' + esc(pauseWhy(t)) + '"' : "") + ">" + ic(k === "pack" ? "info" : "pause", "sm") + "<span>" + esc(body) + "</span>" + link + "</p>";
@@ -823,7 +824,7 @@
   function loadCC(force) {
     if (!force && cc.st && Date.now() - cc.at < 15000) { paintCC(); return Promise.resolve(cc.st); }
     var p = force ? api("/api/claude/status", { method: "POST", body: {} }) : api("/api/claude/status"), asked = Date.now();
-    return p.then(function (st) { cc.st = st; cc.err = false; cc.at = Date.now(); spAdopt(st.sched, asked); paintCC(); return st; })
+    return p.then(function (st) { cc.st = st; cc.err = false; cc.at = Date.now(); spAdopt(st.sched, asked); paintCC(); paintHeldNext(); return st; })
       .catch(function (e) { if (e.auth) return; cc.err = true; cc.at = Date.now(); paintCC(); });
   }
   function ccView() {
@@ -890,6 +891,7 @@
     spAdopt(v, Date.now());
     paintCC();
     paintHomePause();
+    paintHeldNext();
   }
   // setSchedPause(true, "1h" | "4h" | "tomorrow" | "manual") or setSchedPause(false).
   function setSchedPause(on, choice) {
@@ -902,59 +904,108 @@
       return v;
     }).catch(fail);
   }
-  // spMenu: a small menu at the anchor ("up" opens above it, for the sidebar). Arrow keys
-  // move, Enter / Space pick, Esc or a click outside closes and gives focus back.
+  // spMenu: the "pause all" menu at the anchor ("up" opens above it, for the sidebar).
   function spMenu(anchor, dir) {
-    var old = $("#spz-menu");
-    if (old) { old._close(); return; }
+    if ($("#spz-menu")) { $("#spz-menu")._close(); return; }
     api("/api/rpc/scheduler.pause.get", { method: "POST", body: {}, read: true }).then(function (r) {
       var v = r.result;
-      if (!v || $("#spz-menu") || !document.contains(anchor)) return;
+      if (!v) return;
       spAdopt(v, Date.now());
-      var opts = v.options || SPZ_FOR.map(function (f) { return { "for": f }; });
-      var item = function (o) {
-        return '<button type="button" role="menuitem" class="spz-item" data-for="' + esc(o["for"]) + '"><span>' + esc(T("spz.f_" + o["for"])) + "</span><small>" + esc(o.until ? T("spz.ends", { t: when(o.until) }) : T("spz.ends_manual")) + "</small></button>";
-      };
-      var m = document.createElement("div");
-      m.id = "spz-menu"; m.className = "popover spz-menu"; m.setAttribute("role", "menu"); m.setAttribute("aria-label", T(v.paused ? "spz.menu_title_on" : "spz.menu_title"));
-      m.innerHTML = '<div class="spz-head">' + ic("pause", "sm") + "<div><strong>" + esc(T(v.paused ? "spz.menu_title_on" : "spz.menu_title")) + "</strong>" + (v.paused ? "<small>" + esc(spEnds(v)) + "</small>" : "") + "</div></div>" +
-        (v.paused ? '<button type="button" role="menuitem" class="spz-item spz-resume" data-resume="1"><span>' + ic("play", "sm") + esc(T("spz.resume")) + "</span></button><div class=\"spz-sep\">" + esc(T("spz.change")) + "</div>" : "") +
-        opts.map(item).join("") +
-        '<p class="spz-note">' + ic("info", "sm") + "<span>" + esc(T("spz.note")) + " " + esc(v.paused && v.due ? T("spz.note_due", { n: v.due }) : T("spz.note_resume")) + "</span></p>";
-      document.body.appendChild(m);
-      var r0 = anchor.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
-      var left = dir === "up" ? r0.left : r0.right - w;
-      left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
-      var top = dir === "up" ? r0.top - h - 8 : r0.bottom + 8;
-      if (dir !== "up" && top + h > window.innerHeight - 8) top = Math.max(8, r0.top - h - 8);
-      if (top < 8) top = 8;
-      m.style.left = Math.round(left) + "px"; m.style.top = Math.round(top) + "px";
-      anchor.setAttribute("aria-expanded", "true");
-      var items = $$('[role="menuitem"]', m);
-      var close = function (refocus) {
-        m.remove(); anchor.setAttribute("aria-expanded", "false");
-        document.removeEventListener("click", off, true); document.removeEventListener("keydown", key, true); window.removeEventListener("hashchange", m._close);
-        if (refocus && document.contains(anchor)) anchor.focus();
-      };
-      m._close = function () { close(false); };
-      var off = function (e) { if (!m.contains(e.target) && !anchor.contains(e.target)) close(false); };
-      var key = function (e) {
-        var i = items.indexOf(document.activeElement);
-        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
-        else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
-        else if (e.key === "Home" || e.key === "End") { e.preventDefault(); items[e.key === "Home" ? 0 : items.length - 1].focus(); }
-        else if (e.key === "Tab") close(false);
-      };
-      m.addEventListener("click", function (e) {
-        var b = e.target.closest('[role="menuitem"]');
-        if (!b) return;
-        close(true);
-        if (b.hasAttribute("data-resume")) setSchedPause(false); else setSchedPause(true, b.getAttribute("data-for"));
+      pzMenu(anchor, dir, {
+        title: T(v.paused ? "spz.menu_title_on" : "spz.menu_title"), sub: v.paused ? spEnds(v) : "", paused: v.paused,
+        options: v.options, note: T("spz.note") + " " + (v.paused && v.due ? T("spz.note_due", { n: v.due }) : T("spz.note_resume")),
+        pick: function (f) { if (f) setSchedPause(true, f); else setSchedPause(false); }
       });
-      setTimeout(function () { document.addEventListener("click", off, true); document.addEventListener("keydown", key, true); }, 0);
-      window.addEventListener("hashchange", m._close);
-      items[0].focus();
     }).catch(fail);
+  }
+  // pzMenu: a small "pause for…" menu (1 hour, 4 hours, until 9:00 tomorrow, until resumed)
+  // shared by "pause all" and one task's Pause button. o: title, sub (current end), paused
+  // (adds "resume now"), options (from scheduler.pause.get, with the end each gives), note,
+  // pick(for) — "" = resume. Arrow keys move, Enter / Space pick, Esc or a click outside
+  // closes and gives focus back.
+  function pzMenu(anchor, dir, o) {
+    if ($("#spz-menu") || !document.contains(anchor)) return;
+    var opts = o.options || SPZ_FOR.map(function (f) { return { "for": f }; });
+    var item = function (x) {
+      return '<button type="button" role="menuitem" class="spz-item" data-for="' + esc(x["for"]) + '"><span>' + esc(T("spz.f_" + x["for"])) + "</span><small>" + esc(x.until ? T("spz.ends", { t: when(x.until) }) : T("spz.ends_manual")) + "</small></button>";
+    };
+    var m = document.createElement("div");
+    m.id = "spz-menu"; m.className = "popover spz-menu"; m.setAttribute("role", "menu"); m.setAttribute("aria-label", o.title);
+    m.innerHTML = '<div class="spz-head">' + ic("pause", "sm") + "<div><strong>" + esc(o.title) + "</strong>" + (o.sub ? "<small>" + esc(o.sub) + "</small>" : "") + "</div></div>" +
+      (o.paused ? '<button type="button" role="menuitem" class="spz-item spz-resume" data-resume="1"><span>' + ic("play", "sm") + esc(T("spz.resume")) + "</span></button><div class=\"spz-sep\">" + esc(T("spz.change")) + "</div>" : "") +
+      opts.map(item).join("") +
+      '<p class="spz-note">' + ic("info", "sm") + "<span>" + esc(o.note) + "</span></p>";
+    document.body.appendChild(m);
+    var r0 = anchor.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+    var left = dir === "up" ? r0.left : r0.right - w;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    var top = dir === "up" ? r0.top - h - 8 : r0.bottom + 8;
+    if (dir !== "up" && top + h > window.innerHeight - 8) top = Math.max(8, r0.top - h - 8);
+    if (top < 8) top = 8;
+    m.style.left = Math.round(left) + "px"; m.style.top = Math.round(top) + "px";
+    anchor.setAttribute("aria-expanded", "true");
+    var items = $$('[role="menuitem"]', m);
+    var close = function (refocus) {
+      m.remove(); anchor.setAttribute("aria-expanded", "false");
+      document.removeEventListener("click", off, true); document.removeEventListener("keydown", key, true); window.removeEventListener("hashchange", m._close);
+      if (refocus && document.contains(anchor)) anchor.focus();
+    };
+    m._close = function () { close(false); };
+    var off = function (e) { if (!m.contains(e.target) && !anchor.contains(e.target)) close(false); };
+    var key = function (e) {
+      var i = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+      else if (e.key === "Home" || e.key === "End") { e.preventDefault(); items[e.key === "Home" ? 0 : items.length - 1].focus(); }
+      else if (e.key === "Tab") close(false);
+    };
+    m.addEventListener("click", function (e) {
+      var b = e.target.closest('[role="menuitem"]');
+      if (!b) return;
+      close(true);
+      o.pick(b.hasAttribute("data-resume") ? "" : b.getAttribute("data-for"));
+    });
+    setTimeout(function () { document.addEventListener("click", off, true); document.addEventListener("keydown", key, true); }, 0);
+    window.addEventListener("hashchange", m._close);
+    items[0].focus();
+  }
+  // heldNext: "next 10:00" for a task's schedule; while every schedule is paused and that
+  // time falls inside the pause it reads "next 10:00 · paused" (dimmed), so the task list
+  // and the task page don't promise a run the pause will hold back. Kept up to date by
+  // paintHeldNext when the pause changes ([data-next] spans).
+  function heldNext(iso) {
+    var held = spHolds(iso);
+    return '<span class="nx' + (held ? " held" : "") + '" data-next="' + esc(iso) + '"' + (held ? ' data-tip="' + esc(spEnds(spState)) + '"' : "") + ">" + esc(T("tl.next", { t: when(iso) })) + (held ? '<span class="tl-held"> · ' + esc(T("spz.held")) + "</span>" : "") + "</span>";
+  }
+  function spHolds(iso) {
+    var v = spState;
+    if (!iso || !v || !v.paused) return false;
+    return new Date(iso).getTime() < (v.until ? new Date(v.until).getTime() : Infinity);
+  }
+  // taskPauseMenu: one task's Pause button offers the same lengths as "pause all"; a
+  // timed pause resumes by itself and skips the fire times inside it (Uptime Kuma puts one
+  // monitor into a maintenance window the same way: server/model/monitor.js isUnderMaintenance).
+  function taskPauseMenu(anchor, t, done) {
+    if ($("#spz-menu")) { $("#spz-menu")._close(); return; }
+    api("/api/rpc/scheduler.pause.get", { method: "POST", body: {}, read: true }).then(function (r) {
+      var v = r.result || {};
+      pzMenu(anchor, "down", {
+        title: T("tpz.title"), options: v.options, note: T(t.cron ? "tpz.note" : "tpz.note_nocron"),
+        pick: function (f) {
+          rpc("task.pause_for", { id: t.id, "for": f }).then(function (res) {
+            var u = res && res.until;
+            toastUndo(u ? T("tpz.t_until", { t: when(u) }) : T("tpz.t_manual"), function () { api("/api/tasks/" + enc(t.id) + "/resume", { method: "POST", body: {} }).then(done).catch(fail); });
+            done();
+          }).catch(fail);
+        }
+      });
+    }).catch(fail);
+  }
+  function paintHeldNext() {
+    $$("[data-next]").forEach(function (el) {
+      var iso = el.getAttribute("data-next");
+      if (el.classList.contains("held") !== spHolds(iso)) el.outerHTML = heldNext(iso);
+    });
   }
   // Home › next 24 hours: the card's pause button, the "paused" line and runs the pause holds back.
   function paintHomePause() {
@@ -1643,7 +1694,7 @@
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
           return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
-            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + esc(T("tl.next", { t: when(t.next_run_at) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
+            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
         $$("[data-runnow]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); runTaskNow(b.getAttribute("data-runnow"), b); }); });
@@ -1935,7 +1986,7 @@
       mount('<div class="grid g-detail">' +
         '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
         '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span></div></div>" +
-        '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause">' + ic("pause", "sm") + esc(T("td.pause")) + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
+        '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">' + ic("pause", "sm") + esc(T("td.pause")) + ic("chevDown", "sm") + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" + pauseNotice(t) +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
         taskTab(tab, t, items, vers, runs) + "</section>" +
@@ -1952,9 +2003,13 @@
       if ($("#ie-prompt")) inlineEdit($("#ie-prompt"), true, patch("prompt"));
       // Schedule: the next run inline; the cron expression, time zone and the runs after it in the tooltip.
       if ($("#ov-next")) api("/api/scheduler/preview?cron=" + enc(t.cron) + "&n=4").then(function (d) {
-        var ts = d.times || [], box = $("#ov-next");
+        var ts = d.times || [], box = $("#ov-next"), snz = pauseKind(t) === "snooze";
         if (!box || !ts.length) return;
-        box.innerHTML = '<span class="muted">' + esc(T("td.next_at", { t: when(ts[0]) })) + "</span>" + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : ""));
+        // A snoozed task skips the times before its end; a task paused otherwise has no next run;
+        // an active one shows whether "pause all" holds its next run back.
+        if (snz) ts = ts.filter(function (x) { return new Date(x) > new Date(t.pause_detail); });
+        var head = snz ? esc(T("tpz.wakes", { t: when(t.pause_detail) })) + (ts.length ? " · " + esc(T("td.next_at", { t: when(ts[0]) })) : "") : t.status !== "active" ? esc(T("tpz.no_next")) : "";
+        box.innerHTML = (head ? '<span class="muted">' + head + "</span>" : '<span class="muted">' + heldNext(ts[0]) + "</span>") + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : ""));
       }).catch(function () {});
       if ($("#ws-copy")) $("#ws-copy").addEventListener("click", function () { copyText(t.workspace).catch(fail); });
       // Desktop app only: open the folder in Finder / File Explorer / the file manager ("o").
@@ -1981,12 +2036,14 @@
       });
       $("#t-del").addEventListener("click", function () { confirmDialog({ title: T("td.del_title"), body: T("td.confirm_del", { n: t.name }), ok: T("td.delete"), danger: true, typeName: t.name }).then(function (y) { if (y) api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); }); });
       var tg = $("#t-toggle");
-      tg.addEventListener("click", function () {
+      tg.addEventListener("click", function (e) {
         var act = tg.getAttribute("data-act"), k = pauseKind(t);
+        if (act === "pause") { e.stopPropagation(); taskPauseMenu(tg, t, reload); return; }
         tg.disabled = true;
         api(base + "/" + act, { method: "POST", body: {} }).then(function () {
           if (act === "resume" && k === "breaker") toast(T("pz.resumed_reset"));
           else if (act === "resume" && k === "budget") toast(T("pz.resumed_budget"));
+          else if (act === "resume" && k === "snooze") toast(T("tpz.t_resumed"));
           reload();
         }).catch(function (e) { tg.disabled = false; fail(e); });
       });

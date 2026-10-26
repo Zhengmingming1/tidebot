@@ -121,7 +121,7 @@ func TestPauseReasonUI(t *testing.T) {
 	}
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
-		`var PAUSE_KINDS = ["user", "breaker", "budget", "pack", "plugin"];`,
+		`var PAUSE_KINDS = ["user", "snooze", "breaker", "budget", "pack", "plugin"];`,
 		`function taskPill(st, t, small) {`,
 		`function pauseNotice(t) {`,
 		`taskPill(t.status, t) + idChip(T("td.task_id"), t.id)`,

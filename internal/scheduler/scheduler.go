@@ -33,6 +33,10 @@ type Scheduler struct {
 	// out and firing started again, so the owner can forget the stored pause.
 	OnAutoResume func()
 
+	// Wake, when set, is called at the start of every poll (also while firing is paused),
+	// e.g. to resume tasks whose own timed pause has ended.
+	Wake func(ctx context.Context, now time.Time)
+
 	// Gate, when set, may defer a due task (e.g. on battery / about to sleep).
 	// A deferred task is left due and retried on the next tick; its schedule is not advanced.
 	Gate func(task db.Task) (deferRun bool, reason string)
@@ -156,6 +160,9 @@ func (s *Scheduler) Stop() {
 
 func (s *Scheduler) poll(ctx context.Context) {
 	now := time.Now()
+	if s.Wake != nil {
+		s.Wake(ctx, now)
+	}
 	s.expirePause(now)
 	if p, _ := s.PauseState(now); p {
 		return

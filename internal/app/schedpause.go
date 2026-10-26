@@ -185,5 +185,23 @@ func (a *App) schedPauseRPC() map[string]rpcFunc {
 			}
 			return a.SetSchedPause(ctx, in.Paused, in.For)
 		},
+		// One task from the WebUI: {"id", "for": "1h" | "4h" | "tomorrow" | "manual"}; the same
+		// as agentctl's tasks.pause with "for" (see rpcTasksPause).
+		"task.pause_for": a.rpcTasksPause,
+	}
+}
+
+// wakeSnoozedTasks resumes tasks whose own timed pause ("pause this task for 1 hour") has
+// ended; runs from the scheduler's poll, also while every schedule is paused.
+func (a *App) wakeSnoozedTasks(ctx context.Context, now time.Time) {
+	if a.Tasks == nil {
+		return
+	}
+	ids, err := a.Tasks.WakeSnoozed(ctx, now)
+	if err != nil {
+		a.Log.Warn("task snooze: wake", "error", err)
+	}
+	for _, id := range ids {
+		a.Log.Info("task snooze ended, task resumed", "task_id", id)
 	}
 }

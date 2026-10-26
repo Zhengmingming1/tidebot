@@ -119,14 +119,31 @@ func (a *App) rpcTasksCreate(ctx context.Context, params json.RawMessage) (any, 
 	return a.Tasks.Create(ctx, p)
 }
 
+// tasks.pause {"id"} pauses by hand; with "for": "1h" | "4h" | "tomorrow" the task resumes
+// by itself then (fire times in between are skipped); "manual" = until resumed by hand.
 func (a *App) rpcTasksPause(ctx context.Context, params json.RawMessage) (any, error) {
 	var p struct {
-		ID string `json:"id"`
+		ID  string `json:"id"`
+		For string `json:"for"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
 		return nil, fmt.Errorf("id required")
 	}
-	return nil, a.Tasks.SetStatus(ctx, p.ID, "paused", "user")
+	if p.For == "" {
+		return nil, a.Tasks.SetStatus(ctx, p.ID, "paused", "user")
+	}
+	until, err := schedPauseEnd(p.For, time.Now(), a.Cfg.Location())
+	if err != nil {
+		return nil, err
+	}
+	if err := a.Tasks.PauseFor(ctx, p.ID, until); err != nil {
+		return nil, err
+	}
+	out := map[string]any{"ok": true, "status": "paused"}
+	if !until.IsZero() {
+		out["until"] = until.UTC().Format(time.RFC3339)
+	}
+	return out, nil
 }
 
 func (a *App) rpcTasksResume(ctx context.Context, params json.RawMessage) (any, error) {

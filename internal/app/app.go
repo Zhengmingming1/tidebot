@@ -157,6 +157,7 @@ func Open(cfg config.Config) (*App, error) {
 	}
 	a.applyProviderSettings(context.Background())
 	a.Sched.OnAutoResume = a.onSchedPauseEnded
+	a.Sched.Wake = a.wakeSnoozedTasks
 	a.loadSchedPause(context.Background())
 	// Restore webui.enabled from settings if present.
 	if v, err := a.Auth.GetSetting(context.Background(), "webui.enabled"); err == nil && v != "" {

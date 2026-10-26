@@ -1859,5 +1859,15 @@
   "tx.go": "导入 {n} 个任务",
   "tx.done": "已导入 {n} 个任务，均已暂停",
   "tx.done_on": "已导入 {n} 个任务",
-  "tx.some_failed": "{n} 个失败"
+  "tx.some_failed": "{n} 个失败",
+  "pz.pill_snooze": "限时暂停",
+  "pz.why_snooze": "手动暂停到 {u} · {t} 开始\n期间的定时运行会跳过",
+  "tpz.title": "暂停此任务",
+  "tpz.note": "到点自动恢复。期间的定时运行跳过、不补跑，触发器和 Webhook 也不会启动它；仍可手动运行。",
+  "tpz.note_nocron": "到点自动恢复。期间触发器和 Webhook 不会启动它；仍可手动运行。",
+  "tpz.wakes": "{t} 恢复",
+  "tpz.t_until": "已暂停此任务，{t} 自动恢复",
+  "tpz.t_manual": "已暂停此任务，需手动恢复",
+  "tpz.t_resumed": "已恢复，暂停期间的定时运行已跳过",
+  "tpz.no_next": "暂停中，不按计划运行"
 }

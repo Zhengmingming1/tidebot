@@ -204,6 +204,9 @@ const (
 	PauseBudget  = "budget"  // a budget cap was hit (detail: the budget reason)
 	PausePack    = "pack"    // imported from a pack, waiting for review
 	PausePlugin  = "plugin"  // its trigger plugin was uninstalled (detail: plugin id)
+	// PauseSnooze: paused by hand until a time (detail: the end, RFC3339 UTC). It resumes by
+	// itself then (WakeSnoozed), and the fire times that fell inside it are skipped.
+	PauseSnooze = "snooze"
 )
 
 // SetStatus pauses (by hand) or resumes / archives a task; see SetStatusWhy.
@@ -237,8 +240,9 @@ func (s *Service) SetStatusWhy(ctx context.Context, taskID, status, kind, detail
 		return err
 	}
 	defer tx.Rollback()
-	var old string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id=?`, taskID).Scan(&old); err != nil {
+	var old, oldKind, cronExpr string
+	var next sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT status, pause_kind, cron_expr, next_run_at FROM tasks WHERE id=?`, taskID).Scan(&old, &oldKind, &cronExpr, &next); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // nothing to change (same as the plain UPDATE before)
 		}
@@ -262,8 +266,108 @@ func (s *Service) SetStatusWhy(ctx context.Context, taskID, status, kind, detail
 		if _, err := tx.ExecContext(ctx, `UPDATE task_policies SET consecutive_failures=0 WHERE task_id=?`, taskID); err != nil {
 			return err
 		}
+		if oldKind == PauseSnooze {
+			if err := s.skipSnoozed(ctx, tx, taskID, cronExpr, next, time.Now()); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit()
+}
+
+// skipSnoozed moves a waking task's next fire time past now: a snooze means "not during
+// this time", so its missed fire times are skipped instead of caught up (the way Uptime
+// Kuma records checks inside a monitor's maintenance window as maintenance, not as runs
+// owed later). A fire time still ahead is kept.
+func (s *Service) skipSnoozed(ctx context.Context, tx *sql.Tx, taskID, cronExpr string, next sql.NullString, now time.Time) error {
+	if cronExpr == "" || !next.Valid || s.Sched == nil {
+		return nil
+	}
+	if t, err := time.Parse(time.RFC3339, next.String); err == nil && t.After(now) {
+		return nil
+	}
+	nx, err := s.Sched.NextRun(cronExpr, now)
+	if err != nil {
+		return nil // a broken expression is reported where it is edited
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE tasks SET next_run_at=? WHERE id=?`, nx.UTC().Format(time.RFC3339), taskID)
+	return err
+}
+
+// ErrPausedOther: the task is paused for a reason the user has to look at first
+// (failures, budget, a removed plugin, an import waiting for review).
+var ErrPausedOther = errors.New("task is paused for another reason; resume it first")
+
+// PauseFor pauses a task by hand until `until` (zero = until resumed by hand). An active
+// task, a task paused by hand and a snoozed task can be paused this way (pausing again
+// replaces the end and keeps when the pause started); an automatic pause is left alone.
+func (s *Service) PauseFor(ctx context.Context, taskID string, until time.Time) error {
+	kind, detail := PauseUser, ""
+	if !until.IsZero() {
+		if !until.After(time.Now()) {
+			return errors.New("the end must be in the future")
+		}
+		kind, detail = PauseSnooze, until.UTC().Format(time.RFC3339)
+	}
+	tx, err := s.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var st, oldKind string
+	if err := tx.QueryRowContext(ctx, `SELECT status, pause_kind FROM tasks WHERE id=?`, taskID).Scan(&st, &oldKind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("task not found")
+		}
+		return err
+	}
+	now := nowUTC()
+	switch {
+	case st == "active":
+		_, err = tx.ExecContext(ctx, `UPDATE tasks SET status='paused', pause_kind=?, pause_detail=?, paused_at=?, updated_at=? WHERE id=?`, kind, detail, now, now, taskID)
+	case st == "paused" && (oldKind == PauseUser || oldKind == PauseSnooze || oldKind == ""):
+		_, err = tx.ExecContext(ctx, `UPDATE tasks SET pause_kind=?, pause_detail=?, paused_at=COALESCE(paused_at, ?), updated_at=? WHERE id=?`, kind, detail, now, now, taskID)
+	case st == "paused":
+		return ErrPausedOther
+	default:
+		return fmt.Errorf("task not found")
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// WakeSnoozed resumes every task whose snooze has ended by now and returns their ids.
+// Called from the scheduler's poll, so a snooze that ran out while tidebot was off ends
+// on the first tick after start-up.
+func (s *Service) WakeSnoozed(ctx context.Context, now time.Time) ([]string, error) {
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id FROM tasks WHERE status='paused' AND pause_kind=? AND pause_detail <= ?`,
+		PauseSnooze, now.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var woke []string
+	for _, id := range ids {
+		if err := s.SetStatusWhy(ctx, id, "active", "", ""); err != nil {
+			return woke, err
+		}
+		woke = append(woke, id)
+	}
+	return woke, nil
 }
 
 // Rollback moves current pointer to versionID (no new version).
