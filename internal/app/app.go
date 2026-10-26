@@ -70,6 +70,7 @@ type App struct {
 	trig  *triggerState
 	disk  diskWatch
 	power powerWatch
+	loc   atomic.Pointer[time.Location] // scheduling timezone (see timezone.go)
 
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
@@ -113,9 +114,9 @@ func Open(cfg config.Config) (*App, error) {
 	a.Runner.LogDir = filepath.Join(cfg.DataDir, "runs")
 	a.Policy = &policy.Store{DB: sqlDB}
 	a.Notify = notify.New(sqlDB, a.Secrets)
-	a.Notify.Loc = cfg.Location()
+	a.Notify.LocFn = a.Loc
 	a.Sched = scheduler.New(store, log, cfg.SchedulerTick, a.runTaskScheduled)
-	a.Sched.SetLocation(cfg.Location())
+	a.Sched.SetLocation(cfg.Location()) // until the stored zone is read below
 	a.Sched.Catchup = a.catchup
 	if v, err := strconv.ParseFloat(os.Getenv("TIDEBOT_RETRY_SCALE"), 64); err == nil && v > 0 {
 		a.retryScale = v
@@ -137,7 +138,7 @@ func Open(cfg config.Config) (*App, error) {
 	}
 	a.initPlugins()
 	a.Cost = cost.New(sqlDB, log)
-	a.Cost.Loc = cfg.Location()
+	a.Cost.LocFn = a.Loc
 	a.Cost.FX = a.cachedFX
 	a.Auth = auth.New(sqlDB)
 	if mk, err := secrets.NewFileBackend(cfg.HomeDir).MasterKey(); err != nil {
@@ -156,6 +157,7 @@ func Open(cfg config.Config) (*App, error) {
 	} else if n > 0 {
 		log.Info("2fa secret encrypted at rest", "rows", n)
 	}
+	a.applyLoc(a.resolveLoc(context.Background()))
 	a.applyProviderSettings(context.Background())
 	a.Sched.OnAutoResume = a.onSchedPauseEnded
 	a.Sched.Wake = a.wakeSnoozedTasks
@@ -170,7 +172,7 @@ func Open(cfg config.Config) (*App, error) {
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
 		StopRun:  func(id string) (string, error) { return a.StopRun(context.Background(), id) },
 		QueuePos: a.Runner.QueuePos,
-		LogPath:  a.Runner.LogPath, LogWait: a.Runner.LogWait, Location: cfg.Location(),
+		LogPath:  a.Runner.LogPath, LogWait: a.Runner.LogWait, Location: cfg.Location(), LocFn: a.Loc,
 		Ext: a.CallExt,
 		ClaudeStatus: func(ctx context.Context, force bool) any {
 			st := a.ClaudeStatus(ctx, force)

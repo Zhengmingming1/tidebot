@@ -708,8 +708,8 @@
   "set.totp_on_sub": "Sign-in asks for the 6-digit code from your authenticator.",
   "set.totp_sub": "Enable with {cmd}",
   "set.turn_off": "Turn off",
-  "set.tz": "Timezone",
-  "set.tz_sub": "Used for every time shown here and for the daily budget reset.",
+  "set.tz": "Scheduling timezone",
+  "set.tz_sub": "Scheduled tasks run on this clock; also used for every time shown and the daily budget reset.",
   "set.version": "Version",
   "set.version_sub": "The tidebot build you are running.",
   "set.webui_on": "Enable WebUI",
@@ -1869,5 +1869,13 @@
   "tpz.t_until": "Task paused, resumes {t}",
   "tpz.t_manual": "Task paused until you resume it",
   "tpz.t_resumed": "Resumed; scheduled runs during the pause were skipped",
-  "tpz.no_next": "paused — won't run on schedule"
+  "tpz.no_next": "paused — won't run on schedule",
+  "tz.title": "Scheduling timezone",
+  "tz.search": "Search city, region or offset (e.g. Tokyo, +8)",
+  "tz.auto": "Automatic",
+  "tz.auto_key": "automatic system default",
+  "tz.note": "Upcoming scheduled runs move to the new timezone.",
+  "tz.btn_tip": "Now {l} · click to change",
+  "tz.saved": "Timezone set to {z}",
+  "tz.saved_moved": "Timezone set to {z}; next run moved for {n} task(s)"
 }

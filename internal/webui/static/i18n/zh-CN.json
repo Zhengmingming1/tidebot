@@ -708,8 +708,8 @@
   "set.totp_on_sub": "登录时需要验证器里的 6 位码。",
   "set.totp_sub": "开启：{cmd}",
   "set.turn_off": "关闭",
-  "set.tz": "时区",
-  "set.tz_sub": "用于这里显示的所有时间，以及每日预算重置。",
+  "set.tz": "调度时区",
+  "set.tz_sub": "定时任务按这个时区的钟点运行，也用于界面上的时间和每日预算重置。",
   "set.version": "版本",
   "set.version_sub": "当前运行的 tidebot 版本。",
   "set.webui_on": "启用 WebUI",
@@ -1869,5 +1869,13 @@
   "tpz.t_until": "已暂停此任务，{t} 自动恢复",
   "tpz.t_manual": "已暂停此任务，需手动恢复",
   "tpz.t_resumed": "已恢复，暂停期间的定时运行已跳过",
-  "tpz.no_next": "暂停中，不按计划运行"
+  "tpz.no_next": "暂停中，不按计划运行",
+  "tz.title": "调度时区",
+  "tz.search": "搜索城市、地区或偏移（如 Tokyo、+8）",
+  "tz.auto": "自动（跟随系统）",
+  "tz.auto_key": "自动 系统 默认 automatic",
+  "tz.note": "更改后，即将到来的定时运行会按新时区重新计算。",
+  "tz.btn_tip": "当前 {l} · 点按更改",
+  "tz.saved": "调度时区已改为 {z}",
+  "tz.saved_moved": "调度时区已改为 {z}，{n} 个任务的下次运行已调整"
 }

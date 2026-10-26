@@ -117,7 +117,7 @@ func (a *App) runNotifier(ctx context.Context) {
 					h = n
 				}
 			}
-			local := now.In(a.Cfg.Location())
+			local := now.In(a.Loc())
 			day := local.Format("2006-01-02")
 			if local.Hour() == h && lastDigest != day {
 				lastDigest = day

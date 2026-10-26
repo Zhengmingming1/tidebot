@@ -112,7 +112,7 @@ func (a *App) SetSchedPause(ctx context.Context, paused bool, choice string) (Sc
 		a.Log.Info("scheduler resumed")
 		return a.SchedPause(ctx), nil
 	}
-	until, err := schedPauseEnd(choice, now, a.Cfg.Location())
+	until, err := schedPauseEnd(choice, now, a.Loc())
 	if err != nil {
 		return SchedPauseView{}, err
 	}
@@ -156,7 +156,7 @@ func (a *App) SchedPause(ctx context.Context) SchedPauseView {
 	}
 	for _, c := range SchedPauseChoices {
 		o := SchedPauseOption{For: c}
-		if t, err := schedPauseEnd(c, now, a.Cfg.Location()); err == nil && !t.IsZero() {
+		if t, err := schedPauseEnd(c, now, a.Loc()); err == nil && !t.IsZero() {
 			o.Until = t.UTC().Format(time.RFC3339)
 		}
 		v.Options = append(v.Options, o)

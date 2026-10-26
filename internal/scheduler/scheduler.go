@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/db"
@@ -23,7 +24,7 @@ type Scheduler struct {
 	parser cron.Parser
 	// loc is the timezone cron fields are read in (nil = time.Local). It is applied to
 	// every computation, so "0 9 * * *" means 9:00 there whatever zone the from time has.
-	loc     *time.Location
+	loc     atomic.Pointer[time.Location]
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
@@ -262,15 +263,15 @@ func (s *Scheduler) advanceSchedule(ctx context.Context, task db.Task, from time
 }
 
 // SetLocation sets the timezone cron expressions are read in (nil = time.Local).
-// Call before Start.
-func (s *Scheduler) SetLocation(loc *time.Location) { s.loc = loc }
+// Safe while running; call Realign afterwards so stored next runs follow.
+func (s *Scheduler) SetLocation(loc *time.Location) { s.loc.Store(loc) }
 
 // Location is the timezone cron expressions are read in.
 func (s *Scheduler) Location() *time.Location {
-	if s.loc == nil {
-		return time.Local
+	if l := s.loc.Load(); l != nil {
+		return l
 	}
-	return s.loc
+	return time.Local
 }
 
 // NextRun computes the next fire time after from for a standard 5-field cron, read in

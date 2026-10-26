@@ -286,6 +286,9 @@ func (a *App) extRPC() map[string]rpcFunc {
 	for k, v := range a.powerRPC() {
 		m[k] = v
 	}
+	for k, v := range a.timezoneRPC() {
+		m[k] = v
+	}
 	for k, v := range a.schedPauseRPC() {
 		m[k] = v
 	}

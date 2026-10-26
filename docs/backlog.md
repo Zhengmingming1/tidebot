@@ -2961,3 +2961,50 @@ set to UTC never saw it, which is why tests passed.
 3. Warn in the cron preview when a time falls in a DST gap / repeats (e.g. 2:30 on change days).
 4. Route Home's "next 24 hours" and the budget runs-per-day estimate through `Sched.NextRun`
    too, so there is a single cron code path.
+
+## 2026-10-27 (04:00): scheduling timezone can be seen and changed in Settings › General
+
+Category: **UX** (the last round was correctness: cron read in the scheduling timezone).
+The zone that decides when cron fires, when daily budgets reset and how every time is shown
+could only be set in the config file or `$TIDEBOT_TIMEZONE`; Settings showed it read-only.
+
+**Done**
+
+- Settings › General › "调度时区 / Scheduling timezone": a select-looking button with the zone
+  and its current UTC offset (local time in the tooltip) opens a searchable picker: "自动（跟随
+  系统）" first (config file / `$TIDEBOT_TIMEZONE` / `$TZ` / system), then 419 IANA zones
+  (zone.tab + zone1970.tab + UTC) sorted west to east, each with offset and local time, full
+  date in the tooltip. Search matches name, region, `+8`, `UTC+08:00`, `GMT+8`; ↑↓ / PgUp /
+  PgDn / Enter / Esc; opens on the zone in use. Picking saves at once; toast says how many tasks'
+  next run moved. No native dialogs; fits 1024×655 (only the list scrolls).
+- Core: `timezone.get` / `timezone.set` RPC (CSRF via `/api/rpc`), setting `schedule.timezone`
+  (only names in the list; "" = automatic). Applies live: scheduler (`SetLocation` now atomic),
+  budgets (`cost.LocFn`), quiet hours (`notify.LocFn`), WebUI (`Deps.LocFn`), tray, pauses; then
+  `Scheduler.Realign` moves upcoming runs (past-due keep the missed-run rule). Persists across
+  restarts. `/api/settings` gains `tz_offset`; offsets/local times come from the server's
+  embedded tzdata so every WebView shows the same.
+- Tests: `TestSchedulingTimezone` (list sorted, bad / unknown / "Local" refused, New York moves
+  9:00 Shanghai to 9:00 New York, all subsystems switch, persisted, same zone moves nothing,
+  back to automatic), `TestZonesLoad` (every zone loads, no duplicates), `TestTimezoneUI`,
+  `TestTZOffsetMin` (DST, half-hour zone).
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/components/settings/General.vue` and `src/util-frontend.js`
+  (`timezoneList`): "Auto: <guessed>" as the first option, zones labelled `(UTC+08:00) Name` and
+  sorted by current offset, server timezone separate from the browser's display zone. Ideas
+  only, no code copied; search, local-time preview and realigning runs are tidebot's own.
+
+**Learned**
+
+- A runtime-changeable zone must be read through one getter (`App.Loc`) — four subsystems had
+  each captured `cfg.Location()` at startup.
+- Compute offsets on the server: `Intl` `longOffset` and zone data differ across older
+  WebKitGTK / WebView2 builds.
+
+**Ideas for later**
+
+1. Per-task timezone in the task form (n8n has one per workflow).
+2. DST gap / repeated-hour warning in the cron preview.
+3. Route Home's "next 24 hours" and the budget runs-per-day estimate through `Sched.NextRun`.
+4. `agentctl config timezone set <zone>` for headless servers.

@@ -57,6 +57,8 @@ type Deps struct {
 	// log stream then sleeps until there is output instead of polling every 500ms.
 	LogWait  func(runID string) (<-chan struct{}, func())
 	Location *time.Location
+	// LocFn, when set, wins over Location: the scheduling timezone can change in Settings.
+	LocFn func() *time.Location
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
 	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
 	Providers     ProviderAdmin

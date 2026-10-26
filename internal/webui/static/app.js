@@ -3926,7 +3926,7 @@
 
   // ---------- PLUGINS ----------
   // Pure reads: they neither drop the page cache nor wait for the network when cached.
-  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "network.get", "skills.proposals", "skills.compare"];
+  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "timezone.get", "network.get", "skills.proposals", "skills.compare"];
   function rpcKey(method, params) { return "rpc:" + method + ":" + JSON.stringify(params || {}); }
   function rpcCall(method, params, timeout, read) {
     return api("/api/rpc/" + method, { method: "POST", body: params || {}, timeout: timeout, read: read, cacheKey: read ? rpcKey(method, params) : "" }).then(function (r) { return r.result; });
@@ -4831,6 +4831,85 @@
       rpc("storage.vacuum", {}).then(function (r) { toast(T("st.shrunk", { s: fmtBytes(r.saved_bytes) })); storagePaint(r.storage); }).catch(function (err) { fail(err); b.disabled = false; });
     });
   }
+  // ---- Settings › General › Scheduling timezone ----
+  // One zone decides when cron fires, when daily budgets reset and how times are shown.
+  // "Automatic" follows the config file / $TZ / system; picking a zone saves at once and
+  // the server moves upcoming scheduled runs. Offsets and local times come from the
+  // server's embedded tzdata, so the list reads the same in every WebView and browser.
+  // Idea from Uptime Kuma (src/components/settings/General.vue + util-frontend.js
+  // timezoneList: "Auto: <guess>" first, zones labelled and sorted by UTC offset).
+  function tzOffset(min) {
+    var s = min < 0 ? "-" : "+", a = Math.abs(min);
+    return "UTC" + s + String(Math.floor(a / 60)).padStart(2, "0") + ":" + String(a % 60).padStart(2, "0");
+  }
+  function tzButtonHtml(off) {
+    var tz = state.tz || "UTC";
+    return '<button type="button" class="tz-open" id="tz-open" aria-haspopup="dialog" data-tip="' + esc(T("tz.btn_tip", { l: fmtTime(new Date().toISOString()) })) + '"><span class="tz-name">' + esc(tz.replace(/_/g, " ")) + '</span><span class="tz-off">' + esc(tzOffset(off || 0)) + "</span></button>";
+  }
+  function tzPicker(done) {
+    rpc("timezone.get", {}).then(function (v) {
+      var now = Date.parse(v.now) || Date.now(), drift = Date.now() - now;
+      var at = function (off, o) { return new Intl.DateTimeFormat(state.lang, Object.assign({ timeZone: "UTC" }, o)).format(new Date(Date.now() - drift + off * 60000)); };
+      var hm = function (off) { return at(off, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); };
+      var all = [{ id: "", label: T("tz.auto"), sub: v.auto.replace(/_/g, " "), offset: v.auto_offset || 0 }].concat(v.zones.map(function (z) { return { id: z.id, label: z.id.replace(/_/g, " "), offset: z.offset }; }));
+      all.forEach(function (z) {
+        var o = tzOffset(z.offset);
+        z.key = (z.label + " " + (z.sub || "") + " " + o + " " + o.replace("UTC", "GMT") + " " + o.replace(/^UTC([+-])0?(\d+):00$/, "UTC$1$2") + " " + (z.id ? "" : T("tz.auto_key"))).toLowerCase();
+      });
+      var items = all, sel = 0, cur = v.zone || "";
+      modal('<div class="card-head"><span class="ico">' + ic("globe") + "</span><h2>" + esc(T("tz.title")) + "</h2></div>" +
+        '<div class="tz-search">' + ic("search", "sm") + '<input id="tz-q" type="text" autocomplete="off" spellcheck="false" maxlength="64" data-noguard role="combobox" aria-expanded="true" aria-controls="tz-list" aria-autocomplete="list" aria-label="' + esc(T("tz.search")) + '" placeholder="' + esc(T("tz.search")) + '" autofocus></div>' +
+        '<ul id="tz-list" role="listbox" aria-label="' + esc(T("tz.title")) + '"></ul>' +
+        '<div class="actions"><span class="tz-note">' + esc(T("tz.note")) + '</span><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
+        var box = $(".modal", root), ul = $("#tz-list", root), q = $("#tz-q", root), busy = false;
+        box.classList.add("tz-modal");
+        var draw = function () {
+          ul.innerHTML = items.length ? items.map(function (z, i) {
+            var on = z.id === cur;
+            return '<li role="option" id="tz-o' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '" class="' + (i === sel ? "sel" : "") + (on ? " cur" : "") + '" data-tip="' + esc(at(z.offset, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) + " · " + tzOffset(z.offset)) + '">' +
+              '<span class="ck">' + (on ? ic("check", "sm") : "") + '</span><span class="nm">' + esc(z.label) + (z.sub ? "<small>" + esc(z.sub) + "</small>" : "") + '</span><span class="meta">' + esc(tzOffset(z.offset) + " · " + hm(z.offset)) + "</span></li>";
+          }).join("") : '<li class="none">' + esc(T("search.none")) + "</li>";
+          q.setAttribute("aria-activedescendant", items.length ? "tz-o" + sel : "");
+        };
+        var move = function (i) {
+          if (!items.length) return;
+          var was = $("#tz-o" + sel, ul); if (was) { was.classList.remove("sel"); was.setAttribute("aria-selected", "false"); }
+          sel = (i + items.length) % items.length;
+          var li = $("#tz-o" + sel, ul); if (li) { li.classList.add("sel"); li.setAttribute("aria-selected", "true"); if (li.scrollIntoView) li.scrollIntoView({ block: "nearest" }); }
+          q.setAttribute("aria-activedescendant", "tz-o" + sel);
+        };
+        var pick = function (i) {
+          var z = items[i];
+          if (!z || busy) return;
+          if (z.id === cur) { close(); return; }
+          busy = true;
+          rpc("timezone.set", { zone: z.id }).then(function (r) {
+            state.tz = r.active || state.tz;
+            close();
+            toast(T(r.moved ? "tz.saved_moved" : "tz.saved", { z: (r.active || "").replace(/_/g, " "), n: r.moved || 0 }));
+            if (done) done(r);
+          }).catch(fail).then(function () { busy = false; });
+        };
+        q.addEventListener("input", function () {
+          var s = q.value.trim().toLowerCase();
+          items = s ? all.filter(function (z) { return s.split(/\s+/).every(function (w) { return z.key.indexOf(w) >= 0; }); }) : all;
+          sel = 0; draw(); ul.scrollTop = 0;
+        });
+        q.addEventListener("keydown", function (e) {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); move(sel + (e.key === "ArrowDown" ? 1 : -1)); }
+          else if (e.key === "PageDown" || e.key === "PageUp") { e.preventDefault(); move(Math.max(0, Math.min(items.length - 1, sel + (e.key === "PageDown" ? 8 : -8)))); }
+          else if (e.key === "Enter") { e.preventDefault(); pick(sel); }
+        });
+        ul.addEventListener("mousemove", function (e) { var li = e.target.closest("li[data-i]"); if (li && +li.getAttribute("data-i") !== sel) move(+li.getAttribute("data-i")); });
+        ul.addEventListener("click", function (e) { var li = e.target.closest("li[data-i]"); if (li) pick(+li.getAttribute("data-i")); });
+        // Start on the zone in use so the list opens where you are.
+        var i0 = all.map(function (z) { return z.id; }).indexOf(cur);
+        sel = i0 < 0 ? 0 : i0;
+        draw();
+        move(sel);
+      });
+    }).catch(fail);
+  }
   // ---- Settings › General › Power ----
   // Scheduled runs of tasks that can wait are held back on an unplugged laptop and run
   // once when power is back; urgent tasks and runs you start always go. The idea is
@@ -5083,7 +5162,7 @@
       if (section === "general") {
         body = '<section class="card">' + head +
           row("language", T("set.language"), T("set.language_sub"), langSelect("set-lang")) +
-          row("timezone", T("set.tz"), T("set.tz_sub"), "<span>" + esc(tzLabel()) + "</span>") +
+          row("timezone", T("set.tz"), T("set.tz_sub"), tzButtonHtml(st.tz_offset)) +
           row("webui", T("set.addr"), T(st.allow_lan ? "set.lan_on" : "set.lan_off"), "<code>" + esc(st.addr) + "</code>") +
           row("https", "HTTPS", T("set.https_sub"), '<span class="pill ' + (st.tls ? "ok" : "plain") + '">' + esc(T(st.tls ? "set.enabled" : "set.off")) + "</span>") +
           row("idle", T("set.idle"), T("set.idle_sub"), "<span>" + esc(T("set.min", { n: st.idle_minutes })) + "</span>") + "</section>" +
@@ -5094,6 +5173,7 @@
         after = function () {
           $("#set-lang").addEventListener("change", function (e) { setLanguage(e.target.value).then(function () { savedMark($("#set-lang")); }); });
           powerWire();
+          $("#tz-open").addEventListener("click", function () { tzPicker(function () { route(); }); });
           $("#dz-webui").addEventListener("click", function () {
             confirmDialog({ title: T("set.off_title"), body: T("set.confirm_off"), ok: T("set.turn_off"), danger: true }).then(function (y) { if (y) api("/api/webui", { method: "POST", body: { enabled: false } }).then(function () { toast(T("toast.webui_off")); }).catch(fail); });
           });

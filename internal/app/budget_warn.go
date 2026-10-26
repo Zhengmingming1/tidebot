@@ -14,7 +14,7 @@ func (a *App) warnOnce(detail string) {
 	if i := strings.Index(detail, " "); i > 0 {
 		scope = detail[:i]
 	}
-	key := time.Now().In(a.Cfg.Location()).Format("2006-01-02") + "|" + scope
+	key := time.Now().In(a.Loc()).Format("2006-01-02") + "|" + scope
 	if _, dup := budgetWarned.LoadOrStore(key, struct{}{}); dup {
 		return
 	}

@@ -232,7 +232,7 @@ func (a *App) BuildDashboard(ctx context.Context) Dashboard {
 	if total > 0 {
 		d.SuccessRate7d = float64(ok) / float64(total)
 	}
-	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, a.Cfg.Location())
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, a.Loc())
 	_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(`+cost.AmountExpr(a.cachedFX(), a.cachedFX().Display, "")+`),0) FROM cost_ledger WHERE created_at >= ?`, day.UTC().Format(time.RFC3339)).Scan(&d.CostTodayUSD)
 	_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(`+cost.AmountExpr(a.cachedFX(), a.cachedFX().Display, "")+`),0) FROM cost_ledger WHERE created_at >= ?`, now.Add(-7*24*time.Hour).UTC().Format(time.RFC3339)).Scan(&d.Cost7dUSD)
 	var durs []int64

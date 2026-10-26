@@ -42,6 +42,8 @@ type Service struct {
 	Log *slog.Logger
 	// Loc is the timezone whose midnight resets daily budgets (default time.Local).
 	Loc *time.Location
+	// LocFn, when set, wins over Loc (the timezone can change at runtime).
+	LocFn func() *time.Location
 	// Now is overridable for tests.
 	Now func() time.Time
 	// FX returns the display currency and fixed exchange rate (nil = DefaultFX).
@@ -96,6 +98,11 @@ func New(db *sql.DB, log *slog.Logger) *Service {
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func (s *Service) loc() *time.Location {
+	if s.LocFn != nil {
+		if l := s.LocFn(); l != nil {
+			return l
+		}
+	}
 	if s.Loc != nil {
 		return s.Loc
 	}

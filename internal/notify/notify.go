@@ -61,8 +61,21 @@ type Service struct {
 	Secrets secrets.Backend
 	HTTP    *http.Client
 	Loc     *time.Location
+	LocFn   func() *time.Location // wins over Loc when set (timezone changes at runtime)
 	Now     func() time.Time
 	mu      sync.Mutex
+}
+
+func (s *Service) loc() *time.Location {
+	if s.LocFn != nil {
+		if l := s.LocFn(); l != nil {
+			return l
+		}
+	}
+	if s.Loc != nil {
+		return s.Loc
+	}
+	return time.Local
 }
 
 // New creates a Service.
@@ -202,7 +215,7 @@ func (s *Service) Dispatch(ctx context.Context, m Message, quiet string) (status
 	status = "logged"
 	switch {
 	case len(chs) == 0:
-	case (LowPriority[m.Event] && !explicit) || (!m.Urgent && inQuiet(quiet, s.Now().In(s.Loc))):
+	case (LowPriority[m.Event] && !explicit) || (!m.Urgent && inQuiet(quiet, s.Now().In(s.loc()))):
 		status = "queued"
 	default:
 		status = "delivered"

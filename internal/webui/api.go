@@ -84,6 +84,11 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 }
 
 func (s *Server) loc() *time.Location {
+	if s.deps.LocFn != nil {
+		if l := s.deps.LocFn(); l != nil {
+			return l
+		}
+	}
 	if s.deps.Location != nil {
 		return s.deps.Location
 	}
@@ -1526,8 +1531,15 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"fx":               s.fx(),
 		"totp_enabled":     totp,
 		"timezone":         s.loc().String(),
+		"tz_offset":        tzOffsetMin(s.loc(), time.Now()),
 		"version":          Version,
 	})
+}
+
+// tzOffsetMin is loc's UTC offset at t in minutes (east positive).
+func tzOffsetMin(loc *time.Location, t time.Time) int {
+	_, off := t.In(loc).Zone()
+	return off / 60
 }
 
 func (s *Server) handleWebUIToggle(w http.ResponseWriter, r *http.Request) {

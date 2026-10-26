@@ -106,7 +106,7 @@ func (a *App) TrayStatus(ctx context.Context, daemonErr error) TrayStatus {
 	if a.Sched != nil {
 		now := time.Now()
 		p, until := a.Sched.PauseState(now)
-		st.Paused, st.Until = trayPauseEnd(p, until, a.Cfg.Location(), now)
+		st.Paused, st.Until = trayPauseEnd(p, until, a.Loc(), now)
 	}
 	if daemonErr != nil {
 		st.Problems = append(st.Problems, TrayProblem{Key: "desktop.p.daemon_down"})

@@ -1900,3 +1900,26 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 /* a task's next run that "pause all" holds back, and the task Pause button's menu caret */
 .nx.held { opacity: .7; }
 #t-toggle[data-act="pause"] svg:last-child { width: 12px; height: 12px; margin-left: -2px; opacity: .7; }
+
+/* Settings › General › Scheduling timezone: a select-looking button and a searchable picker. */
+.tz-open { display: inline-flex; align-items: center; gap: 8px; height: var(--ctl-h); max-width: 280px; padding: 0 34px 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; text-align: left;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b6458' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center / 16px; }
+.tz-open:hover { border-color: var(--text-3); }
+.tz-open:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); outline: none; }
+.tz-open .tz-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.tz-open .tz-off { flex: none; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.modal.tz-modal { width: 480px; display: flex; flex-direction: column; overflow: hidden; }
+.tz-search { display: flex; align-items: center; gap: 8px; height: var(--ctl-h); padding: 0 12px; margin-bottom: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-3); }
+.tz-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.modal .tz-search input { flex: 1; min-width: 0; height: 100%; border: 0 !important; box-shadow: none !important; background: transparent; padding: 0; font: inherit; font-size: 14px; color: var(--text); outline: none; }
+#tz-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; height: min(320px, calc(100vh - 248px)); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+#tz-list li { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 8px; cursor: pointer; color: var(--text); font-size: 13px; }
+#tz-list li.sel { background: var(--accent-50); }
+#tz-list li .ck { width: 16px; flex: none; color: var(--accent); display: inline-grid; place-items: center; }
+#tz-list li .nm { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#tz-list li .nm small { margin-left: 8px; color: var(--text-3); font-size: 12px; }
+#tz-list li .meta { flex: none; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+#tz-list li.cur .nm { font-weight: 600; }
+#tz-list li.none { cursor: default; color: var(--text-3); justify-content: center; height: 64px; }
+.tz-modal .actions { align-items: center; }
+.tz-modal .tz-note { flex: 1; min-width: 0; color: var(--text-3); font-size: 12px; }

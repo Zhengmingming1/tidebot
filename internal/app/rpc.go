@@ -132,7 +132,7 @@ func (a *App) rpcTasksPause(ctx context.Context, params json.RawMessage) (any, e
 	if p.For == "" {
 		return nil, a.Tasks.SetStatus(ctx, p.ID, "paused", "user")
 	}
-	until, err := schedPauseEnd(p.For, time.Now(), a.Cfg.Location())
+	until, err := schedPauseEnd(p.For, time.Now(), a.Loc())
 	if err != nil {
 		return nil, err
 	}
