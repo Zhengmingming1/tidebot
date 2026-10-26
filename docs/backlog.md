@@ -2907,3 +2907,57 @@ list and the task page still promised "下次 明天 3:00" for runs the pause wo
 2. Snooze from the task list (row menu / `p` key in the j/k cursor) and the batch bar.
 3. A notice when a snooze ends ("「Clean Logs」已恢复，下次 18:00"), opt-in per task.
 4. "Skip next run only" as a fifth choice (advance `next_run_at` once, no pause).
+
+## 2026-10-27 (00:05): daily tasks keep their hour — cron read in the scheduling timezone after every run
+
+Category: **correctness** (the last rounds were features, resource usage and performance).
+robfig/cron reads a schedule's fields in the zone of the `from` time it is given. The first
+next run was computed from `time.Now()` (local), but after each scheduled fire the scheduler
+passed `time.Now().UTC()`, and catch-up / snooze paths passed times parsed from the database
+(UTC). So on a Shanghai machine "0 9 * * *" ran at 9:00 once and then at **17:00** (9:00 UTC)
+from then on, while Home's "next 24 hours" and the cron preview still promised 9:00. Machines
+set to UTC never saw it, which is why tests passed.
+
+**Done**
+
+- `Scheduler.SetLocation` / `Location`: the scheduler reads every cron in one zone (the
+  configured scheduling timezone, `cfg.Location()`, the same one Home, budgets and the preview
+  use). `NextRun` converts `from` into that zone before asking cron and returns the result in
+  `from`'s zone, so every caller (fire, skip on overlap, missed runs, snooze wake, task create /
+  edit / import, preview) agrees.
+- `Scheduler.Realign` at core start: scheduled tasks whose stored next run is still ahead but is
+  not the cron's next fire time in that zone get it recomputed (fixes rows written by the old
+  code, and a changed timezone). Past-due times are left alone so the missed-run setting still
+  decides; broken expressions are skipped. Logged per task.
+- `time/tzdata` embedded in `internal/config`: Windows has no system zoneinfo, so a configured
+  timezone or `$TZ` silently fell back to local time there; now it loads the same on macOS,
+  Windows and Linux (~450 KB binary).
+- No UI change (the times shown were already right; the runs now match them), so no screenshot.
+- Tests: `TestNextRunReadsCronInSchedulerZone` (UTC / local / other-zone `from` all give 9:00
+  Shanghai, result keeps `from`'s zone), `TestNextRunAcrossDST` (New York 9:00 stays 9:00 over
+  the March change), `TestFireKeepsWallClock` (a real poll + fire stores the coming 9:00
+  Shanghai, not 17:00), `TestRealign` (only the wrong future row changes; past-due, broken and
+  manual tasks untouched; idempotent; a zone change moves future runs).
+
+**Inspiration**
+
+- n8n-io/n8n `packages/core/src/execution-engine/scheduled-task-manager.ts` (`register`): the
+  timezone is part of the cron itself (`new CronTime(expression, timezone)`, `new CronJob(...,
+  timezone)`) and of the registration key, so the next fire never depends on the zone of
+  whatever "now" value is passed in, and a timezone change means re-registering. Ideas only, no
+  code copied.
+
+**Learned**
+
+- With robfig/cron's default `time.Local`, `Next(t)` uses `t.Location()` — a UTC `from` is a
+  different schedule. Bind the zone once and convert at the single entry point.
+- Tests that only run on UTC CI machines can't see zone bugs; pin a non-UTC zone in the test.
+
+**Ideas for later**
+
+1. Show the scheduling timezone in Settings › General and allow changing it in the WebUI
+   (Realign already handles the switch).
+2. Per-task timezone (n8n has one per workflow), shown in the task form's cron preview.
+3. Warn in the cron preview when a time falls in a DST gap / repeats (e.g. 2:30 on change days).
+4. Route Home's "next 24 hours" and the budget runs-per-day estimate through `Sched.NextRun`
+   too, so there is a single cron code path.

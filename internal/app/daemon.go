@@ -41,6 +41,11 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 		}
 	}
 	a.LoadPriceCatalog()
+	if n, err := a.Sched.Realign(ctx, time.Now()); err != nil {
+		a.Log.Error("realign schedules", "error", err)
+	} else if n > 0 {
+		a.Log.Info("realigned schedules", "tasks", n)
+	}
 	a.Sched.Start(ctx)
 	go a.runNotifier(ctx)
 	go a.runOptimizer(ctx)

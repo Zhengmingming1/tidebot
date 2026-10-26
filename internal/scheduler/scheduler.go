@@ -16,11 +16,14 @@ type RunnerFunc func(ctx context.Context, task db.Task) error
 
 // Scheduler polls SQLite for due tasks.
 type Scheduler struct {
-	store   *db.Store
-	log     *slog.Logger
-	run     RunnerFunc
-	tick    time.Duration
-	parser  cron.Parser
+	store  *db.Store
+	log    *slog.Logger
+	run    RunnerFunc
+	tick   time.Duration
+	parser cron.Parser
+	// loc is the timezone cron fields are read in (nil = time.Local). It is applied to
+	// every computation, so "0 9 * * *" means 9:00 there whatever zone the from time has.
+	loc     *time.Location
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
@@ -258,13 +261,72 @@ func (s *Scheduler) advanceSchedule(ctx context.Context, task db.Task, from time
 	return s.store.UpdateTaskSchedule(ctx, task.ID, &from, &next)
 }
 
-// NextRun computes the next fire time after from for a standard 5-field cron.
+// SetLocation sets the timezone cron expressions are read in (nil = time.Local).
+// Call before Start.
+func (s *Scheduler) SetLocation(loc *time.Location) { s.loc = loc }
+
+// Location is the timezone cron expressions are read in.
+func (s *Scheduler) Location() *time.Location {
+	if s.loc == nil {
+		return time.Local
+	}
+	return s.loc
+}
+
+// NextRun computes the next fire time after from for a standard 5-field cron, read in
+// the scheduler's timezone. robfig/cron reads the fields in from's own zone, so a from
+// parsed from the database (UTC) used to move "0 9 * * *" to 9:00 UTC after the first run.
 func (s *Scheduler) NextRun(expr string, from time.Time) (time.Time, error) {
 	sched, err := s.parser.Parse(expr)
 	if err != nil {
 		return time.Time{}, err
 	}
-	return sched.Next(from), nil
+	nx := sched.Next(from.In(s.Location()))
+	if nx.IsZero() {
+		return nx, nil
+	}
+	return nx.In(from.Location()), nil
+}
+
+// Realign recomputes next_run_at for scheduled tasks whose stored next run is still ahead
+// but is not the cron's next fire time in the scheduler's timezone (written by an older
+// version in the wrong zone, or the timezone was changed). Past-due times are left alone,
+// so missed-run handling is unchanged. Returns how many tasks were corrected.
+func (s *Scheduler) Realign(ctx context.Context, now time.Time) (int, error) {
+	rows, err := s.store.DB.QueryContext(ctx, `SELECT id, cron_expr, next_run_at FROM tasks
+WHERE cron_expr <> '' AND next_run_at IS NOT NULL AND next_run_at > ?`, now.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	type fix struct{ id, next string }
+	var fixes []fix
+	for rows.Next() {
+		var id, expr, stored string
+		if err := rows.Scan(&id, &expr, &stored); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		nx, err := s.NextRun(expr, now)
+		if err != nil || nx.IsZero() {
+			continue // a broken expression is reported where it is edited
+		}
+		want := nx.UTC().Format(time.RFC3339)
+		if st, err := time.Parse(time.RFC3339, stored); err == nil && st.UTC().Format(time.RFC3339) == want {
+			continue
+		}
+		fixes = append(fixes, fix{id, want})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, f := range fixes {
+		if _, err := s.store.DB.ExecContext(ctx, `UPDATE tasks SET next_run_at = ? WHERE id = ?`, f.next, f.id); err != nil {
+			return 0, err
+		}
+		s.log.Info("realign next run", "task_id", f.id, "next_run_at", f.next, "timezone", s.Location().String())
+	}
+	return len(fixes), nil
 }
 
 // ComputeInitialNext returns the next run from now for a new task.

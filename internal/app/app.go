@@ -115,6 +115,7 @@ func Open(cfg config.Config) (*App, error) {
 	a.Notify = notify.New(sqlDB, a.Secrets)
 	a.Notify.Loc = cfg.Location()
 	a.Sched = scheduler.New(store, log, cfg.SchedulerTick, a.runTaskScheduled)
+	a.Sched.SetLocation(cfg.Location())
 	a.Sched.Catchup = a.catchup
 	if v, err := strconv.ParseFloat(os.Getenv("TIDEBOT_RETRY_SCALE"), 64); err == nil && v > 0 {
 		a.retryScale = v

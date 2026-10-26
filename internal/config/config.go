@@ -9,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	// Windows has no system zoneinfo: embed it so a configured timezone (or $TZ) loads
+	// the same on macOS, Windows and Linux.
+	_ "time/tzdata"
 
 	"gopkg.in/yaml.v3"
 )
