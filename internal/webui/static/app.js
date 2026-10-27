@@ -2264,12 +2264,41 @@
         got.then(function (f) {
           if (g !== fgen) return;
           view.classList.remove("busy");
-          view.innerHTML = fileViewHtml(f);
-          view.scrollTop = 0;
-          var cp = $("[data-fb-copy]", view); if (cp) cp.addEventListener("click", function () { copyText(f.text || "").catch(fail); });
-          var dl = $("[data-fb-dl]", view); if (dl) dl.addEventListener("click", function () { exportSkill(id, fv, dl); });
+          showFile(f);
         }).catch(function (e) { if (g === fgen) { view.classList.remove("busy"); view.innerHTML = errorState(e.message); } });
       };
+      // Markdown files open formatted (preview) or as source; the choice is remembered for every .md file.
+      var mdMode = function () { try { return localStorage.getItem("tb_md_view") === "source" ? "source" : "preview"; } catch (e) { return "preview"; } };
+      var showFile = function (f, focusMode) {
+        var view = $("#fb-view");
+        view.innerHTML = fileViewHtml(f, mdMode());
+        view.scrollTop = 0;
+        var cp = $("[data-fb-copy]", view); if (cp) cp.addEventListener("click", function () { copyText(f.text || "").catch(fail); });
+        var dl = $("[data-fb-dl]", view); if (dl) dl.addEventListener("click", function () { exportSkill(id, fv, dl); });
+        var segEl = $(".fb-mode", view);
+        if (segEl) {
+          var pick = function (m) { try { localStorage.setItem("tb_md_view", m); } catch (e) {} showFile(f, true); };
+          $$("[data-fb-mode]", segEl).forEach(function (b) { b.addEventListener("click", function () { if (b.getAttribute("aria-checked") !== "true") pick(b.getAttribute("data-fb-mode")); }); });
+          segEl.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); pick(mdMode() === "source" ? "preview" : "source"); } });
+          if (focusMode) { var on = $('[aria-checked="true"]', segEl); if (on) on.focus(); }
+        }
+      };
+      $("#fb-view").addEventListener("click", function (e) {
+        var a = e.target.closest("a[data-md-file], a[data-md-anchor]");
+        if (!a) return;
+        e.preventDefault();
+        if (a.hasAttribute("data-md-anchor")) {
+          var box = $(".fb-md", this), h = box && box.querySelector('[data-md-id="' + (window.CSS && CSS.escape ? CSS.escape(a.getAttribute("data-md-anchor")) : a.getAttribute("data-md-anchor")) + '"]');
+          if (h) box.scrollTop = h.offsetTop - 8;
+          return;
+        }
+        var p = a.getAttribute("data-md-file"), have = (tcache[fv] || []).some(function (x) { return x.path === p; });
+        if (!have) { toast(T("fb.no_file", { p: p }), true); return; }
+        var node = $('#fb-tree [data-file="' + (window.CSS && CSS.escape ? CSS.escape(p) : p) + '"]');
+        for (var ul = node && node.parentNode.parentNode; ul && ul.id !== "fb-tree"; ul = ul.parentNode) if (ul.tagName === "UL" && ul.previousElementSibling && ul.previousElementSibling.hasAttribute("data-dir")) toggleDir(ul.previousElementSibling, true);
+        openFile(p);
+        if (node) node.scrollIntoView({ block: "nearest" });
+      });
       var load = function () {
         var qa = $("#d-a").value, qb = $("#d-b").value;
         diffLoaded = true; syncHash();
@@ -2369,17 +2398,153 @@
   }
   // fileViewHtml: read-only view of one file with line numbers. Text keeps its line breaks (CRLF shown as
   // one break); binary and very large files get a short note and the version download instead.
-  function fileViewHtml(f) {
-    var meta = [fmtBytes(f.size)];
+  function isMdPath(p) { return /\.(md|markdown|mdown|mkd)$/i.test(p || ""); }
+  function fileViewHtml(f, mode) {
+    var meta = [fmtBytes(f.size)], md = f.kind === "text" && isMdPath(f.path) && !!f.text, pv = md && mode !== "source";
     if (f.kind === "text") { meta.push(T("fb.lines", { n: f.lines })); if (f.eol) meta.push(T("fb.eol_" + f.eol)); }
-    var head = '<div class="fb-head">' + ic("doc", "sm") + '<code class="fb-path">' + esc(f.path) + '</code><small class="muted fb-meta" data-tip="' + esc(meta.join(" · ")) + '">' + esc(fmtBytes(f.size)) + "</small>" +
+    var seg = md ? '<div class="seg sm fb-mode" role="radiogroup" aria-label="' + esc(T("fb.view_as")) + '">' + [["preview", T("fb.preview")], ["source", T("fb.source")]].map(function (x) {
+      var on = (x[0] === "preview") === pv;
+      return '<button type="button" role="radio" data-fb-mode="' + x[0] + '" aria-checked="' + on + '" tabindex="' + (on ? 0 : -1) + '" class="' + (on ? "active" : "") + '" data-tip="' + esc(T("fb." + x[0] + "_tip")) + '">' + esc(x[1]) + "</button>";
+    }).join("") + "</div>" : "";
+    var head = '<div class="fb-head">' + ic("doc", "sm") + '<code class="fb-path">' + esc(f.path) + '</code><small class="muted fb-meta" data-tip="' + esc(meta.join(" · ")) + '">' + esc(fmtBytes(f.size)) + "</small>" + seg +
       (f.kind === "text" ? '<button type="button" class="icon-btn sm" data-fb-copy data-tip="' + esc(T("fb.copy")) + '" aria-label="' + esc(T("fb.copy")) + '">' + ic("copy", "sm") + "</button>" : "") + "</div>";
     if (f.kind !== "text") return head + '<div class="fb-none">' + ic("doc", "lg") + "<strong>" + esc(T(f.kind === "binary" ? "fb.binary" : "fb.too_large")) + "</strong><small>" + esc(T("fb.none_sub")) + '</small><button type="button" class="btn sm" data-fb-dl>' + ic("download", "sm") + esc(T("sk.export")) + "</button></div>";
     if (!f.text) return head + '<p class="muted pad">' + esc(T("fb.empty_file")) + "</p>";
+    if (pv) return head + '<div class="fb-md md" tabindex="0">' + mdHtml(f.text, f.path.split("/").slice(0, -1).join("/")) + "</div>";
     var text = f.text.replace(/\r\n?/g, "\n").replace(/\n$/, ""), n = text.split("\n").length, nums = [];
     for (var k = 1; k <= n; k++) nums.push(k);
     return head + '<div class="fb-code"><pre class="fb-ln" aria-hidden="true">' + nums.join("\n") + '</pre><pre class="fb-tx" tabindex="0">' + esc(text) + "</pre></div>";
   }
+  // ---------- Markdown preview (skill files) ----------
+  // mdHtml renders the Markdown a skill ships (SKILL.md, references) as formatted text. Idea from
+  // siteboon/claudecodeui src/modules/code-editor (CodeEditor.tsx: .md files get a preview / edit toggle;
+  // markdown/MarkdownPreview.tsx: GFM tables, task lists, links in a new tab). No library: everything is
+  // escaped first and only a fixed set of tags is produced — raw HTML in the file stays text, images are
+  // not fetched (a link instead), links only keep http(s) / mailto, in-file anchors and relative paths
+  // (data-md-file / data-md-anchor, opened by the viewer). YAML front matter becomes a small table.
+  function mdSlug(s) { return String(s).toLowerCase().replace(/<[^>]*>/g, "").replace(/&[a-z#0-9]+;/g, "").replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s/g, "-"); }
+  function mdHref(u, base) {
+    u = String(u).trim();
+    if (/^(https?:|mailto:)/i.test(u)) return { href: u };
+    if (/^[a-z][a-z0-9+.-]*:/i.test(u) || /^\/\//.test(u) || /^[\\/]/.test(u)) return null;
+    if (u.charAt(0) === "#") return { anchor: mdSlug(decodeURIComponentSafe(u.slice(1))) };
+    var path = decodeURIComponentSafe(u.split("#")[0].split("?")[0]), out = (base ? base.split("/") : []);
+    path.replace(/\\/g, "/").split("/").forEach(function (p) { if (p === "..") out.pop(); else if (p && p !== ".") out.push(p); });
+    return out.length ? { file: out.join("/") } : null;
+  }
+  function decodeURIComponentSafe(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+  function mdInline(s, base) {
+    var keep = [], put = function (h) { keep.push(h); return "\u0000" + (keep.length - 1) + "\u0000"; };
+    s = s.replace(/\u0000/g, "");
+    s = s.replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, function (m, t, c) { return put("<code>" + esc(c.replace(/^ ([\s\S]*) $/, "$1")) + "</code>"); });
+    s = s.replace(/\\([!-\/:-@[-`{-~])/g, function (m, c) { return put(esc(c)); });
+    var link = function (txt, url, img, bare) {
+      var h = mdHref(url, base), label = img ? "🖼 " + (txt || url) : txt, inner = bare || img ? esc(label) : mdInline(label, base);
+      if (!h) return put(inner);
+      if (h.href) return put('<a href="' + esc(h.href) + '" target="_blank" rel="noopener noreferrer" data-tip="' + esc(h.href) + '">' + inner + "</a>");
+      if (h.anchor != null) return put('<a href="#" data-md-anchor="' + esc(h.anchor) + '">' + inner + "</a>");
+      return put('<a href="#" data-md-file="' + esc(h.file) + '" data-tip="' + esc(h.file) + '">' + inner + "</a>");
+    };
+    s = s.replace(/(!?)\[([^\]]*)\]\(\s*<?((?:[^()\s<>]|\([^()\s]*\))*)>?(?:\s+"[^"]*")?\s*\)/g, function (m, bang, txt, url) { return link(txt, url, !!bang); });
+    s = s.replace(/<((?:https?:\/\/|mailto:)[^>\s]+)>/g, function (m, u) { return link(u, u, false, true); });
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g, function (m, pre, u) { return pre + link(u, u, false, true); });
+    s = esc(s);
+    s = s.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "<strong>$2</strong>")
+      .replace(/(^|[^*\w])\*(?=\S)([^*]*?\S)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/(^|[^_\w])_(?=\S)([^_]*?\S)_(?![_\w])/g, "$1<em>$2</em>")
+      .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "<del>$1</del>")
+      .replace(/(?: {2,}|\\)\n/g, "<br>");
+    return s.replace(/\u0000(\d+)\u0000/g, function (m, i) { return keep[+i]; });
+  }
+  function mdHtml(src, base) {
+    var lines = String(src).replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n"), out = [], i = 0, fm = "";
+    if (lines[0] === "---") {
+      for (var e = 1; e < Math.min(lines.length, 200); e++) if (lines[e] === "---" || lines[e] === "...") break;
+      if (e < lines.length && e < 200) {
+        var rows = [];
+        lines.slice(1, e).forEach(function (l) {
+          var m = /^([A-Za-z0-9_.-]+):\s?(.*)$/.exec(l);
+          if (m) rows.push([m[1], /^[>|][-+]?$/.test(m[2].trim()) ? "" : m[2]]); else if (rows.length && l.trim()) rows[rows.length - 1][1] += (rows[rows.length - 1][1] ? " " : "") + l.trim();
+        });
+        fm = rows.length ? '<table class="md-fm"><tbody>' + rows.map(function (r) { return "<tr><th>" + esc(r[0]) + "</th><td>" + esc(r[1].replace(/^(["'])(.*)\1$/, "$2").replace(/^[>|][-+]?$/, "")) + "</td></tr>"; }).join("") + "</tbody></table>" : "";
+        i = e + 1;
+      }
+    }
+    var blank = function (l) { return !l || !l.trim(); };
+    var isFence = function (l) { return /^ {0,3}(`{3,}|~{3,})/.exec(l); };
+    var isHr = function (l) { return /^ {0,3}([-*_])( *\1){2,} *$/.test(l); };
+    var isList = function (l) { return /^( *)([-*+]|\d{1,9}[.)]) +(.*)$/.exec(l); };
+    var isTableSep = function (l) { return /^ *\|? *:?-+:? *(\| *:?-+:? *)*\|? *$/.test(l) && l.indexOf("-") >= 0 && l.indexOf("|") >= 0; };
+    var cells = function (l) { return l.trim().replace(/\\\|/g, "\u0001").replace(/^\|/, "").replace(/\|$/, "").split("|").map(function (c) { return c.trim().replace(/\u0001/g, "\\|"); }); };
+    var startsBlock = function (l) { return isFence(l) || /^ {0,3}#{1,6}(\s|$)/.test(l) || isHr(l) || /^ {0,3}>/.test(l) || isList(l); };
+    while (i < lines.length) {
+      var l = lines[i], m;
+      if (blank(l)) { i++; continue; }
+      if ((m = isFence(l))) {
+        var fence = m[1], lang = l.slice(l.indexOf(fence) + fence.length).trim().split(/\s/)[0], code = [];
+        for (i++; i < lines.length && !(lines[i].trim().indexOf(fence.charAt(0).repeat(fence.length)) === 0 && /^[`~]+$/.test(lines[i].trim())); i++) code.push(lines[i]);
+        i++;
+        out.push('<pre class="md-code">' + (lang ? '<span class="md-lang">' + esc(lang) + "</span>" : "") + "<code>" + esc(code.join("\n")) + "</code></pre>");
+        continue;
+      }
+      if ((m = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(l)) || (m = /^ {0,3}(#{1,6})$/.exec(l))) {
+        var lv = m[1].length, txt = m[2] || "";
+        out.push("<h" + lv + ' data-md-id="' + esc(mdSlug(txt)) + '">' + mdInline(txt, base) + "</h" + lv + ">"); i++; continue;
+      }
+      if (isHr(l)) { out.push("<hr>"); i++; continue; }
+      if (/^ {0,3}>/.test(l)) {
+        var q = [];
+        while (i < lines.length && !blank(lines[i]) && (/^ {0,3}>/.test(lines[i]) || q.length)) { q.push(lines[i].replace(/^ {0,3}> ?/, "")); i++; }
+        out.push("<blockquote>" + mdHtml(q.join("\n"), base) + "</blockquote>"); continue;
+      }
+      if ((m = isList(l))) {
+        var ind = m[1].length, ordered = /\d/.test(m[2]), items = [], cur = null, loose = false, sawBlank = false;
+        while (i < lines.length) {
+          var ln = lines[i], mm = isList(ln);
+          if (mm && mm[1].length <= ind + 1 && /\d/.test(mm[2]) === ordered) { if (sawBlank && cur) loose = true; cur = [mm[3]]; items.push(cur); sawBlank = false; i++; continue; }
+          if (blank(ln)) { sawBlank = true; i++; continue; }
+          var lead = /^ */.exec(ln)[0].length;
+          if (lead > ind && cur) { if (sawBlank) cur.push(""); cur.push(ln.slice(Math.min(lead, ind + (mm ? 2 : 2 + (ordered ? 1 : 0))))); sawBlank = false; i++; continue; }
+          if (!sawBlank && cur && !startsBlock(ln)) { cur.push(ln.trim()); i++; continue; }
+          break;
+        }
+        var start = ordered ? parseInt(m[2], 10) : 1;
+        out.push((ordered ? "<ol" + (start !== 1 ? ' start="' + start + '"' : "") + ">" : "<ul>") + items.map(function (it) {
+          var first = it[0], task = /^\[([ xX])\]\s+/.exec(first), cls = "";
+          if (task) { first = first.slice(task[0].length); cls = ' class="md-task' + (task[1] !== " " ? " done" : "") + '"'; }
+          var body = [first].concat(it.slice(1)).join("\n"), inner = mdHtml(body, base);
+          if (!loose) inner = inner.replace(/^<p>([\s\S]*?)<\/p>/, "$1");
+          return "<li" + cls + ">" + (task ? '<span class="md-box" aria-hidden="true"></span>' : "") + inner + "</li>";
+        }).join("") + (ordered ? "</ol>" : "</ul>"));
+        continue;
+      }
+      if (l.indexOf("|") >= 0 && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+        var head = cells(l), al = cells(lines[i + 1]).map(function (c) { return /^:-+:$/.test(c) ? "c" : /-:$/.test(c) ? "r" : ""; }), body2 = [];
+        for (i += 2; i < lines.length && !blank(lines[i]) && lines[i].indexOf("|") >= 0; i++) body2.push(cells(lines[i]));
+        var td = function (tag, c, k) { return "<" + tag + (al[k] ? ' class="md-' + al[k] + '"' : "") + ">" + mdInline(c, base) + "</" + tag + ">"; };
+        out.push('<div class="md-tbl"><table><thead><tr>' + head.map(function (c, k) { return td("th", c, k); }).join("") + "</tr></thead><tbody>" + body2.map(function (r) { return "<tr>" + head.map(function (x, k) { return td("td", r[k] || "", k); }).join("") + "</tr>"; }).join("") + "</tbody></table></div>");
+        continue;
+      }
+      if (/^ {4}/.test(l)) {
+        var ic4 = [];
+        while (i < lines.length && (/^ {4}/.test(lines[i]) || blank(lines[i]))) { ic4.push(lines[i].slice(4)); i++; }
+        while (ic4.length && blank(ic4[ic4.length - 1])) ic4.pop();
+        out.push('<pre class="md-code"><code>' + esc(ic4.join("\n")) + "</code></pre>"); continue;
+      }
+      var para = [l];
+      for (i++; i < lines.length && !blank(lines[i]) && !startsBlock(lines[i]) && !(lines[i].indexOf("|") >= 0 && i + 1 < lines.length && isTableSep(lines[i + 1])); i++) {
+        if (/^ {0,3}(=+|-+) *$/.test(lines[i]) && para.length === 1) break;
+        para.push(lines[i]);
+      }
+      if (i < lines.length && para.length === 1 && /^ {0,3}(=+|-+) *$/.test(lines[i]) && !blank(lines[i])) {
+        var lv2 = lines[i].trim().charAt(0) === "=" ? 1 : 2; i++;
+        out.push("<h" + lv2 + ' data-md-id="' + esc(mdSlug(para[0].trim())) + '">' + mdInline(para[0].trim(), base) + "</h" + lv2 + ">"); continue;
+      }
+      out.push("<p>" + mdInline(para.map(function (x) { return x.replace(/^ +/, ""); }).join("\n"), base) + "</p>");
+    }
+    return fm + out.join("");
+  }
+  // ---------- end Markdown preview ----------
   // ---------- BUTTONS ----------
   function renderButtons() {
     return Promise.all([api("/api/buttons"), api("/api/tasks"), api("/api/skills")]).then(function (r) {

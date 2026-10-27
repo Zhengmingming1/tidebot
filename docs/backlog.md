@@ -3124,3 +3124,62 @@ no status filter, no errors or prompts) or copying pages by hand.
 2. Command palette entry "导出当前运行列表".
 3. `agentctl runs export --status failed --range 7d --format jsonl` over the same query.
 4. Include each run's log (zip of CSV + logs) for a chosen few runs, for bug reports.
+
+## 2026-10-27 (16:00): skill files in Markdown open formatted — preview / source switch
+
+Category: **UI polish / reading** (recent rounds: runs export, notification outages, timezone
+settings, cron correctness, task snooze, tray idling). Idea 3 of 10-25 00:20: the skill file
+browser showed SKILL.md and its reference pages only as raw text with line numbers — front
+matter, tables and fenced commands read like source code, and links between the pages did
+nothing.
+
+**Done**
+
+- Skill page › 文件: `.md` / `.markdown` files open as formatted text; a small "预览 / 源码"
+  switch in the file header (arrow keys too) goes back to the numbered source. The choice is
+  remembered for every Markdown file (`tb_md_view` in localStorage); copy always copies the
+  source. Hints on the two buttons say external images are not loaded.
+- Renderer (`mdHtml`, no library, ~150 lines): YAML front matter as a compact key / value table
+  (folded `>` / `|` values joined), ATX + setext headings, paragraphs with hard breaks,
+  emphasis / strong / strike, code spans and fenced or indented code (language label top
+  right), block quotes, nested and task lists, GFM tables with alignment, rules, backslash
+  escapes, CRLF files.
+- Links: http(s) / mailto open in a new tab (address in the tooltip); a relative link such as
+  `reference/fields.md` or `../x.md` resolves against the file's folder and opens that file in
+  the viewer (its folders unfold, the tree row is selected); `#heading` scrolls within the
+  pane (GitHub-style slugs, no element ids on the page); a link to a file the version doesn't
+  have says so in a toast. Everything else (javascript:, data:, `//host`, absolute paths)
+  stays plain text. Images become a "🖼 alt" link — nothing is fetched while reading.
+- Safety: the file's text is escaped before any markup is added and only a fixed set of tags
+  comes out; raw HTML in the file shows as text. No lookbehind in the regexes (an older WebKit
+  in the desktop app would reject the whole script).
+- Look: sand palette, 14 px body / 8px grid, headings with a hairline, code blocks on the same
+  `#fbfaf6` as the source view; the pane scrolls on its own inside the 1024×655 layout
+  (scrollWidth 1024 in zh-CN and en). Same on macOS / Windows / Linux, desktop and browser.
+- Tests: `TestMarkdownPreviewUI` (wiring, strings in both languages, styles, no native dialogs
+  / innerHTML / lookbehind in the block) and `TestMarkdownRender` (runs the renderer in node:
+  front matter, lists, tables, fences, setext, link resolution, autolinks, XSS cases).
+- Shots: `/workspace/tidebot-shots/skill-md-preview-1024x655.png`, `…-en-1024x655.png`.
+
+**Inspiration**
+
+- siteboon/claudecodeui `src/modules/code-editor/CodeEditor.tsx` (Markdown files get a
+  preview / edit toggle in the editor header, `CodeEditorHeader.tsx`) and
+  `src/modules/code-editor/markdown/MarkdownPreview.tsx` (GFM tables, task lists, links in a
+  new tab with `noopener noreferrer`). They use react-markdown; tidebot keeps a small escaped
+  renderer instead of adding a dependency. Front matter as a table follows GitHub's rendering.
+  Ideas only, no code copied.
+
+**Learned**
+
+- Bare-URL linking must not run the label back through the inline pass (it re-matches itself
+  and recurses forever) — autolinks get an escaped label.
+- Placeholders for code spans / links before escaping keep the order of passes simple and make
+  "escape everything, add known tags" easy to check.
+
+**Ideas for later**
+
+1. Same preview for the task prompt and the run's final answer (agents answer in Markdown).
+2. Rendered diff for Markdown in the compare tab (changed blocks highlighted, not lines).
+3. Outline (h1–h3) in a small popover for long references, Open WebUI-style.
+4. Search inside the open file (⌘/Ctrl+F in the pane, n / N), shared with the log view.
