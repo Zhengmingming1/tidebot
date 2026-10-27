@@ -927,17 +927,27 @@
   // pick(for) — "" = resume. Arrow keys move, Enter / Space pick, Esc or a click outside
   // closes and gives focus back.
   function pzMenu(anchor, dir, o) {
-    if ($("#spz-menu") || !document.contains(anchor)) return;
     var opts = o.options || SPZ_FOR.map(function (f) { return { "for": f }; });
     var item = function (x) {
       return '<button type="button" role="menuitem" class="spz-item" data-for="' + esc(x["for"]) + '"><span>' + esc(T("spz.f_" + x["for"])) + "</span><small>" + esc(x.until ? T("spz.ends", { t: when(x.until) }) : T("spz.ends_manual")) + "</small></button>";
     };
+    popMenu(anchor, dir, {
+      id: "spz-menu", label: o.title,
+      html: '<div class="spz-head">' + ic("pause", "sm") + "<div><strong>" + esc(o.title) + "</strong>" + (o.sub ? "<small>" + esc(o.sub) + "</small>" : "") + "</div></div>" +
+        (o.paused ? '<button type="button" role="menuitem" class="spz-item spz-resume" data-resume="1"><span>' + ic("play", "sm") + esc(T("spz.resume")) + "</span></button><div class=\"spz-sep\">" + esc(T("spz.change")) + "</div>" : "") +
+        opts.map(item).join("") +
+        '<p class="spz-note">' + ic("info", "sm") + "<span>" + esc(o.note) + "</span></p>",
+      pick: function (b) { o.pick(b.hasAttribute("data-resume") ? "" : b.getAttribute("data-for")); }
+    });
+  }
+  // popMenu: a small menu (.popover.spz-menu) at the anchor ("up" opens above it). o: id,
+  // label, html (items are [role=menuitem] buttons), pick(button). Arrow keys / Home / End
+  // move, Enter / Space pick, Esc or a click outside closes and gives focus back.
+  function popMenu(anchor, dir, o) {
+    if ($("#" + o.id) || !document.contains(anchor)) return;
     var m = document.createElement("div");
-    m.id = "spz-menu"; m.className = "popover spz-menu"; m.setAttribute("role", "menu"); m.setAttribute("aria-label", o.title);
-    m.innerHTML = '<div class="spz-head">' + ic("pause", "sm") + "<div><strong>" + esc(o.title) + "</strong>" + (o.sub ? "<small>" + esc(o.sub) + "</small>" : "") + "</div></div>" +
-      (o.paused ? '<button type="button" role="menuitem" class="spz-item spz-resume" data-resume="1"><span>' + ic("play", "sm") + esc(T("spz.resume")) + "</span></button><div class=\"spz-sep\">" + esc(T("spz.change")) + "</div>" : "") +
-      opts.map(item).join("") +
-      '<p class="spz-note">' + ic("info", "sm") + "<span>" + esc(o.note) + "</span></p>";
+    m.id = o.id; m.className = "popover spz-menu" + (o.cls ? " " + o.cls : ""); m.setAttribute("role", "menu"); m.setAttribute("aria-label", o.label);
+    m.innerHTML = o.html;
     document.body.appendChild(m);
     var r0 = anchor.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
     var left = dir === "up" ? r0.left : r0.right - w;
@@ -966,11 +976,11 @@
       var b = e.target.closest('[role="menuitem"]');
       if (!b) return;
       close(true);
-      o.pick(b.hasAttribute("data-resume") ? "" : b.getAttribute("data-for"));
+      o.pick(b);
     });
     setTimeout(function () { document.addEventListener("click", off, true); document.addEventListener("keydown", key, true); }, 0);
     window.addEventListener("hashchange", m._close);
-    items[0].focus();
+    if (items[0]) items[0].focus();
   }
   // heldNext: "next 10:00" for a task's schedule; while every schedule is paused and that
   // time falls inside the pause it reads "next 10:00 · paused" (dimmed), so the task list
@@ -4190,7 +4200,7 @@
         var n = counts[x[2]];
         return '<button data-f="' + x[0] + '" class="' + (x[0] === st ? "active" : "") + '"' + (x[3] ? ' data-tip="' + esc(T(x[3])) + '"' : "") + ">" + esc(T(x[1])) + (typeof n === "number" ? ' <span class="cnt" data-c="' + x[2] + '">' + esc(num(n)) + "</span>" : "") + "</button>";
       };
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + (task && runs[0] ? esc(T("runs.for", { name: runs[0].task_name })) + " · " : "") + esc(T("runs.times_in", { tz: tzLabel() })) + '</p></div><div class="actions"><div class="rel rr-wrap"><button type="button" class="btn rr-btn' + (rangeOn(rg) ? " on" : "") + '" id="r-range" aria-haspopup="dialog" aria-expanded="false" data-tip="' + esc(rangeTip(rg)) + '">' + ic("calendar", "sm") + "<span>" + esc(rangeLabel(rg)) + "</span>" + ic("chevDown", "sm") + '</button></div><button class="btn primary" id="r-quick">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div></div>" +
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.runs")) + "</h1><p>" + (task && runs[0] ? esc(T("runs.for", { name: runs[0].task_name })) + " · " : "") + esc(T("runs.times_in", { tz: tzLabel() })) + '</p></div><div class="actions"><div class="rel rr-wrap"><button type="button" class="btn rr-btn' + (rangeOn(rg) ? " on" : "") + '" id="r-range" aria-haspopup="dialog" aria-expanded="false" data-tip="' + esc(rangeTip(rg)) + '">' + ic("calendar", "sm") + "<span>" + esc(rangeLabel(rg)) + "</span>" + ic("chevDown", "sm") + '</button></div><button type="button" class="btn ghost rx-btn" id="r-export" aria-haspopup="menu" aria-expanded="false" data-tip="' + esc(T("rx.tip")) + '"' + (runs.length ? "" : " disabled") + ">" + ic("download", "sm") + "<span>" + esc(T("rx.export")) + "</span>" + ic("chevDown", "sm") + '</button><button class="btn primary" id="r-quick">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div></div>" +
         '<section class="card flush"><div class="toolbar run-tb"><label class="search-in">' + ic("search", "sm") + '<input id="rq" type="search" maxlength="100" placeholder="' + esc(T("runs.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters run-f">' + RUN_FILTERS.map(chip).join("") + "</div>" +
         '<select id="rsort" aria-label="' + esc(T("runs.sort")) + '">' + [["new", T("runs.s_new")], ["old", T("runs.s_old")], ["cost", T("runs.s_cost")], ["tokens", T("runs.s_tokens")], ["duration", T("runs.s_duration")]].map(function (x) { return opt(x[0], x[1], x[0] === v.sort); }).join("") + "</select>" +
@@ -4198,6 +4208,10 @@
       $("#r-quick").addEventListener("click", function () { quickRunModal(); });
       var setRange = function (n) { location.hash = runsHash(st, task, n); };
       $("#r-range").addEventListener("click", function (e) { rangePicker(e.currentTarget, rg, setRange); });
+      $("#r-export").addEventListener("click", function (e) {
+        if ($("#rx-menu")) { $("#rx-menu")._close(); return; }
+        runsExportMenu(e.currentTarget, { st: st, task: task, taskName: task && shown[0] ? shown[0].task_name : "", v: v, rg: rg, total: runsTotal(counts, st), shown: shown.length });
+      });
       var shown = runs, loading = false, ended = false;
       var foot = function () {
         var total = runsTotal(counts, st), box = $("#rmore");
@@ -4215,6 +4229,7 @@
           '<div class="empty">' + ic("calendar") + "<strong>" + esc(T("rr.empty", { r: rangeLabel(rg) })) + "</strong>" + esc(T("rr.empty_sub")) + '<div class="empty-act"><button type="button" class="btn sm" id="rr-empty-clear">' + esc(T("rr.show_all")) + "</button></div></div>";
         var ec = $("#rr-empty-clear"); if (ec) ec.addEventListener("click", function () { setRange({ range: "", from: "", to: "" }); });
         wireRows($("#rtable"));
+        var xb = $("#r-export"); if (xb) xb.disabled = !list.length;
         $$("[data-stop]", $("#rtable")).forEach(function (b) { b.addEventListener("click", function (e) {
           e.stopPropagation(); b.disabled = true;
           stopRun(b.getAttribute("data-stop"), b.getAttribute("data-st")).then(function (y) { if (y) reload(); else b.disabled = false; }).catch(function (err) { b.disabled = false; fail(err); });
@@ -4258,6 +4273,34 @@
       $("#rsort").addEventListener("change", function (e) { v.sort = e.target.value; v.key = [st, task, v.sort, v.q, rangeQuery(rg)].join("|"); v.n = RUNS_PAGE; reload().catch(fail); });
       // switching the status keeps the task filter (it used to drop it)
       $$("[data-f]").forEach(function (b) { b.addEventListener("click", function () { location.hash = runsHash(b.getAttribute("data-f"), task, rg); }); });
+    });
+  }
+
+  // runsExportMenu: "Export" on the runs page — every run the list matches (status chip,
+  // task, search, time range, sort), not only the loaded pages, as CSV for a spreadsheet or
+  // JSONL for scripts. The head says how many and which filters, so the file holds no
+  // surprises. Idea: langfuse web/src/components/BatchExportTableButton.tsx (an export
+  // menu on the table that takes its filter, search and order, one entry per format);
+  // ours downloads at once instead of queueing a job.
+  function runsExportMenu(anchor, o) {
+    var f = RUN_FILTERS.filter(function (x) { return x[0] === o.st; })[0], parts = [];
+    if (o.st) parts.push(T(f ? f[1] : "runs.all_f"));
+    if (o.taskName) parts.push(o.taskName);
+    if (rangeOn(o.rg)) parts.push(rangeLabel(o.rg));
+    if (o.v.q) parts.push(T("rx.f_q", { q: o.v.q }));
+    var n = o.total != null ? o.total : o.shown;
+    var item = function (fmt, ico) {
+      return '<button type="button" role="menuitem" class="spz-item rx-item" data-fmt="' + fmt + '"><span>' + ic(ico, "sm") + esc(T("rx." + fmt)) + "</span><small>" + esc(T("rx." + fmt + "_sub")) + "</small></button>";
+    };
+    popMenu(anchor, "down", {
+      id: "rx-menu", cls: "rx-menu", label: T("rx.export"),
+      html: '<div class="spz-head rx-head">' + ic("download", "sm") + "<div><strong>" + esc(o.total != null ? T("rx.title_n", { n: num(n) }) : T("rx.title")) + "</strong><small>" + esc(parts.length ? parts.join(" · ") : T("runs.all")) + "</small></div></div>" +
+        item("csv", "list") + item("jsonl", "code") +
+        '<p class="spz-note">' + ic("info", "sm") + "<span>" + esc(T("rx.note", { tz: tzLabel() }) + (n > 100000 ? " " + T("rx.cap") : "")) + "</span></p>",
+      pick: function (b) {
+        var fmt = b.getAttribute("data-fmt");
+        downloadFile("/api/runs/export?format=" + fmt + "&lang=" + enc(state.lang) + "&" + runsQuery(o.st, o.task, o.v, o.rg), "tidebot-runs." + fmt, anchor);
+      }
     });
   }
 

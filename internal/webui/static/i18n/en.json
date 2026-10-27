@@ -1884,5 +1884,16 @@
   "ntf.channel_up.t": "Notification channel \"{name}\" works again",
   "ntf.channel_up.b": "Notices it missed are not resent; they are in the notification center.",
   "notif.channel_down": "Notification channel failing",
-  "notif.channel_up": "Notification channel recovered"
+  "notif.channel_up": "Notification channel recovered",
+  "rx.export": "Export",
+  "rx.tip": "Export every run in the list (CSV or JSONL)",
+  "rx.title_n": "Export {n} runs",
+  "rx.title": "Export these runs",
+  "rx.f_q": "search “{q}”",
+  "rx.csv": "CSV",
+  "rx.csv_sub": "Opens in Excel or Numbers",
+  "rx.jsonl": "JSONL",
+  "rx.jsonl_sub": "One JSON object per line, for scripts",
+  "rx.note": "Exports every run matching the current filters, search and sort — not just the loaded ones. CSV times are in {tz}, JSONL in UTC; amounts in the display currency.",
+  "rx.cap": "Up to 100,000 runs."
 }

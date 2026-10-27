@@ -3070,3 +3070,57 @@ check, rotated token) still failed silently until alerts were missed.
 2. A small per-channel history (last 10 sends) in the edit dialog.
 3. Let the threshold (3) be chosen per channel next to the groups.
 4. Resend the notices a channel missed while down, once it recovers (opt-in, capped at 10).
+
+## 2026-10-27 (12:00): runs list exports what it shows — CSV for a spreadsheet, JSONL for scripts
+
+Category: **feature** (recent rounds: notifications, timezone UX, cron correctness, pauses,
+tray resource use). Idea 2 of 10-24 09:20: the runs list could be filtered by status, task,
+search text and date, but the only way to get runs out was the spend page's CSV (cost rows,
+no status filter, no errors or prompts) or copying pages by hand.
+
+**Done**
+
+- Runs page header: "导出 / Export" (ghost button with a caret, next to the date range). Its
+  menu says how many runs and which filters ("导出 9 条运行 · 失败 · 最近 7 天 · 搜索“x”"), then
+  CSV ("Excel、Numbers 可直接打开") and JSONL ("每行一个 JSON，便于脚本处理"); the note in the menu
+  covers the rest (all matching runs, not just the loaded pages; CSV in the scheduling zone,
+  JSONL in UTC; amounts in the display currency). Arrow keys / Home / End / Enter / Esc;
+  disabled while the list is empty; its tooltip hides while the menu is open. Goes through the
+  shared `downloadFile` → native "Save as" in the desktop app, a download in a browser.
+- `GET /api/runs/export?format=csv|jsonl&lang=` takes exactly the list's query (`runsFilter`
+  + `runsOrder`, both now shared with `/api/runs`), up to 100,000 runs. CSV: BOM, 20 localized
+  columns (date, start, finish, task, run id, status, trigger, provider, model, version,
+  seconds, requests, 4 token counts, amount, currency, error on one line, prompt),
+  formula-safe cells (`csvSafe`). JSONL: English keys, stored UTC times, error kept as is.
+  Prompts are cut at 4000 bytes and errors at 2000 on a rune boundary (the file is built in
+  memory so the single DB connection is not held by a slow reader). File name follows the
+  range: `tidebot-runs_2026-10-21_to_2026-10-27.csv`, one day → that day, none → `all_to_<today>`.
+- `popMenu` pulled out of the pause menu (`pzMenu` now builds its items and calls it), so
+  every small menu has the same placement and keys.
+- Same on macOS / Windows / Linux, desktop and browser: no paths, no native dialogs, both
+  languages, scrollWidth 1024 at 1024×655 (zh-CN and en checked).
+- Tests: `TestRunsExport` (order, localized cells, formula guard, times, clipping, every
+  filter + sort, file names, JSONL, 400s / 405), `TestClip`, `TestRunsExportUI`.
+- Shots: `/workspace/screens/runs-export-menu-1024x655.png`, `…-en-1024x655.png`.
+
+**Inspiration**
+
+- langfuse/langfuse `web/src/components/BatchExportTableButton.tsx` (an icon export menu on
+  each table that sends the table's filter, search and order, one entry per format) and
+  `packages/shared/src/features/batchExport/types.ts` (CSV / JSON / JSONL with their MIME
+  types). Langfuse queues a job and emails a link; a single-user app can answer at once.
+  Ideas only, no code copied.
+
+**Learned**
+
+- Pull the WHERE and ORDER BY out of the list handler before adding a second consumer —
+  otherwise the export and the list drift (a new chip that only one of them knows).
+- Excel reads a lone `\n` inside a quoted cell fine but row heights explode; fold errors to
+  one line in CSV and keep them exact in JSONL.
+
+**Ideas for later**
+
+1. "Export selected" once the runs list has row ticks (x in the j/k cursor).
+2. Command palette entry "导出当前运行列表".
+3. `agentctl runs export --status failed --range 7d --format jsonl` over the same query.
+4. Include each run's log (zip of CSV + logs) for a chosen few runs, for bug reports.

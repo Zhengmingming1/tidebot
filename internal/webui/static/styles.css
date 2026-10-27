@@ -1929,3 +1929,9 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 #tz-list li.none { cursor: default; color: var(--text-3); justify-content: center; height: 64px; }
 .tz-modal .actions { align-items: center; }
 .tz-modal .tz-note { flex: 1; min-width: 0; color: var(--text-3); font-size: 12px; }
+
+/* Runs › Export: the menu takes the list's filters; one entry per format. */
+.rx-menu { width: 304px; }
+.rx-head { color: var(--accent); }
+.rx-item small { white-space: normal; text-align: right; }
+.rx-btn[aria-expanded="true"]::after { display: none; }

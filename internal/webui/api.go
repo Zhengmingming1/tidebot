@@ -55,6 +55,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/runs/quick", s.withAuthCSRF(s.handleQuickRun))
 	mux.HandleFunc("/api/runs/recent-prompts", s.withAuthCSRF(s.handleRecentPrompts))
 	mux.HandleFunc("/api/runs/counts", s.withAuthCSRF(s.handleRunCounts))
+	mux.HandleFunc("/api/runs/export", s.withAuthCSRF(s.handleRunsExport))
 	mux.HandleFunc("/api/runs/", s.withAuthCSRF(s.handleRunSub))
 	mux.HandleFunc("/api/buttons", s.withAuthCSRF(s.handleButtons))
 	mux.HandleFunc("/api/buttons/", s.withAuthCSRF(s.handleButtonRun))
@@ -223,11 +224,8 @@ func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]ru
 	defer rows.Close()
 	out := []runDTO{}
 	for rows.Next() {
-		var d runDTO
-		if err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
-			&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
-			&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
-			&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests); err != nil {
+		d, err := scanRun(rows)
+		if err != nil {
 			return nil, err
 		}
 		if len(d.Prompt) > 300 {
@@ -239,6 +237,16 @@ func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]ru
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// scanRun reads one row of runSelect().
+func scanRun(rows *sql.Rows) (runDTO, error) {
+	var d runDTO
+	err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
+		&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
+		&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
+		&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests)
+	return d, err
 }
 
 func limitParam(r *http.Request, def, max int) int {
@@ -1034,9 +1042,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	// ids are time-ordered to the millisecond: they break ties between runs created in the
 	// same second, so queued runs list in their real order.
 	sortBy := q.Get("sort")
-	order := map[string]string{"": "r.created_at DESC, r.id DESC", "new": "r.created_at DESC, r.id DESC", "old": "r.created_at ASC, r.id ASC",
-		"cost": s.runAmt("r.") + " DESC, r.created_at DESC, r.id DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC, r.id DESC",
-		"duration": "COALESCE(r.duration_ms,0) DESC, r.created_at DESC, r.id DESC"}[sortBy]
+	order := s.runsOrder(sortBy)
 	if order == "" {
 		writeErr(w, 400, "sort must be new, old, cost, tokens or duration")
 		return
@@ -1070,6 +1076,14 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, runs)
+}
+
+// runsOrder is the ORDER BY for the runs list's sort (new, old, cost, tokens, duration);
+// "" for an unknown one.
+func (s *Server) runsOrder(sortBy string) string {
+	return map[string]string{"": "r.created_at DESC, r.id DESC", "new": "r.created_at DESC, r.id DESC", "old": "r.created_at ASC, r.id ASC",
+		"cost": s.runAmt("r.") + " DESC, r.created_at DESC, r.id DESC", "tokens": "(COALESCE(r.input_tokens,0)+COALESCE(r.output_tokens,0)) DESC, r.created_at DESC, r.id DESC",
+		"duration": "COALESCE(r.duration_ms,0) DESC, r.created_at DESC, r.id DESC"}[sortBy]
 }
 
 // handleRunCounts: GET /api/runs/counts — how many runs each filter chip would show,

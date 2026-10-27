@@ -1884,5 +1884,16 @@
   "ntf.channel_up.t": "通知渠道「{name}」已恢复",
   "ntf.channel_up.b": "之前没送达的通知不会补发，可以在通知中心查看。",
   "notif.channel_down": "通知渠道发送失败",
-  "notif.channel_up": "通知渠道已恢复"
+  "notif.channel_up": "通知渠道已恢复",
+  "rx.export": "导出",
+  "rx.tip": "导出列表中的全部运行（CSV 或 JSONL）",
+  "rx.title_n": "导出 {n} 条运行",
+  "rx.title": "导出这些运行",
+  "rx.f_q": "搜索“{q}”",
+  "rx.csv": "CSV",
+  "rx.csv_sub": "Excel、Numbers 可直接打开",
+  "rx.jsonl": "JSONL",
+  "rx.jsonl_sub": "每行一个 JSON，便于脚本处理",
+  "rx.note": "按当前筛选、搜索和排序导出全部匹配的运行，不只是已加载的。CSV 时间为 {tz}，JSONL 为 UTC；金额按当前显示币种。",
+  "rx.cap": "最多导出 100,000 条。"
 }
