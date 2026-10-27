@@ -761,6 +761,7 @@ table.cmp th, table.cmp td { padding: 6px 8px; font-size: 13px; }
 .popover .item.unread::before { content: ""; position: absolute; left: 0; top: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .popover a.link-item { display: flex; gap: 8px; align-items: center; color: var(--accent); }
 .popover a.link-item:hover { background: var(--accent-50); }
+.popover a.link-item.note { display: block; color: inherit; }
 
 /* ---------- I6: settings ---------- */
 .settings-layout { display: grid; grid-template-columns: 200px 1fr; gap: var(--gutter); align-items: start; }
@@ -915,6 +916,11 @@ a.tl-rate:hover { text-decoration: underline; text-underline-offset: 2px; }
   .cc-card { justify-content: center; padding: 12px 0; }
   .cc-card .cc-txt { display: none; }
 }
+
+/* a notification channel's last send failed: dot on Settings and Settings › Notifications */
+.nav-dot { flex: none; width: 8px; height: 8px; margin-left: auto; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--surface, #fff); }
+#nav a[data-tip]:hover::after, #nav a[data-tip]:focus-visible::after, .set-nav a[data-tip]:hover::after, .set-nav a[data-tip]:focus-visible::after { left: 8px; transform: none; }
+@media (max-width: 960px) { #nav a { position: relative; } #nav .nav-dot { position: absolute; top: 8px; right: 16px; margin: 0; } }
 
 /* settings → about → updates */
 #set-update h3 { margin: 12px 0 4px; font-size: 14px; }

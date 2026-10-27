@@ -1715,7 +1715,7 @@
   "nt.gt.budget": "When spend nears a budget (warning) and when it goes over.",
   "nt.gt.breaker": "When a task fails too many times in a row and is paused.",
   "nt.gt.finished": "Only for tasks with \"Notify on success\" turned on.",
-  "nt.gt.system": "New versions, rolled-back updates, low disk space, messages from plugins.",
+  "nt.gt.system": "New versions, rolled-back updates, low disk space, messages from plugins, and another channel failing repeatedly or working again.",
   "nt.gs.failed": "Failures",
   "nt.gs.confirm": "Confirmations",
   "nt.gs.budget": "Budget",
@@ -1877,5 +1877,12 @@
   "tz.note": "Upcoming scheduled runs move to the new timezone.",
   "tz.btn_tip": "Now {l} · click to change",
   "tz.saved": "Timezone set to {z}",
-  "tz.saved_moved": "Timezone set to {z}; next run moved for {n} task(s)"
+  "tz.saved_moved": "Timezone set to {z}; next run moved for {n} task(s)",
+  "nt.failing_tip": "{n} notification channel(s) failed their last send",
+  "ntf.channel_down.t": "Notification channel \"{name}\" failed {n} times in a row",
+  "ntf.channel_down.b": "{detail}",
+  "ntf.channel_up.t": "Notification channel \"{name}\" works again",
+  "ntf.channel_up.b": "Notices it missed are not resent; they are in the notification center.",
+  "notif.channel_down": "Notification channel failing",
+  "notif.channel_up": "Notification channel recovered"
 }

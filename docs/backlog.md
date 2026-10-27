@@ -3008,3 +3008,65 @@ could only be set in the config file or `$TIDEBOT_TIMEZONE`; Settings showed it 
 2. DST gap / repeated-hour warning in the cron preview.
 3. Route Home's "next 24 hours" and the budget runs-per-day estimate through `Sched.NextRun`.
 4. `agentctl config timezone set <zone>` for headless servers.
+
+## 2026-10-27 (08:00): a notification channel that keeps failing tells you — once, elsewhere
+
+Category: **reliability / notifications** (recent rounds were scheduling, timezone, pauses,
+tray, prefetch). Ideas 1 and 2 of 10-25 15:20: a channel's row showed "连续失败 3 次", but
+only if you opened Settings › Notifications. A DingTalk robot that started refusing (keyword
+check, rotated token) still failed silently until alerts were missed.
+
+**Done**
+
+- After `notify.DownAfter` (3) failed real sends in a row, one "通知渠道「运维群」连续 3 次发送
+  失败" notice: in the bell (under 失败, error as the body), as a desktop notification and on
+  every *other* channel that takes system messages — never on the failing one
+  (`Message.SkipChannel`). One notice per outage, not per failure; when the channel delivers
+  again, one "已恢复" notice. Tests from the settings page (and `agentctl`'s `notify.test`) move
+  the streak but never raise either; changing the address / secret starts over.
+- Red dot on Settings in the sidebar and on Settings › Notifications while an enabled channel's
+  last send failed; the count is only in the tooltip ("1 个通知渠道最近一次发送失败"). The dot
+  follows the list right after a test / save / switch (no extra request) and the bell's
+  once-a-minute poll (`channels_failing` in `/api/notifications/center`). Collapsed sidebar:
+  the dot sits on the icon.
+- Bell entries for "channel down / back" and "low disk" open their settings page, laid out like
+  the plain entries (title / body / time stacked) instead of the side-by-side link row.
+- Core: migration `014_notify_channel_down.sql` (`down_notified` flag; channels that already
+  get system messages get rules for `channel_down` / `channel_up`). The streak update uses
+  `UPDATE … RETURNING`, the flag flip is guarded (`WHERE down_notified=0`) so two sends failing
+  at once raise one notice. Errors in the notice are the already-cleaned ones (no URL tokens).
+- Same on macOS / Windows / Linux, desktop and browser: plain CSS dot, no paths, no native
+  dialogs. zh-CN and en for every string (server and WebUI); 1024×655 checked (scrollWidth 1024).
+- CI: the Linux desktop job's `apt-get install` hit the Azure Ubuntu mirror at ~40 KB/s twice
+  (20 min job timeout; run of 0f7acba was cancelled, a rerun passed). `scripts/ci-apt-install.sh`
+  now caches the .debs between runs (actions/cache), puts 20 s timeouts / 3 retries on every
+  request and, if the install still stalls past 7 min, retries once against
+  archive.ubuntu.com. Used by full-matrix and release.
+- Shot: `/workspace/shots/notify-channel-down-1024x655.png`.
+- Tests: `TestChannelDownUp` (threshold, one notice per outage, tests stay quiet, recovery,
+  new address resets, SkipChannel, FailingCount ignores disabled), `TestChannelDownReachesOthers`
+  (bus event → message in the viewer's language → other channel only, bell row, recovery),
+  `TestChannelDownCenter`, `TestChannelDownUI`.
+
+**Inspiration**
+
+- louislam/uptime-kuma `server/model/monitor.js` (`isImportantForNotification`: notify on
+  PENDING→DOWN and DOWN→UP only; retries before DOWN): one notice per outage after a few
+  failures, one when it is back. healthchecks/healthchecks `hc/api/models.py` (`Channel.notify`
+  keeps `last_error` and flips `disabled` on permanent errors) for keeping the state on the
+  channel row. Ideas only, no code copied.
+
+**Learned**
+
+- A notice about a broken channel must not be routed through the normal rules unfiltered, or
+  it goes to the very channel that is broken (and counts as one more failure).
+- "Test" sends need their own path end to end; the old `notify.test` RPC called `Send` and would
+  have raised outage notices for a CLI test.
+
+**Ideas for later**
+
+1. Offer "停用此渠道" on the "连续失败" notice / row when the error is permanent (WeCom "invalid
+   webhook key", DingTalk "token is not exist"), Healthchecks-style, without doing it silently.
+2. A small per-channel history (last 10 sends) in the edit dialog.
+3. Let the threshold (3) be chosen per channel next to the groups.
+4. Resend the notices a channel missed while down, once it recovers (opt-in, capped at 10).

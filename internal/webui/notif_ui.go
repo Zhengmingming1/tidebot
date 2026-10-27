@@ -37,7 +37,7 @@ func (s *Server) handleNotifCenter(w http.ResponseWriter, r *http.Request) {
 				x.Key = "" // unreadable params: show the stored text instead
 			}
 			switch x.Event {
-			case "run_failed", "budget_breached":
+			case "run_failed", "budget_breached", "channel_down":
 				x.Group = "failed"
 			case "approval_needed":
 				x.Group = "confirm"
@@ -61,5 +61,8 @@ WHERE r.status='pending' GROUP BY r.task_id ORDER BY MAX(r.created_at) DESC LIMI
 		}
 		prow.Close()
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "pending": pending})
+	// enabled notification channels whose last send failed: a dot on Settings › Notifications
+	failing := 0
+	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM notify_channels WHERE enabled=1 AND last_at IS NOT NULL AND last_ok=0`).Scan(&failing)
+	writeJSON(w, 200, map[string]any{"items": items, "pending": pending, "channels_failing": failing})
 }

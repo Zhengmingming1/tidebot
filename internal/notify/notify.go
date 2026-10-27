@@ -38,6 +38,9 @@ type Message struct {
 	// Key + Params let clients render the message in their own language.
 	Key    string            `json:"key,omitempty"`
 	Params map[string]string `json:"params,omitempty"`
+	// SkipChannel is never sent to: a "channel down" notice goes everywhere but the
+	// channel that is failing.
+	SkipChannel string `json:"-"`
 }
 
 // Channel configuration (config_json). Secrets are referenced by name, never stored inline.
@@ -63,7 +66,10 @@ type Service struct {
 	Loc     *time.Location
 	LocFn   func() *time.Location // wins over Loc when set (timezone changes at runtime)
 	Now     func() time.Time
-	mu      sync.Mutex
+	// OnHealth hears a channel go down (DownAfter failed sends in a row) or recover.
+	// Called on the sending goroutine: keep it quick and non-blocking.
+	OnHealth func(Health)
+	mu       sync.Mutex
 }
 
 func (s *Service) loc() *time.Location {
@@ -174,6 +180,9 @@ WHERE c.enabled=1 AND (r.event=? OR r.event='*') AND (r.task_id='' OR r.task_id=
 		var cj, ev string
 		if err := rows.Scan(&c.ID, &c.Kind, &c.Name, &cj, &ev); err != nil {
 			return nil, false, err
+		}
+		if c.ID == m.SkipChannel {
+			continue
 		}
 		explicit = explicit || ev == m.Event
 		if seen[c.ID] {
@@ -304,7 +313,16 @@ func (s *Service) secret(c Channel) string {
 func (s *Service) Send(ctx context.Context, c Channel, m Message) error {
 	start := time.Now()
 	err := s.deliver(ctx, c, m, s.channelURL(c), s.secret(c))
-	s.record(context.WithoutCancel(ctx), c.ID, start, err)
+	s.record(context.WithoutCancel(ctx), c, start, err, true)
+	return err
+}
+
+// SendTest is Send for a test message (agentctl's notify.test): the result is kept on the
+// row, but it never raises a "channel down / working again" notice.
+func (s *Service) SendTest(ctx context.Context, c Channel, m Message) error {
+	start := time.Now()
+	err := s.deliver(ctx, c, m, s.channelURL(c), s.secret(c))
+	s.record(context.WithoutCancel(ctx), c, start, err, false)
 	return err
 }
 

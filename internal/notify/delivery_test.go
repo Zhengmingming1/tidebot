@@ -114,7 +114,7 @@ func TestChannelLastDelivery(t *testing.T) {
 	}
 
 	// unsaved channels (no id) never write anything
-	s.record(ctx, "", s.Now(), errors.New("x"))
+	s.record(ctx, Channel{}, s.Now(), errors.New("x"), true)
 
 	// stored errors never carry a URL token or a bot token
 	var raw string

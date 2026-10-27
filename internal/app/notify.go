@@ -20,7 +20,7 @@ var urgentEvents = map[string]bool{EventConfirmNeeded: true, EventBudgetBreached
 // The WebUI renders "ntf.<key>.t" / "ntf.<key>.b" from its own i18n files
 // (scripts/check-i18n.py checks every key here has both).
 var NotificationKeys = []string{"run_finished", "run_failed", "run_interrupted", "approval_needed", "budget_breached", "budget_warning",
-	"breaker_tripped", "confirm_needed", "update_available", "update_rolled_back", "plugin_notify", "disk_low", "generic", "test"}
+	"breaker_tripped", "confirm_needed", "update_available", "update_rolled_back", "plugin_notify", "disk_low", "channel_down", "channel_up", "generic", "test"}
 
 // EventToMessage renders an event in the configured language (channels, tray) and
 // also carries the message key + params so the WebUI can render it in the viewer's language.
@@ -70,6 +70,8 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		m.Title, m.Body = i18n.T("desktop.n.disk_low", m.Params["free"]), i18n.T("desktop.n.disk_low_body")
 	case EventPluginNotify:
 		m.Title, m.Body = e.Detail, ""
+	case EventChannelDown, EventChannelUp:
+		channelMessage(e, &m, i18n.T)
 	default:
 		m.Key = "generic"
 		m.Params["kind"] = e.Kind
@@ -192,7 +194,7 @@ func (a *App) rpcNotifyTest(ctx context.Context, raw json.RawMessage) (any, erro
 	}
 	for _, c := range chs {
 		if c.ID == p.ChannelID {
-			return map[string]bool{"ok": true}, a.Notify.Send(ctx, c, notify.Message{Event: "test", Key: "test", Title: i18n.T("notify.test")})
+			return map[string]bool{"ok": true}, a.Notify.SendTest(ctx, c, notify.Message{Event: "test", Key: "test", Title: i18n.T("notify.test")})
 		}
 	}
 	return nil, errors.New("channel not found")

@@ -515,6 +515,10 @@ func (s *shell) watchEvents(ch <-chan app.Event) {
 		case app.EventBudgetBreached:
 			detail := strings.ReplaceAll(e.Detail, "task/"+e.TaskID, name)
 			s.notify(e.Kind, i18n.T("desktop.n.budget", name), truncate(detail, 160))
+		case app.EventChannelDown:
+			s.notify(e.Kind, i18n.T("notify.channel_down", e.TaskName, e.Count), truncate(e.Detail, 160))
+		case app.EventChannelUp:
+			s.notify(e.Kind, i18n.T("notify.channel_up", e.TaskName), i18n.T("notify.channel_up_body"))
 		}
 	}
 }

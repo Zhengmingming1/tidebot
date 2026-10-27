@@ -23,6 +23,9 @@ type Event struct {
 	Detail   string
 	Count    int
 	CostUSD  float64
+	// ChannelID / ChannelKind: the notification channel of a channel_down / channel_up event.
+	ChannelID   string
+	ChannelKind string
 }
 
 // Bus is a tiny non-blocking fan-out. A nil *Bus is valid and drops everything.

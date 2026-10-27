@@ -128,6 +128,7 @@ func Open(cfg config.Config) (*App, error) {
 	}
 	a.Amend = amend.New(sqlDB, a.Tasks, ver, structurer)
 	a.Events = &Bus{}
+	a.wireChannelHealth()
 	a.Amend.OnProposed = func(taskID string, items []amend.Item) {
 		a.Events.Emit(Event{Kind: EventApprovalNeeded, TaskID: taskID, TaskName: a.taskName(taskID), Count: len(items)})
 	}

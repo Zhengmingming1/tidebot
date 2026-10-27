@@ -1715,7 +1715,7 @@
   "nt.gt.budget": "接近预算（预警）和超出预算时。",
   "nt.gt.breaker": "任务连续失败达到上限、被熔断暂停时。",
   "nt.gt.finished": "只对在任务里开启了「成功时通知」的任务生效。",
-  "nt.gt.system": "有新版本、更新回滚、磁盘空间不足、插件发来的消息。",
+  "nt.gt.system": "有新版本、更新回滚、磁盘空间不足、插件发来的消息，以及其他通知渠道连续发送失败或恢复。",
   "nt.gs.failed": "失败",
   "nt.gs.confirm": "待确认",
   "nt.gs.budget": "预算",
@@ -1877,5 +1877,12 @@
   "tz.note": "更改后，即将到来的定时运行会按新时区重新计算。",
   "tz.btn_tip": "当前 {l} · 点按更改",
   "tz.saved": "调度时区已改为 {z}",
-  "tz.saved_moved": "调度时区已改为 {z}，{n} 个任务的下次运行已调整"
+  "tz.saved_moved": "调度时区已改为 {z}，{n} 个任务的下次运行已调整",
+  "nt.failing_tip": "{n} 个通知渠道最近一次发送失败",
+  "ntf.channel_down.t": "通知渠道「{name}」连续 {n} 次发送失败",
+  "ntf.channel_down.b": "{detail}",
+  "ntf.channel_up.t": "通知渠道「{name}」已恢复",
+  "ntf.channel_up.b": "之前没送达的通知不会补发，可以在通知中心查看。",
+  "notif.channel_down": "通知渠道发送失败",
+  "notif.channel_up": "通知渠道已恢复"
 }

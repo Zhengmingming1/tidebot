@@ -505,6 +505,7 @@
   function renderShell() {
     $("#brand-mark").innerHTML = waveMark();
     $("#nav").innerHTML = NAV.map(function (n) { return '<a href="' + n[1] + '" data-nav="' + n[0] + '">' + ic(n[0]) + "<span>" + esc(T("nav." + n[0])) + "</span></a>"; }).join("");
+    paintChannelDot();
     var tag = document.querySelector("#shell .brand-text small"); if (tag) tag.textContent = T("brand.tagline");
   }
   function setNav(name) { $$("#nav a").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-nav") === name); }); }
@@ -546,8 +547,10 @@
     var unread = function (n) { return n.created_at > state.notifSeen; };
     var it = function (n) {
       var inner = "<strong>" + esc(notifText(n).t) + "</strong><div>" + esc(notifText(n).b) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small>";
-      // low disk space opens the storage card, where old logs can be cleaned up
-      if (n.key === "disk_low") return '<a class="item link-item' + (unread(n) ? " unread" : "") + '" href="#/settings/data/storage">' + inner + "</a>";
+      // low disk space opens the storage card; a channel that stopped (or started) delivering
+      // opens the channel list. Same stacked layout as the plain items, the whole row clickable.
+      var to = n.key === "disk_low" ? "#/settings/data/storage" : n.key === "channel_down" || n.key === "channel_up" ? "#/settings/notifications" : "";
+      if (to) return '<a class="item link-item note' + (unread(n) ? " unread" : "") + '" href="' + to + '">' + inner + "</a>";
       return '<div class="item' + (unread(n) ? " unread" : "") + '">' + inner + "</div>";
     };
     var sec = function (key, inner, count) {
@@ -1093,6 +1096,25 @@
     if (dot) dot.classList.toggle("hidden", !((list[0] && list[0].created_at > state.notifSeen) || (d.pending || []).length));
     fav.failed = list.filter(function (n) { return n.group === "failed" && n.created_at > state.notifSeen; }).length;
     paintFavicon();
+    state.chFailing = d.channels_failing || 0;
+    paintChannelDot();
+  }
+  // Red dot on Settings (sidebar) and Settings › Notifications while an enabled channel's
+  // last send failed; the count is in the tooltip, the page stays clean.
+  function paintChannelDot() {
+    var n = state.chFailing || 0, tip = n ? T("nt.failing_tip", { n: n }) : "";
+    $$('#nav a[data-nav="settings"], .set-nav a[href="#/settings/notifications"]').forEach(function (a) {
+      var dot = $(".nav-dot", a);
+      if (!n) { if (dot) dot.remove(); a.removeAttribute("data-tip"); return; }
+      if (!dot) { dot = document.createElement("b"); dot.className = "nav-dot"; dot.setAttribute("aria-hidden", "true"); a.appendChild(dot); }
+      a.setAttribute("data-tip", tip);
+      a.setAttribute("aria-description", tip);
+    });
+  }
+  // after a test / save / switch on the notifications page the dot follows the fresh list
+  function noteChannels(chs) {
+    state.chFailing = (chs || []).filter(function (c) { return c.enabled && c.last && !c.last.ok; }).length;
+    paintChannelDot();
   }
   // Once a minute: the bell and badge stay current without navigating. In a background tab
   // this only runs while something was running, so an idle hidden tab makes no requests,
@@ -5155,7 +5177,9 @@
       // title/sub are trusted dictionary strings; "{cmd}" is replaced with a <code> chip after escaping.
       var row = function (key, title, sub, right, cmd) { return '<div class="set-row" id="set-' + key + '"><div class="lbl"><strong>' + esc(title) + "</strong><small>" + esc(sub).replace("{cmd}", cmd ? "<code>" + esc(cmd) + "</code>" : "") + "</small></div>" + right + "</div>"; };
       var nav = '<nav class="set-nav" aria-label="' + esc(T("nav.settings")) + '">' + SET_SECTIONS.map(function (k) {
-        return '<a href="#/settings/' + k + '"' + (k === section ? ' class="active" aria-current="page"' : "") + ">" + ic(SET_ICONS[k], "sm") + "<span>" + esc(T("setnav." + k)) + "</span></a>";
+        // the notifications entry carries the failing-channel dot (painted again by paintChannelDot)
+        var dot = k === "notifications" && state.chFailing ? ' data-tip="' + esc(T("nt.failing_tip", { n: state.chFailing })) + '"' : "";
+        return '<a href="#/settings/' + k + '"' + (k === section ? ' class="active" aria-current="page"' : "") + dot + ">" + ic(SET_ICONS[k], "sm") + "<span>" + esc(T("setnav." + k)) + "</span>" + (dot ? '<b class="nav-dot" aria-hidden="true"></b>' : "") + "</a>";
       }).join("") + "</nav>";
       var head = '<div class="card-head"><span class="ico">' + ic(SET_ICONS[section]) + "</span><h2>" + esc(T("setnav." + section)) + "</h2></div>";
       var body = "", after = function () {};
@@ -5247,6 +5271,7 @@
         body = '<section class="card">' + head + '<div id="nt-box"><p class="muted pad-x">…</p></div></section>';
         after = function () {
           rpc("notify.overview", {}).then(function (o) {
+            noteChannels(o.channels);
             var hours = '<select id="nt-digest" aria-label="' + esc(T("set.digest")) + '"><option value="">' + esc(T("set.off")) + "</option>" + Array.from({ length: 24 }, function (_, h) { return '<option value="' + h + '"' + (String(h) === o.digest_hour ? " selected" : "") + ">" + (h < 10 ? "0" : "") + h + ":00</option>"; }).join("") + "</select>";
             $("#nt-box").innerHTML =
               row("quiet", T("set.quiet"), T("set.quiet_sub"), '<input id="nt-quiet" maxlength="11" placeholder="22:00-08:00" value="' + esc(o.quiet || "") + '">') +
@@ -5254,7 +5279,7 @@
               row("channels", T("set.channels"), T("set.channels_sub"), '<button class="btn sm" id="nt-add">' + ic("plus", "sm") + esc(T("nt.add")) + "</button>") +
               '<div id="nt-chs">' + ntListHtml(o) + "</div>";
             var chBox = $("#nt-chs");
-            var reload = function () { return rpc("notify.overview", {}).then(function (o2) { o.channels = o2.channels; chBox.innerHTML = ntListHtml(o); }).catch(fail); };
+            var reload = function () { return rpc("notify.overview", {}).then(function (o2) { o.channels = o2.channels; chBox.innerHTML = ntListHtml(o); noteChannels(o.channels); }).catch(fail); };
             ntWire(chBox, o, reload);
             $("#nt-add").addEventListener("click", function () { ntModal(o, null, reload); });
             $("#nt-quiet").addEventListener("change", function (e) {

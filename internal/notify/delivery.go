@@ -52,25 +52,71 @@ func cleanErr(err error) string {
 	return s
 }
 
+// DownAfter is how many failed sends in a row make a channel "down": one notice when it
+// gets there, one when it works again (Uptime Kuma notifies on DOWN / UP flips only, not on
+// every failed beat).
+const DownAfter = 3
+
+// Health is a channel going down or coming back, for Service.OnHealth.
+type Health struct {
+	Channel Channel
+	Down    bool
+	Streak  int    // failures in a row (Down only)
+	Err     string // cleaned last error (Down only)
+}
+
 // record stores how a send to a saved channel went. Unsaved channels (a form under test)
-// have no row and are skipped.
-func (s *Service) record(ctx context.Context, chID string, start time.Time, err error) {
-	if chID == "" {
+// have no row and are skipped. real is false for the settings page's test button: a test
+// moves the streak but never raises a down / up notice (the user is looking at the result).
+func (s *Service) record(ctx context.Context, c Channel, start time.Time, err error, real bool) {
+	if c.ID == "" {
 		return
 	}
 	at := start.UTC().Format(time.RFC3339)
 	ms := time.Since(start).Milliseconds()
 	if err == nil {
-		_, _ = s.DB.ExecContext(ctx, `UPDATE notify_channels SET last_at=?, last_ok=1, last_error='', last_ms=?, last_ok_at=?, fail_streak=0 WHERE id=?`, at, ms, at, chID)
+		res, _ := s.DB.ExecContext(ctx, `UPDATE notify_channels SET down_notified=0 WHERE id=? AND down_notified=1`, c.ID)
+		_, _ = s.DB.ExecContext(ctx, `UPDATE notify_channels SET last_at=?, last_ok=1, last_error='', last_ms=?, last_ok_at=?, fail_streak=0 WHERE id=?`, at, ms, at, c.ID)
+		if res != nil && real {
+			if n, _ := res.RowsAffected(); n == 1 {
+				s.health(Health{Channel: c})
+			}
+		}
 		return
 	}
-	_, _ = s.DB.ExecContext(ctx, `UPDATE notify_channels SET last_at=?, last_ok=0, last_error=?, last_ms=?, fail_streak=fail_streak+1 WHERE id=?`, at, cleanErr(err), ms, chID)
+	msg := cleanErr(err)
+	var streak, notified int
+	if s.DB.QueryRowContext(ctx, `UPDATE notify_channels SET last_at=?, last_ok=0, last_error=?, last_ms=?, fail_streak=fail_streak+1 WHERE id=? RETURNING fail_streak, down_notified`,
+		at, msg, ms, c.ID).Scan(&streak, &notified) != nil || !real || streak < DownAfter || notified != 0 {
+		return
+	}
+	// the guard makes two sends failing at once raise one notice
+	res, e := s.DB.ExecContext(ctx, `UPDATE notify_channels SET down_notified=1 WHERE id=? AND down_notified=0`, c.ID)
+	if e != nil {
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		s.health(Health{Channel: c, Down: true, Streak: streak, Err: msg})
+	}
+}
+
+func (s *Service) health(h Health) {
+	if s.OnHealth != nil {
+		s.OnHealth(h)
+	}
+}
+
+// FailingCount is how many enabled channels failed their last send (the settings nav dot).
+func (s *Service) FailingCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM notify_channels WHERE enabled=1 AND last_at IS NOT NULL AND last_ok=0`).Scan(&n)
+	return n, err
 }
 
 // resetDelivery forgets the last result once the address, secret or settings changed:
 // the old error says nothing about the new setup.
 func resetDelivery(ctx context.Context, tx *sql.Tx, chID string) error {
-	_, err := tx.ExecContext(ctx, `UPDATE notify_channels SET last_at=NULL, last_ok=0, last_error='', last_ms=0, last_ok_at=NULL, fail_streak=0 WHERE id=?`, chID)
+	_, err := tx.ExecContext(ctx, `UPDATE notify_channels SET last_at=NULL, last_ok=0, last_error='', last_ms=0, last_ok_at=NULL, fail_streak=0, down_notified=0 WHERE id=?`, chID)
 	return err
 }
 

@@ -26,7 +26,7 @@ var EventGroups = []struct {
 	{"budget", []string{"budget_breached", "budget_warning"}},
 	{"breaker", []string{"breaker_tripped"}},
 	{"finished", []string{"run_finished"}}, // only tasks with success notices on
-	{"system", []string{"update_available", "update_rolled_back", "disk_low", "plugin_notify"}},
+	{"system", []string{"update_available", "update_rolled_back", "disk_low", "plugin_notify", "channel_down", "channel_up"}},
 }
 
 // DefaultGroups is what a new channel gets unless the user changes it.
@@ -319,7 +319,8 @@ func (s *Service) Test(ctx context.Context, chID string, in Input, m Message) er
 	start := time.Now()
 	err := s.deliver(tctx, c, m, u, sec)
 	if chID != "" && sameSetup(old, in) {
-		s.record(ctx, chID, start, err)
+		c.Name = old.Name
+		s.record(ctx, c, start, err, false)
 	}
 	return err
 }
