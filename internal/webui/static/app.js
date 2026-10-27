@@ -546,10 +546,15 @@
     items.forEach(function (n) { (groups[n.group] || groups.other).push(n); });
     var unread = function (n) { return n.created_at > state.notifSeen; };
     var it = function (n) {
-      var inner = "<strong>" + esc(notifText(n).t) + "</strong><div>" + esc(notifText(n).b) + '</div><small class="muted">' + esc(when(n.created_at)) + "</small>";
+      var nt = notifText(n), pr = n.params || {};
+      // A success notice may carry the start of the answer: three lines here, all of it on hover.
+      var ex = pr.excerpt ? '<p class="nc-ex" title="' + esc(pr.excerpt) + '">' + esc(pr.excerpt) + "</p>" : "";
+      var inner = "<strong>" + esc(nt.t) + "</strong><div>" + esc(nt.b) + "</div>" + ex + '<small class="muted">' + esc(when(n.created_at)) + "</small>";
       // low disk space opens the storage card; a channel that stopped (or started) delivering
-      // opens the channel list. Same stacked layout as the plain items, the whole row clickable.
-      var to = n.key === "disk_low" ? "#/settings/data/storage" : n.key === "channel_down" || n.key === "channel_up" ? "#/settings/notifications" : "";
+      // opens the channel list; a run notice opens its run. Same stacked layout as the plain
+      // items, the whole row clickable.
+      var to = n.key === "disk_low" ? "#/settings/data/storage" : n.key === "channel_down" || n.key === "channel_up" ? "#/settings/notifications" :
+        /^run_/.test(n.key || "") && /^[\w-]{1,64}$/.test(pr.run || "") ? "#/runs/" + enc(pr.run) : "";
       if (to) return '<a class="item link-item note' + (unread(n) ? " unread" : "") + '" href="' + to + '">' + inner + "</a>";
       return '<div class="item' + (unread(n) ? " unread" : "") + '">' + inner + "</div>";
     };
@@ -3513,7 +3518,7 @@
   function policySummary(p) {
     var parts = [p.retry_max > 0 ? T("tf.sum_retry", { n: p.retry_max }) : T("tf.sum_noretry"), T(p.catchup === "skip" ? "tf.sum_skip" : p.catchup === "run_all" ? "tf.sum_all" : "tf.sum_once")];
     if (p.priority === "urgent" || p.priority === "background") parts.push(T("tf.sum_pr_" + p.priority));
-    if (p.notify_success) parts.push(T("tf.sum_notify"));
+    if (p.notify_success) parts.push(T(p.notify_answer === false ? "tf.sum_notify" : "tf.sum_notify_ans"));
     return parts.join(" · ");
   }
   function policyFieldsHtml(p, streak, brkAt) {
@@ -3529,15 +3534,18 @@
       // Priority decides what waits on battery (Settings › General › Power); the
       // option says it in plain words, the tooltip has the rule and the setting.
       '<div class="form-row">' + fieldHtml(T("tf.prio"), '<select name="priority">' + TF_PRIOS.map(function (k) { return opt(k, T("tf.pr_" + k), k === (p.priority || "normal")); }).join("") + "</select>", T("tf.prio_tip", { n: 20 })) +
-      '<label class="check tf-pol-ok"><input type="checkbox" name="notify_success"' + (p.notify_success ? " checked" : "") + "> " + esc(T("tf.notify_ok")) + tip(T("tf.notify_ok_tip")) + "</label></div></details>";
+      // The success notice may carry the start of the final answer (on unless turned off):
+      // a second line under it, so the pair reads as one setting.
+      '<div class="tf-pol-checks"><label class="check tf-pol-ok"><input type="checkbox" name="notify_success"' + (p.notify_success ? " checked" : "") + "> " + esc(T("tf.notify_ok")) + tip(T("tf.notify_ok_tip")) + "</label>" +
+      '<label class="check tf-pol-ans"><input type="checkbox" name="notify_answer"' + (p.notify_answer !== false ? " checked" : "") + "> " + esc(T("tf.notify_ans")) + tip(T("tf.notify_ans_tip")) + "</label></div></div></details>";
   }
   function readPolicyFields(f) {
-    return { retry_max: parseInt(f.retry_max.value, 10) || 0, catchup: f.catchup.value, catchup_grace_minutes: parseInt(f.catchup_grace_minutes.value, 10) || 360, notify_success: f.notify_success.checked, priority: f.priority.value };
+    return { retry_max: parseInt(f.retry_max.value, 10) || 0, catchup: f.catchup.value, catchup_grace_minutes: parseInt(f.catchup_grace_minutes.value, 10) || 360, notify_success: f.notify_success.checked, notify_answer: f.notify_answer.checked, priority: f.priority.value };
   }
   function wirePolicyFields(root, f) {
     var sum = $("#tf-pol-sum", root);
     var sync = function () { f.catchup_grace_minutes.disabled = f.catchup.value === "skip"; sum.textContent = policySummary(readPolicyFields(f)); };
-    ["retry_max", "catchup", "notify_success", "priority"].forEach(function (n) { f[n].addEventListener("change", sync); });
+    ["retry_max", "catchup", "notify_success", "notify_answer", "priority"].forEach(function (n) { f[n].addEventListener("change", sync); });
   }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
@@ -3546,7 +3554,7 @@
     Promise.all(reqs).then(function (r) {
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
-      var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
+      var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
       var drafty = !taskId && !pre.prompt;
       var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";

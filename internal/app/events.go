@@ -26,6 +26,10 @@ type Event struct {
 	// ChannelID / ChannelKind: the notification channel of a channel_down / channel_up event.
 	ChannelID   string
 	ChannelKind string
+	// Answer: a succeeded run's final answer (API key already masked), only when the task's
+	// success notice may carry it; AnswerCut: the stored answer itself was capped.
+	Answer    string
+	AnswerCut bool
 }
 
 // Bus is a tiny non-blocking fan-out. A nil *Bus is valid and drops everything.

@@ -3232,3 +3232,59 @@ newlines flattened and cut at 400 characters. Nothing kept the full text.
 2. Compare a task's last two answers (rendered diff), e.g. to see what changed in a digest.
 3. Search runs by answer text (FTS5 index on `result_text`), plus `agentctl runs show --answer`.
 4. Full prompt on the run page: the detail still shows the list's 300-char preview.
+
+## 2026-10-28 (00:00): success notices carry the start of the answer
+
+Category: **notifications / correctness** (recent rounds: run final answer, skill Markdown
+preview, runs export, channel outages, timezone, cron fix). Idea 1 of 10-27 20:00: "成功时也通知"
+only said "运行完成：日报 · 花费 $0.01" — for a daily digest task the answer *is* the point, yet
+the group chat got none of it and the bell couldn't even open the run.
+
+**Done**
+
+- When a run succeeds, the stored (key-masked, capped) final answer rides on the event. The
+  notice for chat robots (Feishu, DingTalk, WeCom, Telegram), the bell and the webhook gets a
+  plain-text excerpt: Markdown marks stripped (headings, emphasis, code fences, quotes, table
+  rules; bullets → "•", task boxes → ☐/☑, web links keep their address), at most 8 lines /
+  360 characters, "…" plus "完整回答见 tidebot 运行详情" when cut. Far below WeCom's 2048-byte
+  text limit even in CJK.
+- Email gets the whole answer. Mail bodies are now quoted-printable with CRLF line ends and an
+  RFC 2047 subject, so long lines (past SMTP's 998 octets) and any script arrive intact.
+- Desktop notification: cost plus the answer's opening (120 characters).
+- Per task, "附带回答开头" under "成功时也通知" (on by default, tooltip says what goes where and
+  to turn it off for sensitive answers); folded summary reads "成功也通知（附回答）".
+  `task_policies.notify_answer` (migration 016). A form, exported task file or
+  `agentctl call policy.set` without the field keeps the task's choice.
+- Bell: run notices (finished / failed / interrupted) open their run page; the excerpt shows in
+  a quiet three-line block, the rest on hover.
+- Daily digest folds each notice to one line of ≤ 200 characters (an excerpt would otherwise
+  fill it).
+- Tests: `TestAnswerExcerpt`, `TestDigestLine`, `TestBuildMailLongAnswer` (QP round trip, line
+  length, encoded subject), `TestSuccessNoticeCarriesAnswer`, `TestPolicySetKeepsNotifyAnswer`,
+  `TestTaskFormNotifyAnswer`, `TestNotifyAnswerUI`.
+- Shots: `/workspace/tidebot-shots/2026-10-28-notify-answer-bell-1024x655.png`,
+  `…-form-1024x655.png` (and `-en`).
+
+**Inspiration**
+
+- healthchecks/healthchecks `hc/api/transports.py` (`get_ping_body(ping, maxlen)` appends
+  "[truncated]") with `hc/integrations/telegram/transport.py` and
+  `hc/integrations/slack/transport.py` (chat messages clip the last ping body at 1000 chars
+  "for consistency") and `hc/integrations/email/transport.py` (email carries the whole body).
+  tidebot applies the same split to a run's answer. Ideas only, no code copied.
+
+**Learned**
+
+- A chat excerpt should be flattened, not just cut: raw `**`, `|---|` and fences read worse in
+  a WeCom text message than a shorter plain line.
+- `smtp.SendMail` dot-stuffs but doesn't wrap lines; any user-sized text in mail needs a
+  transfer encoding.
+- A new boolean that defaults to *on* needs "absent means keep" on every writer (form, import,
+  RPC), or older callers silently switch it off.
+
+**Ideas for later**
+
+1. Markdown message types for DingTalk / WeCom / Feishu cards (headings and links rendered).
+2. A public base URL setting so channel messages can link straight to the run page.
+3. Per-channel choice of excerpt vs. full answer (e.g. full text to one email, excerpt to chat).
+4. "Only notify when the answer changed" for digest-style tasks (compare with the last answer).

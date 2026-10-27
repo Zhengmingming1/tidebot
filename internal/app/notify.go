@@ -40,7 +40,9 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		}
 		m.Params["cost"] = strconv.FormatFloat(e.CostUSD, 'f', 4, 64)
 		m.Title, m.Body = i18n.T("desktop.n.finished", shown), i18n.T("desktop.n.finished_body", e.CostUSD)
+		answerMessage(e, &m, i18n.T)
 	case EventRunFailed:
+		m.Params["run"] = e.RunID
 		m.Title, m.Body = i18n.T("desktop.n.failed", shown), e.Detail
 		if strings.HasPrefix(e.Detail, db.RunInterruptedMsg) {
 			// routed like a failure (same rules), shown as "didn't finish, rerun it"
@@ -78,6 +80,49 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		m.Title, m.Body = e.Kind+": "+shown, e.Detail
 	}
 	return m, true
+}
+
+// answerMessage adds the start of the final answer to a success notice: chat robots and the
+// bell get a plain-text excerpt, email the whole answer (as healthchecks puts the last ping
+// body in its messages: clipped for chats, complete in email). The run id lets the bell open
+// the run page.
+func answerMessage(e Event, m *notify.Message, t func(string, ...any) string) {
+	m.Params["run"] = e.RunID
+	if strings.TrimSpace(e.Answer) == "" {
+		return
+	}
+	ex, cut := notify.AnswerExcerpt(e.Answer)
+	if ex == "" {
+		return
+	}
+	m.Params["excerpt"] = ex
+	head := m.Body
+	m.Body = head + "\n\n" + ex
+	if cut || e.AnswerCut {
+		m.Params["cut"] = "1"
+		m.Body += "\n\n" + t("notify.answer_more")
+	}
+	full := strings.TrimSpace(e.Answer)
+	if e.AnswerCut {
+		full += "\n\n" + t("notify.answer_capped")
+	}
+	m.LongBody = head + "\n\n" + full
+}
+
+// attachAnswer puts the stored (masked, capped) final answer on a success event when the
+// task's success notice may carry it.
+func (a *App) attachAnswer(ctx context.Context, ev *Event) {
+	if ev.RunID == "" || ev.TaskID == "" || a.Policy == nil || a.Store == nil {
+		return
+	}
+	if !a.Policy.Get(ctx, ev.TaskID).NotifyAnswer {
+		return
+	}
+	rctx, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer done()
+	if txt, cut, err := a.Store.RunResult(rctx, ev.RunID); err == nil {
+		ev.Answer, ev.AnswerCut = txt, cut
+	}
 }
 
 // syncLang applies the "language" setting to server-rendered text (channels,

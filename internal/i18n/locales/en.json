@@ -57,5 +57,7 @@
   "cli.update_notify_only": "This install (%v) is updated by its package manager / image; not applying.",
   "cli.update_self_built": "This copy was built from source, so it is never replaced with official binaries automatically. Download the official build by hand: %v",
   "cli.update_self_built_dev": "Development build (compiled from source): no automatic updates. The latest official release is %v.",
-  "cli.update_none": "Up to date (%v)."
+  "cli.update_none": "Up to date (%v).",
+  "notify.answer_more": "Full answer on the run page in tidebot",
+  "notify.answer_capped": "(The answer was over 128 KB; the rest was not saved.)"
 }

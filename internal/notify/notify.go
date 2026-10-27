@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/quotedprintable"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -41,6 +43,8 @@ type Message struct {
 	// SkipChannel is never sent to: a "channel down" notice goes everywhere but the
 	// channel that is failing.
 	SkipChannel string `json:"-"`
+	// LongBody replaces Body in email (the whole answer of a run; chats get Body's excerpt).
+	LongBody string `json:"-"`
 }
 
 // Channel configuration (config_json). Secrets are referenced by name, never stored inline.
@@ -281,7 +285,7 @@ func (s *Service) FlushDigest(ctx context.Context) (int, error) {
 		chs, _, _ := s.targets(ctx, Message{Event: it.event, TaskID: it.ref})
 		for _, c := range chs {
 			chByID[c.ID] = c
-			byCh[c.ID] = append(byCh[c.ID], "• "+strings.ReplaceAll(it.body, "\n", " — "))
+			byCh[c.ID] = append(byCh[c.ID], "• "+digestLine(it.body))
 		}
 	}
 	var errs []string
@@ -299,6 +303,25 @@ func (s *Service) FlushDigest(ctx context.Context) (int, error) {
 	}
 	return len(items), nil
 }
+
+// digestLine folds a stored notice to one line of at most DigestLineRunes characters (a
+// success notice with an answer excerpt would otherwise fill the digest).
+func digestLine(body string) string {
+	var parts []string
+	for _, l := range strings.Split(body, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			parts = append(parts, l)
+		}
+	}
+	r := []rune(strings.Join(parts, " — "))
+	if len(r) > DigestLineRunes {
+		return strings.TrimRight(string(r[:DigestLineRunes]), " —") + "…"
+	}
+	return string(r)
+}
+
+// DigestLineRunes caps one notice in the daily digest.
+const DigestLineRunes = 200
 
 func (s *Service) secret(c Channel) string {
 	if ref := c.Config["secret_ref"]; ref != "" {
@@ -358,6 +381,9 @@ func (s *Service) deliver(ctx context.Context, c Channel, m Message, u, sec stri
 		}
 		return s.postJSON(ctx, base+"/bot"+tok+"/sendMessage", map[string]string{"chat_id": c.Config["chat_id"], "text": text}, "", c.Kind)
 	case "email":
+		if m.LongBody != "" {
+			m.Body = m.LongBody
+		}
 		return sendMail(c.Config, sec, m)
 	}
 	return fmt.Errorf("unsupported channel %q", c.Kind)
@@ -452,13 +478,20 @@ func feishuSign(now time.Time, secret string) (string, string) {
 	return ts, base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
-// BuildMail renders an RFC 5322 message (exported for tests).
+// BuildMail renders an RFC 5322 message (exported for tests). The body is quoted-printable
+// with CRLF line ends, so a long answer (lines past SMTP's 998-octet limit, any script) arrives
+// intact; the subject is RFC 2047-encoded.
 func BuildMail(from, to string, m Message) []byte {
 	clean := func(s string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(s) }
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s\r\n",
-		clean(from), clean(to), clean("[Tidebot] "+m.Title), m.Body)
-	return []byte(b.String())
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n",
+		clean(from), clean(to), mime.QEncoding.Encode("utf-8", clean("[Tidebot] "+m.Title)))
+	body := strings.ReplaceAll(strings.ReplaceAll(m.Body, "\r\n", "\n"), "\r", "\n")
+	qp := quotedprintable.NewWriter(&b)
+	_, _ = qp.Write([]byte(strings.ReplaceAll(body, "\n", "\r\n")))
+	_ = qp.Close()
+	b.WriteString("\r\n")
+	return b.Bytes()
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

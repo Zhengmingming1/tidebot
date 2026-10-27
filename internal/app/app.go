@@ -353,6 +353,8 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		ev.Kind, ev.Detail = EventRunFailed, err.Error()
 	} else if res.Status != "" && res.Status != "succeeded" {
 		ev.Kind, ev.Detail = EventRunFailed, res.Status+": "+res.ErrorMessage
+	} else {
+		a.attachAnswer(ctx, &ev)
 	}
 	a.Events.Emit(ev)
 	return res, err

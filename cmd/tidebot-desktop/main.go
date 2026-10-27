@@ -27,6 +27,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
+	"github.com/Zhengmingming1/tidebot/internal/notify"
 	"github.com/Zhengmingming1/tidebot/internal/osopen"
 	"github.com/Zhengmingming1/tidebot/internal/updater"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -507,7 +508,11 @@ func (s *shell) watchEvents(ch <-chan app.Event) {
 		}
 		switch e.Kind {
 		case app.EventRunFinished:
-			s.notify(e.Kind, i18n.T("desktop.n.finished", name), i18n.T("desktop.n.finished_body", e.CostUSD))
+			body := i18n.T("desktop.n.finished_body", e.CostUSD)
+			if ex, _ := notify.AnswerExcerpt(e.Answer); ex != "" { // the answer's opening line(s)
+				body += "\n" + truncate(strings.Join(strings.Fields(ex), " "), 120)
+			}
+			s.notify(e.Kind, i18n.T("desktop.n.finished", name), body)
 		case app.EventRunFailed:
 			s.notify(e.Kind, i18n.T("desktop.n.failed", name), truncate(e.Detail, 160))
 		case app.EventApprovalNeeded:

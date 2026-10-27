@@ -19,7 +19,9 @@ type Policy struct {
 	AllowedTools        string `json:"allowed_tools"`
 	SideEffects         bool   `json:"side_effects"`
 	NotifySuccess       bool   `json:"notify_success"`
-	ConsecutiveFailures int    `json:"consecutive_failures"`
+	// NotifyAnswer: the success notice carries the first lines of the final answer.
+	NotifyAnswer        bool `json:"notify_answer"`
+	ConsecutiveFailures int  `json:"consecutive_failures"`
 }
 
 // Defaults (suggested values from the plan).
@@ -30,7 +32,7 @@ const (
 
 // Default returns the default policy for a task.
 func Default(taskID string) Policy {
-	return Policy{TaskID: taskID, Catchup: "run_once", CatchupGraceMinutes: 360, RetryMax: 2, Priority: "normal"}
+	return Policy{TaskID: taskID, Catchup: "run_once", CatchupGraceMinutes: 360, RetryMax: 2, Priority: "normal", NotifyAnswer: true}
 }
 
 // Store persists policies.
@@ -39,13 +41,13 @@ type Store struct{ DB *sql.DB }
 // Get returns the stored policy or the default.
 func (s *Store) Get(ctx context.Context, taskID string) Policy {
 	p := Default(taskID)
-	var se, ns int
-	err := s.DB.QueryRowContext(ctx, `SELECT catchup, catchup_grace_minutes, retry_max, priority, allowed_tools, side_effects, notify_success, consecutive_failures
-FROM task_policies WHERE task_id=?`, taskID).Scan(&p.Catchup, &p.CatchupGraceMinutes, &p.RetryMax, &p.Priority, &p.AllowedTools, &se, &ns, &p.ConsecutiveFailures)
+	var se, ns, na int
+	err := s.DB.QueryRowContext(ctx, `SELECT catchup, catchup_grace_minutes, retry_max, priority, allowed_tools, side_effects, notify_success, notify_answer, consecutive_failures
+FROM task_policies WHERE task_id=?`, taskID).Scan(&p.Catchup, &p.CatchupGraceMinutes, &p.RetryMax, &p.Priority, &p.AllowedTools, &se, &ns, &na, &p.ConsecutiveFailures)
 	if err != nil {
 		return Default(taskID)
 	}
-	p.SideEffects, p.NotifySuccess = se == 1, ns == 1
+	p.SideEffects, p.NotifySuccess, p.NotifyAnswer = se == 1, ns == 1, na == 1
 	return p
 }
 
@@ -83,12 +85,12 @@ func (s *Store) Put(ctx context.Context, p Policy) error {
 	if err := Validate(&p); err != nil {
 		return err
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO task_policies(task_id, catchup, catchup_grace_minutes, retry_max, priority, allowed_tools, side_effects, notify_success, updated_at)
-VALUES(?,?,?,?,?,?,?,?,?)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO task_policies(task_id, catchup, catchup_grace_minutes, retry_max, priority, allowed_tools, side_effects, notify_success, notify_answer, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(task_id) DO UPDATE SET catchup=excluded.catchup, catchup_grace_minutes=excluded.catchup_grace_minutes,
  retry_max=excluded.retry_max, priority=excluded.priority, allowed_tools=excluded.allowed_tools,
- side_effects=excluded.side_effects, notify_success=excluded.notify_success, updated_at=excluded.updated_at`,
-		p.TaskID, p.Catchup, p.CatchupGraceMinutes, p.RetryMax, p.Priority, p.AllowedTools, b2i(p.SideEffects), b2i(p.NotifySuccess), now())
+ side_effects=excluded.side_effects, notify_success=excluded.notify_success, notify_answer=excluded.notify_answer, updated_at=excluded.updated_at`,
+		p.TaskID, p.Catchup, p.CatchupGraceMinutes, p.RetryMax, p.Priority, p.AllowedTools, b2i(p.SideEffects), b2i(p.NotifySuccess), b2i(p.NotifyAnswer), now())
 	return err
 }
 
