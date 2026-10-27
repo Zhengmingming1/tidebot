@@ -2885,7 +2885,7 @@
     bg.innerHTML = '<aside class="drawer" role="dialog" aria-modal="true" tabindex="-1"></aside>';
     document.body.appendChild(bg);
     var d = $(".drawer", bg);
-    var onKey = function (e) { if (e.key === "Escape" && !$("#modal-root").innerHTML) { e.preventDefault(); closeDrawer(); } };
+    var onKey = function (e) { if (e.key === "Escape" && !$("#modal-root").innerHTML && !$(".mdl-pop", bg)) { e.preventDefault(); closeDrawer(); } };
     bg._off = function () { document.removeEventListener("keydown", onKey, true); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
     document.addEventListener("keydown", onKey, true);
     bg.addEventListener("mousedown", function (e) { if (e.target === bg) closeDrawer(); });
@@ -3130,7 +3130,7 @@
       '<div class="field"><span>' + esc(T("pv.auth")) + '</span><div class="seg" role="radiogroup" aria-label="' + esc(T("pv.auth")) + '">' + seg("ANTHROPIC_AUTH_TOKEN", "Bearer", "ANTHROPIC_AUTH_TOKEN") + seg("ANTHROPIC_API_KEY", "x-api-key", "ANTHROPIC_API_KEY") + "</div></div>" +
       '<label class="field"><span>' + esc(T("pv.api_key")) + tip(T("pv.key_hint")) + '</span><div class="in-group"><input name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="' + esc(!creating && v.key_set && v.key_source === "store" ? T("pv.key_keep", { l: v.key_last4 || "" }) : !creating && v.key_source === "env" ? T("pv.key_env") : T("pv.key_new")) + '"><button type="button" class="btn ghost" id="pd-eye" aria-pressed="false" aria-label="' + esc(T("pv.show_key")) + '">' + esc(T("pv.show")) + "</button></div></label>" +
       (!creating && v.key_source === "store" ? '<label class="check"><input type="checkbox" name="clear_key"> ' + esc(T("pv.clear_key")) + "</label>" : "") +
-      '<h4 class="sec">' + esc(T("pv.models")) + "</h4>" +
+      '<h4 class="sec">' + esc(T("pv.models")) + '<button type="button" class="btn ghost sm pv-fetch" id="pd-fetch"' + (creating ? ' disabled data-tip="' + esc(T("pv.check_after_save")) + '"' : "") + ">" + ic("download", "sm") + "<span>" + esc(T("pv.fetch_models")) + "</span></button></h4>" +
       '<div class="model-list">' + models.map(function (m) { return '<div class="model-row"><label for="pm-' + m[0] + '">' + esc(m[1]) + '</label><div class="in-group"><input id="pm-' + m[0] + '" name="' + m[0] + '" value="' + esc(v[m[0]] || "") + '" maxlength="128" spellcheck="false"><button type="button" class="btn ghost" data-check="' + m[0] + '"' + (creating ? " disabled" : "") + ">" + esc(T("pv.check")) + '</button></div><span class="mres" data-res="' + m[0] + '"></span></div>'; }).join("") + "</div>" + (creating ? '<small class="hint">' + esc(T("pv.check_after_save")) + "</small>" : "") +
       (!creating ? '<h4 class="sec" id="pd-price-h">' + esc(T("pr.sec")) + '</h4><div id="pd-price" class="pr-box"><p class="muted">…</p></div>' : "") +
       '<details class="sec-adv"><summary class="sec">' + esc(T("pv.sec_adv")) + "</summary>" +
@@ -3163,6 +3163,7 @@
     $("#pd-eye", host).addEventListener("click", function (e) { var k = f.api_key, on = k.type === "password"; k.type = on ? "text" : "password"; e.currentTarget.setAttribute("aria-pressed", on); e.currentTarget.textContent = T(on ? "pv.hide" : "pv.show"); });
     var rs = $("#pd-reset", host); if (rs) rs.addEventListener("click", function () { f.base_url.value = base.base_url || ""; f.base_url.focus(); });
     if (creating && !p) wireProviderAutofill(host, f, v, presetById);
+    if (!creating) wireModelPicker(host, f, v, models);
     $$("[data-check]", host).forEach(function (b) { b.addEventListener("click", function () { var k = b.getAttribute("data-check"); if (!f[k].value.trim()) { toast(T("pv.model_empty"), true); return; } runTest(v.name, f[k].value.trim(), $('[data-res="' + k + '"]', host)); }); });
     var tb = $("#pd-test-btn", host); if (tb) tb.addEventListener("click", function () { runTest(v.name, "", out); });
     $$("[data-mode]", f).forEach(function (b) { b.addEventListener("click", function () { mode = b.getAttribute("data-mode"); }); });
@@ -3184,6 +3185,108 @@
         toast(T("pv.saved"));
         return done(saved.name).then(function () { if (testAfter) { var el = $("#pd-test"); if (el) runTest(saved.name, "", el); } });
       }).catch(fail);
+    });
+  }
+
+  // Model fields pick from the provider's own list (POST /api/providers/{name}/models asks its
+  // GET …/v1/models with the saved key; the server keeps it 10 minutes). Fetched by the button,
+  // or by itself the first time a model field gets focus when a key is saved. Typing filters,
+  // ↑/↓ + Enter picks, Esc closes; any other name can still be typed. A filled-in model that is
+  // not on the list gets a quiet note. Idea from cc-switch ModelInputWithFetch / ModelDropdown.
+  function wireModelPicker(host, f, v, models) {
+    var btn = $("#pd-fetch", host), list = null, busy = null, pop = null, popFor = null, sel = -1, items = [], picking = false;
+    var label = function (t, icon) { btn.innerHTML = ic(icon || "download", "sm") + "<span>" + esc(t) + "</span>"; };
+    var noteUnlisted = function () {
+      if (!list) return;
+      var ids = {}; list.models.forEach(function (m) { ids[m.id] = true; });
+      models.forEach(function (m) {
+        var el = $('[data-res="' + m[0] + '"]', host), val = f[m[0]].value.trim();
+        if (!el || (el.innerHTML && !el.querySelector(".mdl-unlisted"))) return; // a check result stays
+        el.innerHTML = val && list.models.length && !ids[val] ? '<small class="mdl-unlisted">' + ic("info", "sm") + esc(T("pv.models_unlisted", { n: list.models.length })) + "</small>" : "";
+      });
+    };
+    var load = function (refresh, quiet) {
+      if (busy) return busy;
+      if (!v.key_set) { if (!quiet) toast(T("pv.models_nokey"), true); return Promise.resolve(null); }
+      btn.disabled = true; btn.classList.add("busy"); label(T("pv.fetching"), "refresh");
+      busy = api("/api/providers/" + enc(v.name) + "/models", { method: "POST", body: { refresh: !!refresh } }).then(function (r) {
+        if (!r.ok) {
+          list = null;
+          var why = r.unsupported ? T("pv.models_unsupported") : T("pv.models_failed", { e: (r.status ? r.status + " " : "") + (r.error || "") });
+          label(T("pv.fetch_models")); btn.setAttribute("data-tip", why);
+          if (!quiet || !r.unsupported) toast(why, true);
+          return null;
+        }
+        list = r;
+        label(T("pv.models_n", { n: r.models.length }), "refresh");
+        btn.setAttribute("data-tip", T("pv.models_tip", { h: r.host + r.path, t: when(r.fetched_at) }));
+        if (!r.models.length && !quiet) toast(T("pv.models_empty"), true);
+        noteUnlisted();
+        if (popFor && document.activeElement === popFor) show(popFor);
+        return r;
+      }).catch(function (e) { label(T("pv.fetch_models")); if (!quiet) fail(e); return null; }).then(function (r) { btn.disabled = false; btn.classList.remove("busy"); busy = null; return r; });
+      return busy;
+    };
+    var hide = function () { if (pop) pop.remove(); pop = null; sel = -1; if (popFor) popFor.setAttribute("aria-expanded", "false"); };
+    var mark = function (id, q) {
+      var i = q ? id.toLowerCase().indexOf(q) : -1;
+      return i < 0 ? esc(id) : esc(id.slice(0, i)) + "<b>" + esc(id.slice(i, i + q.length)) + "</b>" + esc(id.slice(i + q.length));
+    };
+    var show = function (input) {
+      if (!list || !list.models.length) return;
+      var q = input.value.trim().toLowerCase(), cur = input.value.trim();
+      // The field's own value shouldn't hide the rest: filter only once it's been edited.
+      var filt = input._typed && q ? q : "";
+      items = list.models.filter(function (m) { return !filt || (m.id + " " + (m.name || "")).toLowerCase().indexOf(filt) >= 0; });
+      if (!pop) {
+        pop = document.createElement("ul");
+        pop.className = "mdl-pop"; pop.id = "mdl-pop"; pop.setAttribute("role", "listbox"); pop.setAttribute("aria-label", T("pv.models"));
+        input.parentNode.appendChild(pop);
+        pop.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep focus in the field
+        pop.addEventListener("click", function (e) { var li = e.target.closest("li[data-i]"); if (li) pick(+li.getAttribute("data-i")); });
+        pop.addEventListener("mousemove", function (e) { var li = e.target.closest("li[data-i]"); if (li && +li.getAttribute("data-i") !== sel) move(+li.getAttribute("data-i")); });
+      }
+      popFor = input; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-controls", "mdl-pop");
+      sel = Math.max(0, items.map(function (m) { return m.id; }).indexOf(cur));
+      pop.innerHTML = items.length ? items.map(function (m, i) {
+        return '<li role="option" id="mdl-o' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '" class="' + (i === sel ? "sel" : "") + (m.id === cur ? " cur" : "") + '"' + (m.owner ? ' title="' + esc(m.owner) + '"' : "") + '><span class="ck">' + (m.id === cur ? ic("check", "sm") : "") + '</span><code class="id">' + mark(m.id, filt) + "</code>" + (m.name ? '<small class="nm">' + esc(m.name) + "</small>" : "") + "</li>";
+      }).join("") : '<li class="none">' + esc(T("pv.models_none")) + "</li>";
+      // Open upwards when the drawer has no room below (the Haiku row near the footer).
+      var body = input.closest(".drawer-body"), r = input.getBoundingClientRect(), b = body ? body.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      pop.classList.toggle("up", b.bottom - r.bottom < 216 && r.top - b.top > b.bottom - r.bottom);
+      move(sel);
+    };
+    var move = function (i) {
+      if (!pop || !items.length) return;
+      var was = $("#mdl-o" + sel, pop); if (was) { was.classList.remove("sel"); was.setAttribute("aria-selected", "false"); }
+      sel = (i + items.length) % items.length;
+      var li = $("#mdl-o" + sel, pop); if (li) { li.classList.add("sel"); li.setAttribute("aria-selected", "true"); if (li.scrollIntoView) li.scrollIntoView({ block: "nearest" }); }
+      if (popFor) popFor.setAttribute("aria-activedescendant", "mdl-o" + sel);
+    };
+    var pick = function (i) {
+      var m = items[i], input = popFor;
+      if (!m || !input) return;
+      input.value = m.id; input._typed = false;
+      hide(); picking = true;
+      input.dispatchEvent(new Event("input", { bubbles: true })); // the unsaved-edit guard sees it
+      picking = false; noteUnlisted();
+    };
+    btn.addEventListener("click", function () { load(true, false).then(function (r) { if (r && r.models.length) { var first = f[models[0][0]]; first.focus(); show(first); } }); });
+    models.forEach(function (m) {
+      var input = f[m[0]];
+      input.setAttribute("role", "combobox"); input.setAttribute("aria-autocomplete", "list"); input.setAttribute("aria-expanded", "false"); input.setAttribute("autocomplete", "off");
+      input.addEventListener("focus", function () { popFor = input; if (list) show(input); else if (v.key_set && !btn.hasAttribute("data-tip")) load(false, true); });
+      input.addEventListener("click", function () { if (list && !pop) show(input); });
+      input.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== input && popFor === input) hide(); noteUnlisted(); }, 0); });
+      input.addEventListener("input", function (e) { if (e.isTrusted) input._typed = true; if (list && !picking && document.activeElement === input) show(input); });
+      input.addEventListener("keydown", function (e) {
+        if (!list || !list.models.length) return;
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (!pop) show(input); else move(sel + (e.key === "ArrowDown" ? 1 : -1)); }
+        else if (e.key === "PageDown" || e.key === "PageUp") { if (pop) { e.preventDefault(); move(Math.max(0, Math.min(items.length - 1, sel + (e.key === "PageDown" ? 8 : -8)))); } }
+        else if (e.key === "Enter" && pop && items.length) { e.preventDefault(); pick(sel); }
+        else if (e.key === "Escape" && pop) { e.preventDefault(); e.stopPropagation(); hide(); }
+        else if (e.key === "Tab") hide();
+      });
     });
   }
 

@@ -1912,5 +1912,15 @@
   "rx.jsonl": "JSONL",
   "rx.jsonl_sub": "每行一个 JSON，便于脚本处理",
   "rx.note": "按当前筛选、搜索和排序导出全部匹配的运行，不只是已加载的。CSV 时间为 {tz}，JSONL 为 UTC；金额按当前显示币种。",
-  "rx.cap": "最多导出 100,000 条。"
+  "rx.cap": "最多导出 100,000 条。",
+  "pv.fetch_models": "获取模型列表",
+  "pv.fetching": "正在获取…",
+  "pv.models_n": "{n} 个模型",
+  "pv.models_tip": "来自 {h}，{t} 获取。点击重新获取",
+  "pv.models_none": "没有匹配的模型，可直接使用输入的名称",
+  "pv.models_unsupported": "这个接入没有提供模型列表，请按服务商文档填写模型名",
+  "pv.models_failed": "获取模型列表失败：{e}",
+  "pv.models_nokey": "先填写 API Key 并保存，再获取模型列表",
+  "pv.models_unlisted": "不在该接入的 {n} 个模型中，可点「检测」确认",
+  "pv.models_empty": "接入返回的模型列表是空的"
 }

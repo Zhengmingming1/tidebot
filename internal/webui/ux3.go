@@ -324,6 +324,7 @@ type ProviderAdmin interface {
 	DeleteProvider(ctx context.Context, name string) error
 	SetDefaultProvider(ctx context.Context, name string) error
 	TestProvider(ctx context.Context, name, model string) (map[string]any, error)
+	ListModels(ctx context.Context, name string, refresh bool) (map[string]any, error)
 	SetProviderOrder(ctx context.Context, names []string) error
 }
 
@@ -427,6 +428,14 @@ func (s *Server) handleProviderSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out, err = pa.TestProvider(r.Context(), name, strings.TrimSpace(b.Model))
+	case len(parts) == 2 && parts[1] == "models" && r.Method == http.MethodPost:
+		// POST (not GET): it calls out to the provider with the saved key, so it goes
+		// through the CSRF check like every other side-effecting request.
+		var b struct {
+			Refresh bool `json:"refresh"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&b)
+		out, err = pa.ListModels(r.Context(), name, b.Refresh)
 	case len(parts) == 1 && name == "order" && r.Method == http.MethodPost:
 		var b struct {
 			Names []string `json:"names"`

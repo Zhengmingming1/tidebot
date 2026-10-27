@@ -240,6 +240,7 @@ func (pa providerAdmin) SaveProvider(ctx context.Context, in webui.ProviderInput
 	if err != nil {
 		return webui.ProviderView{}, err
 	}
+	forgetModelList(in.Name, in.OriginalName)
 	if renaming {
 		_ = pa.removeName(ctx, in.OriginalName, false)
 		_ = a.Secrets.Delete("provider:" + in.OriginalName)
@@ -288,6 +289,7 @@ func (pa providerAdmin) DeleteProvider(ctx context.Context, name string) error {
 		return err
 	}
 	_ = pa.a.Secrets.Delete("provider:" + name)
+	forgetModelList(name)
 	return nil
 }
 

@@ -1912,5 +1912,15 @@
   "rx.jsonl": "JSONL",
   "rx.jsonl_sub": "One JSON object per line, for scripts",
   "rx.note": "Exports every run matching the current filters, search and sort — not just the loaded ones. CSV times are in {tz}, JSONL in UTC; amounts in the display currency.",
-  "rx.cap": "Up to 100,000 runs."
+  "rx.cap": "Up to 100,000 runs.",
+  "pv.fetch_models": "Fetch models",
+  "pv.fetching": "Fetching…",
+  "pv.models_n": "{n} models",
+  "pv.models_tip": "From {h}, fetched {t}. Click to fetch again",
+  "pv.models_none": "No match — the name you typed is used as is",
+  "pv.models_unsupported": "This provider doesn't publish a model list; type the names from its docs",
+  "pv.models_failed": "Couldn't fetch models: {e}",
+  "pv.models_nokey": "Save an API key first, then fetch the models",
+  "pv.models_unlisted": "Not among this provider's {n} models — Check to be sure",
+  "pv.models_empty": "The provider returned an empty model list"
 }

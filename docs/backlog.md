@@ -3288,3 +3288,61 @@ the group chat got none of it and the bell couldn't even open the run.
 2. A public base URL setting so channel messages can link straight to the run page.
 3. Per-channel choice of excerpt vs. full answer (e.g. full text to one email, excerpt to chat).
 4. "Only notify when the answer changed" for digest-style tasks (compare with the last answer).
+
+## 2026-10-28 (04:00): provider models picked from the provider's own list
+
+Category: **settings / model providers — UI interaction** (recent rounds were all run answers and
+notifications). The five model fields in a provider drawer were free text: you copied ids such as
+`deepseek-v4-flash` or `qwen3-coder-plus` from a docs page, and a typo only showed up when a
+run failed.
+
+**Done**
+
+- `POST /api/providers/{name}/models` asks the provider's `GET …/v1/models` with the saved key
+  (Bearer or x-api-key as configured, `anthropic-version` set). Gateways that serve Anthropic
+  under a sub-path (`/anthropic`, `/api/anthropic`, `/apps/anthropic`, `/coding`, `/claude`)
+  fall back to the root `/v1/models`, `/models` (and DashScope's `/compatible-mode/v1/models`)
+  with Bearer — only on 404/405; a refused key or rate limit is the answer. Anthropic paging
+  (`has_more` / `after_id`, ≤ 10 pages) is followed. Reads `data[]` (id, display_name,
+  owned_by, created / created_at) and `models[]` (slug / id / name); odd ids and duplicates
+  dropped, ≤ 500, newest first when dated, else by id. POST so it passes the CSRF check; the
+  key is masked out of every error.
+- Kept in memory 10 minutes per provider, keyed by base URL + auth + key hash; saving, renaming
+  or removing the provider drops it; the button fetches again.
+- Drawer: "获取模型列表" at the right of the Models heading (disabled until saved, like Check).
+  The first focus on a model field fetches by itself when a key is saved. Each field becomes a
+  combobox: the list opens under it (upwards near the footer), typing filters with the match
+  in bold, ↑/↓/PageUp/PageDown + Enter picks, Esc closes the list before the drawer, any other
+  name can still be typed. Display names show muted, owner on hover. After a fetch the button
+  reads "10 个模型" and its tooltip says where from and when.
+- A filled-in model not on the fetched list gets a quiet amber note ("不在该接入的 10 个模型中，
+  可点「检测」确认"); a Check result in the same slot wins.
+- No list (all candidates 404) says so once on the button tooltip without a toast on auto-fetch.
+- Tests: `TestModelListURLs`, `TestParseModelList`, `TestListModelsFallbackCacheAndSecrets`,
+  `TestListModelsPagesAndUnsupported`, `TestProviderModelsRoute` (CSRF), `TestProviderModelPickerUI`.
+- Shots: `/workspace/tidebot-shots/2026-10-28-provider-models-1024x655.png`,
+  `…-provider-models-haiku-1024x655.png` (and `-en`).
+
+**Inspiration**
+
+- farion1231/cc-switch `src-tauri/src/services/model_fetch.rs` (candidate URLs: strip known
+  Anthropic-compat suffixes, try `/v1/models` then `/models`, move on only on 404/405, redact
+  the key in error bodies; parse `data[]` or `models[].slug`) and
+  `src/components/providers/forms/shared/ModelInputWithFetch.tsx` / `ModelDropdown.tsx` (a
+  fetch button beside the model input that turns into a searchable dropdown; the input stays
+  free text). Ideas only, no code copied.
+
+**Learned**
+
+- One shared popover for several inputs needs every blur/input handler to check it still owns
+  the popover, or the field you leave closes the list the next field just opened.
+- The drawer's Esc listener runs in the capture phase, so an inner list can't stop it with
+  `stopPropagation`; the drawer has to look for an open list itself.
+
+**Ideas for later**
+
+1. Offer the list in the "add provider" drawer before saving (send the typed key once, not stored).
+2. Use the fetched list in the task form / quick run to pick a per-task model override.
+3. Pricing editor: add rows straight from the fetched models that have no price yet.
+4. Show the list's model count on the provider card tooltip, and flag cards whose saved models
+   went missing from the provider's list.

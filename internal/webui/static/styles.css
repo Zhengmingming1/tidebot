@@ -1990,3 +1990,21 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .notif-center .nc-ex { margin: 4px 0 2px; padding: 4px 8px; border-left: 2px solid var(--border); background: #fbfaf6; border-radius: 0 4px 4px 0;
   font-size: 12px; line-height: 16px; color: var(--text-2); white-space: pre-line; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+
+/* ---------- provider drawer: model fields pick from the provider's list ---------- */
+.drawer-body .sec .pv-fetch { margin-left: auto; height: var(--ctl-h-sm); padding: 0 8px; gap: 4px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; color: var(--text-2); }
+.drawer-body .sec .pv-fetch:hover:not(:disabled) { color: var(--accent); }
+.drawer-body .sec .pv-fetch.busy .i { animation: spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .drawer-body .sec .pv-fetch.busy .i { animation: none; } }
+.model-row .in-group { position: relative; }
+.mdl-pop { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 4px 0; max-height: 208px; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-pop); }
+.mdl-pop.up { top: auto; bottom: calc(100% + 4px); }
+.mdl-pop li { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 8px; cursor: pointer; font-size: 13px; color: var(--text); }
+.mdl-pop li.sel { background: var(--accent-50); }
+.mdl-pop li .ck { width: 16px; flex: none; display: inline-grid; place-items: center; color: var(--accent); }
+.mdl-pop li .id { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--mono); font-size: 12px; background: none; padding: 0; color: inherit; }
+.mdl-pop li .id b { font-weight: 700; color: var(--accent); }
+.mdl-pop li .nm { flex: 0 1 auto; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-3); font-size: 12px; }
+.mdl-pop li.cur .id { font-weight: 600; }
+.mdl-pop li.none { cursor: default; color: var(--text-3); font-size: 12px; justify-content: center; height: 40px; }
+.mdl-unlisted { display: inline-flex; align-items: center; gap: 4px; color: var(--warn); font-size: 12px; }
