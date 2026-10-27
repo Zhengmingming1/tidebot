@@ -62,6 +62,45 @@ func TestRunOnceWithMock(t *testing.T) {
 	if err != nil || len(runs) != 1 || runs[0].Status != "succeeded" {
 		t.Fatalf("runs=%+v err=%v", runs, err)
 	}
+	// The final answer is kept in full for the run page.
+	if txt, cut, err := store.RunResult(ctx, res.RunID); err != nil || txt != "ok: hello tidebot" || cut {
+		t.Fatalf("result=%q cut=%v err=%v", txt, cut, err)
+	}
+}
+
+// TestRunResultMaskedAndErrorsNotStored: the stored answer never carries the API key, and an
+// error result (already the run's error message) is not stored a second time.
+func TestRunResultMaskedAndErrorsNotStored(t *testing.T) {
+	skipOnWindows(t)
+	sqlDB, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	store := db.NewStore(sqlDB)
+	r := New(store, nil, 2)
+	ctx := context.Background()
+	opts := func(prompt string) Options {
+		return Options{ClaudeBin: mockBin(t), Prompt: prompt, WorkspaceDir: t.TempDir(), Timeout: 10 * time.Second, Bare: true,
+			Profile: provider.Profile{Name: "mock", BaseURL: "http://127.0.0.1:9", AuthEnv: "ANTHROPIC_AUTH_TOKEN", Model: "mock-model"},
+			APIKey:  "sk-mock-secret-123", TriggerKind: "manual"}
+	}
+	res, err := r.RunOnce(ctx, opts("echo sk-mock-secret-123"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt, _, _ := store.RunResult(ctx, res.RunID); txt != "ok: echo ***" {
+		t.Fatalf("masked result=%q", txt)
+	}
+	o := opts("x")
+	o.ExtraArgs = []string{"--fail"}
+	res, _ = r.RunOnce(ctx, o)
+	if res.Status != "failed" {
+		t.Fatalf("status=%s", res.Status)
+	}
+	if txt, _, _ := store.RunResult(ctx, res.RunID); txt != "" {
+		t.Fatalf("error result stored: %q", txt)
+	}
 }
 
 func TestConcurrencyLimit(t *testing.T) {

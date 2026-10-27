@@ -414,6 +414,13 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	if dbErr := r.store.UpdateRunFinish(context.Background(), finish); dbErr != nil {
 		log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
 	}
+	// The final answer, in full (the log line keeps 400 chars). An error result is already the
+	// run's error message, so it is not stored twice.
+	if txt := strings.TrimSpace(res.ResultText); txt != "" && res.ResultText != res.ErrorMessage {
+		if dbErr := r.store.SetRunResult(context.Background(), runID, provider.MaskSecret(txt, opts.APIKey)); dbErr != nil {
+			log.Error("persist run result failed", "error", dbErr, "run_id", runID)
+		}
+	}
 	if opts.Cost != nil {
 		if dbErr := r.store.UpdateRunCost(context.Background(), runID, res.Cost); dbErr != nil {
 			log.Error("persist run cost failed", "error", dbErr, "run_id", runID)

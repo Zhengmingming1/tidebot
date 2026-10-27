@@ -70,7 +70,7 @@ html { overflow-y: scroll; }
 /* Scrolling to the end of a dialog, drawer or popup list doesn't carry on into the page behind. */
 .modal, .drawer-body, .popover, .search-results, #pal-list, .notif-center, .icon-grid, .presets,
 .ap-rail, .ap-grid, .ai-body, .ai-flist, .ai-log, .ai-code, .tree, .fb-tree, .fb-code, .fb-md, .tx-list,
-.desc-box, .changelog, .cc-searched ul { overscroll-behavior: contain; }
+.rd-ans-body, .desc-box, .changelog, .cc-searched ul { overscroll-behavior: contain; }
 body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-600); }
@@ -1971,3 +1971,13 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .rx-head { color: var(--accent); }
 .rx-item small { white-space: normal; text-align: right; }
 .rx-btn[aria-expanded="true"]::after { display: none; }
+/* Run detail › 最终回答: the agent's last answer as Markdown (or its text); the body scrolls on its
+   own so the log stays near the fold at 1024×655. Same sand look as the skill file preview. */
+.rd-ans .card-head { margin-bottom: var(--s1); }
+.rd-ans .rd-acts { gap: 4px; }
+.rd-ans .rd-ans-mode { margin-right: 4px; }
+.rd-ans-body { max-height: min(320px, 40vh); overflow: auto; margin: 0; padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fdfcf9; color: var(--text); font-size: var(--fs-md); line-height: 1.6; overflow-wrap: anywhere; outline: none; position: relative; }
+.rd-ans-body:focus-visible { box-shadow: 0 0 0 2px var(--accent-100); }
+.rd-ans-body.md > :first-child { margin-top: 0; }
+.rd-ans-body.md > :last-child { margin-bottom: 0; }
+.rd-ans-src { font: 13px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; tab-size: 4; }

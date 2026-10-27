@@ -3183,3 +3183,52 @@ nothing.
 2. Rendered diff for Markdown in the compare tab (changed blocks highlighted, not lines).
 3. Outline (h1–h3) in a small popover for long references, Open WebUI-style.
 4. Search inside the open file (⌘/Ctrl+F in the pane, n / N), shared with the log view.
+
+## 2026-10-27 (20:00): run page shows the agent's final answer, formatted
+
+Category: **logic / data + reading** (recent rounds: skill Markdown preview, runs export,
+channel outages, timezone, cron fix, task snooze). Idea 1 of 10-27 16:00: the final answer of
+a run — what a scheduled task is actually for — was only in the log as one `result:` line,
+newlines flattened and cut at 400 characters. Nothing kept the full text.
+
+**Done**
+
+- Runner: the stream's final `result` text is stored with the run (`runs.result_text`,
+  migration 015), CRLF folded to LF, capped at 128 KB on a UTF-8 boundary
+  (`result_truncated` set). The API key is masked the same way as in the log; an error result
+  is not stored twice (it already is the run's error message).
+- API: `GET /api/runs/{id}` returns `result` / `result_truncated`; the runs list and export
+  don't carry it, so lists stay small.
+- Run page: a "最终回答" card under the stat cards with "预览 / 源码" (own remembered choice
+  `tb_ans_view`, arrow keys too), copy the raw text, and download as `<run id>.md` (system
+  save dialog in the desktop app). Line count and size in the title's tooltip; a "已截断" pill
+  with a tooltip when cut. The body scrolls inside the card (max 320 px / 40 vh, overscroll
+  contained) so the log stays reachable at 1024×655. Runs from before this have no card.
+- Renderer: `mdHtml(text, null)` is the answer mode — no front-matter table (a leading `---`
+  is just a rule) and relative links stay text (there are no files to open); web links open in
+  a new tab and `#heading` links scroll inside the card. Same escaping as the skill preview.
+- Tests: `TestCapRunResult`, `TestRunResultStore` (cap, UTF-8, quotes stay data),
+  `TestRunOnceWithMock` (answer stored end to end), `TestRunResultMaskedAndErrorsNotStored`,
+  `TestRunAnswerAPI` (detail yes, list no), `TestRunAnswerUI`, `TestRunAnswerRender` (node).
+- Shots: `/workspace/tidebot-shots/run-answer-1024x655.png`, `…-en-1024x655.png`.
+
+**Inspiration**
+
+- cline/cline `apps/vscode/webview-ui/src/components/chat/CompletionOutputRow.tsx`: the turn's
+  last response sits in its own quiet container with a small label and a copy button, rendered
+  through `MarkdownRow`, separate from the tool chatter above it. tidebot does the same on the
+  run page, with the existing escaped renderer. Ideas only, no code copied.
+
+**Learned**
+
+- The log is a view, not a store: anything a later screen needs (the answer) has to be saved
+  as data when the event arrives — the formatter already threw the newlines away.
+- One renderer, two contexts: a `null` base was enough to switch off what only makes sense
+  inside a skill (front matter, file links) without forking the code.
+
+**Ideas for later**
+
+1. "成功时通知" sends the first lines of the answer (feishu / DingTalk / WeCom take Markdown).
+2. Compare a task's last two answers (rendered diff), e.g. to see what changed in a digest.
+3. Search runs by answer text (FTS5 index on `result_text`), plus `agentctl runs show --answer`.
+4. Full prompt on the run page: the detail still shows the list's 300-char preview.

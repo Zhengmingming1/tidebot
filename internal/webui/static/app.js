@@ -2428,6 +2428,7 @@
     if (/^(https?:|mailto:)/i.test(u)) return { href: u };
     if (/^[a-z][a-z0-9+.-]*:/i.test(u) || /^\/\//.test(u) || /^[\\/]/.test(u)) return null;
     if (u.charAt(0) === "#") return { anchor: mdSlug(decodeURIComponentSafe(u.slice(1))) };
+    if (base === null) return null; // a run's answer: no files to open, relative links stay text
     var path = decodeURIComponentSafe(u.split("#")[0].split("?")[0]), out = (base ? base.split("/") : []);
     path.replace(/\\/g, "/").split("/").forEach(function (p) { if (p === "..") out.pop(); else if (p && p !== ".") out.push(p); });
     return out.length ? { file: out.join("/") } : null;
@@ -2458,7 +2459,7 @@
   }
   function mdHtml(src, base) {
     var lines = String(src).replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n"), out = [], i = 0, fm = "";
-    if (lines[0] === "---") {
+    if (lines[0] === "---" && base !== null) {
       for (var e = 1; e < Math.min(lines.length, 200); e++) if (lines[e] === "---" || lines[e] === "...") break;
       if (e < lines.length && e < 200) {
         var rows = [];
@@ -4623,6 +4624,7 @@
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(queued ? T("rd.waiting") : live ? T("rd.running") : r.started_at ? dur(r.duration_ms) : "—") + "</strong><span>" + esc(r.started_at || !r.finished_at ? T(queued ? "rd.queued_at" : "rd.started", { t: when(r.started_at || r.created_at) }) : T("rd.never_started")) + "</span></div>" +
         '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
         '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +
+        runAnswerHtml(r, ansMode()) +
         costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + "</span>" +
         // Stop sits next to the live state, above the fold at 1024×655 (the details card is below the log there).
@@ -4644,6 +4646,7 @@
         var b = e.currentTarget; b.disabled = true;
         stopRun(id, r.status).then(function (y) { if (y) refresh(); else b.disabled = false; }).catch(function (err) { b.disabled = false; fail(err); });
       });
+      if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider }); });
       if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider }); });
       logView($("#lv"), id, live, function (why) {
@@ -4656,6 +4659,48 @@
     });
   }
   var RUN_STATS_MS = 5000;
+  // Final answer card (idea: cline/cline apps/vscode/webview-ui/src/components/chat/CompletionOutputRow.tsx —
+  // the turn's last response in its own quiet container, rendered Markdown plus a copy button).
+  // Preview / source like skill files, but its own remembered choice; relative links and front
+  // matter are not interpreted (mdHtml with base null). The body scrolls inside the card.
+  function ansMode() { try { return localStorage.getItem("tb_ans_view") === "source" ? "source" : "preview"; } catch (e) { return "preview"; } }
+  function runAnswerHtml(r, mode) {
+    if (!r.result) return "";
+    var pv = mode !== "source", lines = r.result.split("\n").length;
+    var meta = T("rd.ans_meta", { n: num(lines), s: fmtBytes(new Blob([r.result]).size) });
+    var seg = '<div class="seg sm rd-ans-mode" role="radiogroup" aria-label="' + esc(T("fb.view_as")) + '">' + [["preview", T("fb.preview")], ["source", T("fb.source")]].map(function (x) {
+      var on = (x[0] === "preview") === pv;
+      return '<button type="button" role="radio" data-ans-mode="' + x[0] + '" aria-checked="' + on + '" tabindex="' + (on ? 0 : -1) + '" class="' + (on ? "active" : "") + '" data-tip="' + esc(T(x[0] === "preview" ? "rd.ans_preview_tip" : "rd.ans_source_tip")) + '">' + esc(x[1]) + "</button>";
+    }).join("") + "</div>";
+    return '<section class="card rd-ans" id="rd-ans"><div class="card-head"><span class="ico">' + ic("chat") + '</span><h3 data-tip="' + esc(meta) + '">' + esc(T("rd.answer")) + "</h3>" +
+      (r.result_truncated ? '<span class="pill warn sm" data-tip="' + esc(T("rd.ans_cut_tip")) + '">' + esc(T("rd.ans_cut")) + "</span>" : "") +
+      '<span class="rd-acts">' + seg +
+      '<button type="button" class="icon-btn sm" data-ans-copy aria-label="' + esc(T("rd.ans_copy")) + '" data-tip="' + esc(T("rd.ans_copy")) + '">' + ic("copy", "sm") + "</button>" +
+      '<button type="button" class="icon-btn sm" data-ans-dl aria-label="' + esc(T("rd.ans_dl")) + '" data-tip="' + esc(T("rd.ans_dl")) + '">' + ic("download", "sm") + "</button></span></div>" +
+      (pv ? '<div class="rd-ans-body md" tabindex="0">' + mdHtml(r.result, null) + "</div>" : '<pre class="rd-ans-body rd-ans-src" tabindex="0">' + esc(r.result) + "</pre>") + "</section>";
+  }
+  function bindRunAnswer(card, r) {
+    var redraw = function (m) {
+      try { localStorage.setItem("tb_ans_view", m); } catch (e) {}
+      var tmp = document.createElement("div");
+      tmp.innerHTML = runAnswerHtml(r, m);
+      var next = tmp.firstChild;
+      card.parentNode.replaceChild(next, card);
+      bindRunAnswer(next, r);
+      var on = $('[data-ans-mode][aria-checked="true"]', next); if (on) on.focus();
+    };
+    $$("[data-ans-mode]", card).forEach(function (b) { b.addEventListener("click", function () { if (b.getAttribute("aria-checked") !== "true") redraw(b.getAttribute("data-ans-mode")); }); });
+    $(".rd-ans-mode", card).addEventListener("keydown", function (e) { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); redraw(ansMode() === "source" ? "preview" : "source"); } });
+    $("[data-ans-copy]", card).addEventListener("click", function () { copyText(r.result).catch(fail); });
+    $("[data-ans-dl]", card).addEventListener("click", function () { saveBlob(new Blob([r.result.replace(/\n?$/, "\n")], { type: "text/markdown" }), r.id + ".md").catch(fail); });
+    card.addEventListener("click", function (e) {
+      var a = e.target.closest("a[data-md-anchor]"), body = $(".rd-ans-body", card);
+      if (!a || !body) return;
+      e.preventDefault();
+      var v = a.getAttribute("data-md-anchor"), h = body.querySelector('[data-md-id="' + (window.CSS && CSS.escape ? CSS.escape(v) : v) + '"]');
+      if (h) body.scrollTop = h.offsetTop - 8;
+    });
+  }
   function liveRunStats(id, was) {
     return api("/api/runs/" + enc(id)).then(function (r) {
       var still = r.status === "running" || r.status === "queued";

@@ -1153,13 +1153,17 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// cost_detail: the calculation (tokens × price snapshot) for the run detail page
-		var detail string
-		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail FROM runs WHERE id=?`, id).Scan(&detail)
+		// result: the agent's final answer (Markdown, capped) — only on the detail, never in lists
+		var detail, result string
+		var cut int
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut)
 		out := struct {
 			runDTO
-			CostDetail json.RawMessage `json:"cost_detail"`
-			Currency   string          `json:"currency"`
-		}{runs[0], nil, s.fx().Display}
+			CostDetail      json.RawMessage `json:"cost_detail"`
+			Currency        string          `json:"currency"`
+			Result          string          `json:"result"`
+			ResultTruncated bool            `json:"result_truncated,omitempty"`
+		}{runs[0], nil, s.fx().Display, result, cut != 0}
 		if json.Valid([]byte(detail)) {
 			out.CostDetail = json.RawMessage(detail)
 		}
