@@ -47,10 +47,12 @@ func (s *Server) handleSpendBreakdown(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	// rows: the whole range, or only the picked day
-	rowsWhere, rowsArg := "l.day >= ?", since
+	// rows: the whole range, or only the picked day ("all" reads the table straight through)
+	rowsWhere, rowsArgs := "l.day >= ?", []any{since}
 	if pick != "" {
-		rowsWhere, rowsArg = "l.day = ?", pick
+		rowsWhere, rowsArgs = "l.day = ?", []any{pick}
+	} else if n == 0 {
+		rowsWhere, rowsArgs = "1=1", nil
 	}
 	type row struct {
 		Key        string  `json:"key"`
@@ -69,12 +71,24 @@ func (s *Server) handleSpendBreakdown(w http.ResponseWriter, r *http.Request) {
 	}
 	amt := s.ledgerAmt("l.")
 	ctx := r.Context()
-	rows, err := s.deps.DB.QueryContext(ctx, `SELECT `+keyExpr+` AS k, COALESCE(MAX(t.name),''), COUNT(1), COALESCE(SUM(`+amt+`),0), COALESCE(SUM(l.tokens),0),
-  COALESCE(SUM(l.input_tokens),0), COALESCE(SUM(l.output_tokens),0), COALESCE(SUM(l.cache_read_tokens),0), COALESCE(SUM(l.cache_write_tokens),0),
-  COALESCE(SUM(l.requests),0), SUM(CASE WHEN l.source IN ('estimate','claude') THEN 1 ELSE 0 END),
-  SUM(CASE WHEN l.source='legacy' THEN 1 ELSE 0 END), SUM(CASE WHEN l.source='subscription' THEN 1 ELSE 0 END)
-FROM cost_ledger l LEFT JOIN runs r ON r.id = l.run_id LEFT JOIN tasks t ON t.id = l.task_id
-WHERE `+rowsWhere+` GROUP BY k ORDER BY SUM(`+amt+`) DESC, SUM(l.tokens) DESC LIMIT 50`, rowsArg)
+	// Sum the ledger first, then look up the (at most 50) task names: joining tasks and
+	// runs on every ledger row cost ~300 ms at 50 000 runs. runs is joined only for keys
+	// that fall back to the run's provider / model (rows written before the ledger had them).
+	from := "cost_ledger l"
+	if by != "task" && by != "" {
+		from += " LEFT JOIN runs r ON r.id = l.run_id"
+	}
+	agg := `SELECT ` + keyExpr + ` AS k, COUNT(1) AS n, COALESCE(SUM(` + amt + `),0) AS usd, COALESCE(SUM(l.tokens),0) AS tok,
+  COALESCE(SUM(l.input_tokens),0) AS i, COALESCE(SUM(l.output_tokens),0) AS o, COALESCE(SUM(l.cache_read_tokens),0) AS cr, COALESCE(SUM(l.cache_write_tokens),0) AS cw,
+  COALESCE(SUM(l.requests),0) AS req, SUM(CASE WHEN l.source IN ('estimate','claude') THEN 1 ELSE 0 END) AS est,
+  SUM(CASE WHEN l.source='legacy' THEN 1 ELSE 0 END) AS leg, SUM(CASE WHEN l.source='subscription' THEN 1 ELSE 0 END) AS sub
+FROM ` + from + ` WHERE ` + rowsWhere + ` GROUP BY k ORDER BY usd DESC, tok DESC LIMIT 50`
+	name := "''"
+	if by == "task" || by == "" {
+		name = "COALESCE(t.name,'')"
+	}
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT a.k, `+name+`, a.n, a.usd, a.tok, a.i, a.o, a.cr, a.cw, a.req, a.est, a.leg, a.sub
+FROM (`+agg+`) a LEFT JOIN tasks t ON t.id = a.k ORDER BY a.usd DESC, a.tok DESC`, rowsArgs...)
 	if err != nil {
 		writeErr(w, 500, "query failed")
 		return
@@ -100,7 +114,12 @@ WHERE `+rowsWhere+` GROUP BY k ORDER BY SUM(`+amt+`) DESC, SUM(l.tokens) DESC LI
 		USD float64 `json:"usd"`
 	}
 	series := []day{}
-	drows, err := s.deps.DB.QueryContext(ctx, `SELECT day, COALESCE(SUM(`+s.ledgerAmt("")+`),0) FROM cost_ledger WHERE day >= ? GROUP BY day ORDER BY day DESC LIMIT 90`, since)
+	// the chart shows 90 days at most: don't sum the days before that
+	from90 := time.Now().In(loc).AddDate(0, 0, -89).Format("2006-01-02")
+	if from90 < since {
+		from90 = since
+	}
+	drows, err := s.deps.DB.QueryContext(ctx, `SELECT day, COALESCE(SUM(`+s.ledgerAmt("")+`),0) FROM cost_ledger WHERE day >= ? GROUP BY day ORDER BY day DESC LIMIT 90`, from90)
 	if err == nil {
 		for drows.Next() {
 			var d day

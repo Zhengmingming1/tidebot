@@ -3575,3 +3575,60 @@ timezone (Settings › General) is a DST zone, on any OS (Windows uses the embed
 2. Mark the adjusted time in the preview list itself (small "夏令时" tag on that row).
 3. A notification the day before a change for tasks whose time moves ("明天 02:30 的任务改在 03:00").
 4. Show the next change for the scheduling timezone in Settings › General's timezone tooltip.
+
+## 2026-10-29 (00:05): task list, Home and spend page stay fast with a long run history
+
+Category: **performance** (the last rounds were DST correctness, search UX, log compression,
+prompt correctness and features; the last performance round was 10-26 08:40). Measured on the
+demo server with 50 000 runs and ledger rows (5 tasks): `GET /api/tasks` and `/api/dashboard`
+took ~450 ms each, `/api/runs/counts` 47 ms, `/api/spend/breakdown?range=all` 300 ms — the
+task list and Home re-poll these, and the spend page loads `/api/tasks` first. A task every
+15 minutes reaches 35 000 runs in a year.
+
+**Done**
+
+- Last N runs per task (task list strip, Home heartbeat bars) — `recentBeats`: each task reads its
+  newest N entries of `idx_runs_task_created` (`r.rowid IN (SELECT rowid … WHERE task_id = t.id
+  ORDER BY created_at DESC, id DESC LIMIT ?)`) instead of `ROW_NUMBER() OVER (PARTITION BY
+  task_id)` over `SELECT r.*`, which numbered and copied every run ever made (prompt and final
+  answer included) to keep 10. Same rows and order (ties by id); Home's bars now also break ties
+  by id. `/api/tasks` 450 → 1.4 ms, `/api/dashboard` 480 → 2.4 ms.
+- `/api/runs/counts` joins tasks only when there is search text (the only use of the task name):
+  the count comes from `idx_runs_status` alone, 47 → 4 ms.
+- `/api/spend/breakdown`: sums the ledger first, then looks up the ≤ 50 task names; runs are
+  joined only for model / provider keys (older ledger rows without them); "all" no longer walks
+  the day index; the chart series sums only the last 90 days (all it can show). 300 → 170 ms.
+- Tests: `TestRecentBeatsMatchesWindow` (1 500 runs in random order with equal timestamps: same
+  result as the old window query for 1 / 10 / 20 / 400, plan uses the index and never scans
+  runs), `TestTaskListAndDashboardHistory`, `TestRunCountsHistory` (no-search counts = table,
+  task-name search still matches), `TestSpendBreakdownHistory` (every range × key equal to the
+  old one-pass query; series within 90 days).
+- No UI change, no new strings, no migration.
+
+**Inspiration**
+
+- louislam/uptime-kuma `server/client.js` (`sendHeartbeatList`: per monitor `ORDER BY time DESC
+  LIMIT 100` on the `(monitor_id, time)` index from `db/old_migrations/patch-improve-performance.sql`;
+  `sendHeartbeatLists`: narrow column list, join on the picked ids instead of whole rows). Ideas
+  only, no code copied.
+
+**Learned**
+
+- In SQLite a window function over `SELECT *` materialises every column of every row before the
+  outer `rn <= N`; the cost grew with the size of prompts and answers, not just the row count.
+- `rowid IN (correlated LIMIT subquery)` gives a per-group top-N that stops early on an index —
+  the rowid is part of every index entry, so the inner query never touches the table.
+- modernc.org/sqlite is ~2–3× slower than the C library on the same plan; measure through the
+  server, not only with the Python sqlite3 module.
+
+**Ideas for later**
+
+1. Global search (`/api/search`, ~140 ms at 50 000 runs) and `/api/runs/counts?q=` (~130 ms) scan
+   every prompt: an FTS5 table over prompt / error (trigram tokenizer for Chinese) would make both
+   index lookups.
+2. Keep a per-day rollup of the ledger (like Uptime Kuma's `stat_daily`) so "all time" spend is a
+   sum of a few hundred rows.
+3. A `scripts/bench-history.sh` that seeds N runs into the demo server and prints endpoint
+   timings, run before each weekly release to catch regressions.
+4. Retention's "keep the last N runs per task" (`internal/app/system.go`) still uses a window
+   query; it only selects ids, but could use the same per-task index read.
