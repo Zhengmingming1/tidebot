@@ -19,6 +19,33 @@
   }
   function enc(v) { return encodeURIComponent(String(v == null ? "" : v)); }
 
+  // ---------- IME (Chinese / Japanese / Korean input) ----------
+  // While a candidate window is open, Enter confirms the candidate and Esc cancels it: they
+  // belong to the input method, not to us. One capture listener on window runs before every
+  // other key handler (palette, dialogs, drawers, pickers, inline edits, list keys), so
+  // confirming 你好 with Enter no longer runs the palette's first entry or saves a half-typed
+  // name, and Esc no longer closes the dialog. Safari reports the confirming Enter as
+  // keyCode 229 with isComposing already false, hence both checks.
+  function imeKey(e) { return !!(e && (e.isComposing || e.keyCode === 229)); }
+  window.addEventListener("keydown", function (e) { if (imeKey(e)) e.stopImmediatePropagation(); }, true);
+  // imeInput: search-as-you-type that waits for the input method. Pinyin letters typed on the
+  // way to 天气 never reach the search; the text is committed once on compositionend (some
+  // engines fire it before the last input event, so the field is read then), clearing the
+  // box applies at once, other edits after ms of quiet. The same text is never sent twice.
+  // Idea: CherryHQ/cherry-studio src/renderer/components/GlobalSearch/
+  // useImeAwareDebouncedValue.ts (frozen while composing, flushed on compositionend).
+  function imeInput(el, ms, fn) {
+    var t, composing = false, last = el.value;
+    var fire = function () { clearTimeout(t); if (el.value === last) return; last = el.value; fn(el.value); };
+    el.addEventListener("compositionstart", function () { composing = true; clearTimeout(t); });
+    el.addEventListener("compositionend", function () { composing = false; fire(); });
+    el.addEventListener("input", function (e) {
+      if (composing || e.isComposing) return;
+      clearTimeout(t);
+      if (!ms || !el.value) fire(); else t = setTimeout(fire, ms);
+    });
+  }
+
   // ---------- i18n ----------
   // Key-based dictionaries (embedded JSON). T() returns plain text; callers still esc() it.
   var LANGS = ["en", "zh-CN"];
@@ -648,7 +675,7 @@
     };
     document.addEventListener("keydown", onKey, true);
     $(".pal-bg", root).addEventListener("mousedown", function (e) { if (e.target.classList.contains("pal-bg")) close(); });
-    input.addEventListener("input", function () { palUpdate(input.value.trim()); });
+    imeInput(input, 0, function (v) { palUpdate(v.trim()); });
     if (!pal.buttons) api("/api/buttons").then(function (l) { pal.buttons = l || []; if (root.innerHTML) palUpdate(input.value.trim()); }).catch(function () { pal.buttons = []; });
     palUpdate("");
     input.focus();
@@ -1406,12 +1433,21 @@
   }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 
-  function runsTable(runs, rerun) {
+  // runHitHtml: the excerpt behind a search hit (server-cut, parts alternate plain / matched),
+  // shown in place of the trigger line: the field as a muted prefix, matches marked, how many
+  // hits in the tooltip. A hit in the task name has no excerpt; the title is marked instead.
+  function runHitHtml(m) {
+    if (!m || !m.parts || !m.parts.length) return "";
+    return '<small class="ell run-hit" data-tip="' + esc(T("runs.hit_tip", { f: T("runs.hit_" + m.field), n: num(m.count || 1) })) + '"><span class="hit-f">' + esc(T("runs.hit_" + m.field)) + "</span>" +
+      m.parts.map(function (p, i) { return i % 2 ? "<mark>" + esc(p) + "</mark>" : esc(p); }).join("") + "</small>";
+  }
+  function runsTable(runs, rerun, q) {
+    var lq = (q || "").trim().toLowerCase();
     if (!runs.length) return emptyState("runs", T("runs.none"), T("runs.none_sub"));
     return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.provider")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
       runs.map(function (r) {
         var running = r.status === "running", active = running || r.status === "queued";
-        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + esc(runTitle(r)) + '</strong></a><small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small></div></div></td>" +
+        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + hlText(runTitle(r), lq) + "</strong></a>" + (runHitHtml(r.match) || '<small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small>") + "</div></div></td>" +
           '<td class="run-prov"><span class="ell">' + esc(r.provider || "—") + "</span>" + (r.model ? '<small class="ell">' + esc(r.model) + "</small>" : "") + "</td>" +
           "<td>" + statusPill(r.status, r.queue_pos, r.error) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
           '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && active ? '<button class="icon-btn sm row-act" data-stop="' + esc(r.id) + '" data-st="' + esc(r.status) + '" data-tip="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '" aria-label="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '">' + ic("stop", "sm") + "</button>" : "") + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
@@ -1748,8 +1784,7 @@
         var boxes = $$("[data-pick]", body);
         $("#tall").checked = boxes.length > 0 && boxes.every(function (c) { return c.checked; });
       }
-      var qt;
-      $("#tq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value; rows(); }, 120); });
+      imeInput($("#tq"), 120, function (val) { v.q = val; rows(); });
       $$("[data-st]").forEach(function (b) { b.addEventListener("click", function () {
         v.status = b.getAttribute("data-st");
         $$("[data-st]").forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-pressed", String(x === b)); });
@@ -2845,7 +2880,7 @@
         f.task_id.addEventListener("change", autofill); f.skill_id.addEventListener("change", autofill);
         $$("[data-m]", root).forEach(function (x) { x.addEventListener("click", function () { setTimeout(autofill, 0); }); });
       }
-      $("#ic-q", root).addEventListener("input", function (e) { var q = e.target.value.trim().toLowerCase(); $$("[data-ic]", root).forEach(function (x) { x.classList.toggle("hidden", q && x.getAttribute("data-ic").indexOf(q) < 0); }); });
+      imeInput($("#ic-q", root), 0, function (val) { var q = val.trim().toLowerCase(); $$("[data-ic]", root).forEach(function (x) { x.classList.toggle("hidden", q && x.getAttribute("data-ic").indexOf(q) < 0); }); });
       $$("[data-ic]", root).forEach(function (x) { x.addEventListener("click", function (e) { if (e.isTrusted) { mine.icon = true; afPill("icon", false); } b.icon = x.getAttribute("data-ic"); $$("[data-ic]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
       $$("[data-sw]", root).forEach(function (x) { x.addEventListener("click", function () { b.color = x.getAttribute("data-sw"); $$("[data-sw]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
       $$("[data-m]", root).forEach(function (x) { x.addEventListener("click", function () { mode = x.getAttribute("data-m"); showMode(); }); });
@@ -2996,7 +3031,7 @@
         select(cur || vis[0] || null, false);
       };
       var go = function () { if (sel >= 0) { var p = presets[sel]; close(); pick(p); } };
-      q.addEventListener("input", filter);
+      imeInput(q, 0, filter);
       $$(".ap-rail button", root).forEach(function (b) { b.addEventListener("click", function () { cat = b.getAttribute("data-cat"); $$(".ap-rail button", root).forEach(function (x) { x.classList.toggle("active", x === b); x.setAttribute("aria-selected", x === b); }); filter(); }); });
       $$(".ap-tile", root).forEach(function (t) { t.addEventListener("click", function () { select(t, false); }); t.addEventListener("dblclick", go); });
       next.addEventListener("click", go);
@@ -4502,7 +4537,7 @@
       };
       var paint = function (list) {
         shown = list;
-        $("#rtable").innerHTML = list.length || !(v.q || rangeOn(rg)) ? runsTable(list, true) : v.q ? emptyState("search", T("runs.no_match"), "") :
+        $("#rtable").innerHTML = list.length || !(v.q || rangeOn(rg)) ? runsTable(list, true, v.q) : v.q ? emptyState("search", T("runs.no_match"), "") :
           '<div class="empty">' + ic("calendar") + "<strong>" + esc(T("rr.empty", { r: rangeLabel(rg) })) + "</strong>" + esc(T("rr.empty_sub")) + '<div class="empty-act"><button type="button" class="btn sm" id="rr-empty-clear">' + esc(T("rr.show_all")) + "</button></div></div>";
         var ec = $("#rr-empty-clear"); if (ec) ec.addEventListener("click", function () { setRange({ range: "", from: "", to: "" }); });
         wireRows($("#rtable"));
@@ -4545,8 +4580,7 @@
       var gate = revGate();
       var live = function (list) { if (list.some(function (r) { return r.status === "running" || r.status === "queued"; })) livePoll(function () { return gate(reload); }, 2000); else stopPoll(); };
       paint(runs); live(runs);
-      var qt;
-      $("#rq").addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { v.q = e.target.value.trim(); v.key = [st, task, v.sort, v.q, rangeQuery(rg)].join("|"); v.n = RUNS_PAGE; reload().catch(fail); }, 250); });
+      imeInput($("#rq"), 250, function (val) { if (val.trim() === v.q) return; v.q = val.trim(); v.key = [st, task, v.sort, v.q, rangeQuery(rg)].join("|"); v.n = RUNS_PAGE; reload().catch(fail); });
       $("#rsort").addEventListener("change", function (e) { v.sort = e.target.value; v.key = [st, task, v.sort, v.q, rangeQuery(rg)].join("|"); v.n = RUNS_PAGE; reload().catch(fail); });
       // switching the status keeps the task filter (it used to drop it)
       $$("[data-f]").forEach(function (b) { b.addEventListener("click", function () { location.hash = runsHash(b.getAttribute("data-f"), task, rg); }); });
@@ -4692,8 +4726,7 @@
       var el = $('[data-i="' + matches[cur] + '"]', rows);
       if (el) el.scrollIntoView({ block: "center" });
     };
-    var qt;
-    $("#lv-q", host).addEventListener("input", function (e) { clearTimeout(qt); qt = setTimeout(function () { q = e.target.value.trim().toLowerCase(); cur = -1; paint(true); if (q) jump(1); }, 150); });
+    imeInput($("#lv-q", host), 150, function (val) { q = val.trim().toLowerCase(); cur = -1; paint(true); if (q) jump(1); });
     $("#lv-q", host).addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); jump(e.shiftKey ? -1 : 1); } });
     $("#lv-next", host).addEventListener("click", function () { jump(1); });
     $("#lv-prev", host).addEventListener("click", function () { jump(-1); });
@@ -5312,7 +5345,7 @@
             if (done) done(r);
           }).catch(fail).then(function () { busy = false; });
         };
-        q.addEventListener("input", function () {
+        imeInput(q, 0, function () {
           var s = q.value.trim().toLowerCase();
           items = s ? all.filter(function (z) { return s.split(/\s+/).every(function (w) { return z.key.indexOf(w) >= 0; }); }) : all;
           sel = 0; draw(); ul.scrollTop = 0;

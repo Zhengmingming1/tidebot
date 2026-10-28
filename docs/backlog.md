@@ -3450,3 +3450,55 @@ near-identical text files a month.
 3. Compress artifacts that are plain text (reports, exports) the same way, or store them in a
    per-run zip.
 4. Show "freed by compression" next to the last cleanup in the storage tooltip.
+
+## 2026-10-28 (16:00): runs search shows where it matched; search boxes wait for the input method
+
+Category: **UX / interaction** (the last rounds were disk usage, correctness and features).
+Searching the runs page matched the full prompt, the error, the task name and the id in SQL, but
+the rows only showed "task #id" and the trigger — a hit 600 bytes into a prompt left no trace,
+so you couldn't tell why a row was there. And every search box searched while you were still
+typing pinyin ("tianqi" before 天气), while Enter / Esc that only confirm or cancel an IME
+candidate also ran our shortcuts.
+
+**Done**
+
+- 运行搜索显示命中片段：`GET /api/runs?q=` 每行带 `match`（命中字段 prompt / error / task / id、
+  命中次数、片段）。按完整提示词匹配（列表本身仍只带 300 字节预览），按 SQLite LIKE 的规则只折叠
+  ASCII 大小写，片段从命中前 8 个字符（不跨到上一行）到命中后 80 个字符，按字符边界截断，空白
+  （含 CRLF、Tab）压成一个空格，片段内每处命中都标出，截断处加「…」；片段按「普通/命中」交替的
+  数组返回，页面逐段转义，不用再在前端重新查找。
+- 运行列表：有搜索词时，标题下的触发方式行换成「提示词 · …片段…」，命中处高亮（与日志搜索同色），
+  命中字段和次数在悬停提示；只在任务名命中时不出片段，改为高亮标题。
+- 输入法：`window` 捕获阶段统一拦下输入法组字中的按键（`isComposing` 或 Safari 的 keyCode 229），
+  用回车选词不再执行命令面板第一项、不再提前保存就地编辑的名称，Esc 取消候选不再关掉弹窗/抽屉。
+- 搜索框改用 `imeInput`：组字期间不搜索，选词结束（compositionend）立即搜一次，清空立即生效，
+  其他输入按原来的防抖；同一内容不重复请求。用于运行、任务、日志搜索，命令面板，服务商选择、
+  时区选择和图标搜索。
+- Tests: `TestFindRunHit`（字段顺序、ASCII 折叠、多处命中、跨行、按字符截断、跨窗口的命中保持
+  完整、次数上限）, `TestRunsSearchHit`（超过预览长度的命中、% 和 _ 按字面、无搜索词不带 match）,
+  `TestRunsHitUI`（node 跑 `runHitHtml` 转义和 `imeInput` 组字/选词/防抖/清空）。
+- Shots: `/workspace/tidebot-shots/2026-10-28-runs-search-hit-1024x655.png`（及 `-en`）。
+
+**Inspiration**
+
+- CherryHQ/cherry-studio `src/main/utils/searchSnippet.ts`（命中前后各取一段、合并区间、截断处
+  加 "..."）和 `src/renderer/components/HighlightText.tsx`（片段里标出关键词）；
+  `src/renderer/components/GlobalSearch/useImeAwareDebouncedValue.ts`（组字时冻结、compositionend
+  立即提交、清空同步提交）。cline/cline `apps/vscode/webview-ui/src/components/history/HistoryView.tsx`
+  （历史列表按命中区间高亮，`ignoreLocation` 的注释正是"命中在 60 字符之后就被漏掉"的同类问题）。
+  只借鉴思路，未复制代码。
+
+**Learned**
+
+- 搜索命中的位置只有服务端知道（列表只有预览），所以片段要在服务端切；按「普通/命中」交替返回
+  比返回偏移量更稳：Go 的字节偏移、JS 的 UTF-16 下标不用互相换算。
+- SQLite LIKE 只对 ASCII 不分大小写；片段用同样的规则，才不会出现「列出来了但标不出命中」。
+- 单元格大约只放得下 16 个汉字：命中前的上下文要短，否则命中被省略号吃掉。
+- 输入法的回车在 Safari 上 `isComposing` 已经是 false，只能靠 keyCode 229 识别。
+
+**Ideas for later**
+
+1. 运行详情页从搜索进入时（带 `?q=`），提示词卡自动展开并高亮命中，日志搜索框预填同一个词。
+2. 全局搜索（顶栏 / 命令面板）的运行结果同样显示命中片段。
+3. 任务列表搜索提示词时也给片段（现在只按名称在前端过滤）。
+4. 多个词（空格分隔）按 AND 搜索，每个词分别高亮。

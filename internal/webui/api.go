@@ -206,6 +206,8 @@ type runDTO struct {
 	Requests     int64   `json:"requests"`
 	// QueuePos is a queued run's place in line for a free slot (1 = next).
 	QueuePos int `json:"queue_pos,omitempty"`
+	// Match: with search text, which field matched and an excerpt around the hit.
+	Match *runHit `json:"match,omitempty"`
 }
 
 func (s *Server) runSelect() string {
@@ -1085,10 +1087,23 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		where += " OFFSET ?"
 		args = append(args, off)
 	}
-	runs, err := s.queryRuns(r.Context(), where, args...)
+	// With search text, read whole prompts so a hit past the 300-byte preview still shows
+	// up in the row's excerpt; the prompt is cut to the preview afterwards.
+	qs := strings.TrimSpace(q.Get("q"))
+	promptMax := listPromptMax
+	if qs != "" {
+		promptMax = 0
+	}
+	runs, err := s.queryRunsOpt(r.Context(), promptMax, where, args...)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
+	}
+	if qs != "" {
+		for i := range runs {
+			runs[i].Match = findRunHit(runs[i], qs)
+			runs[i].Prompt = textclip.Ellipsis(runs[i].Prompt, listPromptMax)
+		}
 	}
 	writeJSON(w, 200, runs)
 }

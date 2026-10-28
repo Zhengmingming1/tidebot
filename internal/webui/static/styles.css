@@ -2017,3 +2017,8 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .rd-prompt:focus-visible { box-shadow: 0 0 0 2px var(--accent-100); }
 .rd-prompt-acts { display: inline-flex; align-items: center; gap: 4px; margin-left: -6px; }
 .rd-prompt-acts [data-tip]:hover::after, .rd-prompt-acts [data-tip]:focus-visible::after { left: 0; transform: none; }
+/* runs search: excerpt around the hit under the run title; marks match the log search */
+.cell-main small.run-hit { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.run-hit .hit-f { color: var(--text-3); margin-right: 4px; }
+.run-hit .hit-f::after { content: "·"; margin-left: 4px; }
+.run-hit mark, .cell-main strong mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; }
