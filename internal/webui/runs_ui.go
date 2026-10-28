@@ -13,7 +13,8 @@ import (
 // rerun: POST /api/runs/<id>/rerun — a task run reruns the task; an ad-hoc run reruns its prompt.
 // The answer carries the new run's id (see writeStarted).
 func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
-	runs, err := s.queryRuns(r.Context(), "WHERE r.id=?", id)
+	// the whole prompt: the list preview ends in "…" after 300 bytes
+	runs, err := s.queryRunsFull(r.Context(), "WHERE r.id=?", id)
 	if err != nil || len(runs) == 0 {
 		writeErr(w, 404, "run not found")
 		return

@@ -17,6 +17,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 
 	"github.com/Zhengmingming1/tidebot/internal/provider"
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
 
@@ -370,10 +371,8 @@ func (pa providerAdmin) testProvider(ctx context.Context, name, onlyModel string
 		if json.Unmarshal(rb, &e) == nil && e.Error.Message != "" {
 			msg = e.Error.Message
 		}
-		if len(msg) > 300 {
-			msg = msg[:300]
-		}
-		out["error"] = provider.MaskSecret(msg, key)
+		// mask first: a key that straddles the cut would survive in part
+		out["error"] = textclip.Head(provider.MaskSecret(msg, key), 300)
 	}
 	return out, nil
 }

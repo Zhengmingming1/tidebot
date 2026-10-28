@@ -2008,3 +2008,12 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .mdl-pop li.cur .id { font-weight: 600; }
 .mdl-pop li.none { cursor: default; color: var(--text-3); font-size: 12px; justify-content: center; height: 40px; }
 .mdl-unlisted { display: inline-flex; align-items: center; gap: 4px; color: var(--warn); font-size: 12px; }
+
+/* Run prompt in the details card: whole text, folded to 4 lines (4 × 20px) with a fade. */
+.kv dd.rd-prompt-dd { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.rd-prompt { width: 100%; max-height: 80px; overflow: hidden; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; border-radius: var(--radius-sm); }
+.rd-prompt.clamped { cursor: pointer; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.rd-prompt.open { max-height: min(320px, 40vh); overflow: auto; overscroll-behavior: contain; }
+.rd-prompt:focus-visible { box-shadow: 0 0 0 2px var(--accent-100); }
+.rd-prompt-acts { display: inline-flex; align-items: center; gap: 4px; margin-left: -6px; }
+.rd-prompt-acts [data-tip]:hover::after, .rd-prompt-acts [data-tip]:focus-visible::after { left: 0; transform: none; }

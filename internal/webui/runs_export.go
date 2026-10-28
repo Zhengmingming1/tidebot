@@ -9,7 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 )
 
 // Export caps for the free-text columns: a run's prompt or error can be long, and the whole
@@ -30,16 +31,7 @@ var runsExportTrigger = map[string]map[string]string{
 }
 
 // clip cuts s to at most n bytes on a rune boundary, marking the cut with "…".
-func clip(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	s = s[:n]
-	for len(s) > 0 && !utf8.ValidString(s) {
-		s = s[:len(s)-1]
-	}
-	return s + "…"
-}
+func clip(s string, n int) string { return textclip.Ellipsis(s, n) }
 
 // exportRun is one JSONL line: stable English keys, times as stored (RFC 3339, UTC).
 type exportRun struct {

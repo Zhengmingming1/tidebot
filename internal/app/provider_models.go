@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/provider"
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 )
 
 // Model list for the provider drawer: the model fields become pick lists instead of ids
@@ -153,12 +154,7 @@ func cleanModels(in []listedModel) []listedModel {
 		if m.ID == "" || len(m.ID) > 128 || strings.ContainsAny(m.ID, " \t\r\n\"'<>") || seen[m.ID] {
 			continue
 		}
-		if len(m.Name) > 80 {
-			m.Name = m.Name[:80]
-		}
-		if len(m.Owner) > 40 {
-			m.Owner = m.Owner[:40]
-		}
+		m.Name, m.Owner = textclip.Head(m.Name, 80), textclip.Head(m.Owner, 40)
 		seen[m.ID] = true
 		if m.created == 0 {
 			dated = false
@@ -242,7 +238,7 @@ func (pa providerAdmin) fetchModels(ctx context.Context, p provider.Profile, key
 			resp.Body.Close()
 			status = resp.StatusCode
 			if status != 200 {
-				failed = map[string]any{"ok": false, "status": status, "error": provider.MaskSecret(upstreamMessage(rb), key)}
+				failed = map[string]any{"ok": false, "status": status, "error": textclip.Head(provider.MaskSecret(upstreamMessage(rb), key), 300)}
 				break
 			}
 			ms, more, lastID, perr := parseModelList(rb)
@@ -301,9 +297,6 @@ func upstreamMessage(rb []byte) string {
 	}
 	if strings.HasPrefix(msg, "<") { // an HTML error page says nothing useful
 		msg = ""
-	}
-	if len(msg) > 300 {
-		msg = msg[:300]
 	}
 	return msg
 }

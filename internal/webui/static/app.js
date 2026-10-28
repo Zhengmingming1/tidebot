@@ -4744,7 +4744,7 @@
           (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
           '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>" +
           (r.task_id ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") + '</span></div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
-        "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd><dt>" + esc(T("f.prompt")) + "</dt><dd>" + esc(r.prompt) + "</dd>" + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
+        "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd>" + runPromptHtml(r) + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();
       $("#rd-rerun").addEventListener("click", function (e) {
@@ -4758,6 +4758,7 @@
         stopRun(id, r.status).then(function (y) { if (y) refresh(); else b.disabled = false; }).catch(function (err) { b.disabled = false; fail(err); });
       });
       if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
+      bindRunPrompt(r);
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider }); });
       if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider }); });
       logView($("#lv"), id, live, function (why) {
@@ -4770,6 +4771,41 @@
     });
   }
   var RUN_STATS_MS = 5000;
+  // Run prompt in the details card: the whole text (the list only has a 300-byte preview),
+  // line breaks kept, folded to four lines with a fade when longer; "展开全部" or a click on
+  // the text opens it in place (scrolls inside past 40vh), copy takes the full text. Size in
+  // the label's tooltip. Idea: cline/cline apps/vscode/webview-ui/src/components/chat/
+  // task-header/TaskHeader.tsx (clamped task text, overflow measured, click to expand, copy).
+  function runPromptHtml(r) {
+    var p = r.prompt || "", meta = T("rd.prompt_meta", { c: num(Array.from(p).length), n: num(p.split("\n").length) });
+    return '<dt><span data-tip="' + esc(meta) + '">' + esc(T("f.prompt")) + '</span></dt><dd class="rd-prompt-dd"><div class="rd-prompt" id="rd-prompt">' + esc(p) + "</div>" +
+      '<div class="rd-prompt-acts"><button type="button" class="linkish hidden" id="rd-prompt-more" aria-controls="rd-prompt" aria-expanded="false">' + esc(T("rd.prompt_more")) + "</button>" +
+      '<button type="button" class="icon-btn sm" id="rd-prompt-copy" aria-label="' + esc(T("rd.prompt_copy")) + '" data-tip="' + esc(T("rd.prompt_copy")) + '">' + ic("copy", "sm") + "</button></div></dd>";
+  }
+  function bindRunPrompt(r) {
+    var box = $("#rd-prompt"), more = $("#rd-prompt-more");
+    if (!box) return;
+    $("#rd-prompt-copy").addEventListener("click", function () { copyText(r.prompt || "").catch(fail); });
+    var open = false;
+    var set = function (o) {
+      open = o;
+      box.classList.toggle("open", o);
+      more.setAttribute("aria-expanded", String(o));
+      more.textContent = T(o ? "rd.prompt_less" : "rd.prompt_more");
+      if (o) box.setAttribute("tabindex", "0"); else { box.removeAttribute("tabindex"); box.scrollTop = 0; }
+    };
+    // measured right after mount (layout is synchronous here), so a short prompt never shows a fade
+    var fits = function () { return open || box.scrollHeight <= box.clientHeight + 1; };
+    var sync = function () {
+      var cut = !fits();
+      box.classList.toggle("clamped", cut && !open);
+      more.classList.toggle("hidden", !cut && !open);
+    };
+    sync();
+    more.addEventListener("click", function () { set(!open); sync(); });
+    box.addEventListener("click", function () { if (!open && box.classList.contains("clamped") && !String(window.getSelection() || "")) { set(true); sync(); } });
+    if (window.ResizeObserver) { var ro = new ResizeObserver(function () { if (!document.contains(box)) { ro.disconnect(); return; } sync(); }); ro.observe(box); }
+  }
   // Final answer card (idea: cline/cline apps/vscode/webview-ui/src/components/chat/CompletionOutputRow.tsx —
   // the turn's last response in its own quiet container, rendered Markdown plus a copy button).
   // Preview / source like skill files, but its own remembered choice; relative links and front

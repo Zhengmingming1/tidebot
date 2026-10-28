@@ -25,6 +25,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/version"
 )
 
@@ -216,7 +217,20 @@ func (s *Server) runSelect() string {
 FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN versions v ON v.id = r.task_version_id`
 }
 
+// listPromptMax: lists carry a preview of each run's prompt (cut on a character boundary);
+// the run detail and rerun read the whole prompt (queryRunsFull).
+const listPromptMax = 300
+
 func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]runDTO, error) {
+	return s.queryRunsOpt(ctx, listPromptMax, where, args...)
+}
+
+// queryRunsFull is queryRuns with the whole prompt — for one run's page and for rerunning it.
+func (s *Server) queryRunsFull(ctx context.Context, where string, args ...any) ([]runDTO, error) {
+	return s.queryRunsOpt(ctx, 0, where, args...)
+}
+
+func (s *Server) queryRunsOpt(ctx context.Context, promptMax int, where string, args ...any) ([]runDTO, error) {
 	rows, err := s.deps.DB.QueryContext(ctx, s.runSelect()+" "+where, args...)
 	if err != nil {
 		return nil, err
@@ -228,8 +242,8 @@ func (s *Server) queryRuns(ctx context.Context, where string, args ...any) ([]ru
 		if err != nil {
 			return nil, err
 		}
-		if len(d.Prompt) > 300 {
-			d.Prompt = d.Prompt[:300] + "…"
+		if promptMax > 0 {
+			d.Prompt = textclip.Ellipsis(d.Prompt, promptMax)
 		}
 		if d.Status == "queued" {
 			d.QueuePos = s.queuePos(d.ID)
@@ -1147,7 +1161,7 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	if len(parts) == 1 {
-		runs, err := s.queryRuns(r.Context(), "WHERE r.id=?", id)
+		runs, err := s.queryRunsFull(r.Context(), "WHERE r.id=?", id)
 		if err != nil || len(runs) == 0 {
 			writeErr(w, 404, "run not found")
 			return

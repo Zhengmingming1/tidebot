@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 )
 
 // Limits for one package.
@@ -244,9 +246,7 @@ func ParseFrontmatter(md []byte) (Meta, error) {
 	}
 	m.Name = strings.TrimSpace(m.Name)
 	m.Description = strings.TrimSpace(m.Description)
-	if len(m.Description) > 1024 {
-		m.Description = m.Description[:1024]
-	}
+	m.Description = textclip.Head(m.Description, 1024)
 	return m, nil
 }
 

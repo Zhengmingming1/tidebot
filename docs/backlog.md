@@ -3346,3 +3346,47 @@ run failed.
 3. Pricing editor: add rows straight from the fetched models that have no price yet.
 4. Show the list's model count on the provider card tooltip, and flag cards whose saved models
    went missing from the provider's list.
+
+## 2026-10-28 (08:00): run page shows the whole prompt — and "rerun" reruns all of it
+
+Category: **correctness** (recent rounds were features: provider model list, answer excerpts,
+final answer card). Idea 4 of 10-27 20:00 turned out to hide a real bug: every run query cut the
+prompt to its first 300 *bytes* plus "…", including the one behind the run page and the rerun
+endpoint.
+
+**Done**
+
+- 重跑临时运行时用完整提示词：`POST /api/runs/{id}/rerun` 以前从列表查询取提示词，超过 300 字节的
+  只重跑了开头加「…」。运行详情、「编辑后重跑」「存为任务」同样拿到的是截断版。现在列表仍只带
+  预览（`queryRuns`），详情和重跑用 `queryRunsFull`。
+- 截断不再切坏中文：新包 `internal/textclip`（`Head` / `Ellipsis`）按字符边界截字节数。替换了
+  运行列表预览、技能描述（1024 字节，存进库里的是坏字节）、更新说明、服务商检测/模型列表的错误
+  信息和模型名、自动推断的输入、运行导出。
+- 服务商错误先打码再截断：以前先截 300 字节再去掉密钥，恰好跨在截断处的密钥会留下一段前缀。
+- 运行页详情卡的提示词：保留换行，超过 4 行折叠并渐隐，「展开全部」或点文字展开（超过 40vh
+  卡内滚动），可复制完整提示词；字数和行数在标签的悬停提示里。只在确实溢出时出现按钮
+  （挂载后测量，宽度变化时用 ResizeObserver 重算），短提示词和以前一样。
+- Tests: `TestHead`, `TestEllipsis`, `TestRunPromptFull`（列表预览是合法 UTF-8、详情完整、
+  重跑拿到完整提示词）, `TestRunPromptUI`, `TestMaskBeforeClip`.
+- Shots: `/workspace/screenshots/2026-10-28-run-prompt-folded-1024x655.png`, `…-open-…`（及 `-en`）.
+
+**Inspiration**
+
+- cline/cline `apps/vscode/webview-ui/src/components/chat/task-header/TaskHeader.tsx`：任务原文
+  `whitespace-pre-wrap`、限高 4.5rem 并用渐变遮罩淡出，`scrollHeight > clientHeight` 判断是否
+  需要折叠，点击展开到 25vh 内滚动，旁边一个复制按钮。tidebot 照这个思路做了运行页提示词。
+  只借鉴思路，未复制代码。
+
+**Learned**
+
+- 「列表只要预览」的截断放在共用查询里，后来每个复用它的接口都悄悄拿到了截断版——截断应该是
+  调用方的选择，不是查询的默认。
+- Go 里 `s[:n]` 对中文是按字节切的；JSON 编码把坏尾巴变成 U+FFFD，SQLite 则原样存下坏字节。
+- 打码和截断的顺序会影响安全：先打码。
+
+**Ideas for later**
+
+1. 任务详情页的提示词也用同样的折叠/展开（现在是整段平铺的就地编辑框）。
+2. 运行列表搜索提示词时，预览里高亮命中的位置（命中在 300 字节之后时显示命中附近的片段）。
+3. `agentctl runs show <id>` 输出完整提示词和最终回答。
+4. 全仓检查其余 `[:n]` 字节截断（日志字段、插件输出），统一走 `textclip`。

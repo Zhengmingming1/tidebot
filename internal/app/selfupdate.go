@@ -16,6 +16,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/updater"
 )
 
@@ -352,8 +353,5 @@ func updateMessage(e Event) (string, string) {
 }
 
 func clipNotes(s string) string {
-	if len(s) <= 600 {
-		return s
-	}
-	return s[:600] + "…"
+	return textclip.Ellipsis(s, 600)
 }

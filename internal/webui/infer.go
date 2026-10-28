@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 )
 
 // ---- task form: name + schedule from the instruction ----
@@ -46,9 +48,7 @@ func InferTask(prompt string) TaskGuess {
 	if p == "" {
 		return TaskGuess{}
 	}
-	if len(p) > 4000 {
-		p = p[:4000]
-	}
+	p = textclip.Head(p, 4000)
 	g := TaskGuess{Cron: inferCron(p)}
 	g.Name = inferName(p)
 	return g
