@@ -3502,3 +3502,9 @@ candidate also ran our shortcuts.
 2. 全局搜索（顶栏 / 命令面板）的运行结果同样显示命中片段。
 3. 任务列表搜索提示词时也给片段（现在只按名称在前端过滤）。
 4. 多个词（空格分隔）按 AND 搜索，每个词分别高亮。
+
+**Follow-up (same round)**: CI on macOS caught a flaky `TestCanaryCompareAndDone` — `optimize.nowUTC`
+used RFC3339Nano, which drops trailing zeros, so `created_at` compared as text could put
+"…:14.1Z" after "…:14.12Z" and the canary's own runs fell before its start. Timestamps there are
+now fixed width (`TestNowUTCSortsAsText`). Idea: grep the rest of the repo for RFC3339Nano values
+that are compared or sorted as text.
