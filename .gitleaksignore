@@ -1,3 +1,5 @@
 # Known fake test fixtures (synthetic WeCom webhook key in prefill tests)
 internal/prefill/prefill_test.go:generic-api-key:102
 internal/webui/prefill_test.go:generic-api-key:17
+# Fake key literal in a test (replaced by a runtime-built string in the next commit)
+86e20c1925d0567caaa409c60c54b167eb99b065:internal/app/clipmask_test.go:generic-api-key:15

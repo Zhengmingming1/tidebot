@@ -12,7 +12,7 @@ import (
 // TestMaskBeforeClip: provider errors are masked first and cut after, so a key that straddles
 // the 300-byte cut can't survive in part; the cut keeps UTF-8 whole.
 func TestMaskBeforeClip(t *testing.T) {
-	key := "sk-test-0123456789abcdef0123456789"
+	key := "fake" + strings.Repeat("Q", 30) // built at run time, not a credential
 	msg := strings.Repeat("错", 95) + " key " + key + " 无效"
 	got := textclip.Head(provider.MaskSecret(upstreamMessage([]byte(`{"error":{"message":"`+msg+`"}}`)), key), 300)
 	if strings.Contains(got, key[:8]) || !utf8.ValidString(got) || len(got) > 300 {
