@@ -74,9 +74,11 @@ func TestCompressLogFileRoundTrip(t *testing.T) {
 	if n, ok := GzipRawSize(p + ".gz"); !ok || n != int64(len(raw)) {
 		t.Fatalf("raw size %d %v", n, ok)
 	}
-	if _, packed, err := OpenLogFile(p); err != nil || !packed {
+	rc, packed, err := OpenLogFile(p)
+	if err != nil || !packed {
 		t.Fatalf("packed %v err %v", packed, err)
 	}
+	rc.Close() // Windows can't remove the temp dir while it's open
 	if _, _, err := OpenLogFile(filepath.Join(dir, "none.log")); !errors.Is(err, ErrNoLog) {
 		t.Fatalf("missing log: %v", err)
 	}
@@ -103,9 +105,11 @@ func TestCompressLogFileLeavesSmallAndRandom(t *testing.T) {
 	}
 	// Plain wins when both exist (a sweep that couldn't remove the plain file).
 	os.WriteFile(small+".gz", []byte("junk"), 0o600)
-	if _, packed, err := OpenLogFile(small); err != nil || packed {
+	rc, packed, err := OpenLogFile(small)
+	if err != nil || packed {
 		t.Fatalf("plain should win: packed %v err %v", packed, err)
 	}
+	rc.Close()
 }
 
 func TestCompressFinishedLogsSkipsLiveBusyRecent(t *testing.T) {
