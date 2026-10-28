@@ -60,6 +60,7 @@ type taskFileEntry struct {
 	Skill          *taskFileSkill  `json:"skill,omitempty"`         // follows the skill's current version
 	AllowedTools   []string        `json:"allowed_tools,omitempty"` // as the task has them
 	Policy         *taskPolicyForm `json:"policy,omitempty"`        // retries, catch-up, priority
+	Tags           []string        `json:"tags,omitempty"`
 }
 
 // exportTasks: GET /api/tasks/export[?ids=a,b] → tidebot-tasks-YYYYMMDD.json (all live
@@ -128,6 +129,9 @@ func (s *Server) taskEntryOf(ctx context.Context, v tasksvc.TaskView) taskFileEn
 		_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(max_usd,0) FROM budgets WHERE scope='task' AND scope_id=? AND period='day' AND bucket=''`, v.Task.ID).Scan(&e.BudgetUSD)
 		pf := policyFormOf((&policy.Store{DB: s.deps.DB}).Get(ctx, v.Task.ID))
 		e.Policy = &pf
+		if m, err := s.taskTags(ctx, v.Task.ID); err == nil {
+			e.Tags = m[v.Task.ID]
+		}
 	}
 	return e
 }
@@ -272,6 +276,10 @@ func (s *Server) checkImport(ctx context.Context, i int, e *taskFileEntry, taken
 	}
 	f := taskForm{Name: e.Name, Prompt: e.Prompt, Provider: strings.TrimSpace(e.Provider), Cron: e.Cron,
 		BudgetUSD: e.BudgetUSD, TimeoutMinutes: e.TimeoutMinutes, Policy: e.Policy}
+	if len(e.Tags) > 0 {
+		tags := e.Tags
+		f.Tags = &tags
+	}
 	if f.Provider != "" && s.deps.Reg != nil {
 		if _, ok := s.deps.Reg.Get(f.Provider); !ok {
 			f.Provider = ""

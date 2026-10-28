@@ -112,7 +112,7 @@ func TestTaskFormPolicyUI(t *testing.T) {
 		`function policyFieldsHtml(p, streak, brkAt) {`,
 		`wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +`,
 		`wirePolicyFields(root, f);`,
-		`policy: readPolicyFields(f) };`,
+		`policy: readPolicyFields(f), tags: tgs.value() };`,
 		`f.catchup_grace_minutes.disabled = f.catchup.value === "skip";`,
 		// new-task defaults mirror policy.Default
 		`{ retry_max: ` + itoa(d.RetryMax) + `, catchup: "` + d.Catchup + `", catchup_grace_minutes: ` + itoa(d.CatchupGraceMinutes) + `, notify_success: false, notify_answer: ` + strconv.FormatBool(d.NotifyAnswer) + `, priority: "` + d.Priority + `" }`,

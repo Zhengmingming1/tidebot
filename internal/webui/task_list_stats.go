@@ -20,6 +20,15 @@ func (s *Server) enrichTaskList(ctx context.Context, out []taskDTO) error {
 	for i := range out {
 		at[out[i].ID] = i
 	}
+	tags, err := s.taskTags(ctx)
+	if err != nil {
+		return err
+	}
+	for tid, tg := range tags {
+		if i, ok := at[tid]; ok {
+			out[i].Tags = tg
+		}
+	}
 	beats, err := s.recentBeats(ctx, "t.status <> 'archived'", taskListBeats)
 	if err != nil {
 		return err

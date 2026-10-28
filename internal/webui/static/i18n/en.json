@@ -1936,5 +1936,20 @@
   "pv.models_failed": "Couldn't fetch models: {e}",
   "pv.models_nokey": "Save an API key first, then fetch the models",
   "pv.models_unlisted": "Not among this provider's {n} models — Check to be sure",
-  "pv.models_empty": "The provider returned an empty model list"
+  "pv.models_empty": "The provider returned an empty model list",
+  "tg.label": "Tags",
+  "tg.hint": "Group tasks; the task list filters and searches by tag. Enter or comma adds one, up to 8",
+  "tg.ph": "Type a tag and press Enter, e.g. report, monitor",
+  "tg.one_ph": "Tag name, e.g. report",
+  "tg.in_use": "In use:",
+  "tg.n_tasks": "Used by {n} tasks",
+  "tg.remove": "Remove tag {t}",
+  "tg.any": "Any tag",
+  "tg.filter_tip": "Show only tasks tagged “{t}”",
+  "tg.batch": "Tag",
+  "tg.batch_title": "Tag {n} selected tasks",
+  "tg.batch_add": "Add",
+  "tg.batch_remove": "Remove from selected",
+  "tg.added": "Tagged {n} tasks “{t}”.",
+  "tg.removed": "Removed “{t}” from {n} tasks."
 }

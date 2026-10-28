@@ -151,7 +151,8 @@
     edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
     eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
     battery: '<rect width="16" height="10" x="2" y="7" rx="2" ry="2"/><path d="M22 11v2"/><path d="M6 11v2"/><path d="M10 11v2"/>',
-    lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
+    lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1"/>'
   };
   function ic(name, cls) { return '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[name] || P.circle) + "</svg>"; }
   var BUTTON_ICONS = ["doc", "sync", "pie", "trash", "bolt", "terminal", "calendar", "pulse", "shield", "globe", "mail", "database", "code", "rocket", "bug", "cloud", "camera", "book", "box", "git", "chat", "image", "link", "download", "star", "cpu", "server", "edit"];
@@ -1724,17 +1725,121 @@
     });
   }
 
+  // ---------- task tags ----------
+  // Group tasks by a few words ("日报", "监控", "客户 A"), as Uptime Kuma tags its monitors
+  // (src/components/TagsManager.vue, MonitorList.vue): picked from the ones in use, case
+  // doesn't make a new tag, the list search matches tag names and a tag filters the list.
+  // No colour picker: each name gets one of six quiet sand-theme hues from a hash, the same
+  // on every page and machine.
+  var TAG_MAX = 8, TAG_LEN = 24, TAG_ROW = 2;
+  function tagHue(name) {
+    // FNV-1a: a multiplier like 31 is 1 mod 6, which would make the hue the sum of the codes.
+    var h = 2166136261, k = String(name).toLowerCase();
+    for (var i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return (h >>> 8) % 6;
+  }
+  function tagChip(name, attrs) { return '<span class="ttag h' + tagHue(name) + '"' + (attrs || "") + ">" + esc(name) + "</span>"; }
+  // tagChipsRow: up to TAG_ROW chips that filter the list, the rest as "+N" with the names in the tooltip.
+  function tagChipsRow(tags) {
+    if (!tags || !tags.length) return "";
+    var shown = tags.slice(0, TAG_ROW), rest = tags.slice(TAG_ROW);
+    return '<span class="ttags">' + shown.map(function (g) { return '<button type="button" class="ttag h' + tagHue(g) + '" data-tagf="' + esc(g) + '" data-tip="' + esc(T("tg.filter_tip", { t: g })) + '">' + esc(g) + "</button>"; }).join("") +
+      (rest.length ? '<span class="ttag more" data-tip="' + esc(rest.join(T("list.sep"))) + '">+' + rest.length + "</span>" : "") + "</span>";
+  }
+  function cleanTag(raw) { return String(raw || "").trim().replace(/^[#＃]+/, "").replace(/\s+/g, " ").replace(/[,，]/g, "").slice(0, TAG_LEN).trim(); }
+  // tagInput: chips + a text box. Enter, comma or Tab (with text) adds; Backspace on an empty
+  // box removes the last; × removes one; tags already in use are offered below (filtered by
+  // what is typed, click to add). Input-method composition is left alone.
+  function tagInput(host, initial, inUse) {
+    var tags = (initial || []).slice(), inp, box, sug;
+    host.innerHTML = '<div class="tag-in" id="tg-box"><input id="tg-inp" maxlength="' + TAG_LEN + '" autocomplete="off" spellcheck="false" aria-label="' + esc(T("tg.label")) + '"></div><div class="tag-sugg" id="tg-sugg"></div>';
+    box = $("#tg-box", host); inp = $("#tg-inp", host); sug = $("#tg-sugg", host);
+    var has = function (t) { return tags.some(function (x) { return x.toLowerCase() === t.toLowerCase(); }); };
+    var canon = function (t) { var u = (inUse || []).filter(function (x) { return x.tag.toLowerCase() === t.toLowerCase(); })[0]; return u ? u.tag : t; };
+    function paint() {
+      $$(".ttag", box).forEach(function (c) { c.remove(); });
+      inp.insertAdjacentHTML("beforebegin", tags.map(function (g, i) { return '<span class="ttag h' + tagHue(g) + '">' + esc(g) + '<button type="button" class="x" data-rm="' + i + '" aria-label="' + esc(T("tg.remove", { t: g })) + '">×</button></span>'; }).join(""));
+      inp.placeholder = tags.length ? "" : T("tg.ph");
+      inp.disabled = tags.length >= TAG_MAX;
+      var q = inp.value.trim().toLowerCase();
+      var list = (inUse || []).filter(function (u) { return !has(u.tag) && (!q || u.tag.toLowerCase().indexOf(q) >= 0); }).slice(0, 8);
+      sug.innerHTML = list.length && tags.length < TAG_MAX ? '<span class="muted">' + esc(T("tg.in_use")) + "</span>" + list.map(function (u) { return '<button type="button" class="ttag h' + tagHue(u.tag) + '" data-add="' + esc(u.tag) + '" data-tip="' + esc(T("tg.n_tasks", { n: u.n })) + '">+ ' + esc(u.tag) + "</button>"; }).join("") : "";
+    }
+    function add(raw) {
+      var t = cleanTag(raw);
+      if (!t || has(t) || tags.length >= TAG_MAX) return false;
+      tags.push(canon(t)); return true;
+    }
+    box.addEventListener("click", function (e) {
+      var rm = e.target.closest("[data-rm]");
+      if (rm) { tags.splice(+rm.getAttribute("data-rm"), 1); paint(); inp.focus(); return; }
+      if (e.target === box) inp.focus();
+    });
+    sug.addEventListener("click", function (e) { var a = e.target.closest("[data-add]"); if (a && add(a.getAttribute("data-add"))) { paint(); if (!inp.disabled) inp.focus(); } });
+    inp.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if ((e.key === "Enter" || e.key === "," || e.key === "，" || (e.key === "Tab" && inp.value.trim())) && inp.value.trim()) {
+        e.preventDefault(); add(inp.value); inp.value = ""; paint(); inp.focus();
+      } else if (e.key === "Enter") e.preventDefault(); // never submits the form from here
+      else if (e.key === "Backspace" && !inp.value && tags.length) { tags.pop(); paint(); }
+    });
+    inp.addEventListener("input", function () { if (/[,，]/.test(inp.value)) { inp.value.split(/[,，]/).forEach(add); inp.value = ""; } paint(); });
+    inp.addEventListener("blur", function () { if (inp.value.trim() && add(inp.value)) { inp.value = ""; paint(); } });
+    paint();
+    // value(): the tags, with whatever is still typed in the box.
+    return { value: function () { if (inp.value.trim()) add(inp.value); return tags.slice(); } };
+  }
+  // tagBatchModal: add a tag to the selected tasks, or take one off them.
+  function tagBatchModal(ids, inUse, done) {
+    modal('<div class="card-head"><span class="ico">' + ic("tag") + "</span><h2>" + esc(T("tg.batch_title", { n: ids.length })) + "</h2></div>" +
+      '<form id="tgb"><label class="field"><span>' + esc(T("tg.label")) + '</span><input name="tag" maxlength="' + TAG_LEN + '" autocomplete="off" spellcheck="false" required placeholder="' + esc(T("tg.one_ph")) + '"></label><div class="tag-sugg" id="tgb-sugg"></div>' +
+      '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn" id="tgb-rm">' + esc(T("tg.batch_remove")) + '</button><button class="btn primary" id="tgb-add">' + ic("plus", "sm") + esc(T("tg.batch_add")) + "</button></div></form>", function (root, close) {
+      var f = $("#tgb", root), sug = $("#tgb-sugg", root);
+      var paint = function () {
+        var q = f.tag.value.trim().toLowerCase(), l = inUse.filter(function (u) { return !q || u.tag.toLowerCase().indexOf(q) >= 0; }).slice(0, 10);
+        sug.innerHTML = l.length ? '<span class="muted">' + esc(T("tg.in_use")) + "</span>" + l.map(function (u) { return '<button type="button" class="ttag h' + tagHue(u.tag) + '" data-pick="' + esc(u.tag) + '" data-tip="' + esc(T("tg.n_tasks", { n: u.n })) + '">' + esc(u.tag) + "</button>"; }).join("") : "";
+      };
+      sug.addEventListener("click", function (e) { var b = e.target.closest("[data-pick]"); if (b) { f.tag.value = b.getAttribute("data-pick"); paint(); f.tag.focus(); } });
+      f.tag.addEventListener("input", paint);
+      var go = function (act) {
+        var t = cleanTag(f.tag.value);
+        if (!t) { f.tag.focus(); return; }
+        $$(".actions .btn", root).forEach(function (b) { b.disabled = true; });
+        api("/api/tasks/batch", { method: "POST", body: { ids: ids, action: act, tag: t } }).then(function (r) {
+          close();
+          if (r.failed && r.failed.length) toast(T("tl.batch_partial", { n: r.done, f: r.failed.length }), true);
+          else toast(T(act === "add_tag" ? "tg.added" : "tg.removed", { t: t, n: r.done }));
+          done();
+        }).catch(function (e) { $$(".actions .btn", root).forEach(function (b) { b.disabled = false; }); fail(e); });
+      };
+      f.addEventListener("submit", function (e) { e.preventDefault(); go("add_tag"); });
+      $("#tgb-rm", root).addEventListener("click", function () { go("remove_tag"); });
+      paint();
+      setTimeout(function () { f.tag.focus(); }, 0);
+    });
+  }
+
   // ---------- TASKS ----------
-  var taskView = { q: "", status: "", skill: "", sort: "name", dir: 1, sel: {} };
+  var taskView = { q: "", status: "", skill: "", tag: "", sort: "name", dir: 1, sel: {} };
   // TASK_FILTERS: [value, label key, tooltip key]. "failing" = the newest run with a result failed.
   var TASK_FILTERS = [["", "runs.all_f"], ["active", "task.active"], ["paused", "task.paused"], ["failing", "tl.f_failing", "tl.f_failing_tip"]];
   function taskMatchesStatus(t, st) { return !st || (st === "failing" ? !!t.failing : t.status === st); }
-  function tasksHash(st) { return "#/tasks" + (st ? "?status=" + enc(st) : ""); }
+  function tasksHash(st) {
+    var q = [];
+    if (st) q.push("status=" + enc(st));
+    if (taskView.tag) q.push("tag=" + enc(taskView.tag));
+    return "#/tasks" + (q.length ? "?" + q.join("&") : "");
+  }
   function renderTasks(params) {
     var want = params && params.get("status");
     if (want != null) taskView.status = TASK_FILTERS.some(function (x) { return x[0] === want; }) ? want : "";
+    var wantTag = params && params.get("tag");
+    if (wantTag != null) taskView.tag = cleanTag(wantTag);
     return api("/api/tasks").then(function (tasks) {
-      var v = taskView, skills = {};
+      var v = taskView, skills = {}, tagN = {};
+      tasks.forEach(function (t) { (t.tags || []).forEach(function (g) { tagN[g] = (tagN[g] || 0) + 1; }); });
+      var tagList = Object.keys(tagN).sort(function (a, b) { return tagN[b] - tagN[a] || (a < b ? -1 : 1); });
+      if (v.tag && !tagN[v.tag]) v.tag = "";
       // The address shows the filter, so a link or reload opens the same view; replaceState
       // changes it without a hashchange (no refetch, no repaint).
       if (location.hash.indexOf("#/tasks") === 0 && location.hash !== tasksHash(v.status)) history.replaceState(null, "", tasksHash(v.status));
@@ -1746,18 +1851,19 @@
       };
       var th = function (k, label) { return '<th><button class="th-sort' + (v.sort === k ? " on" : "") + '" data-sort="' + k + '" aria-sort="' + (v.sort === k ? (v.dir > 0 ? "ascending" : "descending") : "none") + '">' + esc(label) + (v.sort === k ? '<span class="arr">' + (v.dir > 0 ? "↑" : "↓") + "</span>" : "") + "</button></th>"; };
       mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn ghost" id="t-import" data-tip="' + esc(T("tx.import_tip")) + '">' + ic("upload", "sm") + esc(T("tx.import")) + '</button><button class="btn ghost" id="t-export" data-tip="' + esc(T("tx.export_tip")) + '"' + (tasks.length ? "" : " disabled") + ">" + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
-        '<section class="card flush"><div class="toolbar"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
+        '<section class="card flush"><div class="toolbar task-tb"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters task-f" role="group">' + TASK_FILTERS.map(function (x) { return '<button data-st="' + x[0] + '" aria-pressed="' + (x[0] === v.status) + '" class="' + (x[0] === v.status ? "active" : "") + '"' + (x[2] ? ' data-tip="' + esc(T(x[2])) + '"' : "") + ">" + esc(T(x[1])) + ' <span class="cnt" data-c="' + x[0] + '"></span></button>'; }).join("") + "</div>" +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
+        (tagList.length ? '<select id="ttag" aria-label="' + esc(T("tg.label")) + '"><option value="">' + esc(T("tg.any")) + "</option>" + tagList.map(function (g) { return opt(g, g + " · " + tagN[g], g === v.tag); }).join("") + "</select>" : "") +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
-        '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm" id="tb-export" data-tip="' + esc(T("tx.export_tip")) + '">' + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
+        '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm" id="tb-tag">' + ic("tag", "sm") + esc(T("tg.batch")) + '</button><button class="btn sm" id="tb-export" data-tip="' + esc(T("tx.export_tip")) + '">' + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
         '<table class="table"><thead><tr><th class="ck"><input type="checkbox" id="tall" aria-label="' + esc(T("tl.select_all")) + '"></th>' + th("name", T("col.task")) + th("schedule", T("col.schedule")) + th("status", T("col.status")) + th("version", T("col.version")).replace("<th>", '<th class="c-opt">') + th("last", T("col.recent_runs")) + th("today", T("col.runs_today")).replace("<th>", '<th class="c-opt">') + '<th class="c-act"></th></tr></thead><tbody id="tbody"></tbody></table></section>', "tasks", [[T("nav.tasks")]]);
       var body = $("#tbody");
       function rows() {
         var q = v.q.trim().toLowerCase(), key = sorters[v.sort];
         // Counts on the chips follow the search and skill filter, not the chip itself (like the runs list).
         var base = tasks.filter(function (t) {
-          return (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt).toLowerCase().indexOf(q) >= 0);
+          return (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!v.tag || (t.tags || []).indexOf(v.tag) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt + " " + (t.tags || []).join(" ")).toLowerCase().indexOf(q) >= 0);
         });
         TASK_FILTERS.forEach(function (x) {
           var n = base.filter(function (t) { return taskMatchesStatus(t, x[0]); }).length, c = $('.task-f [data-c="' + x[0] + '"]');
@@ -1766,11 +1872,12 @@
         var list = base.filter(function (t) { return taskMatchesStatus(t, v.status); }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
-          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
+          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
             '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
         $$("[data-runnow]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); runTaskNow(b.getAttribute("data-runnow"), b); }); });
+        $$("[data-tagf]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); setTag(b.getAttribute("data-tagf")); }); });
         $$("[data-pick]", body).forEach(function (c) {
           c.addEventListener("click", function (e) { e.stopPropagation(); });
           c.addEventListener("change", function () { if (c.checked) v.sel[c.getAttribute("data-pick")] = 1; else delete v.sel[c.getAttribute("data-pick")]; batch(); });
@@ -1792,6 +1899,15 @@
         rows();
       }); });
       $("#tsk").addEventListener("change", function (e) { v.skill = e.target.value; rows(); });
+      // A tag chip in a row or the tag menu filters the list; the address keeps it.
+      function setTag(g) {
+        v.tag = v.tag === g ? "" : g;
+        if ($("#ttag")) $("#ttag").value = v.tag;
+        history.replaceState(null, "", tasksHash(v.status));
+        rows();
+      }
+      if ($("#ttag")) $("#ttag").addEventListener("change", function (e) { v.tag = ""; setTag(e.target.value); });
+      $("#tb-tag").addEventListener("click", function () { tagBatchModal(Object.keys(v.sel), tagList.map(function (g) { return { tag: g, n: tagN[g] }; }), function () { v.sel = {}; refresh(); }); });
       $$("[data-sort]").forEach(function (b) { b.addEventListener("click", function () { var k = b.getAttribute("data-sort"); if (v.sort === k) v.dir = -v.dir; else { v.sort = k; v.dir = 1; } renderTasks(); }); });
       $("#tall").addEventListener("change", function (e) { $$("[data-pick]", body).forEach(function (c) { c.checked = e.target.checked; if (c.checked) v.sel[c.getAttribute("data-pick")] = 1; else delete v.sel[c.getAttribute("data-pick")]; }); batch(); });
       $("#tclear").addEventListener("click", function () { v.sel = {}; rows(); });
@@ -2057,7 +2173,8 @@
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="grid g-detail">' +
         '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
-        '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span></div></div>" +
+        '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span>" +
+        ((t.tags || []).length ? '<span class="td-tags">' + ic("tag", "sm") + t.tags.map(function (g) { return '<a class="ttag h' + tagHue(g) + '" href="#/tasks?tag=' + enc(g) + '" data-tip="' + esc(T("tg.filter_tip", { t: g })) + '">' + esc(g) + "</a>"; }).join("") + "</span>" : "") + "</div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">' + ic("pause", "sm") + esc(T("td.pause")) + ic("chevDown", "sm") + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" + pauseNotice(t) +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
@@ -3702,9 +3819,11 @@
   }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
-    var reqs = [api("/api/skills"), api("/api/settings")];
+    var reqs = [api("/api/skills"), api("/api/settings"), api("/api/tasks/tags").catch(function () { return []; })];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
     Promise.all(reqs).then(function (r) {
+      var inUse = r[2] || [];
+      r.splice(2, 1);
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
@@ -3713,6 +3832,7 @@
       var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
         (taskId ? nameF + promptF : promptF + nameF) +
+        '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
         '<div class="form-row">' + fieldHtml(T("bt.skill"), '<select name="skill_id"><option value="">' + esc(T("tf.no_skill")) + "</option>" + skills.map(function (s) { return opt(s.id, s.name, s.id === tf.skill_id); }).join("") + "</select>") +
         fieldHtml(T("bt.skill_ver"), '<select name="skill_version_id"><option value="">' + esc(T("bt.latest")) + "</option></select>") + "</div>" +
         fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
@@ -3730,6 +3850,7 @@
           api("/api/skills/" + enc(f.skill_id.value) + "/versions").then(function (v) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>" + v.versions.slice().reverse().map(function (x) { return opt(x.id, T("bt.pin_v", { n: x.no }), x.id === tf.skill_version_id); }).join(""); }).catch(fail);
         };
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
+        var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
         loadVers();
         if (drafty) wireDraft(root, f.prompt, "task");
         f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
@@ -3741,7 +3862,7 @@
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, provider: f.provider.value, cron: se.value(),
-            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f) };
+            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
             if (drafty) draftClear("task");

@@ -1936,5 +1936,20 @@
   "pv.models_failed": "获取模型列表失败：{e}",
   "pv.models_nokey": "先填写 API Key 并保存，再获取模型列表",
   "pv.models_unlisted": "不在该接入的 {n} 个模型中，可点「检测」确认",
-  "pv.models_empty": "接入返回的模型列表是空的"
+  "pv.models_empty": "接入返回的模型列表是空的",
+  "tg.label": "标签",
+  "tg.hint": "给任务分组，任务列表可按标签筛选和搜索；回车或逗号添加，最多 8 个",
+  "tg.ph": "输入标签后回车，如 日报、监控",
+  "tg.one_ph": "标签名，如 日报",
+  "tg.in_use": "已有：",
+  "tg.n_tasks": "{n} 个任务在用",
+  "tg.remove": "移除标签 {t}",
+  "tg.any": "全部标签",
+  "tg.filter_tip": "只看标签为「{t}」的任务",
+  "tg.batch": "标签",
+  "tg.batch_title": "给所选 {n} 个任务加标签",
+  "tg.batch_add": "添加",
+  "tg.batch_remove": "从所选移除",
+  "tg.added": "已给 {n} 个任务加上「{t}」",
+  "tg.removed": "已从 {n} 个任务移除「{t}」"
 }

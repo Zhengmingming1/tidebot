@@ -3632,3 +3632,58 @@ task list and Home re-poll these, and the spend page loads `/api/tasks` first. A
    timings, run before each weekly release to catch regressions.
 4. Retention's "keep the last N runs per task" (`internal/app/system.go`) still uses a window
    query; it only selects ids, but could use the same per-task index read.
+
+## 2026-10-29 (04:00): tasks carry tags — the list filters and searches by them
+
+Category: **feature / UX** (the last rounds were performance, DST correctness, search UX, log
+compression and prompt correctness). With a dozen tasks the list had only status and skill to
+narrow it; nothing grouped "daily reports" or "client A" together.
+
+**Done**
+
+- Migration `017_task_tags.sql`: `task_tags(task_id, tag, pos)`, primary key per task and tag,
+  index on tag. Archived tasks keep theirs but are never listed or suggested.
+- `internal/webui/task_tags.go`: tags are trimmed, inner spaces folded, a leading `#`/`＃`
+  dropped, duplicates removed without case (first spelling wins), max 8 × 24 characters, no
+  commas or control characters. A tag typed in another case joins the spelling already in use
+  ("daily" → "Daily"). Parameterized SQL, one transaction per save.
+- API: the task form carries `tags` (left out = unchanged, so older pages and agentctl don't
+  wipe them; `[]` clears); `/api/tasks`, the detail and `/form` answer with them (list: one
+  query for all tasks); `GET /api/tasks/tags` → tags in use with counts; batch actions
+  `add_tag` / `remove_tag`; duplicate copies tags; export / import carry them.
+- WebUI: chip input in the task form under the prompt (Enter, comma or Tab adds, Backspace on an
+  empty box removes the last, × removes one, IME composition left alone, Enter never submits),
+  tags already in use offered underneath with their counts in the tooltip. Task list: up to two
+  chips beside the name (+N with the rest in the tooltip); clicking one filters, a "全部标签"
+  menu (only when tags exist) does the same, the address keeps `?tag=`; the search also matches
+  tag names; the batch bar has "标签" (add to / remove from the selected tasks, in-app dialog).
+  Task page: chips after the created/updated line, each links to the filtered list. Hue from an
+  FNV-1a hash of the lowercased name into six quiet sand-theme colours — same on every page and
+  OS, no colour picker. Toolbar search box now shrinks (140–240 px) so search, status chips,
+  skill and tag menus stay on one row at 1024 px in both languages. zh-CN and en.
+- Tests: `TestNormalizeTags`, `TestTaskTagsAPI` (create / keep / clear, case joins, list, detail,
+  form, in-use counts, batch add / remove / empty, duplicate, export → import),
+  `TestTaskTagsUI` (wiring, strings, no native dialogs, escaping, hue spread via node).
+- Shots: `/workspace/tidebot-shots/2026-10-29-task-tags-list-1024x655.png`, `…-filter-…`,
+  `…-form-…` and the `-en` variants.
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/components/TagsManager.vue` (tags picked from the ones in use, a
+  name in another case is "already exists"), `src/components/Tag.vue` (small chip, optional ×),
+  `src/components/MonitorList.vue` (search text also matches tag names; filter by tags). Ideas
+  only, no code copied; tidebot drops colours and values to keep it one field.
+
+**Learned**
+
+- A string hash with multiplier 31 is useless modulo 6 (31 ≡ 1), the "hue" became the sum of the
+  character codes and most CJK pairs landed on the same colour; FNV-1a spreads them.
+- Optional pointer fields (`*[]string`) keep "left out" and "cleared" apart, which matters for
+  agentctl and older open pages that PUT the form without the new field.
+
+**Ideas for later**
+
+1. Filter runs and spend by tag (spend breakdown "by tag").
+2. Several tags in the filter at once (Uptime Kuma allows any-of).
+3. Rename / merge a tag everywhere from a small "manage tags" list in Settings.
+4. `agentctl tasks create --tag` and tags in the global ⌘K search.

@@ -2025,3 +2025,32 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .run-hit .hit-f { color: var(--text-3); margin-right: 4px; }
 .run-hit .hit-f::after { content: "·"; margin-left: 4px; }
 .run-hit mark, .cell-main strong mark { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; }
+
+/* Task tags: small chips in six quiet hues (picked from the name, see tagHue), 20px high
+   so a row keeps its height; the form's chip box looks like an input. */
+.ttag { display: inline-flex; align-items: center; gap: 2px; height: 20px; max-width: 160px; padding: 0 6px; border-radius: 6px; border: 1px solid transparent; font: inherit; font-size: 12px; font-weight: 500; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; cursor: default; flex: none; }
+button.ttag, a.ttag { cursor: pointer; }
+button.ttag:hover, a.ttag:hover { filter: brightness(.96); text-decoration: none; }
+.ttag.h0 { background: #eaf1fd; color: #1d4f9e; border-color: #d6e4fb; }
+.ttag.h1 { background: #e7f5ec; color: #1b6b3d; border-color: #cbe8d6; }
+.ttag.h2 { background: #fdf3e2; color: #8a5300; border-color: #f3dcb3; }
+.ttag.h3 { background: #f6ebf8; color: #7a3b86; border-color: #ead3ef; }
+.ttag.h4 { background: #e6f4f4; color: #1d6466; border-color: #c9e6e6; }
+.ttag.h5 { background: #fbeeea; color: #9a3f2a; border-color: #f2d5cc; }
+.ttag.more { background: var(--bg-sunk); color: var(--text-3); border-color: var(--border); }
+.tl-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tl-line .row-link { min-width: 0; overflow: hidden; }
+.ttags { display: inline-flex; gap: 4px; flex: none; min-width: 0; }
+.td-tags { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
+.tag-in { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: var(--ctl-h, 36px); padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: text; }
+.tag-in:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.tag-in input, .field .tag-in input { flex: 1; min-width: 96px; height: 24px; border: 0; padding: 0; background: transparent; box-shadow: none; outline: none; font: inherit; }
+.tag-in .ttag .x { border: 0; background: none; padding: 0 0 0 2px; color: inherit; opacity: .6; font: inherit; font-size: 14px; line-height: 1; cursor: pointer; }
+.tag-in .ttag .x:hover { opacity: 1; }
+.tag-sugg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; }
+.tag-sugg:empty { display: none; }
+.tag-sugg .muted { margin-right: 4px; }
+/* Task list toolbar: with the tag menu the search box gives way (basis 140, up to 240) so
+   search, status chips, skill and tag menus stay on one row at 1024px in both languages. */
+.task-tb .search-in { flex: 1 1 140px; min-width: 120px; max-width: 240px; }
+.task-tb select { max-width: 128px; text-overflow: ellipsis; }

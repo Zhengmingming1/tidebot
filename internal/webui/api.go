@@ -123,6 +123,7 @@ type taskDTO struct {
 	// ConstraintIDs parallels Constraints; amendment items refer to constraints by id.
 	ConstraintIDs []string `json:"constraint_ids"`
 	Skills        []string `json:"skills"`
+	Tags          []string `json:"tags"`
 	RunsToday     int      `json:"runs_today"`
 	LastStatus    string   `json:"last_status"`
 	// List answer only: when the newest run was created and the last few runs, oldest first.
@@ -147,7 +148,7 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 		Prompt: v.Task.Prompt, Workspace: v.Task.WorkspaceDir,
 		NextRunAt: v.Task.NextRunAt.String, LastFiredAt: v.Task.LastFiredAt.String,
 		CreatedAt: v.Task.CreatedAt, UpdatedAt: v.Task.UpdatedAt,
-		Constraints: []string{}, ConstraintIDs: []string{}, Skills: []string{},
+		Constraints: []string{}, ConstraintIDs: []string{}, Skills: []string{}, Tags: []string{},
 	}
 	if v.Task.Status == "paused" {
 		d.PauseKind, d.PauseDetail, d.PausedAt = v.Task.PauseKind, v.Task.PauseDetail, v.Task.PausedAt.String
@@ -581,6 +582,10 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		s.importTasks(w, r)
 		return
 	}
+	if id == "tags" && len(parts) == 1 && r.Method == http.MethodGet {
+		s.handleTagsInUse(w, r)
+		return
+	}
 	if id == "batch" && len(parts) == 1 && r.Method == http.MethodPost {
 		s.handleTaskBatch(w, r)
 		return
@@ -624,6 +629,9 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		}
 		d := toTaskDTO(v)
 		d.Workspace, d.WorkspaceDefault = s.taskWorkspace(d.ID, d.Workspace)
+		if m, err := s.taskTags(ctx, id); err == nil && m[id] != nil {
+			d.Tags = m[id]
+		}
 		writeJSON(w, 200, d)
 		return
 	}

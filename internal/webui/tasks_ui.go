@@ -34,6 +34,8 @@ type taskForm struct {
 	Workspace *string `json:"workspace,omitempty"`
 	// Policy: retries, catch-up and success notices. nil (left out) keeps what the task has.
 	Policy *taskPolicyForm `json:"policy,omitempty"`
+	// Tags: nil (left out, e.g. an older page or agentctl) keeps the task's tags.
+	Tags *[]string `json:"tags,omitempty"`
 }
 
 // taskPolicyForm is the part of policy.Policy the task form edits. Allowed tools and
@@ -88,6 +90,14 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 		if err := validatePolicyForm(f.Policy); err != nil {
 			return err
 		}
+	}
+	if f.Tags != nil {
+		tags, err := normalizeTags(*f.Tags)
+		if err != nil {
+			return err
+		}
+		tags = s.canonicalTags(ctx, tags)
+		f.Tags = &tags
 	}
 	f.Name = strings.TrimSpace(f.Name)
 	f.Prompt = strings.TrimSpace(f.Prompt)
@@ -163,6 +173,11 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 			p.NotifyAnswer = *f.Policy.NotifyAnswer
 		}
 		if err := ps.Put(ctx, p); err != nil {
+			return err
+		}
+	}
+	if f.Tags != nil && s.deps.DB != nil {
+		if err := s.setTaskTags(ctx, taskID, *f.Tags); err != nil {
 			return err
 		}
 	}
@@ -293,6 +308,11 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 	p := (&policy.Store{DB: s.deps.DB}).Get(ctx, id)
 	pf := policyFormOf(p)
 	f.Policy = &pf
+	tags := []string{}
+	if m, err := s.taskTags(ctx, id); err == nil && m[id] != nil {
+		tags = m[id]
+	}
+	f.Tags = &tags
 	return map[string]any{"form": f, "fail_streak": p.ConsecutiveFailures, "breaker_at": policy.BreakerThreshold}, nil
 }
 
@@ -362,12 +382,21 @@ func (s *Server) handleTaskBatch(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		IDs    []string `json:"ids"`
 		Action string   `json:"action"`
+		Tag    string   `json:"tag"` // add_tag / remove_tag
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&b); err != nil || len(b.IDs) == 0 || len(b.IDs) > 200 {
 		writeErr(w, 400, "ids (1-200) and action required")
 		return
 	}
 	ctx := r.Context()
+	if b.Action == "add_tag" || b.Action == "remove_tag" {
+		t, err := s.batchTagArg(ctx, b.Tag)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		b.Tag = t
+	}
 	done, failed := 0, []string{}
 	for _, id := range b.IDs {
 		v, err := s.deps.Tasks.Get(ctx, id)
@@ -384,8 +413,10 @@ func (s *Server) handleTaskBatch(w http.ResponseWriter, r *http.Request) {
 			if err = s.deps.Tasks.SetStatus(ctx, id, "archived", "deleted in WebUI (batch)"); err == nil {
 				_ = s.deps.Tasks.SetSchedule(ctx, id, "")
 			}
+		case "add_tag", "remove_tag":
+			err = s.batchTag(ctx, id, b.Action, b.Tag)
 		default:
-			writeErr(w, 400, "action must be pause, resume or delete")
+			writeErr(w, 400, "action must be pause, resume, delete, add_tag or remove_tag")
 			return
 		}
 		if err != nil {
@@ -441,6 +472,13 @@ func (s *Server) duplicateTask(w http.ResponseWriter, r *http.Request, id string
 }
 
 func (s *Server) copyTaskSettings(ctx context.Context, from, to string) error {
+	if m, err := s.taskTags(ctx, from); err != nil {
+		return err
+	} else if len(m[from]) > 0 {
+		if err := s.setTaskTags(ctx, to, m[from]); err != nil {
+			return err
+		}
+	}
 	if s.deps.Cost != nil {
 		rows, err := s.deps.DB.QueryContext(ctx, `SELECT period, max_usd, max_tokens, action, warn_at_pct, bucket, currency
 FROM budgets WHERE scope='task' AND scope_id=?`, from)
