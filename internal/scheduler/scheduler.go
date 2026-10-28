@@ -277,12 +277,13 @@ func (s *Scheduler) Location() *time.Location {
 // NextRun computes the next fire time after from for a standard 5-field cron, read in
 // the scheduler's timezone. robfig/cron reads the fields in from's own zone, so a from
 // parsed from the database (UTC) used to move "0 9 * * *" to 9:00 UTC after the first run.
+// Daylight saving changes follow the rules in dst.go (fixed times run once a day).
 func (s *Scheduler) NextRun(expr string, from time.Time) (time.Time, error) {
 	sched, err := s.parser.Parse(expr)
 	if err != nil {
 		return time.Time{}, err
 	}
-	nx := sched.Next(from.In(s.Location()))
+	nx := NextIn(sched, from, s.Location())
 	if nx.IsZero() {
 		return nx, nil
 	}

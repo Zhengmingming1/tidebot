@@ -3508,3 +3508,70 @@ used RFC3339Nano, which drops trailing zeros, so `created_at` compared as text c
 "…:14.1Z" after "…:14.12Z" and the canary's own runs fell before its start. Timestamps there are
 now fixed width (`TestNowUTCSortsAsText`). Idea: grep the rest of the repo for RFC3339Nano values
 that are compared or sorted as text.
+
+## 2026-10-28 (20:00): daily times survive daylight saving — once a day, every day
+
+Category: **correctness / cross-platform scheduling** (the last rounds were search UI, disk usage
+and run-page features). Idea "DST gap / repeated-hour warning in the cron preview" (10-26 20:00,
+10-27 00:05) turned out to hide two real bugs in robfig/cron, which the scheduler, the preview,
+Home's "next 24 hours" and the budget estimate all used directly:
+
+- clocks forward: "30 2 * * *" in America/New_York had no run at all on 2026-03-08;
+- clocks back: "0 1 * * *" ran twice on 2026-11-01 (01:00 EDT and 01:00 EST) — twice the cost;
+- zones with a 30-minute shift (Australia/Lord_Howe): robfig skipped whole days for *every*
+  daily time around the change (its DST handling assumes one-hour steps).
+
+Asia/Shanghai has no DST, so nothing changes there; it matters as soon as the scheduling
+timezone (Settings › General) is a DST zone, on any OS (Windows uses the embedded tzdata).
+
+**Done**
+
+- `internal/scheduler/dst.go`: `NextIn(sched, from, loc)` matches cron fields against the wall
+  clock (robfig walks a UTC copy, which has no DST) and resolves each matching wall time to real
+  instants. Rules as in croner: a **fixed-time** job (one minute and one hour) whose time doesn't
+  exist runs once when the clock has jumped (03:00), if still the same day; a time that occurs
+  twice runs only on the first pass. **Interval** jobs (`*/15`, hourly, `9-17`) skip times in
+  the gap and run on both passes of the repeated hour, so the spacing stays even (identical to
+  robfig in whole-hour zones; a second walk from the fall-back edge finds the later pass).
+  `@every` and `CRON_TZ=` schedules are left to robfig.
+- `Scheduler.NextRun` (due runs, missed-run catch-up, `Realign`) goes through it, so stored next
+  runs that the old code put on a duplicate or skipped day are corrected at start-up by the
+  existing realign. Home's upcoming list and the budget "runs per day" estimate use it too (the
+  10-27 idea "route through Sched.NextRun").
+- `NextDSTNote`: the preview answer carries `dst` {kind gap / skip / fold, date, wall, at} for
+  the first change within a year. The schedule editor shows one quiet amber line under the
+  next runs, e.g. "夏令时：3/14周日 没有 02:30（时钟拨快），当天改在 03:00 运行" or "11/1周日 的
+  01:00 会出现两次（时钟拨慢），只运行一次"; the rule and the zone are in the tooltip. Task detail's
+  next-run tooltip adds the same sentence. zh-CN and en.
+- Tests: `TestNextInDST` (gap, weekly gap, fold, created on either pass, hourly both passes and
+  gap, interval in gap, Lord Howe ±30 min), `TestNextInOncePerDay` (9 fixed times × 5 zones ×
+  2 years: exactly one run per calendar day; interval schedules equal robfig over 3000 steps),
+  `TestNextDSTNote`, `TestSchedulerNextRunDST` (UTC from, as read from the database),
+  `TestSchedulerPreviewDSTNote`, `TestRunsPerDayDST`, `TestSchedulerDSTUI`.
+- Shots: `/workspace/tidebot-shots/2026-10-28-schedule-dst-1024x655.png` (gap, tooltip open),
+  `…-schedule-dst-fold-1024x655.png` (fold; the list shows 11/1 01:00 once), and `-en`.
+
+**Inspiration**
+
+- Hexagon/croner `src/croner.ts` (`_findOccurrence` / `_walk` / `_runAt`: walk the wall clock,
+  resolve each match as single / ambiguous / gap; fixed-time jobs run the first pass of a repeat
+  and at the gap end if on the same day, interval jobs both passes and skip the gap; a second walk
+  from the fall-back edge when the reference is on the first pass) and `src/pattern.ts`
+  (`isFixedTime`). Cross-checked with cuu508/cronsim (healthchecks' cron library,
+  `cronsim/cronsim.py`, `fixup_tz` handling). Ideas only, no code copied.
+
+**Learned**
+
+- robfig/cron's DST handling only works for one-hour shifts; walking the wall clock in UTC and
+  resolving instants afterwards is simpler and correct for any offset change.
+- Go's `time.Date` picks one side for a missing or doubled local time without saying which;
+  `Time.ZoneBounds` (Go 1.19+) gives the transition instants needed to tell them apart.
+- "Fixed time" must be decided per expression: an hourly job that ran twice in the repeated hour
+  is right, a daily one is a bug.
+
+**Ideas for later**
+
+1. Per-task timezone (n8n has one per workflow), with the note in that zone.
+2. Mark the adjusted time in the preview list itself (small "夏令时" tag on that row).
+3. A notification the day before a change for tasks whose time moves ("明天 02:30 的任务改在 03:00").
+4. Show the next change for the scheduling timezone in Settings › General's timezone tooltip.

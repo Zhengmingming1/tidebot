@@ -12,6 +12,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
 	"github.com/Zhengmingming1/tidebot/internal/pricing/catalog"
+	"github.com/Zhengmingming1/tidebot/internal/scheduler"
 )
 
 // BudgetGuess is the new-task form's daily budget suggestion (tasks are capped per
@@ -56,7 +57,7 @@ func runsPerDay(expr string, loc *time.Location) int {
 	end := now.AddDate(0, 0, 14)
 	per := map[string]int{}
 	best := 0
-	for t, i := sch.Next(now), 0; !t.IsZero() && t.Before(end) && i < 5000; t, i = sch.Next(t), i+1 {
+	for t, i := scheduler.NextIn(sch, now, loc), 0; !t.IsZero() && t.Before(end) && i < 5000; t, i = scheduler.NextIn(sch, t, loc), i+1 {
 		d := t.Format("2006-01-02")
 		per[d]++
 		if per[d] > best {

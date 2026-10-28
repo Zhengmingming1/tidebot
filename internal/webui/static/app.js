@@ -2081,7 +2081,7 @@
         // an active one shows whether "pause all" holds its next run back.
         if (snz) ts = ts.filter(function (x) { return new Date(x) > new Date(t.pause_detail); });
         var head = snz ? esc(T("tpz.wakes", { t: when(t.pause_detail) })) + (ts.length ? " · " + esc(T("td.next_at", { t: when(ts[0]) })) : "") : t.status !== "active" ? esc(T("tpz.no_next")) : "";
-        box.innerHTML = (head ? '<span class="muted">' + head + "</span>" : '<span class="muted">' + heldNext(ts[0]) + "</span>") + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : ""));
+        box.innerHTML = (head ? '<span class="muted">' + head + "</span>" : '<span class="muted">' + heldNext(ts[0]) + "</span>") + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : "") + (d.dst ? "\n" + dstNoteText(d.dst, d.scheduler_timezone) : ""));
       }).catch(function () {});
       if ($("#ws-copy")) $("#ws-copy").addEventListener("click", function () { copyText(t.workspace).catch(fail); });
       // Desktop app only: open the folder in Finder / File Explorer / the file manager ("o").
@@ -3451,6 +3451,19 @@
     return "";
   }
   var previewCache = {};
+  // dstNoteHtml: one quiet line when a clock change moves or merges a fixed daily time
+  // (server rules in internal/scheduler/dst.go); the rule and zone are in the tooltip.
+  function dstNoteText(n, zone) {
+    if (!n || !n.kind) return "";
+    var day = new Intl.DateTimeFormat(state.lang, { timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short" }).format(new Date(n.date + "T12:00:00Z"));
+    var at = n.at ? new Intl.DateTimeFormat(state.lang, { timeZone: zone || undefined, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(n.at)) : "";
+    var key = n.kind === "gap" ? "se.dst_gap" : n.kind === "fold" ? "se.dst_fold" : "se.dst_skip";
+    return T(key, { d: day, w: n.wall, at: at });
+  }
+  function dstNoteHtml(n, zone) {
+    var text = dstNoteText(n, zone);
+    return text ? ic("clock", "sm") + "<span>" + esc(text) + "</span>" + tip(T("se.dst_tip", { z: zone || "" })) : "";
+  }
   function scheduleEditor(host, cron, serverTz) {
     var s = parseSched(cron), tz = serverTz || state.tz || "", timer = null, seq = 0, touched = false;
     var dowName = function (d) { return new Intl.DateTimeFormat(state.lang, { weekday: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2023, 0, 1 + d))); };
@@ -3466,16 +3479,18 @@
       '<div class="se-pane" data-pane="cron"><input class="mono" data-k="cron" maxlength="200" spellcheck="false" placeholder="*/30 9-18 * * 1-5" value="' + esc(s.cron) + '" aria-describedby="se-err"><small class="hint">' + esc(T("se.cron_hint")) + '</small></div>' +
       '<div class="se-pane" data-pane="manual"><p class="muted">' + esc(T("tf.manual_hint")) + "</p></div>" +
       '<p class="field-err" id="se-err" role="alert"></p><p class="se-note muted"></p>' +
-      '<div class="sched-prev"><div class="sp-head"><span class="sp-human"></span><label class="inl">' + esc(T("se.show_in")) + ' <select data-k="tz">' + tzs.map(function (z) { return opt(z, z + (z === serverTz ? " · " + T("se.server") : ""), z === tz); }).join("") + '</select></label></div><ul class="next"></ul></div></div>';
+      '<div class="sched-prev"><div class="sp-head"><span class="sp-human"></span><label class="inl">' + esc(T("se.show_in")) + ' <select data-k="tz">' + tzs.map(function (z) { return opt(z, z + (z === serverTz ? " · " + T("se.server") : ""), z === tz); }).join("") + '</select></label></div><ul class="next"></ul><p class="sp-dst hidden"></p></div></div>';
     var $k = function (k) { return $('[data-k="' + k + '"]', host); };
-    var err = $("#se-err", host), note = $(".se-note", host), list = $(".next", host), human = $(".sp-human", host);
+    var err = $("#se-err", host), note = $(".se-note", host), list = $(".next", host), human = $(".sp-human", host), dstEl = $(".sp-dst", host);
     function value() {
       if (s.mode === "manual") return "";
       if (s.mode === "cron") return $k("cron").value.trim();
       return simpleCron({ kind: $k("kind").value, every: $k("every").value, minute: $k("minute").value, dow: $k("dow").value, dom: $k("dom").value, time: $k("time").value });
     }
-    function show(times, zone) {
-      list.innerHTML = times.map(function (t) { return "<li>" + esc(new Intl.DateTimeFormat(state.lang, { timeZone: zone, weekday: "short", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t))) + "</li>"; }).join("");
+    function show(d, zone) {
+      list.innerHTML = (d.times || []).map(function (t) { return "<li>" + esc(new Intl.DateTimeFormat(state.lang, { timeZone: zone, weekday: "short", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t))) + "</li>"; }).join("");
+      dstEl.innerHTML = dstNoteHtml(d.dst, d.scheduler_timezone || tz);
+      dstEl.classList.toggle("hidden", !d.dst);
     }
     function preview() {
       var c = value();
@@ -3488,7 +3503,7 @@
       if (s.mode === "cron" && s.unconvertible) note.textContent = T("se.cron_only");
       if (!c) { host.dispatchEvent(new CustomEvent("sched", { detail: { cron: "", ok: true } })); return; }
       var bad = cronSyntaxError(c);
-      if (bad) { err.textContent = bad; list.innerHTML = ""; human.textContent = ""; host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); return; }
+      if (bad) { err.textContent = bad; list.innerHTML = ""; human.textContent = ""; dstEl.classList.add("hidden"); host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); return; }
       human.innerHTML = "<strong>" + esc(cronHuman(c)) + '</strong> <code class="muted">' + esc(c) + "</code>";
       var zone = $k("tz").value, key = c + "|" + zone;
       host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: true } }));
@@ -3497,9 +3512,9 @@
       var my = ++seq;
       timer = setTimeout(function () {
         api("/api/scheduler/preview?cron=" + enc(c) + "&tz=" + enc(zone)).then(function (d) {
-          previewCache[key] = d.times || [];
+          previewCache[key] = { times: d.times || [], dst: d.dst || null, scheduler_timezone: d.scheduler_timezone };
           if (my === seq) show(previewCache[key], zone);
-        }).catch(function (e) { if (my === seq) { err.textContent = e.message; list.innerHTML = ""; host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); } });
+        }).catch(function (e) { if (my === seq) { err.textContent = e.message; list.innerHTML = ""; dstEl.classList.add("hidden"); host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); } });
       }, 300);
     }
     host.addEventListener("input", function (e) { if (e.isTrusted) touched = true; });

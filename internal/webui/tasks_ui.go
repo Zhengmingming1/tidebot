@@ -14,6 +14,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
+	"github.com/Zhengmingming1/tidebot/internal/scheduler"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
@@ -330,7 +331,14 @@ func (s *Server) handleCronPreview(w http.ResponseWriter, r *http.Request) {
 	for i, t := range times {
 		out[i] = t.In(show).Format(time.RFC3339)
 	}
-	writeJSON(w, 200, map[string]any{"times": out, "timezone": show.String(), "scheduler_timezone": s.loc().String()})
+	res := map[string]any{"times": out, "timezone": show.String(), "scheduler_timezone": s.loc().String()}
+	// A fixed daily time that a clock change moves or merges within the next year.
+	if sch, err := cronParser.Parse(expr); err == nil {
+		if n := scheduler.NextDSTNote(sch, time.Now(), s.loc(), 366*24*time.Hour); n != nil {
+			res["dst"] = n
+		}
+	}
+	writeJSON(w, 200, res)
 }
 
 // PreviewRuns returns the next n fire times using the scheduler's own NextRun, so the

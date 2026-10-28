@@ -25,6 +25,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
+	"github.com/Zhengmingming1/tidebot/internal/scheduler"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/version"
@@ -468,7 +469,7 @@ func (s *Server) upcoming(ctx context.Context, horizon time.Duration, max int) (
 		}
 		next := now
 		for i := 0; i < 6; i++ {
-			next = sch.Next(next)
+			next = scheduler.NextIn(sch, next, s.loc())
 			if next.IsZero() || next.After(end) {
 				break
 			}
