@@ -1517,6 +1517,7 @@
   "st.p_backups": "Backups",
   "st.p_database": "Database",
   "st.p_logs": "Run logs",
+  "st.packed": "{n} logs of finished runs are compressed: {raw} → {on}",
   "st.runs": "{n} runs",
   "st.shrink": "Shrink database",
   "st.shrink_btn": "Shrink",

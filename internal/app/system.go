@@ -16,6 +16,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/db"
+	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
 
 // --- retention ---------------------------------------------------------------
@@ -45,6 +46,8 @@ type runFile struct {
 	size  int64
 	mod   time.Time
 	kind  string // log | artifact
+	// packed: a gzipped run log (<run_id>.log.gz)
+	packed bool
 }
 
 // ApplyRetention deletes old transcripts/artifacts. Run metadata rows stay in the DB.
@@ -143,7 +146,11 @@ func (a *App) runFiles() []runFile {
 	if ents, err := os.ReadDir(logDir); err == nil {
 		for _, e := range ents {
 			if fi, err := e.Info(); err == nil && fi.Mode().IsRegular() {
-				files = append(files, runFile{runID: strings.TrimSuffix(e.Name(), ".log"), path: filepath.Join(logDir, e.Name()), size: fi.Size(), mod: fi.ModTime(), kind: "log"})
+				id, ok := runner.LogRunID(e.Name())
+				if !ok {
+					id = e.Name()
+				}
+				files = append(files, runFile{runID: id, path: filepath.Join(logDir, e.Name()), size: fi.Size(), mod: fi.ModTime(), kind: "log", packed: strings.HasSuffix(e.Name(), runner.GzSuffix)})
 			}
 		}
 	}

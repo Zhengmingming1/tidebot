@@ -130,7 +130,7 @@ func (a *App) aiView(j *AIJob) map[string]any {
 	_ = json.Unmarshal(b, &out)
 	if runID != "" && a.Runner != nil {
 		if lp := a.Runner.LogPath(runID); lp != "" {
-			if raw, err := os.ReadFile(lp); err == nil {
+			if raw, err := runner.ReadLogFile(lp); err == nil {
 				lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 				if len(lines) > 80 {
 					lines = lines[len(lines)-80:]

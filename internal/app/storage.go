@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
 
 // Storage settings and usage for Settings › Data. The idea comes from Uptime Kuma's
@@ -63,6 +65,7 @@ func (a *App) runCleanup(ctx context.Context, now time.Time, auto bool) (Retenti
 }
 
 func (a *App) retentionTick(ctx context.Context, now time.Time) {
+	defer a.compactLogs(ctx, now) // after cleanup: don't gzip what is about to go
 	if rep, err := a.runCleanup(ctx, now, true); err != nil {
 		a.Log.Warn("retention", "error", err)
 	} else if rep.DeletedFiles > 0 {
@@ -74,6 +77,42 @@ func (a *App) retentionTick(ctx context.Context, now time.Time) {
 type UsagePart struct {
 	Bytes int64 `json:"bytes"`
 	Count int   `json:"count"`
+	// Logs only: how many are gzipped, and what those take uncompressed.
+	Packed    int   `json:"packed,omitempty"`
+	PackedRaw int64 `json:"packed_raw,omitempty"`
+	PackedOn  int64 `json:"packed_bytes,omitempty"`
+}
+
+// logQuiet: a finished run's log is gzipped once it has been left alone this long, so a
+// run page still open on it (or a slow last write) never races the compression.
+const logQuiet = 10 * time.Minute
+
+// compactLogs gzips the logs of finished runs (see runner.CompressFinishedLogs).
+func (a *App) compactLogs(ctx context.Context, now time.Time) runner.CompactReport {
+	if a.Runner == nil {
+		return runner.CompactReport{}
+	}
+	busy := map[string]bool{}
+	rows, err := a.DB.QueryContext(ctx, `SELECT id FROM runs WHERE status IN ('queued','running')`)
+	if err != nil {
+		return runner.CompactReport{}
+	}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			busy[id] = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return runner.CompactReport{}
+	}
+	rep := a.Runner.CompressFinishedLogs(busy, logQuiet, now)
+	if rep.Files > 0 {
+		a.Log.Info("run logs compressed", "files", rep.Files, "freed_bytes", rep.FreedBytes)
+	}
+	return rep
 }
 
 // StorageView is what Settings › Data shows.
@@ -106,6 +145,13 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 		p := v.Parts[k]
 		p.Bytes += f.size
 		p.Count++
+		if f.packed {
+			if raw, ok := runner.GzipRawSize(f.path); ok {
+				p.Packed++
+				p.PackedRaw += raw
+				p.PackedOn += f.size
+			}
+		}
 		v.Parts[k] = p
 	}
 	var db UsagePart

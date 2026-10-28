@@ -5193,7 +5193,7 @@
     var box = $("#st-usage");
     if (!box) return;
     var parts = v.parts || {}, total = v.total_bytes || 0, p = v.policy || {};
-    var tipOf = function (k) { var x = parts[k] || {}; return T("st.p_" + k) + " · " + fmtBytes(x.bytes) + (k === "database" ? "" : " · " + T("st.files", { n: x.count || 0 })); };
+    var tipOf = function (k) { var x = parts[k] || {}; return T("st.p_" + k) + " · " + fmtBytes(x.bytes) + (k === "database" ? "" : " · " + T("st.files", { n: x.count || 0 })) + (x.packed ? "\n" + T("st.packed", { n: x.packed, raw: fmtBytes(x.packed_raw), on: fmtBytes(x.packed_bytes) }) : ""); };
     box.innerHTML = '<div class="st-bar" role="img" aria-label="' + esc(ST_PARTS.map(tipOf).join("; ")) + '">' + ST_PARTS.filter(function (k) { return (parts[k] || {}).bytes > 0; }).map(function (k) {
       var pct = total ? (parts[k].bytes / total) * 100 : 0;
       return '<span class="st-seg s-' + k + '" data-w="' + Math.max(1, pct).toFixed(2) + '" data-tip="' + esc(tipOf(k)) + '"></span>';

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -157,5 +158,58 @@ func TestShrinkDatabase(t *testing.T) {
 	_ = json.Unmarshal(b, &res)
 	if res.Saved < 1<<20 || res.Storage.Reclaimable >= 1<<20 {
 		t.Fatalf("vacuum %s", b)
+	}
+}
+
+// Finished runs' logs are gzipped by the periodic sweep; usage reports them, retention
+// still counts their age and deletes them by run id.
+func TestRetentionTickPacksFinishedLogs(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	logs := filepath.Join(a.Cfg.DataDir, "runs")
+	day := 24 * time.Hour
+	text := func(p string, age time.Duration) {
+		t.Helper()
+		os.MkdirAll(logs, 0o755)
+		os.WriteFile(p, []byte(strings.Repeat("[09:00:00] 读取 README.md → ok\n", 2000)), 0o600)
+		ts := time.Now().Add(-age)
+		os.Chtimes(p, ts, ts)
+	}
+	text(filepath.Join(logs, "r_done.log"), 2*day)
+	text(filepath.Join(logs, "r_old.log"), 40*day)
+	text(filepath.Join(logs, "r_run.log"), 2*day)
+	if _, err := a.DB.Exec(`INSERT INTO runs(id, status, created_at) VALUES('r_run','running',?)`, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callStorage(t, a, "storage.settings", map[string]any{"keep_per_task": 0}); err != nil {
+		t.Fatal(err)
+	}
+	a.retentionTick(ctx, time.Now())
+	exists := func(n string) bool { _, err := os.Stat(filepath.Join(logs, n)); return err == nil }
+	if !exists("r_done.log.gz") || exists("r_done.log") || !exists("r_run.log") || exists("r_old.log") || exists("r_old.log.gz") {
+		ents, _ := os.ReadDir(logs)
+		t.Fatalf("after tick: %v", ents)
+	}
+	v, err := a.StorageUsage(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lp := v.Parts["logs"]
+	if lp.Count != 2 || lp.Packed != 1 || lp.PackedRaw <= lp.PackedOn || lp.PackedOn <= 0 {
+		t.Fatalf("logs part %+v", lp)
+	}
+	// Retention ages the packed log like the plain one and finds it by run id.
+	plan, err := a.planRetention(ctx, RetentionPolicy{LogDays: 1}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range plan.del {
+		if f.runID == "r_done" && f.packed {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("packed log not planned for deletion: %+v", plan.del)
 	}
 }

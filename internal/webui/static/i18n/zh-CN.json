@@ -1517,6 +1517,7 @@
   "st.p_backups": "备份",
   "st.p_database": "数据库",
   "st.p_logs": "运行日志",
+  "st.packed": "其中 {n} 个已结束运行的日志已压缩：{raw} → {on}",
   "st.runs": "最近 {n} 次",
   "st.shrink": "压缩数据库",
   "st.shrink_btn": "压缩",

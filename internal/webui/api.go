@@ -24,6 +24,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
+	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/version"
@@ -1258,12 +1259,53 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request, runID stri
 		if n, err := strconv.ParseInt(from, 10, 64); err == nil && n > 0 {
 			if fi, err := os.Stat(path); err == nil && n <= fi.Size() {
 				offset = n
+			} else if path != "" {
+				if raw, ok := runner.GzipRawSize(path + ".gz"); ok && n <= raw {
+					offset = n
+				}
 			}
 		}
+	}
+	// A finished run's log may have been gzipped (runner.CompressFinishedLogs): it is
+	// complete, so it is read once from offset to the end and the stream closes.
+	readPacked := func() bool {
+		rc, packed, err := runner.OpenLogFile(path)
+		if err != nil || !packed {
+			if rc != nil {
+				rc.Close()
+			}
+			return false
+		}
+		defer rc.Close()
+		if _, err := io.CopyN(io.Discard, rc, offset); err != nil {
+			return true
+		}
+		br := bufio.NewReader(rc)
+		sent := false
+		for {
+			line, err := br.ReadString('\n')
+			if len(line) > 0 {
+				offset += int64(len(line))
+				if line = strings.TrimRight(line, "\r\n"); line != "[[end]]" {
+					send("", line)
+					sent = true
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		if sent {
+			flusher.Flush()
+		}
+		return true
 	}
 	readMore := func() bool {
 		if path == "" {
 			return false
+		}
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && readPacked() {
+			return true
 		}
 		// Stat first (like Cronicle's fstat before read): nothing new means no open.
 		if fi, err := os.Stat(path); err != nil || fi.Size() <= offset {

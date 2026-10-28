@@ -3390,3 +3390,63 @@ endpoint.
 2. 运行列表搜索提示词时，预览里高亮命中的位置（命中在 300 字节之后时显示命中附近的片段）。
 3. `agentctl runs show <id>` 输出完整提示词和最终回答。
 4. 全仓检查其余 `[:n]` 字节截断（日志字段、插件输出），统一走 `textclip`。
+
+## 2026-10-28 (12:00): finished run logs are kept gzipped
+
+Category: **resource usage (disk)** (the last rounds were correctness and features; the last
+resource round was the tray on 10-26). Every run writes a human-readable `runs/<id>.log`, kept
+30 days by default and never compressed — an hourly task fills the folder with hundreds of
+near-identical text files a month.
+
+**Done**
+
+- `runner.CompressFinishedLogs`: the retention tick (at start-up, then every 6 h, after the
+  cleanup so nothing about to be deleted gets packed) gzips the logs no run writes to any more:
+  not in flight in this runner, not queued/running in the database, untouched for 10 minutes.
+  Best-compression gzip, written to `<id>.log.gz.tmp`, synced, renamed, then the plain file is
+  removed; the modification time is copied over (retention counts days from it). Files under
+  4 KB (one filesystem block, nothing to free) and ones that wouldn't shrink stay as they are.
+  If the plain file can't be removed (Windows: a reader still has it open) the copy is dropped
+  and the next sweep tries again; temp files left by a crash are removed after an hour.
+- Readers don't care which form is on disk: `runner.OpenLogFile` / `ReadLogFile` prefer the
+  plain file, else the `.gz`. The run page's SSE log streams a packed log in one pass with the
+  same line ids (offsets into the original text), so a reconnect with `Last-Event-ID` / `?from=`
+  still continues where it left off; the AI-plugin job view reads it the same way. Retention,
+  storage usage and backups count `.log.gz` (and leftovers) under the right run id.
+- Settings › Data › Storage: the "run logs" tooltip adds "其中 N 个已结束运行的日志已压缩：原始 →
+  现在" (raw size from the gzip trailer, no decompression). zh-CN and en.
+- Demo (9 runs whose logs carry Read tool output of Go source, the less compressible case):
+  239.7 KB → 64.6 KB. Plain run logs (timestamps, tool calls, repeated prefixes) shrink further.
+  Same code on macOS / Windows / Linux (pure Go `compress/gzip`, no new dependency).
+- Tests: `TestLogRunID`, `TestCompressLogFileRoundTrip` (CJK + CRLF bytes identical, mtime kept,
+  ISIZE), `TestCompressLogFileLeavesSmallAndRandom` (plain wins when both exist),
+  `TestCompressFinishedLogsSkipsLiveBusyRecent`, `TestRunEventsPackedLog` (same stream as the plain
+  file, resume by offset), `TestRetentionTickPacksFinishedLogs`, `TestStoragePackedTipUI`.
+- Shots: `/workspace/tidebot-shots/2026-10-28-storage-packed-logs-1024x655.png` (and `-en`).
+
+**Inspiration**
+
+- jhuckaby/Cronicle `lib/job.js` (`uploadJobLog`: a finished job's `log.txt` is piped through
+  `zlib.createGzip` into storage as `jobs/<id>/log.txt.gz`, the local file removed afterwards) and
+  `lib/api/job.js` (`api_get_job_log` serves the stored `.gz` as is with `Content-Encoding: gzip`).
+  tidebot keeps the live file plain and packs only once the run is done and quiet. Ideas only, no
+  code copied.
+
+**Learned**
+
+- Windows can't delete a file another handle has open (Go doesn't open with
+  `FILE_SHARE_DELETE`), so "compress, then remove" must be able to back out and retry later
+  instead of leaving two copies.
+- Keeping SSE ids as offsets into the *original* text made the packed path a drop-in: the client
+  never learns the file changed form.
+- A gzip trailer's ISIZE gives the original size for free; good enough for a usage tooltip.
+
+**Ideas for later**
+
+1. Serve "download log" (a future button on the run page) straight from the `.gz` with
+   `Content-Encoding: gzip`, like Cronicle.
+2. Pack right after a run ends (with the 10-minute quiet delay on a timer) instead of waiting for
+   the 6-hourly tick.
+3. Compress artifacts that are plain text (reports, exports) the same way, or store them in a
+   per-run zip.
+4. Show "freed by compression" next to the last cleanup in the storage tooltip.
