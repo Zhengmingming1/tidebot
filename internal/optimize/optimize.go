@@ -477,4 +477,9 @@ func b2i(b bool) int {
 	return 0
 }
 
-func nowUTC() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+// nowUTC is a fixed-width UTC timestamp: the queries compare created_at as text, and
+// RFC3339Nano drops trailing zeros ("…:14.1Z" sorts after "…:14.12Z"), which made a canary's
+// own runs look older than the canary now and then.
+func nowUTC() string { return time.Now().UTC().Format(tsLayout) }
+
+const tsLayout = "2006-01-02T15:04:05.000000000Z"

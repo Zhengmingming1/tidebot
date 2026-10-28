@@ -166,3 +166,16 @@ func TestShouldAnalyzeAndParse(t *testing.T) {
 		t.Fatal("prompt")
 	}
 }
+
+// TestNowUTCSortsAsText: created_at is compared as text, so timestamps must be fixed width.
+func TestNowUTCSortsAsText(t *testing.T) {
+	a := time.Date(2026, 10, 28, 8, 9, 14, 100000000, time.UTC).Format(tsLayout)
+	b := time.Date(2026, 10, 28, 8, 9, 14, 120000000, time.UTC).Format(tsLayout)
+	c := time.Date(2026, 10, 28, 8, 9, 15, 0, time.UTC).Format(tsLayout)
+	if !(a < b && b < c) || len(a) != len(c) {
+		t.Fatalf("%s %s %s", a, b, c)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, nowUTC()); err != nil {
+		t.Fatal(err)
+	}
+}
