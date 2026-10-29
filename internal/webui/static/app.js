@@ -201,6 +201,7 @@
     eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
     battery: '<rect width="16" height="10" x="2" y="7" rx="2" ry="2"/><path d="M22 11v2"/><path d="M6 11v2"/><path d="M10 11v2"/>',
     lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    offline: '<path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/>',
     tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1"/>'
   };
   function ic(name, cls) { return '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[name] || P.circle) + "</svg>"; }
@@ -372,7 +373,7 @@
     // opts.timeout (ms): abort and reject with a readable error instead of waiting forever.
     var ac = opts.timeout && window.AbortController ? new AbortController() : null, tm = null;
     if (ac) tm = setTimeout(function () { ac.abort(); }, opts.timeout);
-    return fetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).catch(function (err) {
+    return netFetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).catch(function (err) {
       if (tm) clearTimeout(tm);
       if (ac && ac.signal.aborted) { var et = new Error(T("err.req_timeout")); et.timeout = true; throw et; }
       throw err;
@@ -413,7 +414,7 @@
   // Blob keeps the bytes as sent (a UTF-8 BOM survives; res.text() would strip it).
   function downloadFile(path, fallback, btn) {
     if (btn) btn.disabled = true;
-    return fetch(path, { credentials: "same-origin" }).then(function (res) {
+    return netFetch(path, { credentials: "same-origin" }).then(function (res) {
       if (res.status === 401) { showLogin(); throw new Error(T("err.sign_in")); }
       if (!res.ok) return res.json().catch(function () { return {}; }).then(function (d) { throw new Error(d.error || res.statusText); });
       return res.blob().then(function (b) { return saveBlob(b, dispName(res.headers.get("content-disposition"), fallback)); });
@@ -449,7 +450,7 @@
         toast(T("dl.saved", { n: name }));
         return;
       }
-      return fetch("/api/desktop/save?name=" + enc(name), { method: "POST", headers: { "Accept": "application/json", "Content-Type": "application/octet-stream", "X-CSRF-Token": state.csrf }, body: b, credentials: "same-origin" }).then(function (res) {
+      return netFetch("/api/desktop/save?name=" + enc(name), { method: "POST", headers: { "Accept": "application/json", "Content-Type": "application/octet-stream", "X-CSRF-Token": state.csrf }, body: b, credentials: "same-origin" }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (d) {
           if (!res.ok) throw new Error(d.error || res.statusText);
           if (d.canceled) return;
@@ -471,7 +472,128 @@
   }
   function desktopOpen(body) { return api("/api/desktop/open", { method: "POST", body: body }).catch(fail); }
   function toastUndo(msg, undo) { return toast(msg, false, undo); }
-  function fail(e) { toast(e.message, true); }
+  // A click that failed because tidebot is unreachable says so once, not once per click;
+  // the toast goes away by itself when the connection is back.
+  function fail(e) {
+    if (e && e.offline) { if (!net.toast) { var c = toast(e.message, true); net.toast = function () { c(); net.toast = null; }; } return; }
+    toast(e.message, true);
+  }
+  // ---------- connection ----------
+  // When tidebot can't be reached (agentd restarting or upgraded, the laptop waking from sleep,
+  // Wi-Fi gone in server mode) each engine says it its own way and in English: "Failed to
+  // fetch" (Chrome / WebView2), "Load failed" (Safari / WKWebView), "NetworkError when
+  // attempting to fetch resource." (Firefox), WebKitGTK varies. All of them become one
+  // translated error, and one bar at the bottom retries with backoff, counts down, offers
+  // "Retry now" and repaints the page once the server answers again — instead of an English
+  // toast per click and a dead page. A short blip shows nothing: the bar waits for a probe.
+  // Ideas: Uptime Kuma src/mixins/socket.js (grace delay before "Lost connection… Reconnecting"),
+  // VS Code src/vs/workbench/contrib/remote/browser/remote.ts ("Attempting to reconnect in N
+  // seconds…", "Reconnect Now") and platform/remote/common/remoteAgentConnection.ts (wait list).
+  var NET_WAIT = [2, 3, 5, 5, 10, 10, 15, 30];
+  function netDelay(n) { return NET_WAIT[Math.max(0, Math.min(n, NET_WAIT.length - 1))]; }
+  // No answer at all: fetch rejects with a TypeError (refused, reset, DNS, offline). Our own
+  // timeout is an AbortError and stays a timeout. A reverse proxy answering 502 / 503 / 504
+  // with its own page means the same thing; tidebot's own errors are always JSON.
+  function netLost(err, res) {
+    if (res) return (res.status === 502 || res.status === 503 || res.status === 504) && ((res.headers && res.headers.get("content-type")) || "").indexOf("json") < 0;
+    return !!err && err.name !== "AbortError" && (err.name === "TypeError" || /network ?error|failed to fetch|load failed/i.test(err.message || ""));
+  }
+  function netError() { var e = new Error(T("err.offline")); e.offline = true; return e; }
+  var net = { down: false, shown: false, n: 0, left: 0, t: null, tick: null, at: 0, busy: false, toast: null, hideT: null };
+  // fetch() for tidebot's own endpoints: no answer → netDown() and the translated error;
+  // any answer from tidebot → netUp().
+  function netFetch(path, init) {
+    return fetch(path, init).then(function (res) {
+      if (netLost(null, res)) { netDown(); throw netError(); }
+      if (net.down) netUp();
+      return res;
+    }, function (err) {
+      if (netLost(err)) { netDown(); throw netError(); }
+      throw err;
+    });
+  }
+  function netDown() {
+    if (net.down) return;
+    net.down = true; net.shown = false; net.n = 0; net.left = 0; net.at = Date.now();
+    clearTimeout(net.t); net.t = setTimeout(netProbe, 1500);
+  }
+  // One cheap authenticated GET; any answer from tidebot (401 included) means it is back.
+  function netProbe() {
+    clearTimeout(net.t); clearInterval(net.tick); net.t = null;
+    if (!net.down || net.busy) return;
+    net.busy = true; netPaint();
+    var ac = window.AbortController ? new AbortController() : null, tm = ac ? setTimeout(function () { ac.abort(); }, 8000) : null;
+    fetch("/api/rev", { credentials: "same-origin", cache: "no-store", headers: { "Accept": "application/json" }, signal: ac ? ac.signal : undefined }).then(function (res) {
+      return !netLost(null, res);
+    }, function () { return false; }).then(function (ok) {
+      if (tm) clearTimeout(tm);
+      net.busy = false;
+      if (ok) { netUp(); return; }
+      net.n++; net.shown = true; net.left = netDelay(net.n - 1);
+      netPaint();
+      // The countdown stands still in a hidden tab (no requests there); coming back retries.
+      net.tick = setInterval(function () {
+        if (document.hidden) return;
+        if (--net.left <= 0) { netProbe(); return; }
+        netPaint();
+      }, 1000);
+    });
+  }
+  function netUp() {
+    if (!net.down) return;
+    var was = net.shown;
+    net.down = false; net.shown = false; net.busy = false;
+    clearTimeout(net.t); clearInterval(net.tick); net.t = null;
+    if (net.toast) { net.toast(); net.toast = null; }
+    if (!was) { netPaint(); return; }
+    netPaint(true);
+    // The page under the bar is stale or shows "Failed": repaint it in place, unless a dialog
+    // is open or someone is typing on the page (their edits stay; live pages catch up alone).
+    if (document.getElementById("boot")) { boot(); return; }
+    if (!state.csrf) return;
+    loadCC(false);
+    api("/api/notifications/center").then(noteNotifs).catch(function () {});
+    if ($("#err-retry")) { lastHash = null; route(); return; }
+    var a = document.activeElement, pg = page();
+    if ($("#modal-root").innerHTML || (a && pg && pg.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return;
+    refresh();
+  }
+  // Something saw a hiccup (a live log stream dropped): check quietly, show the bar only if it lasts.
+  function netCheck() { if (!net.down) netDown(); else if (!net.busy && !net.t && !net.left) netProbe(); }
+  function netNow() { if (net.down && !net.busy) netProbe(); }
+  function netPaint(back) {
+    var bar = $("#net-bar");
+    if (!net.shown && !back) {
+      if (bar && !bar.classList.contains("back")) { bar.remove(); document.body.classList.remove("net-on"); }
+      return;
+    }
+    if (!bar) {
+      bar = document.createElement("div"); bar.id = "net-bar"; bar.className = "net-bar";
+      bar.setAttribute("role", "status"); bar.setAttribute("aria-live", "polite");
+      document.body.appendChild(bar);
+    }
+    document.body.classList.add("net-on");
+    if (back) {
+      bar.className = "net-bar back";
+      bar.innerHTML = ic("check", "sm") + '<span class="nb-msg">' + esc(T("conn.back")) + "</span>";
+      bar.removeAttribute("data-tip");
+      clearTimeout(net.hideT);
+      net.hideT = setTimeout(function () { var b = $("#net-bar"); if (b && b.classList.contains("back")) { b.remove(); document.body.classList.remove("net-on"); } }, 2000);
+      return;
+    }
+    // Built once per outage; each second only the countdown text changes, so the button keeps
+    // focus and a click, and screen readers hear "lost connection" once, not every second.
+    if (!bar.classList.contains("lost")) {
+      bar.className = "net-bar lost";
+      bar.innerHTML = '<span class="nb-ico">' + ic("offline", "sm") + '</span><span class="nb-msg">' + esc(T("conn.lost")) + '<span class="nb-sub" aria-hidden="true"></span></span><button type="button" class="btn sm" id="nb-now">' + esc(T("conn.now")) + "</button>";
+      $("#nb-now", bar).addEventListener("click", netNow);
+    }
+    bar.setAttribute("data-tip", T("conn.tip", { t: clock(net.at), n: num(net.n) }));
+    $(".nb-sub", bar).textContent = net.busy ? T("conn.retrying") : T("conn.retry_in", { n: net.left });
+  }
+  window.addEventListener("online", netNow);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && net.down && net.shown) netNow(); });
+
   // CSP forbids inline style attributes; sizes are applied through CSSOM.
   function applySizes(root) {
     $$("[data-w]", root).forEach(function (el) { el.style.width = Math.max(0, Math.min(100, Number(el.getAttribute("data-w")))) + "%"; });
@@ -1553,6 +1675,7 @@
   function revGate() {
     var seen = null;
     return function (load) {
+      if (net.down) return Promise.resolve(); // the reconnect probe is already asking
       return apiRaw("/api/rev").then(function (r) {
         var rev = r && r.rev;
         if (rev && rev === seen) return;
@@ -2813,7 +2936,7 @@
 
   // ---------- v0.1.2 shared helpers ----------
   function upload(path, fd) {
-    return fetch(path, { method: "POST", headers: { "Accept": "application/json", "X-CSRF-Token": state.csrf }, body: fd, credentials: "same-origin" }).then(function (res) {
+    return netFetch(path, { method: "POST", headers: { "Accept": "application/json", "X-CSRF-Token": state.csrf }, body: fd, credentials: "same-origin" }).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (d) {
         if (res.status === 401) { showLogin(); throw new Error(T("err.sign_in")); }
         if (!res.ok) { var e = new Error(d.error || res.statusText); e.status = res.status; e.data = d; throw e; }
@@ -4936,6 +5059,7 @@
       es.addEventListener("idle", function () { es.close(); state.es = null; state.esPaused = true; if (onEnd) onEnd("idle"); });
       es.onerror = function () {
         if (ended) return;
+        netCheck();
         if (es.readyState === 2 && document.contains(host)) { retry++; setTimeout(function () { if (!ended && document.contains(host)) connect(); }, Math.min(10000, 1000 * retry)); }
       };
     }
@@ -5996,7 +6120,7 @@
           var paint = function (v) {
             view = v; cur = JSON.parse(JSON.stringify(v.settings));
             $("#net-url").value = cur.proxy.url || ""; $("#net-bypass").value = cur.proxy.bypass || "";
-            $("#net-eff").textContent = T("net.now", { p: proxyLabel(v.effective) });
+            $("#net-eff").textContent = T("conn.now", { p: proxyLabel(v.effective) });
             paintMode(); paintMirrors();
           };
           $$("#net-mode button").forEach(function (b) { b.addEventListener("click", function () { cur.proxy.mode = b.getAttribute("data-m"); paintMode(); if (cur.proxy.mode === "manual") $("#net-url").focus(); }); });
@@ -6458,7 +6582,11 @@
       dropBoot();
       renderShell();
       route();
-    }).catch(function () { showLogin(); });
+    }).catch(function (e) {
+      // Unreachable at start: keep the splash, the connection bar retries and boots again.
+      if (e && e.offline) return;
+      showLogin();
+    });
   }
   var storedLang = "auto";
   try { storedLang = localStorage.getItem("tb_lang") || "auto"; } catch (e) {}

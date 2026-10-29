@@ -2054,3 +2054,16 @@ button.ttag:hover, a.ttag:hover { filter: brightness(.96); text-decoration: none
    search, status chips, skill and tag menus stay on one row at 1024px in both languages. */
 .task-tb .search-in { flex: 1 1 140px; min-width: 120px; max-width: 240px; }
 .task-tb select { max-width: 128px; text-overflow: ellipsis; }
+
+/* connection bar: tidebot unreachable — one quiet pill at the bottom, above dialogs and drawers,
+   below tooltips; toasts move up while it shows. Fixed, so the page never shifts. */
+.net-bar { position: fixed; left: 50%; bottom: var(--sp-4); transform: translateX(-50%); z-index: 66; display: flex; align-items: center; gap: var(--sp-2); height: 40px; padding: 0 var(--sp-1) 0 var(--sp-3); max-width: calc(100vw - 32px); border-radius: var(--radius-pill); background: var(--surface); border: 1px solid #ecd3a6; box-shadow: var(--shadow-pop); color: var(--text); font-size: var(--fs-sm); white-space: nowrap; animation: t-in var(--dur) var(--ease); }
+.net-bar .nb-ico { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--warn-50); color: var(--warn); flex: none; }
+.net-bar .nb-msg { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.net-bar .nb-sub { font-weight: 400; color: var(--text-3); margin-left: var(--sp-2); font-variant-numeric: tabular-nums; }
+.net-bar .btn.sm { border-radius: var(--radius-pill); }
+.net-bar.back { padding: 0 var(--sp-3); border-color: #b7dfc6; color: var(--ok); }
+.net-bar.back .i { color: var(--ok); }
+.net-bar[data-tip]:hover::after { bottom: calc(100% + 8px); }
+body.net-on .toasts { bottom: 72px; }
+@media (prefers-reduced-motion: reduce) { .net-bar { animation: none; } }

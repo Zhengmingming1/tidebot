@@ -1952,5 +1952,12 @@
   "tg.batch_add": "Add",
   "tg.batch_remove": "Remove from selected",
   "tg.added": "Tagged {n} tasks “{t}”.",
-  "tg.removed": "Removed “{t}” from {n} tasks."
+  "tg.removed": "Removed “{t}” from {n} tasks.",
+  "err.offline": "Can't reach tidebot. Check that it's running and the network is up.",
+  "conn.lost": "Lost connection to tidebot",
+  "conn.retry_in": "retrying in {n}s",
+  "conn.retrying": "Reconnecting…",
+  "conn.now": "Retry now",
+  "conn.back": "Reconnected",
+  "conn.tip": "Disconnected at {t} · attempts: {n}\nThe page refreshes once it's back"
 }

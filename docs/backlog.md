@@ -3750,3 +3750,69 @@ Russian / Greek layout.
 3. ⌘/Ctrl+S in the skill file editor and the task form.
 4. Desktop app menu accelerators (macOS menu bar: ⌘, opens Settings, ⌘N new task) wired to the
    same commands.
+
+## 2026-10-29 (12:00): tidebot unreachable — one translated message and a bar that reconnects
+
+Category: **robustness / cross-platform** (the last rounds were keyboard (cross-platform), tags
+(feature), list performance and DST correctness). When agentd restarted, was upgraded, or the
+laptop woke up with the server-mode page open, each engine reported it its own way and in English
+— "Failed to fetch" (Chrome / WebView2), "Load failed" (Safari / WKWebView), "NetworkError when
+attempting to fetch resource." (Firefox) — as a red toast per click or an error page, live pages
+kept polling, nothing said when it was back, and a failed start fell through to the login page.
+
+**Done**
+
+- `app.js` connection block next to `fail()`: `netFetch()` wraps every fetch to tidebot's own
+  endpoints (`apiRaw`, downloads, desktop save, uploads); no answer (TypeError) or a reverse proxy's
+  own 502 / 503 / 504 page (not JSON) becomes `err.offline` with `e.offline = true`; our own
+  timeout (AbortError) stays a timeout; any answer from tidebot clears the state.
+- A short blip shows nothing: the first probe (`GET /api/rev`, 8 s timeout, 401 counts as "back")
+  goes out after 1.5 s. If it fails, a pill at the bottom centre says "与 tidebot 的连接已断开 ·
+  N 秒后重试" with "立即重试"; retries back off 2, 3, 5, 5, 10, 10, 15, then every 30 s. Disconnect
+  time and attempt count are in the tooltip. The bar is built once per outage and only the
+  countdown text changes (the button keeps focus, `role=status` announces once, the countdown is
+  `aria-hidden`). Fixed position, so the page never shifts; toasts move up while it shows; above
+  dialogs and drawers, under tooltips; no animation with reduced motion.
+- Hidden tab: the countdown stands still (no requests); coming back, the `online` event and a
+  dropped live-log stream (`EventSource` error) all trigger a check. Live pages skip their
+  `/api/rev` poll while down.
+- Back: "已重新连接" for 2 s, the offline toast closes, the sidebar Claude Code status and the
+  bell reload, an error page is routed again, any other page repaints in place — unless a dialog
+  is open or someone is typing on the page. A start that failed for lack of connection keeps the
+  splash and boots again instead of showing the login page.
+- `fail()`: an offline error toasts once, not once per click.
+- zh-CN and en (`err.offline`, `conn.*`; the `net.*` keys already belong to the proxy settings).
+  Lucide `wifi-off` icon added as `offline`.
+- Tests: `TestConnectionBar` (wiring; no raw `fetch()` outside `netFetch`, the probe and the i18n
+  loader; CSS; keys and placeholders in both languages; node with a fake clock, DOM and fetch:
+  Chrome / Safari / Firefox messages, AbortError, proxy 502/503 vs JSON 503, 500, 401, backoff
+  list, blip shows nothing and repaints nothing, bar after a failed probe, countdown, bar built
+  once, hidden tab makes no probes, one offline toast, "Retry now", reconnect repaints and hides
+  the bar after 2 s, dialog keeps the page, error page re-routed, failed start boots again).
+- Shots (real agentd stopped and started again):
+  `/workspace/tidebot-shots/2026-10-29-connection-lost-1024x655.png`, `…-connection-back-…` and
+  the `-en` variants.
+
+**Inspiration**
+
+- louislam/uptime-kuma `src/mixins/socket.js` (2 s delay before "Lost connection to the socket
+  server. Reconnecting…" to avoid noise; `connectCount` to reload data after a reconnect) and
+  `src/layouts/Layout.vue` (one `lost-connection` bar instead of per-request errors).
+- microsoft/vscode `src/vs/workbench/contrib/remote/browser/remote.ts` ("Attempting to reconnect
+  in N seconds…", "Reconnect Now" skips the wait) and
+  `src/vs/platform/remote/common/remoteAgentConnection.ts` (growing wait list
+  `[0, 5, 5, 10, 10, 10, 10, 10, 30]`). Ideas only, no code copied.
+
+**Learned**
+
+- A fetch that gets no answer rejects with a TypeError whose message differs per engine; the
+  type is the only portable signal, and an aborted fetch (our timeout) must be kept apart by name.
+- Rebuilding a live region every second makes it unclickable (the button is replaced mid-click)
+  and noisy for screen readers; update one text node instead.
+
+**Ideas for later**
+
+1. Show the version agentd came back with, and offer a reload when the static assets changed
+   (an upgrade under an open tab).
+2. Queue a failed "run now" while offline and offer to send it on reconnect.
+3. Desktop app: when the embedded server stops, show the same bar instead of a blank window.

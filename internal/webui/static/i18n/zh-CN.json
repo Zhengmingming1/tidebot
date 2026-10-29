@@ -1952,5 +1952,12 @@
   "tg.batch_add": "添加",
   "tg.batch_remove": "从所选移除",
   "tg.added": "已给 {n} 个任务加上「{t}」",
-  "tg.removed": "已从 {n} 个任务移除「{t}」"
+  "tg.removed": "已从 {n} 个任务移除「{t}」",
+  "err.offline": "连不上 tidebot 服务，请确认它在运行、网络正常。",
+  "conn.lost": "与 tidebot 的连接已断开",
+  "conn.retry_in": "{n} 秒后重试",
+  "conn.retrying": "正在重新连接…",
+  "conn.now": "立即重试",
+  "conn.back": "已重新连接",
+  "conn.tip": "{t} 断开 · 已重试 {n} 次\n恢复后自动刷新当前页面"
 }
