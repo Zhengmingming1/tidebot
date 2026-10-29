@@ -5378,7 +5378,7 @@
   }
   function bucketName(b) { return b.scope === "global" ? T("sp.global") : b.scope === "bucket" ? (T("bucket." + b.scope_id) === "bucket." + b.scope_id ? cap(b.scope_id) : T("bucket." + b.scope_id)) : (taskNames[b.scope_id] || T("col.task") + " " + String(b.scope_id).slice(0, 12)); }
   var spendView = { range: "7d", by: "task", day: "" }, spendCache = {};
-  var SPEND_RANGES = ["7d", "30d", "all"], SPEND_BYS = ["task", "provider_model", "model", "provider"];
+  var SPEND_RANGES = ["7d", "30d", "all"], SPEND_BYS = ["task", "provider_model", "model", "provider", "tag"];
   // Daily spend columns: every day of the range (empty days included, so the axis never
   // jumps), a rounded top value + mid gridline, the date and amount in each bar's tooltip.
   // Daily bars. Each bar is a button: click / Enter picks that day and the breakdown below
@@ -5434,7 +5434,9 @@
     var spendP = api("/api/spend"); // start all while the route's cache window is open
     var bkKey = spendQuery(spendView);
     var bkP = api("/api/spend/breakdown?" + bkKey).then(function (r) { spendCache[bkKey] = r; }, function () {});
-    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
+    // "By tag" only appears once some task has a tag (or the address asks for it).
+    var hasTags = spendView.by === "tag";
+    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; if ((t.tags || []).length) hasTags = true; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
       var s = d.summary, budgets = s.budgets || [];
       var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0, max_tokens: 0 };
       var runsToday = d.top_tasks.reduce(function (a, t) { return a + t.runs; }, 0);
@@ -5452,7 +5454,7 @@
         '<div class="card stat"><small>Tokens</small><strong>' + esc(num(s.total_tokens)) + "</strong><span>" + esc(global.max_tokens ? T("sp.tok_cap", { n: num(global.max_tokens) }) : T("sp.no_tok_cap")) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.runs_today")) + "</small><strong>" + esc(runsToday) + "</strong><span>" + esc(plural(d.top_tasks.length, "sp.sources_one", "sp.sources_many")) + "</span></div></div>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" + '<button class="icon-btn" id="sp-export" data-tip="' + esc(T("sp.export_tip")) + '" aria-label="' + esc(T("sp.export")) + '">' + ic("download", "sm") + "</button></div>" +
-        '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["provider_model", T("sp.by_provider_model")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
+        '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["provider_model", T("sp.by_provider_model")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].concat(hasTags ? [["tag", T("sp.by_tag")]] : []).map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
         // Budgets: one aligned row per scope (column heads instead of a label on every select),
         // the cap edits in place. Full width, so the events table below gets room too.
         '<section class="card bud-card"><div class="card-head"><span class="ico">' + ic("wallet") + '</span><h2>' + esc(T("sp.budgets")) + "</h2>" + tip(T("sp.breach_hint")) + '<a class="link" href="#/settings/budgets">' + esc(T("sp.bud_settings")) + "</a></div>" +
@@ -5463,17 +5465,24 @@
       var paintBody = function (r) {
         var rows = r.rows || [], mxd = Math.max.apply(null, (r.days || []).map(function (x) { return x.usd; }).concat([0.0001]));
         var nm = function (x) { return spendView.by === "task" ? (x.key ? (x.name || taskNames[x.key] || x.key) : T("run.adhoc_paren")) : (x.key || T("sp.unknown")); };
+        // By tag: the tag is a chip that opens the task list filtered by it (task count in
+        // the tooltip); the untagged row is plain text that says what it holds.
+        var nameCell = function (x) {
+          if (spendView.by !== "tag") return "<strong>" + esc(nm(x)) + "</strong>";
+          if (!x.key) return '<strong class="muted" data-tip="' + esc(T("sp.no_tag_tip")) + '">' + esc(T("sp.no_tag")) + "</strong>";
+          return '<a class="ttag h' + tagHue(x.key) + '" href="#/tasks?tag=' + enc(x.key) + '" data-tip="' + esc(T(x.tasks === 1 ? "sp.tag_tip_one" : "sp.tag_tip_many", { t: x.key, n: x.tasks || 0 })) + '">' + esc(x.key) + "</a>";
+        };
         var dy = r.day || "", hadFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest(".spc-plot");
         var focusDay = hadFocus ? document.activeElement.getAttribute("data-day") : "";
         var head = dy ? '<span class="sp-day" role="status"><span>' + esc(T("sp.day_only", { d: spendDayLabel(dy) })) + '</span><button type="button" class="icon-btn sm" id="sp-day-clear" data-tip="' + esc(T("sp.day_clear")) + '" aria-label="' + esc(T("sp.day_clear")) + '">' + ic("x", "sm") + '</button></span><a class="link sp-day-runs" href="#/runs?from=' + enc(dy) + "&to=" + enc(dy) + '">' + esc(T("sp.day_runs")) + " " + ic("arrow", "sm") + "</a>"
           : '<span class="muted">' + esc(T("sp.since", { d: spendView.range === "all" ? T("sp.rall") : r.since })) + "</span>";
         $("#sp-body").innerHTML = '<div class="sp-total"><strong>' + esc(usd(r.total_usd || 0, 4)) + "</strong>" + (r.estimated_runs ? costBadge("estimate") : "") + " " + head + (r.estimated_runs ? ' <span class="muted">· ' + esc(T("sp.est_runs", { n: r.estimated_runs })) + "</span>" : "") + "</div>" +
           spendChart(r.days || [], spendView.range, dy) +
-          (rows.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.col_" + spendView.by)) + "</th><th>" + esc(T("nav.runs")) + "</th><th>Tokens</th><th>" + esc(T("sp.share")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows.map(function (x) {
+          (rows.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.col_" + spendView.by)) + "</th><th>" + esc(T("nav.runs")) + "</th><th>Tokens</th><th>" + esc(T("sp.share")) + (spendView.by === "tag" && r.overlap ? tip(T("sp.tag_overlap")) : "") + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows.map(function (x) {
             var sh = r.total_usd ? x.usd / r.total_usd * 100 : 0;
             var tokTip = T("sp.tok_tip", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0), r: num(x.cache_read_tokens || 0), w: num(x.cache_write_tokens || 0), q: num(x.requests || 0) });
             var badge = x.estimated_runs || x.legacy_runs ? costBadge(x.estimated_runs ? "estimate" : "legacy") : (x.subscription_runs === x.runs ? costBadge("subscription") : "");
-            return "<tr><td><strong>" + esc(nm(x)) + "</strong>" + badge + "</td><td>" + esc(x.runs) + '</td><td title="' + esc(tokTip) + '">' + esc(num(x.tokens)) + '<small class="muted">' + esc(T("rd.in_out", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0) })) + (x.cache_read_tokens ? " · " + esc(T("sp.cache_n", { n: num(x.cache_read_tokens) })) : "") + '</small></td><td><div class="progress thin"><span data-w="' + sh + '"></span></div></td><td class="right"><strong>' + esc(usd(x.usd, 4)) + "</strong></td></tr>";
+            return "<tr><td>" + nameCell(x) + badge + "</td><td>" + esc(x.runs) + '</td><td title="' + esc(tokTip) + '">' + esc(num(x.tokens)) + '<small class="muted">' + esc(T("rd.in_out", { i: num(x.input_tokens || 0), o: num(x.output_tokens || 0) })) + (x.cache_read_tokens ? " · " + esc(T("sp.cache_n", { n: num(x.cache_read_tokens) })) : "") + '</small></td><td><div class="progress thin"><span data-w="' + sh + '"></span></div></td><td class="right"><strong>' + esc(usd(x.usd, 4)) + "</strong></td></tr>";
           }).join("") + "</tbody></table>" : emptyState("receipt", dy ? T("sp.none_day") : T("sp.none_range"), ""));
         applySizes($("#sp-body"));
         var ex = $("#sp-export");

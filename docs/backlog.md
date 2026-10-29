@@ -3931,3 +3931,51 @@ to open two runs and compare 100 lines by eye to find "¥1,899 → ¥1,699".
 3. Put the changed lines (not the answer's first lines) into the success notice when the task
    notifies only on change.
 4. Side-by-side view on wide windows.
+
+## 2026-10-30 (00:00): spend page — "by tag" shows what each group of tasks costs
+
+Category: **cost / budget** (the last rounds were answer diff (reading), notify-only-on-change,
+reconnect, cross-platform shortcuts, tags, list performance and DST). Tasks got tags yesterday,
+but the spend page could only split by task, model or provider: "how much do my 日报 tasks cost
+this week" meant adding up rows by hand.
+
+**Done**
+
+- `GET /api/spend/breakdown?by=tag`: the ledger joined to `task_tags`, grouped by tag without
+  case (`COLLATE NOCASE`, same rule as the form). A run of a task with two tags counts under both
+  (LiteLLM's spend per request tag does the same); untagged tasks and quick runs share one `''`
+  row, so nothing drops out. Every row now carries `tasks` (distinct tasks behind it).
+- The tag rows overlap, so their sum is not the total: in tag mode `total_usd` and
+  `estimated_runs` are read from the ledger itself, and `overlap` says whether the rows add up
+  to more. Range, picked day, the chart and the 估算 badge work as on the other tabs.
+- Spend page: a fifth tab 按标签 / By tag, shown once any task has a tag (or the address has
+  `by=tag`), kept in the address like the others. Each tag is its colour chip and links to the
+  task list filtered by it (`#/tasks?tag=…`), "N 个任务" in the tooltip; the untagged row is
+  muted text with "没有标签的任务和临时运行" in its tooltip. When rows overlap, an ⓘ next to 占比
+  explains that shares can add up past 100 %. Each share bar stays "this tag ÷ total".
+- zh-CN and en strings. Tests: `TestSpendBreakdownByTag` (case-folded tag, overlap, total from the
+  ledger, untagged + quick run row, task counts, other tabs `overlap=false`, bad `by` → 400),
+  `TestSpendByTagUI` (wiring, i18n keys).
+- Shots (real agentd + mock data, 1024×655):
+  `/workspace/tidebot-shots/2026-10-30-0000-spend-by-tag-1024x655.png` and `…-en-…`.
+
+**Inspiration**
+
+- BerriAI/litellm `litellm/proxy/spend_tracking/spend_management_endpoints.py`
+  (`get_spend_by_tags` / `ui_get_spend_by_tags`: `jsonb_array_elements_text(request_tags)` so a
+  request is counted once per tag, sorted by spend, with a request count per tag). Idea only; we
+  also keep an untagged row (LiteLLM leaves untagged spend out) and a separate total so the
+  percentages stay honest.
+
+**Learned**
+
+- Any "group by a many-to-many label" breaks the "rows sum to the total" assumption the UI made;
+  the total has to come from the base table and the UI has to say the shares overlap.
+- `COUNT(DISTINCT task_id)` ignores NULL, which is what we want: quick runs aren't tasks.
+
+**Ideas for later**
+
+1. Budgets per tag (daily / monthly cap for everything tagged 监控), next to task and global.
+2. Tag column in the spend CSV export (all tags of the run's task, joined).
+3. Pick a tag on the spend page to narrow the "by model" / "by task" tabs to it.
+4. Show the week's spend per tag as a tooltip on the task list's tag filter menu.
