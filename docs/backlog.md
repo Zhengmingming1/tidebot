@@ -3979,3 +3979,61 @@ this week" meant adding up rows by hand.
 2. Tag column in the spend CSV export (all tags of the run's task, joined).
 3. Pick a tag on the spend page to narrow the "by model" / "by task" tabs to it.
 4. Show the week's spend per tag as a tooltip on the task list's tag filter menu.
+
+## 2026-10-30 (04:00): Settings › Security lists signed-in devices — sign one out, old desktop sessions cleared
+
+Category: security / settings UX.
+
+**Done**
+
+- The "会话" row in Settings › Security only said "signed in on this browser", plus a "sign out others
+  (n)" button whose count also included sessions the desktop app left behind on every launch (each
+  launch made a new local session; only that process ever knew its id). It is now **已登录的设备 /
+  Signed-in devices**: one row per signed-in browser or desktop window, this window first with a
+  "本窗口" pill, then by last activity. Each row: icon (browser / phone / desktop), "Chrome 130 ·
+  macOS", "最近活动 12 分钟前" (relative, full date in its tooltip); sign-in time, address (loopback
+  shown as 本机) and expiry sit in the name's tooltip. Every other row has a sign-out button behind
+  the in-app confirm dialog (desktop rows say the window signs itself back in); the list and the
+  "sign out others" count repaint in place, no page re-render.
+- Migration 019: `sessions.client`, `sessions.os`. At sign-in the User-Agent is read into a browser
+  name + major version and an OS name (`auth.ParseUA`: Edge / Opera / Samsung / Vivaldi / Yandex /
+  Firefox / Chrome / Safari / curl; iOS / iPadOS / Android / ChromeOS / Windows / macOS / Linux). Only
+  those fixed names and digits are stored, never the raw header. Desktop sessions get the host OS.
+- `GET /api/auth/sessions`, `POST /api/auth/sessions/signout {id}` (session + CSRF, 1 KB body cap);
+  `/api/settings` carries the list so the page paints in one go. Rows are addressed by a handle
+  (truncated SHA-256 of the session id with a label); the session id never leaves the server, and a
+  raw id is not accepted as a handle. The current window can't be ended from the list (400 `current`,
+  sign out is the button for that); an unknown or already-ended handle is 404 `gone`.
+- The desktop app drops the sessions of its earlier launches when it starts (`PruneLocalSessions`,
+  same origin only: `desktop` for the in-process bridge, `desktop-loopback` for the fallback). The
+  listing also deletes expired rows on the way.
+- zh-CN and en strings. Tests: `TestParseUA`, `TestSessionListSignOutAndPrune` (auth),
+  `TestSignedInDevices` (UA parsed at login, no session id in the answer, CSRF, current refused,
+  sign-out ends the session, 404 after, 405), `TestDesktopPrunesOldLocalSessions`,
+  `TestSignedInDevicesUI` (wiring, confirm dialog, i18n keys).
+- Shots (real agentd + mock data, 1024×655):
+  `/workspace/tidebot-shots/2026-10-30-0400-signed-in-devices-1024x655.png`, `…-confirm-…` and `-en`.
+
+**Inspiration**
+
+- immich-app/immich `web/src/routes/(user)/user-settings/DeviceList.svelte` (current device on top,
+  other devices below, per-device log out after a confirm, "log out all devices"),
+  `web/src/lib/components/user-settings-page/DeviceCard.svelte` (OS icon, "OS • browser", last seen
+  as relative time) and `server/src/dtos/session.dto.ts` (`deviceType` / `deviceOS` stored per session,
+  `current` flag). Idea only; we store just parsed names, address rows by a hash instead of the id, put
+  the dates and address in a tooltip and clean up the desktop app's own leftovers.
+
+**Learned**
+
+- Every desktop launch created a 7-day session that nothing could use again; they inflated "sign out
+  others (n)" for people who only use the app. Sessions minted per process need cleaning when the
+  next process starts, not only when they expire.
+- A list of sessions must not expose the cookie value: a derived handle is enough to address a row.
+
+**Ideas for later**
+
+1. Show where an unfamiliar sign-in came from in a notification ("新设备登录：Edge 130 · Windows，
+   192.168.1.40"), opt-in, like GitHub's new-device email.
+2. Name a device ("办公室电脑") so the list reads better than the browser name.
+3. Sign-in history (successful and failed attempts from `login_attempts`) under the device list.
+4. Shorter session lifetime option (1 day / 7 days / 30 days) in the same section.

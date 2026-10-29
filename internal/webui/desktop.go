@@ -73,16 +73,19 @@ func (s *Server) runButton(ctx context.Context, id string) (label, runID string,
 // Every request is authenticated with a local owner session that only this handler knows.
 func (s *Server) DesktopHandler(ctx context.Context) (http.Handler, error) {
 	var mu sync.Mutex
-	sess, err := s.deps.Auth.CreateLocalSession(ctx, "desktop")
+	sess, err := s.deps.Auth.CreateLocalSession(ctx, auth.OriginDesktop)
 	if err != nil {
 		return nil, err
 	}
+	// Earlier launches each left a desktop session nobody can use; they showed up as
+	// "other sessions" and as unknown rows in the device list.
+	_, _ = s.deps.Auth.PruneLocalSessions(ctx, auth.OriginDesktop, sess.ID)
 	routes := s.routes()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		if _, err := s.deps.Auth.GetSession(r.Context(), sess.ID); err != nil {
 			// e.g. the user pressed "Sign out" — silently issue a fresh local session.
-			if ns, err2 := s.deps.Auth.CreateLocalSession(r.Context(), "desktop"); err2 == nil {
+			if ns, err2 := s.deps.Auth.CreateLocalSession(r.Context(), auth.OriginDesktop); err2 == nil {
 				sess = ns
 			}
 		}
@@ -151,11 +154,12 @@ func (s *Server) StartLoopbackBridge(ctx context.Context) (*LoopbackBridge, erro
 				http.Error(w, "invalid or used token", http.StatusForbidden)
 				return
 			}
-			sess, err := s.deps.Auth.CreateLocalSession(r.Context(), "desktop-loopback")
+			sess, err := s.deps.Auth.CreateLocalSession(r.Context(), auth.OriginDesktopLoopback)
 			if err != nil {
 				http.Error(w, "session", http.StatusInternalServerError)
 				return
 			}
+			_, _ = s.deps.Auth.PruneLocalSessions(r.Context(), auth.OriginDesktopLoopback, sess.ID)
 			http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: sess.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: sess.ExpiresAt})
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return

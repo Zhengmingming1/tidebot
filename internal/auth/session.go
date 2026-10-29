@@ -322,7 +322,11 @@ func (s *Service) CreateLocalSession(ctx context.Context, origin string) (*Sessi
 	if err := s.EnsureOwner(ctx); err != nil {
 		return nil, err
 	}
-	return s.createSession(ctx, origin)
+	sess, err := s.createSession(ctx, origin)
+	if err == nil {
+		_ = s.SetSessionDevice(ctx, sess.ID, "", HostOS())
+	}
+	return sess, err
 }
 
 // storeTOTP encrypts when a key is configured (always, in the app).

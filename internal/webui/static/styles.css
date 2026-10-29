@@ -2085,3 +2085,12 @@ table.diff tr.del mark.dx { background: #f7c6c6; }
 .rd-ans-diff tr.gap td { padding: 0; }
 .rd-ans-diff tr.gap .linkish { width: 100%; border-radius: 0; font-weight: 500; color: var(--text-2); padding: 2px 8px; }
 .rd-ans-diff tr.gap .linkish:hover { color: var(--accent); }
+
+/* ---------- signed-in devices (Settings → Security) ---------- */
+.ses-list { margin-top: var(--s1); }
+.ses-logo { flex: none; width: 32px; height: 32px; border-radius: var(--radius-sm); display: grid; place-items: center; background: var(--bg-sunk); color: var(--text-2); border: 1px solid var(--border); box-sizing: border-box; }
+.ses-row.cur .ses-logo { background: var(--accent-50); color: var(--accent-600); border-color: var(--accent-100); }
+.ses-row .nt-txt strong { overflow: visible; outline: none; border-radius: 4px; cursor: help; }
+.ses-row .nt-txt strong:focus-visible { box-shadow: var(--focus-ring); }
+.ses-row .pill, .ses-row .icon-btn { flex: none; }
+.ses-row strong[data-tip]:hover::after, .ses-row strong[data-tip]:focus-visible::after { left: 0; transform: none; }

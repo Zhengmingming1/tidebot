@@ -164,6 +164,8 @@
     upload: '<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
     plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
     shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+    monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
+    phone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
     globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
     key: '<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>',
     logout: '<path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>',
@@ -5855,6 +5857,75 @@
     return '<span class="nt-last ' + (d.ok ? "ok" : "bad") + '" tabindex="0" data-tip="' + esc(tip.join("\n")) + '"><i class="nt-dot" aria-hidden="true"></i>' + label +
       '<span data-ago="' + esc(d.at) + '">' + esc(ago(d.at)) + "</span></span>";
   }
+  // ---------- signed-in devices (Settings → Security) ----------
+  // One row per browser / desktop window that is signed in, this window first: browser and OS
+  // read from the User-Agent at sign-in, last activity as relative time; sign-in time, address
+  // and expiry sit in the tooltip. Every other row can be signed out on its own (Immich's
+  // device list does the same), "sign out others" stays for all at once.
+  function sesLabel(x) {
+    var who = x.kind === "desktop" ? T("ses.desktop") : (x.client || T("ses.browser"));
+    return x.os ? who + " · " + x.os : who;
+  }
+  function sesIcon(x) {
+    if (x.kind === "desktop") return "monitor";
+    return /^(iOS|iPadOS|Android)$/.test(x.os || "") ? "phone" : "globe";
+  }
+  function sesIP(ip) {
+    if (!ip) return "";
+    return /^(127\.|::1$|localhost$)/.test(ip) ? T("ses.local") : ip;
+  }
+  function sesTip(x) {
+    var parts = [T("ses.since", { t: when(x.created_at) })], ip = sesIP(x.ip);
+    if (ip) parts.push(T("ses.from", { ip: ip }));
+    parts.push(T("ses.until", { t: when(x.expires_at) }));
+    return parts.join("\n");
+  }
+  function sesOthersHtml(n) {
+    return n > 0 ? '<button class="btn sm ghost" id="ses-others" data-tip="' + esc(T("ses.others_tip")) + '">' + esc(T("ses.others", { n: n })) + "</button>" : "";
+  }
+  function sesListHtml(list) {
+    list = list || [];
+    if (!list.length) return "";
+    return '<ul class="nt-list ses-list" aria-label="' + esc(T("ses.list")) + '">' + list.map(function (x) {
+      var label = sesLabel(x);
+      return '<li class="nt-ch ses-row' + (x.current ? " cur" : "") + '" data-ses="' + esc(x.id) + '"><span class="ses-logo" aria-hidden="true">' + ic(sesIcon(x), "sm") + "</span>" +
+        '<div class="grow nt-txt"><strong tabindex="0" data-tip="' + esc(sesTip(x)) + '">' + esc(label) + "</strong><small>" +
+        (x.current ? esc(T("ses.this_window")) : tAgo("ses.seen", {}, "t", x.last_seen_at)) + "</small></div>" +
+        (x.current ? '<span class="pill ok">' + esc(T("ses.current")) + "</span>" :
+          '<button class="icon-btn sm" data-ses-out="' + esc(x.id) + '" data-kind="' + esc(x.kind) + '" data-name="' + esc(label) + '" aria-label="' + esc(T("ses.out", { n: label })) + '" data-tip="' + esc(T("ses.out_tip")) + '">' + ic("logout", "sm") + "</button>") + "</li>";
+    }).join("") + "</ul>";
+  }
+  // sesWire: the row's "sign out others" and the per-device buttons; both repaint the list
+  // in place (no page re-render), keeping focus on the list.
+  function sesWire(row, box) {
+    var reload = function () {
+      return api("/api/auth/sessions", { fresh: true }).then(function (r) {
+        var list = r.sessions || [], others = list.filter(function (x) { return !x.current; }).length;
+        box.innerHTML = sesListHtml(list);
+        var old = $("#ses-others", row), gap = $(".row-gap", row);
+        if (old) old.remove();
+        if (others && gap) gap.insertAdjacentHTML("afterbegin", sesOthersHtml(others));
+      }).catch(fail);
+    };
+    row.addEventListener("click", function (e) {
+      var b = e.target.closest("#ses-others"); if (!b) return;
+      b.disabled = true;
+      api("/api/auth/sessions/others", { method: "POST", body: {} }).then(function (r) { toast(T("ses.others_done", { n: r.signed_out })); return reload(); }).catch(function (err) { b.disabled = false; fail(err); });
+    });
+    box.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-ses-out]"); if (!b || !box.contains(b)) return;
+      var id = b.getAttribute("data-ses-out"), name = b.getAttribute("data-name");
+      confirmDialog({ title: T("ses.out_title", { n: name }), body: T(b.getAttribute("data-kind") === "desktop" ? "ses.out_body_desktop" : "ses.out_body"), ok: T("ses.out_ok"), danger: true, icon: "logout" }).then(function (yes) {
+        if (!yes) return;
+        b.disabled = true;
+        api("/api/auth/sessions/signout", { method: "POST", body: { id: id } }).then(function () { toast(T("ses.out_done", { n: name })); }).catch(function (err) {
+          if (err && err.status === 404) toast(T("ses.out_gone")); else fail(err);
+        }).then(function () {
+          return reload().then(function () { var nb = $("[data-ses-out]", box) || $(".ses-row strong", box); if (nb) nb.focus(); });
+        });
+      });
+    });
+  }
   function ntListHtml(o) {
     var chs = o.channels || [];
     if (!chs.length) return '<div class="nt-empty">' + ic("bell", "sm") + "<span>" + esc(T("set.no_channels")) + "</span></div>";
@@ -6075,17 +6146,15 @@
             '<span class="row-gap"><span class="pill ok">' + esc(T("set.on")) + '</span><button class="btn sm" id="tf-off">' + esc(T("tf.disable")) + "</button></span>" :
             '<button class="btn primary sm" id="tf-on">' + esc(T("tf.enable")) + "</button>") +
           row("cookies", T("set.cookies"), T("set.cookies_sub"), "") +
-          row("session", T("set.session"), T("set.session_sub"), '<span class="row-gap">' + (st.other_sessions > 0 ? '<button class="btn sm ghost" id="ses-others" data-tip="' + esc(T("ses.others_tip")) + '">' + esc(T("ses.others", { n: st.other_sessions })) + "</button>" : "") +
-            '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button></span>") + "</section>";
+          row("session", T("set.session"), T("set.session_sub"), '<span class="row-gap">' + sesOthersHtml(st.other_sessions) +
+            '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button></span>") +
+          '<div id="ses-box">' + sesListHtml(st.sessions) + "</div></section>";
         after = function () {
           $("#btn-logout").addEventListener("click", function () {
             api("/api/logout", { method: "POST", body: {} }).catch(function () {}).then(function () { state.csrf = ""; draftsClearAll(); showLogin(); });
           });
           $("#pw-change").addEventListener("click", function () { pwChange(st.password_set !== false); });
-          if ($("#ses-others")) $("#ses-others").addEventListener("click", function (e) {
-            var b = e.currentTarget; b.disabled = true;
-            api("/api/auth/sessions/others", { method: "POST", body: {} }).then(function (r) { toast(T("ses.others_done", { n: r.signed_out })); refresh(); }).catch(function (err) { b.disabled = false; fail(err); });
-          });
+          sesWire($("#set-session"), $("#ses-box"));
           if ($("#tf-on")) $("#tf-on").addEventListener("click", twoFASetup);
           if ($("#tf-off")) $("#tf-off").addEventListener("click", function () { twoFADisable(st.password_set !== false); });
         };

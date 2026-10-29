@@ -353,6 +353,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, err.Error())
 		return
 	}
+	if cl, osName := auth.ParseUA(r.UserAgent()); cl != "" || osName != "" {
+		_ = s.deps.Auth.SetSessionDevice(r.Context(), sess.ID, cl, osName)
+	}
 	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.SessionCookie,
