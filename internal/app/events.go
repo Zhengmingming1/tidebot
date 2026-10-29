@@ -30,6 +30,10 @@ type Event struct {
 	// success notice may carry it; AnswerCut: the stored answer itself was capped.
 	Answer    string
 	AnswerCut bool
+	// AnswerSameAs: a succeeded run whose answer matches the task's previous one (that run's
+	// id); Unchanged: the task asked to skip the success notice in that case.
+	AnswerSameAs string
+	Unchanged    bool
 }
 
 // Bus is a tiny non-blocking fan-out. A nil *Bus is valid and drops everything.

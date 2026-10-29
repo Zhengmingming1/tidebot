@@ -508,6 +508,9 @@ func (s *shell) watchEvents(ch <-chan app.Event) {
 		}
 		switch e.Kind {
 		case app.EventRunFinished:
+			if e.Unchanged { // same answer as last time, the task only wants news
+				continue
+			}
 			body := i18n.T("desktop.n.finished_body", e.CostUSD)
 			if ex, _ := notify.AnswerExcerpt(e.Answer); ex != "" { // the answer's opening line(s)
 				body += "\n" + truncate(strings.Join(strings.Fields(ex), " "), 120)

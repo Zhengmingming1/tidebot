@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"unicode/utf8"
 )
@@ -37,4 +39,41 @@ func (s *Store) RunResult(ctx context.Context, runID string) (string, bool, erro
 	var cut int
 	err := s.DB.QueryRowContext(ctx, `SELECT result_text, result_truncated FROM runs WHERE id=?`, runID).Scan(&text, &cut)
 	return text, cut != 0, err
+}
+
+// AnswerKey is what "the same answer" compares: the text with every run of whitespace
+// (spaces, tabs, blank lines, a trailing newline) folded into one space, so re-wrapped or
+// re-indented output is not a change. Idea: changedetection.io
+// processors/text_json_diff/processor.py (ChecksumCalculator with ignore_whitespace).
+func AnswerKey(text string) string { return strings.Join(strings.Fields(text), " ") }
+
+// MarkAnswerSame compares a finished run's final answer with the task's previous succeeded
+// run that has one, stores the earlier run's id on this run when they match and returns it
+// ("" when the answer changed, is the task's first, is empty, or the run has no task).
+func (s *Store) MarkAnswerSame(ctx context.Context, runID string) (string, error) {
+	var taskID sql.NullString
+	var created, text string
+	if err := s.DB.QueryRowContext(ctx, `SELECT task_id, created_at, result_text FROM runs WHERE id=?`, runID).Scan(&taskID, &created, &text); err != nil {
+		return "", err
+	}
+	key := AnswerKey(text)
+	if !taskID.Valid || taskID.String == "" || key == "" {
+		return "", nil
+	}
+	var prevID, prevText string
+	err := s.DB.QueryRowContext(ctx, `SELECT id, result_text FROM runs
+WHERE task_id=? AND id<>? AND status='succeeded' AND result_text<>'' AND created_at<=?
+ORDER BY created_at DESC, id DESC LIMIT 1`, taskID.String, runID, created).Scan(&prevID, &prevText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	same := ""
+	if AnswerKey(prevText) == key {
+		same = prevID
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE runs SET answer_same_as=? WHERE id=?`, same, runID)
+	return same, err
 }

@@ -3816,3 +3816,58 @@ kept polling, nothing said when it was back, and a failed start fell through to 
    (an upgrade under an open tab).
 2. Queue a failed "run now" while offline and offer to send it on reconnect.
 3. Desktop app: when the embedded server stops, show the same bar instead of a blank window.
+
+## 2026-10-29 (16:00): success notices only when the answer changed — digest and watch tasks stop repeating themselves
+
+Category: **feature / notifications** (the last rounds were connection robustness, keyboard
+(cross-platform), tags, list performance and DST correctness). A daily digest or a "has this page
+changed?" task with "notify on success" sent the same message every day even when nothing was
+new, so people turned success notices off and missed the days that mattered.
+
+**Done**
+
+- Migration `018_answer_same.sql`: `task_policies.notify_changed` (off by default) and
+  `runs.answer_same_as` (id of the earlier run with the same answer).
+- `db.AnswerKey` folds every run of whitespace (spaces, tabs, blank lines, CRLF, full-width
+  space) into one space; `Store.MarkAnswerSame` compares a succeeded run's final answer with the
+  task's previous succeeded run that has one (indexed by `task_id, created_at`, parameterized SQL)
+  and stores the match. Always compared, so switching the option on later already knows the last
+  answer; failed runs in between don't count; empty answers and the first run never match.
+- `app`: after a success, `markAnswerSame` sets `Event.AnswerSameAs` and `Event.Unchanged` (the
+  task wants only changes); `EventToMessage` drops the notice for every channel and the bell, the
+  desktop shell skips its banner. Failure, approval and budget notices are never held back.
+- Task form › 失败与补跑: a third line under 成功时也通知 — 仅在回答有变化时通知, tooltip with the
+  rule; the two sub-options grey out (class, not `:has()`, for older WebKitGTK) while success
+  notices are off; the folded summary adds 回答有变化才通知. `policy.set`, older pages, imported
+  files and agentctl that don't send the field keep the task's choice; export carries it.
+- Run page: the final answer card gets a quiet chip 与上次相同 linking to the matching run; the time
+  of that run and the whitespace rule are in its tooltip. A run cleaned up since shows no chip.
+- zh-CN and en strings. Tests: `TestSuccessNoticeOnlyWhenAnswerChanged`,
+  `TestPolicySetKeepsNotifyChanged`, `TestTaskFormNotifyChanged`, `TestRunAnswerSameAPI`,
+  `TestNotifyChangedUI`, `TestAnswerKey`; new-task defaults test updated.
+- Shots: `/workspace/tidebot-shots/2026-10-29-1600.png` (form, tooltip open) and
+  `…-1600-run.png` (chip with tooltip), real agentd with mock Claude at 1024×655.
+
+**Inspiration**
+
+- dgtlmoon/changedetection.io `changedetectionio/processors/text_json_diff/processor.py`:
+  `ChecksumCalculator.calculate(text, ignore_whitespace)` and the `previous_md5` comparison — a
+  change is "the normalized text's checksum differs from last time", whitespace optionally
+  ignored, and only a change triggers a notification. Idea only; we compare the normalized text
+  directly (answers are capped at 128 KB) and keep the match on the run for the UI.
+
+**Learned**
+
+- Keeping the comparison result on the run (not only deciding the notice) costs one indexed
+  query per success and makes the decision visible afterwards — "why didn't I get a message?" is
+  answered on the run page.
+- Agents re-wrap the same content; comparing raw text would call almost every run a change.
+
+**Ideas for later**
+
+1. Ignore lines matching a pattern (dates, "generated at …") before comparing, like
+   changedetection.io's `ignore_text`.
+2. A diff of this answer against the previous one on the run page (line diff we already have for
+   skills).
+3. Mark runs with an unchanged answer in the task's last-10 strip (hollow dot) and the runs list.
+4. "Notify when the answer changed" for failures too: send a failure once, not every retry day.

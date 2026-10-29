@@ -75,6 +75,9 @@ func (a *App) rpcPolicySet(ctx context.Context, raw json.RawMessage) (any, error
 	if _, ok := keys["notify_answer"]; !ok { // a caller that doesn't know the field keeps it
 		in.NotifyAnswer = cur.NotifyAnswer
 	}
+	if _, ok := keys["notify_changed"]; !ok {
+		in.NotifyChanged = cur.NotifyChanged
+	}
 	in.ConsecutiveFailures = cur.ConsecutiveFailures
 	if err := a.Policy.Put(ctx, in); err != nil {
 		return nil, err

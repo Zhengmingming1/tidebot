@@ -354,6 +354,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	} else if res.Status != "" && res.Status != "succeeded" {
 		ev.Kind, ev.Detail = EventRunFailed, res.Status+": "+res.ErrorMessage
 	} else {
+		a.markAnswerSame(ctx, &ev)
 		a.attachAnswer(ctx, &ev)
 	}
 	a.Events.Emit(ev)

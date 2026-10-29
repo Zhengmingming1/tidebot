@@ -1199,16 +1199,24 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		}
 		// cost_detail: the calculation (tokens × price snapshot) for the run detail page
 		// result: the agent's final answer (Markdown, capped) — only on the detail, never in lists
-		var detail, result string
+		// answer_same: the earlier run of the task that gave the same answer (whitespace ignored)
+		var detail, result, sameID string
 		var cut int
-		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut)
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID)
 		out := struct {
 			runDTO
 			CostDetail      json.RawMessage `json:"cost_detail"`
 			Currency        string          `json:"currency"`
 			Result          string          `json:"result"`
 			ResultTruncated bool            `json:"result_truncated,omitempty"`
-		}{runs[0], nil, s.fx().Display, result, cut != 0}
+			AnswerSame      *answerSameDTO  `json:"answer_same,omitempty"`
+		}{runs[0], nil, s.fx().Display, result, cut != 0, nil}
+		if sameID != "" {
+			var at string
+			if s.deps.DB.QueryRowContext(r.Context(), `SELECT COALESCE(finished_at, created_at) FROM runs WHERE id=?`, sameID).Scan(&at) == nil {
+				out.AnswerSame = &answerSameDTO{RunID: sameID, At: at}
+			}
+		}
 		if json.Valid([]byte(detail)) {
 			out.CostDetail = json.RawMessage(detail)
 		}
@@ -1846,4 +1854,10 @@ func (s *Server) handleExt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"result": out})
+}
+
+// answerSameDTO points the run page at the earlier run with the same final answer.
+type answerSameDTO struct {
+	RunID string `json:"run_id"`
+	At    string `json:"at"`
 }

@@ -45,8 +45,9 @@ type taskPolicyForm struct {
 	Catchup             string `json:"catchup"`
 	CatchupGraceMinutes int    `json:"catchup_grace_minutes"`
 	NotifySuccess       bool   `json:"notify_success"`
-	NotifyAnswer        *bool  `json:"notify_answer,omitempty"` // nil (an older page or file) keeps the task's
-	Priority            string `json:"priority,omitempty"`      // urgent | normal | background (power saving)
+	NotifyAnswer        *bool  `json:"notify_answer,omitempty"`  // nil (an older page or file) keeps the task's
+	NotifyChanged       *bool  `json:"notify_changed,omitempty"` // only when the answer changed; nil keeps the task's
+	Priority            string `json:"priority,omitempty"`       // urgent | normal | background (power saving)
 }
 
 // maxCatchupGrace: missed runs older than a week are not worth running any more.
@@ -74,8 +75,8 @@ func validatePolicyForm(p *taskPolicyForm) error {
 
 // policyFormOf is the editable policy of a task (defaults when it has none yet).
 func policyFormOf(p policy.Policy) taskPolicyForm {
-	na := p.NotifyAnswer
-	return taskPolicyForm{RetryMax: p.RetryMax, Catchup: p.Catchup, CatchupGraceMinutes: p.CatchupGraceMinutes, NotifySuccess: p.NotifySuccess, NotifyAnswer: &na, Priority: p.Priority}
+	na, nc := p.NotifyAnswer, p.NotifyChanged
+	return taskPolicyForm{RetryMax: p.RetryMax, Catchup: p.Catchup, CatchupGraceMinutes: p.CatchupGraceMinutes, NotifySuccess: p.NotifySuccess, NotifyAnswer: &na, NotifyChanged: &nc, Priority: p.Priority}
 }
 
 func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID string) error {
@@ -171,6 +172,9 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 		}
 		if f.Policy.NotifyAnswer != nil {
 			p.NotifyAnswer = *f.Policy.NotifyAnswer
+		}
+		if f.Policy.NotifyChanged != nil {
+			p.NotifyChanged = *f.Policy.NotifyChanged
 		}
 		if err := ps.Put(ctx, p); err != nil {
 			return err

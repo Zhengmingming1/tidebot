@@ -3959,6 +3959,7 @@
     var parts = [p.retry_max > 0 ? T("tf.sum_retry", { n: p.retry_max }) : T("tf.sum_noretry"), T(p.catchup === "skip" ? "tf.sum_skip" : p.catchup === "run_all" ? "tf.sum_all" : "tf.sum_once")];
     if (p.priority === "urgent" || p.priority === "background") parts.push(T("tf.sum_pr_" + p.priority));
     if (p.notify_success) parts.push(T(p.notify_answer === false ? "tf.sum_notify" : "tf.sum_notify_ans"));
+    if (p.notify_success && p.notify_changed) parts.push(T("tf.sum_changed"));
     return parts.join(" · ");
   }
   function policyFieldsHtml(p, streak, brkAt) {
@@ -3974,18 +3975,25 @@
       // Priority decides what waits on battery (Settings › General › Power); the
       // option says it in plain words, the tooltip has the rule and the setting.
       '<div class="form-row">' + fieldHtml(T("tf.prio"), '<select name="priority">' + TF_PRIOS.map(function (k) { return opt(k, T("tf.pr_" + k), k === (p.priority || "normal")); }).join("") + "</select>", T("tf.prio_tip", { n: 20 })) +
-      // The success notice may carry the start of the final answer (on unless turned off):
-      // a second line under it, so the pair reads as one setting.
+      // The success notice may carry the start of the final answer (on unless turned off) and
+      // may be skipped when the answer is the same as last time (digest / watch tasks): indented
+      // lines under it, so the group reads as one setting; greyed while success notices are off.
       '<div class="tf-pol-checks"><label class="check tf-pol-ok"><input type="checkbox" name="notify_success"' + (p.notify_success ? " checked" : "") + "> " + esc(T("tf.notify_ok")) + tip(T("tf.notify_ok_tip")) + "</label>" +
-      '<label class="check tf-pol-ans"><input type="checkbox" name="notify_answer"' + (p.notify_answer !== false ? " checked" : "") + "> " + esc(T("tf.notify_ans")) + tip(T("tf.notify_ans_tip")) + "</label></div></div></details>";
+      '<label class="check tf-pol-ans"><input type="checkbox" name="notify_answer"' + (p.notify_answer !== false ? " checked" : "") + (p.notify_success ? "" : " disabled") + "> " + esc(T("tf.notify_ans")) + tip(T("tf.notify_ans_tip")) + "</label>" +
+      '<label class="check tf-pol-ans"><input type="checkbox" name="notify_changed"' + (p.notify_changed ? " checked" : "") + (p.notify_success ? "" : " disabled") + "> " + esc(T("tf.notify_changed")) + tip(T("tf.notify_changed_tip")) + "</label></div></div></details>";
   }
   function readPolicyFields(f) {
-    return { retry_max: parseInt(f.retry_max.value, 10) || 0, catchup: f.catchup.value, catchup_grace_minutes: parseInt(f.catchup_grace_minutes.value, 10) || 360, notify_success: f.notify_success.checked, notify_answer: f.notify_answer.checked, priority: f.priority.value };
+    return { retry_max: parseInt(f.retry_max.value, 10) || 0, catchup: f.catchup.value, catchup_grace_minutes: parseInt(f.catchup_grace_minutes.value, 10) || 360, notify_success: f.notify_success.checked, notify_answer: f.notify_answer.checked, notify_changed: f.notify_changed.checked, priority: f.priority.value };
   }
   function wirePolicyFields(root, f) {
     var sum = $("#tf-pol-sum", root);
-    var sync = function () { f.catchup_grace_minutes.disabled = f.catchup.value === "skip"; sum.textContent = policySummary(readPolicyFields(f)); };
-    ["retry_max", "catchup", "notify_success", "notify_answer", "priority"].forEach(function (n) { f[n].addEventListener("change", sync); });
+    var sync = function () {
+      f.catchup_grace_minutes.disabled = f.catchup.value === "skip";
+      [f.notify_answer, f.notify_changed].forEach(function (c) { c.disabled = !f.notify_success.checked; c.parentNode.classList.toggle("off", c.disabled); });
+      sum.textContent = policySummary(readPolicyFields(f));
+    };
+    ["retry_max", "catchup", "notify_success", "notify_answer", "notify_changed", "priority"].forEach(function (n) { f[n].addEventListener("change", sync); });
+    sync();
   }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
@@ -3996,7 +4004,7 @@
       r.splice(2, 1);
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
-      var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
+      var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
       var drafty = !taskId && !pre.prompt;
       var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
@@ -5161,6 +5169,8 @@
     }).join("") + "</div>";
     return '<section class="card rd-ans" id="rd-ans"><div class="card-head"><span class="ico">' + ic("chat") + '</span><h3 data-tip="' + esc(meta) + '">' + esc(T("rd.answer")) + "</h3>" +
       (r.result_truncated ? '<span class="pill warn sm" data-tip="' + esc(T("rd.ans_cut_tip")) + '">' + esc(T("rd.ans_cut")) + "</span>" : "") +
+      // same answer as the task's previous succeeded run: a quiet chip that opens that run
+      (r.answer_same && /^[\w-]{1,64}$/.test(r.answer_same.run_id) ? '<a class="pill plain sm rd-ans-same" href="#/runs/' + enc(r.answer_same.run_id) + '" data-tip="' + esc(T("rd.ans_same_tip", { t: when(r.answer_same.at) })) + '">' + ic("check", "sm") + esc(T("rd.ans_same")) + "</a>" : "") +
       '<span class="rd-acts">' + seg +
       '<button type="button" class="icon-btn sm" data-ans-copy aria-label="' + esc(T("rd.ans_copy")) + '" data-tip="' + esc(T("rd.ans_copy")) + '">' + ic("copy", "sm") + "</button>" +
       '<button type="button" class="icon-btn sm" data-ans-dl aria-label="' + esc(T("rd.ans_dl")) + '" data-tip="' + esc(T("rd.ans_dl")) + '">' + ic("download", "sm") + "</button></span></div>" +

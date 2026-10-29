@@ -38,6 +38,9 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		if e.TaskID == "" || a.Policy == nil || !a.Policy.Get(context.Background(), e.TaskID).NotifySuccess {
 			return m, false // success is silent unless enabled per task
 		}
+		if e.Unchanged {
+			return m, false // same answer as last time and the task only wants news
+		}
 		m.Params["cost"] = strconv.FormatFloat(e.CostUSD, 'f', 4, 64)
 		m.Title, m.Body = i18n.T("desktop.n.finished", shown), i18n.T("desktop.n.finished_body", e.CostUSD)
 		answerMessage(e, &m, i18n.T)
@@ -107,6 +110,24 @@ func answerMessage(e Event, m *notify.Message, t func(string, ...any) string) {
 		full += "\n\n" + t("notify.answer_capped")
 	}
 	m.LongBody = head + "\n\n" + full
+}
+
+// markAnswerSame records whether a succeeded run answered the same as the task's previous
+// succeeded run (shown on the run page) and whether its success notice is skipped for it.
+// Always compared, so turning the option on later already knows the last answer.
+func (a *App) markAnswerSame(ctx context.Context, ev *Event) {
+	if ev.RunID == "" || ev.TaskID == "" || a.Store == nil {
+		return
+	}
+	rctx, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer done()
+	prev, err := a.Store.MarkAnswerSame(rctx, ev.RunID)
+	if err != nil {
+		a.Log.Warn("answer compare", "run", ev.RunID, "error", err)
+		return
+	}
+	ev.AnswerSameAs = prev
+	ev.Unchanged = prev != "" && a.Policy != nil && a.Policy.Get(rctx, ev.TaskID).NotifyChanged
 }
 
 // attachAnswer puts the stored (masked, capped) final answer on a success event when the
