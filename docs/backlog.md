@@ -3871,3 +3871,63 @@ new, so people turned success notices off and missed the days that mattered.
    skills).
 3. Mark runs with an unchanged answer in the task's last-10 strip (hollow dot) and the runs list.
 4. "Notify when the answer changed" for failures too: send a failure once, not every retry day.
+
+## 2026-10-29 (20:00): run page compares the answer with last time — changed lines, changed words marked
+
+Category: **UI / reading** (the last rounds were notifications (only when the answer changed),
+connection robustness, keyboard (cross-platform), tags, list performance and DST correctness).
+"Only when the answer changed" told you *that* a digest or watch task changed, not *what*: you had
+to open two runs and compare 100 lines by eye to find "¥1,899 → ¥1,699".
+
+**Done**
+
+- `db.PrevAnswer` (shared with `MarkAnswerSame`): the task's previous succeeded run with an
+  answer, created before this one; failed runs and quick runs without a task have none.
+- Run detail returns `answer_prev {run_id, at}` (one indexed query, only when the run has an
+  answer). New `GET /api/runs/{id}/answer-diff`: `prev`, `same` (equal once whitespace is
+  ignored, the notice rule), `added`, `removed`, `lines` (every line of this answer plus the
+  removed ones, numbered on both sides).
+- `AnswerDiff`: CRLF and trailing spaces don't count; common head and tail are cut first and the
+  existing Myers `LineDiff` runs only on the middle; more than 1000 changed lines are shown as
+  replaced (`coarse`) so a rewritten 128 KB answer can't make the quadratic-memory trace explode.
+- Word marks: the removed and added lines of each change are paired (first with first …) and
+  diffed again by token — words, numbers like `1,299.50` as one token, each Han / kana / Hangul
+  character on its own, whitespace runs; a pair with no word in common keeps only the line
+  colour. Segments always join back to the exact line.
+- Answer card: a third choice 对比上次 next to 预览 / 源码 only when there is an earlier answer
+  (its time in the tooltip); remembered like the other two, falls back to preview elsewhere;
+  ←/→ cycle all three. The diff loads on first use and is cached for redraws. Summary row
+  (+N −M · link to that run, time in the tooltip; "only spaces and line breaks differ" or "large
+  change" when it applies) stays at the top while the body scrolls inside the card. Unchanged
+  stretches of 4+ lines fold to "展开 N 行未改动的内容" (3 lines of context) and open in place
+  without losing the scroll position. Everything escaped; line numbers coerced to numbers.
+- zh-CN and en strings. Tests: `TestAnswerDiff` (pairs, number and CJK tokens, trailing spaces,
+  CRLF, coarse path, segments rejoin), `TestAnswerDiffAPI` (prev skips failed runs, quick runs and
+  first answers, 404, whitespace-only = same, GET only), `TestAnswerDiffUI` (wiring, CSS, keys and
+  placeholders, node: folding, opening a fold, short stretches not folded, escaping, empty/same
+  states); answer/prompt UI tests follow the new `ansMode(r)`.
+- Shots (real agentd + mock Claude, 1024×655):
+  `/workspace/tidebot-shots/2026-10-29-2000-answer-diff-1024x655.png` and `…-en-…`.
+
+**Inspiration**
+
+- dgtlmoon/changedetection.io `changedetectionio/diff/__init__.py` (`render_nested_line_diff`:
+  changed line pair keeps the line colour, changed tokens get a darker mark; a line with nothing
+  in common is shown whole) and `changedetectionio/diff/tokenizers/natural_text.py` (words and
+  whitespace as tokens). Idea only; our tokenizer also keeps numbers whole and splits CJK by
+  character, and the diff reuses tidebot's own Myers implementation.
+
+**Learned**
+
+- Myers' trace costs O(D·(N+M)) memory; cutting the common head/tail first and capping the middle
+  keeps the worst case at a few MB while typical answers (a few changed lines) stay exact.
+- Word marks only help when the two lines share something; marking a fully rewritten line just
+  paints it twice.
+
+**Ideas for later**
+
+1. Compare with any earlier run (picker of the task's last successful runs), not only the last one.
+2. Ignore lines matching a pattern (dates, "generated at …") in both the diff and the notice rule.
+3. Put the changed lines (not the answer's first lines) into the success notice when the task
+   notifies only on change.
+4. Side-by-side view on wide windows.

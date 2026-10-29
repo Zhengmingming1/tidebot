@@ -5083,7 +5083,7 @@
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(queued ? T("rd.waiting") : live ? T("rd.running") : r.started_at ? dur(r.duration_ms) : "—") + "</strong><span>" + esc(r.started_at || !r.finished_at ? T(queued ? "rd.queued_at" : "rd.started", { t: when(r.started_at || r.created_at) }) : T("rd.never_started")) + "</span></div>" +
         '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
         '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +
-        runAnswerHtml(r, ansMode()) +
+        runAnswerHtml(r, ansMode(r)) +
         costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + "</span>" +
         // Stop sits next to the live state, above the fold at 1024×655 (the details card is below the log there).
@@ -5158,14 +5158,22 @@
   // the turn's last response in its own quiet container, rendered Markdown plus a copy button).
   // Preview / source like skill files, but its own remembered choice; relative links and front
   // matter are not interpreted (mdHtml with base null). The body scrolls inside the card.
-  function ansMode() { try { return localStorage.getItem("tb_ans_view") === "source" ? "source" : "preview"; } catch (e) { return "preview"; } }
+  function ansMode(r) {
+    var m = "preview";
+    try { m = localStorage.getItem("tb_ans_view") || "preview"; } catch (e) {}
+    // "compare" only where there is an earlier answer; elsewhere the page shows the preview
+    return m === "source" || (m === "diff" && r && r.answer_prev) ? m : "preview";
+  }
+  function ansModes(r) { return r.answer_prev ? ["preview", "source", "diff"] : ["preview", "source"]; }
   function runAnswerHtml(r, mode) {
     if (!r.result) return "";
-    var pv = mode !== "source", lines = r.result.split("\n").length;
+    var lines = r.result.split("\n").length;
     var meta = T("rd.ans_meta", { n: num(lines), s: fmtBytes(new Blob([r.result]).size) });
-    var seg = '<div class="seg sm rd-ans-mode" role="radiogroup" aria-label="' + esc(T("fb.view_as")) + '">' + [["preview", T("fb.preview")], ["source", T("fb.source")]].map(function (x) {
-      var on = (x[0] === "preview") === pv;
-      return '<button type="button" role="radio" data-ans-mode="' + x[0] + '" aria-checked="' + on + '" tabindex="' + (on ? 0 : -1) + '" class="' + (on ? "active" : "") + '" data-tip="' + esc(T(x[0] === "preview" ? "rd.ans_preview_tip" : "rd.ans_source_tip")) + '">' + esc(x[1]) + "</button>";
+    var label = { preview: T("fb.preview"), source: T("fb.source"), diff: T("rd.ans_diff") };
+    var tip = { preview: T("rd.ans_preview_tip"), source: T("rd.ans_source_tip"), diff: r.answer_prev ? T("rd.ans_diff_tip", { t: when(r.answer_prev.at) }) : "" };
+    var seg = '<div class="seg sm rd-ans-mode" role="radiogroup" aria-label="' + esc(T("fb.view_as")) + '">' + ansModes(r).map(function (x) {
+      var on = x === mode;
+      return '<button type="button" role="radio" data-ans-mode="' + x + '" aria-checked="' + on + '" tabindex="' + (on ? 0 : -1) + '" class="' + (on ? "active" : "") + '" data-tip="' + esc(tip[x]) + '">' + esc(label[x]) + "</button>";
     }).join("") + "</div>";
     return '<section class="card rd-ans" id="rd-ans"><div class="card-head"><span class="ico">' + ic("chat") + '</span><h3 data-tip="' + esc(meta) + '">' + esc(T("rd.answer")) + "</h3>" +
       (r.result_truncated ? '<span class="pill warn sm" data-tip="' + esc(T("rd.ans_cut_tip")) + '">' + esc(T("rd.ans_cut")) + "</span>" : "") +
@@ -5174,7 +5182,8 @@
       '<span class="rd-acts">' + seg +
       '<button type="button" class="icon-btn sm" data-ans-copy aria-label="' + esc(T("rd.ans_copy")) + '" data-tip="' + esc(T("rd.ans_copy")) + '">' + ic("copy", "sm") + "</button>" +
       '<button type="button" class="icon-btn sm" data-ans-dl aria-label="' + esc(T("rd.ans_dl")) + '" data-tip="' + esc(T("rd.ans_dl")) + '">' + ic("download", "sm") + "</button></span></div>" +
-      (pv ? '<div class="rd-ans-body md" tabindex="0">' + mdHtml(r.result, null) + "</div>" : '<pre class="rd-ans-body rd-ans-src" tabindex="0">' + esc(r.result) + "</pre>") + "</section>";
+      (mode === "diff" ? '<div class="rd-ans-body rd-ans-diff" tabindex="0" aria-live="polite">' + (r._ansDiff ? ansDiffHtml(r, r._ansDiff) : skeleton("list")) + "</div>" :
+        mode === "source" ? '<pre class="rd-ans-body rd-ans-src" tabindex="0">' + esc(r.result) + "</pre>" : '<div class="rd-ans-body md" tabindex="0">' + mdHtml(r.result, null) + "</div>") + "</section>";
   }
   function bindRunAnswer(card, r) {
     var redraw = function (m) {
@@ -5187,7 +5196,29 @@
       var on = $('[data-ans-mode][aria-checked="true"]', next); if (on) on.focus();
     };
     $$("[data-ans-mode]", card).forEach(function (b) { b.addEventListener("click", function () { if (b.getAttribute("aria-checked") !== "true") redraw(b.getAttribute("data-ans-mode")); }); });
-    $(".rd-ans-mode", card).addEventListener("keydown", function (e) { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); redraw(ansMode() === "source" ? "preview" : "source"); } });
+    $(".rd-ans-mode", card).addEventListener("keydown", function (e) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      var ms = ansModes(r), i = ms.indexOf(ansMode(r));
+      redraw(ms[(i + (e.key === "ArrowRight" ? 1 : ms.length - 1)) % ms.length]);
+    });
+    var dbox = $(".rd-ans-diff", card);
+    if (dbox && !r._ansDiff) {
+      api("/api/runs/" + enc(r.id) + "/answer-diff").then(function (d) {
+        r._ansDiff = d;
+        if (document.contains(dbox)) dbox.innerHTML = ansDiffHtml(r, d);
+      }).catch(function (e) { if (document.contains(dbox)) dbox.innerHTML = errorState(e.message); });
+    }
+    // a folded stretch of unchanged lines opens in place
+    if (dbox) dbox.addEventListener("click", function (e) {
+      var g = e.target.closest("[data-ans-gap]");
+      if (!g || !r._ansDiff) return;
+      (r._ansOpen = r._ansOpen || {})[g.getAttribute("data-ans-gap")] = true;
+      var top = dbox.scrollTop;
+      dbox.innerHTML = ansDiffHtml(r, r._ansDiff);
+      dbox.scrollTop = top;
+      dbox.focus({ preventScroll: true });
+    });
     $("[data-ans-copy]", card).addEventListener("click", function () { copyText(r.result).catch(fail); });
     $("[data-ans-dl]", card).addEventListener("click", function () { saveBlob(new Blob([r.result.replace(/\n?$/, "\n")], { type: "text/markdown" }), r.id + ".md").catch(fail); });
     card.addEventListener("click", function (e) {
@@ -5197,6 +5228,38 @@
       var v = a.getAttribute("data-md-anchor"), h = body.querySelector('[data-md-id="' + (window.CSS && CSS.escape ? CSS.escape(v) : v) + '"]');
       if (h) body.scrollTop = h.offsetTop - 8;
     });
+  }
+  // "Compare with last time": this answer against the task's previous successful one. Long
+  // unchanged stretches fold to one row that opens in place; inside a changed line the words
+  // that differ are marked (server side). Idea: dgtlmoon/changedetection.io
+  // changedetectionio/diff/__init__.py (render_nested_line_diff) — line colour plus a darker
+  // mark on the changed words, so "63 → 66" is seen at a glance.
+  var ANS_CTX = 3;
+  function ansDiffHtml(r, d) {
+    if (!d.prev) return '<p class="muted">' + esc(T("rd.ans_diff_none")) + "</p>";
+    var L = d.lines || [], open = r._ansOpen || {};
+    var prev = '<a href="#/runs/' + enc(d.prev.run_id) + '" data-tip="' + esc(T("rd.ans_diff_prev_tip", { t: when(d.prev.at) })) + '">' + esc(T("rd.ans_diff_prev")) + "</a>";
+    if (!d.added && !d.removed) return '<p class="diff-sum">' + ic("check", "sm") + " " + esc(T("rd.ans_diff_same")) + " · " + prev + "</p>";
+    var sum = '<p class="diff-sum"><span class="add">+' + esc(num(d.added)) + '</span> <span class="del">−' + esc(num(d.removed)) + "</span> · " + prev +
+      (d.same ? ' · <span data-tip="' + esc(T("rd.ans_diff_ws_tip")) + '">' + esc(T("rd.ans_diff_ws")) + "</span>" : "") +
+      (d.coarse ? ' · <span data-tip="' + esc(T("rd.ans_diff_coarse_tip")) + '">' + esc(T("rd.ans_diff_coarse")) + "</span>" : "") + "</p>";
+    // which unchanged lines stay visible: ANS_CTX around each change; a fold hides 4 or more
+    var near = L.map(function () { return false; });
+    L.forEach(function (l, i) { if (l.op !== " ") for (var k = Math.max(0, i - ANS_CTX); k <= Math.min(L.length - 1, i + ANS_CTX); k++) near[k] = true; });
+    var rows = [], i = 0;
+    while (i < L.length) {
+      if (near[i]) { rows.push(ansDiffRow(L[i])); i++; continue; }
+      var j = i; while (j < L.length && !near[j]) j++;
+      if (j - i < 4 || open[i]) { for (var k = i; k < j; k++) rows.push(ansDiffRow(L[k])); }
+      else rows.push('<tr class="gap"><td colspan="4"><button type="button" class="linkish" data-ans-gap="' + i + '">' + esc(T("rd.ans_diff_fold", { n: num(j - i) })) + "</button></td></tr>");
+      i = j;
+    }
+    return sum + '<table class="diff"><tbody>' + rows.join("") + "</tbody></table>";
+  }
+  function ansDiffRow(l) {
+    var c = l.op === "+" ? "ins" : l.op === "-" ? "del" : "";
+    var tx = l.segs && l.segs.length ? l.segs.map(function (g) { return g.x ? '<mark class="dx">' + esc(g.t) + "</mark>" : esc(g.t); }).join("") : esc(l.text);
+    return '<tr class="' + c + '"><td class="ln-a">' + (+l.a || "") + '</td><td class="ln-b">' + (+l.b || "") + '</td><td class="sg">' + (l.op === "+" ? "+" : l.op === "-" ? "−" : "") + '</td><td class="tx">' + tx + "</td></tr>";
   }
   function liveRunStats(id, was) {
     return api("/api/runs/" + enc(id)).then(function (r) {

@@ -60,14 +60,8 @@ func (s *Store) MarkAnswerSame(ctx context.Context, runID string) (string, error
 	if !taskID.Valid || taskID.String == "" || key == "" {
 		return "", nil
 	}
-	var prevID, prevText string
-	err := s.DB.QueryRowContext(ctx, `SELECT id, result_text FROM runs
-WHERE task_id=? AND id<>? AND status='succeeded' AND result_text<>'' AND created_at<=?
-ORDER BY created_at DESC, id DESC LIMIT 1`, taskID.String, runID, created).Scan(&prevID, &prevText)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
+	prevID, prevText, _, err := s.prevAnswer(ctx, taskID.String, runID, created)
+	if err != nil || prevID == "" {
 		return "", err
 	}
 	same := ""
@@ -76,4 +70,32 @@ ORDER BY created_at DESC, id DESC LIMIT 1`, taskID.String, runID, created).Scan(
 	}
 	_, err = s.DB.ExecContext(ctx, `UPDATE runs SET answer_same_as=? WHERE id=?`, same, runID)
 	return same, err
+}
+
+// PrevAnswer returns the run the given run's answer is compared with: the task's previous
+// succeeded run that has an answer (its id, answer and finish time). Empty id when there is
+// none (first answer, a quick run without a task, or the run does not exist).
+func (s *Store) PrevAnswer(ctx context.Context, runID string) (id, text, at string, err error) {
+	var taskID sql.NullString
+	var created string
+	if err = s.DB.QueryRowContext(ctx, `SELECT task_id, created_at FROM runs WHERE id=?`, runID).Scan(&taskID, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		}
+		return
+	}
+	if !taskID.Valid || taskID.String == "" {
+		return
+	}
+	return s.prevAnswer(ctx, taskID.String, runID, created)
+}
+
+func (s *Store) prevAnswer(ctx context.Context, taskID, runID, created string) (id, text, at string, err error) {
+	err = s.DB.QueryRowContext(ctx, `SELECT id, result_text, COALESCE(finished_at, created_at) FROM runs
+WHERE task_id=? AND id<>? AND status='succeeded' AND result_text<>'' AND created_at<=?
+ORDER BY created_at DESC, id DESC LIMIT 1`, taskID, runID, created).Scan(&id, &text, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", "", nil
+	}
+	return
 }

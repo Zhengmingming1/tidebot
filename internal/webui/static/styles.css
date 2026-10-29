@@ -2071,3 +2071,17 @@ body.net-on .toasts { bottom: 72px; }
 .tf-pol .tf-pol-ans.off { opacity: .5; }
 .rd-ans .rd-ans-same { gap: 4px; text-decoration: none; color: var(--text-2); }
 .rd-ans .rd-ans-same:hover { color: var(--text); background: var(--border); }
+/* final answer compared with last time: summary, line diff, changed words marked */
+.rd-ans-diff { padding: 0; font-size: 13px; background: var(--surface); }
+.rd-ans-diff > p.muted { margin: 0; padding: 8px 16px; }
+.rd-ans-diff .diff-sum { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0; padding: 4px 8px; min-height: 32px; border-bottom: 1px solid var(--border); background: #fdfcf9; position: sticky; top: 0; z-index: 1; }
+.rd-ans-diff .diff-sum a { color: var(--accent); text-decoration: none; }
+.rd-ans-diff .diff-sum a:hover { text-decoration: underline; }
+.rd-ans-diff table.diff { background: var(--surface); }
+.rd-ans-diff table.diff tr.del { font-weight: 400; }
+table.diff mark.dx { color: inherit; border-radius: 2px; padding: 0 1px; }
+table.diff tr.ins mark.dx { background: #b9e5c8; }
+table.diff tr.del mark.dx { background: #f7c6c6; }
+.rd-ans-diff tr.gap td { padding: 0; }
+.rd-ans-diff tr.gap .linkish { width: 100%; border-radius: 0; font-weight: 500; color: var(--text-2); padding: 2px 8px; }
+.rd-ans-diff tr.gap .linkish:hover { color: var(--accent); }

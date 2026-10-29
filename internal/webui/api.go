@@ -1210,11 +1210,18 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			Result          string          `json:"result"`
 			ResultTruncated bool            `json:"result_truncated,omitempty"`
 			AnswerSame      *answerSameDTO  `json:"answer_same,omitempty"`
-		}{runs[0], nil, s.fx().Display, result, cut != 0, nil}
+			AnswerPrev      *answerSameDTO  `json:"answer_prev,omitempty"`
+		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil}
 		if sameID != "" {
 			var at string
 			if s.deps.DB.QueryRowContext(r.Context(), `SELECT COALESCE(finished_at, created_at) FROM runs WHERE id=?`, sameID).Scan(&at) == nil {
 				out.AnswerSame = &answerSameDTO{RunID: sameID, At: at}
+			}
+		}
+		// answer_prev: the answer this one is compared with on the page ("compare with last time")
+		if result != "" {
+			if pid, _, at, err := s.prevAnswer(r.Context(), id); err == nil && pid != "" {
+				out.AnswerPrev = &answerSameDTO{RunID: pid, At: at}
 			}
 		}
 		if json.Valid([]byte(detail)) {
@@ -1229,6 +1236,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[1] == "stop" && r.Method == http.MethodPost {
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.stopRun(w, r, id) })).ServeHTTP(w, r)
+		return
+	}
+	if parts[1] == "answer-diff" && r.Method == http.MethodGet {
+		s.answerDiff(w, r, id)
 		return
 	}
 	if parts[1] != "events" {

@@ -47,12 +47,12 @@ func TestRunAnswerUI(t *testing.T) {
 	js, _ := Static.ReadFile("static/app.js")
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
-		`runAnswerHtml(r, ansMode()) +
+		`runAnswerHtml(r, ansMode(r)) +
         costCalcHtml(r) +`,
 		`if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);`,
 		`'<div class="rd-ans-body md" tabindex="0">' + mdHtml(r.result, null) + "</div>"`,
 		`'<pre class="rd-ans-body rd-ans-src" tabindex="0">' + esc(r.result) + "</pre>"`,
-		`localStorage.getItem("tb_ans_view") === "source"`,
+		`m = localStorage.getItem("tb_ans_view") || "preview";`,
 		`copyText(r.result).catch(fail)`,
 		`saveBlob(new Blob([r.result.replace(/\n?$/, "\n")], { type: "text/markdown" }), r.id + ".md")`,
 		`if (base === null) return null;`,
@@ -62,7 +62,7 @@ func TestRunAnswerUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	i, j := strings.Index(src, "  function ansMode() {"), strings.Index(src, "  // Run detail stat cards.")
+	i, j := strings.Index(src, "  function ansMode(r) {"), strings.Index(src, "  // Run detail stat cards.")
 	if i < 0 || j < i {
 		t.Fatal("answer block not found")
 	}

@@ -63,7 +63,7 @@ func TestRunPromptUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	i, j := strings.Index(src, "  function runPromptHtml(r) {"), strings.Index(src, "  function ansMode() {")
+	i, j := strings.Index(src, "  function runPromptHtml(r) {"), strings.Index(src, "  function ansMode(r) {")
 	if i < 0 || j < i {
 		t.Fatal("prompt block not found")
 	}
