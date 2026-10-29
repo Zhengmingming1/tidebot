@@ -3687,3 +3687,66 @@ narrow it; nothing grouped "daily reports" or "client A" together.
 2. Several tags in the filter at once (Uptime Kuma allows any-of).
 3. Rename / merge a tag everywhere from a small "manage tags" list in Settings.
 4. `agentctl tasks create --tag` and tags in the global ⌘K search.
+
+## 2026-10-29 (08:00): shortcuts speak each OS — ⌘K on a Mac, Ctrl+K elsewhere, and only that
+
+Category: **cross-platform / keyboard** (the last rounds were tags (feature / UX), list
+performance and DST correctness; the last cross-platform round was 10-28 20:00). Three
+differences showed up across macOS, Windows and Linux: the inline editor said "Ctrl+Enter 保存"
+on a Mac, quick run's tooltip read "⌘+Enter", sort hints said "Alt" where a Mac keyboard says
+⌥; the palette also opened on Ctrl+K on a Mac (that is "delete to end of line" in every macOS
+text field) and on Ctrl+Alt+K on Windows (AltGr+K on Polish / German layouts); and the
+single-letter shortcuts (j / k, g h, n t, r / e / o, x) did nothing with Caps Lock on or a
+Russian / Greek layout.
+
+**Done**
+
+- `app.js` key helpers next to the IME guard: `KB_MAC` (one platform check, `userAgentData`
+  then `navigator.platform` then the UA; replaces three copies of the `navigator.platform`
+  regex), `keyLabel("Mod+Enter")` → "⌘Enter" on a Mac / "Ctrl+Enter" elsewhere (⌘ ⌥ ⇧ ⌃
+  written together on a Mac, `Ctrl+` `Alt+` `Shift+` elsewhere; `aria` gives Command / Option /
+  Control for screen readers), `kbdHtml()` (one `<kbd>` per key of a sequence, "g h" → two),
+  `modKey(e)` (⌘ alone on a Mac, Ctrl alone elsewhere, never with Alt), `submitKey(e)`
+  (⌘ or Ctrl + Enter on every OS — neither gives it a meaning in a text box, and earlier hints
+  taught Ctrl+Enter), `kbLetter(e)` (letters by meaning: Caps Lock lowercased, Shift kept,
+  a non-Latin character falls back to `e.code` KeyJ → j).
+- Topbar search badge, shortcuts dialog (new row "⌘Enter / Ctrl+Enter: save or run from a
+  text box"; reorder shown as ⌥← / ⌥→), quick run tooltip, inline editor hint, Buttons and
+  providers sort hints now go through `keyLabel`. The four strings take `{k}` in zh-CN and en;
+  zh-CN also gets full-width punctuation there.
+- Palette: `modKey` + `kbLetter` (⌘K on a Russian layout still opens it). Global and list
+  keys use `kbLetter`.
+- Tests: `TestPlatformKeys` (wiring; no `navigator.platform` outside `KB_MAC`, no hard-coded
+  "⌘ K" / "Ctrl K", no modifier names in either dictionary; node: labels Mac / PC / ARIA,
+  chords, sequences; modKey on both OSes incl. AltGr and the Windows key; submitKey; kbLetter
+  for Caps Lock, Shift, Russian, Greek, French digit row, punctuation). `TestListKeyboardCursor`
+  and `TestQuickRunMemory` follow the helpers.
+- Shots (macOS UA zh-CN / Windows UA en): `/workspace/tidebot-shots/2026-10-29-shortcuts-mac-zh-1024x655.png`,
+  `…-shortcuts-win-en-…`, `…-shortcuts-inline-mac-zh-…`, `…-shortcuts-inline-win-en-…`.
+
+**Inspiration**
+
+- microsoft/vscode `src/vs/base/common/keybindingLabels.ts` (`UILabelProvider`: per-OS
+  modifier names and separator — ⌘⌥⇧⌃ with no separator on macOS, "Ctrl+" elsewhere;
+  `AriaLabelProvider`: long names "Command", "Option" for screen readers).
+- n8n-io/n8n `packages/frontend/@n8n/composables/src/useDeviceSupport.ts` (`isCtrlKeyPressed`:
+  metaKey on macOS, ctrlKey elsewhere; `controlKeyText`) and
+  `packages/frontend/@n8n/design-system/src/components/N8nKeyboardShortcut/N8nKeyboardShortcut.vue`
+  (one key cap per key, ⌥ vs Alt). Ideas only, no code copied.
+
+**Learned**
+
+- "metaKey || ctrlKey" is the common shortcut check and wrong on both sides: it steals
+  Control-based text editing on macOS and fires on AltGr (reported as Ctrl+Alt) on Windows.
+- `e.key` follows the layout and Caps Lock; `e.code` names the physical key. Shortcuts should
+  prefer the meaning and fall back to the position only when the layout has no Latin letter.
+
+**Ideas for later**
+
+1. Show a key hint in more button tooltips ("立即运行 · r", "编辑 · e") with `kbdHtml`, like
+   VS Code's "(⌘K)" suffix in hover titles.
+2. ⌘/Ctrl+Enter submits every dialog form (task form, provider drawer, AI plugin), with the hint
+   on the primary button.
+3. ⌘/Ctrl+S in the skill file editor and the task form.
+4. Desktop app menu accelerators (macOS menu bar: ⌘, opens Settings, ⌘N new task) wired to the
+   same commands.

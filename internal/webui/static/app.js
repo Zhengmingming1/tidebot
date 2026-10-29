@@ -46,6 +46,55 @@
     });
   }
 
+  // ---------- keys: one modifier per platform, labels as each OS writes them ----------
+  // macOS uses ⌘ for app shortcuts and keeps Control for text editing (Ctrl+K deletes to the end
+  // of the line in every text field), Windows and Linux use Ctrl (the Windows / Super key belongs
+  // to the OS). modKey() therefore takes only the platform's own modifier, and never Ctrl+Alt:
+  // that is AltGr on Windows keyboards (Polish ą, German @), not a shortcut. Labels follow the
+  // platform too: ⌘ ⌥ ⇧ ⌃ written together on a Mac (⌘K, ⌘Enter), Ctrl+ / Alt+ / Shift+
+  // elsewhere (Ctrl+K); screen readers get the long names. Ideas: microsoft/vscode
+  // src/vs/base/common/keybindingLabels.ts (UILabelProvider / AriaLabelProvider per OS) and
+  // n8n-io/n8n packages/frontend/@n8n/composables/src/useDeviceSupport.ts (isCtrlKeyPressed:
+  // metaKey on macOS, ctrlKey elsewhere).
+  var KB_MAC = (function () {
+    var n = typeof navigator === "undefined" ? {} : navigator;
+    var p = (n.userAgentData && n.userAgentData.platform) || n.platform || n.userAgent || "";
+    return /mac|iphone|ipad|ipod/i.test(p);
+  })();
+  var KEY_NAMES = {
+    mac: { Mod: "⌘", Ctrl: "⌃", Alt: "⌥", Shift: "⇧", sep: "" },
+    pc: { Mod: "Ctrl", Ctrl: "Ctrl", Alt: "Alt", Shift: "Shift", sep: "+" },
+    macAria: { Mod: "Command", Ctrl: "Control", Alt: "Option", Shift: "Shift", sep: "+" },
+    pcAria: { Mod: "Control", Ctrl: "Control", Alt: "Alt", Shift: "Shift", sep: "+" }
+  };
+  // keyLabel("Mod+Enter") → "⌘Enter" on a Mac, "Ctrl+Enter" elsewhere; the last part is the key.
+  function keyLabel(combo, aria, mac) {
+    var m = KEY_NAMES[(mac == null ? KB_MAC : mac) ? (aria ? "macAria" : "mac") : (aria ? "pcAria" : "pc")];
+    var parts = String(combo).split("+"), key = parts.pop();
+    return parts.map(function (x) { return m[x] || x; }).join(m.sep) + (parts.length ? m.sep : "") + key;
+  }
+  // A space separates keys pressed one after another ("g h"): one <kbd> each.
+  function kbdHtml(combo) { return String(combo).split(" ").map(function (c) { return '<kbd aria-label="' + esc(keyLabel(c, true)) + '">' + esc(keyLabel(c)) + "</kbd>"; }).join(""); }
+  // The platform's shortcut modifier alone (Shift allowed): ⌘ on a Mac, Ctrl elsewhere.
+  function modKey(e, mac) {
+    if (e.altKey) return false;
+    return (mac == null ? KB_MAC : mac) ? !!e.metaKey && !e.ctrlKey : !!e.ctrlKey && !e.metaKey;
+  }
+  // ⌘/Ctrl+Enter saves or runs a text box. Either modifier is taken here: neither OS gives
+  // Enter with it a meaning in a text field, and earlier hints said Ctrl+Enter on every OS.
+  function submitKey(e) { return e.key === "Enter" && !!(e.metaKey || e.ctrlKey) && !e.altKey; }
+  // The letter a shortcut means, whatever the layout: Caps Lock gives "J", a Russian or Greek
+  // layout gives "о" for the same key; e.code still says KeyJ. Other keys pass through.
+  function kbLetter(e) {
+    var k = e.key || "";
+    if (/^[a-z]$/i.test(k)) return e.shiftKey ? k : k.toLowerCase();
+    if (k.length === 1 && /[^\x00-\x7f]/.test(k) && /^Key[A-Z]$/.test(e.code || "")) {
+      var c = e.code.slice(3);
+      return e.shiftKey ? c : c.toLowerCase();
+    }
+    return k;
+  }
+
   // ---------- i18n ----------
   // Key-based dictionaries (embedded JSON). T() returns plain text; callers still esc() it.
   var LANGS = ["en", "zh-CN"];
@@ -543,9 +592,8 @@
     var c = crumbs && crumbs.length > 1 ? '<div class="crumbs">' + crumbs.map(function (x, i) {
       return (i ? '<span class="sep">' + ic("chev", "sm") + "</span>" : "") + (x[1] ? '<a href="' + esc(x[1]) + '">' + esc(x[0]) + "</a>" : "<span>" + esc(x[0]) + "</span>");
     }).join("") + "</div>" : "";
-    var mac = /Mac|iPhone|iPad/.test(navigator.platform || "");
     $("#topbar").innerHTML = c + '<div class="spacer"></div>' +
-      '<button class="search pal-open" id="q-open" aria-label="' + esc(T("top.search_label")) + '">' + ic("search") + '<span class="ph">' + esc(T("pal.placeholder")) + "</span><kbd>" + (mac ? "⌘" : "Ctrl") + " K</kbd></button>" +
+      '<button class="search pal-open" id="q-open" aria-label="' + esc(T("top.search_label")) + '">' + ic("search") + '<span class="ph">' + esc(T("pal.placeholder")) + "</span>" + kbdHtml("Mod+K") + "</button>" +
       '<button class="lang-btn" id="btn-lang" title="' + esc(T("top.language")) + '" aria-label="' + esc(T("top.language")) + '">' + (state.lang === "zh-CN" ? "中" : "EN") + "</button>" +
       '<button class="icon-btn" id="btn-refresh" title="' + esc(T("top.refresh")) + '" aria-label="' + esc(T("top.refresh")) + '">' + ic("refresh") + "</button>" +
       '<div class="rel"><button class="icon-btn" id="btn-bell" title="' + esc(T("top.notifications")) + '" aria-label="' + esc(T("top.notifications")) + '" aria-haspopup="true">' + ic("bell") + '<span class="badge-dot hidden" id="bell-dot"></span></button><div id="notif" class="popover notif-center hidden"></div></div>';
@@ -739,10 +787,9 @@
     it.run();
   }
   function shortcutsHelp() {
-    var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
-    var rows = [[mod + " K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["j / k", T("sc.rows")], ["Enter / o", T("sc.open_row")], ["x / r", T("sc.row_acts")], ["/", T("sc.search")], ["Esc", T("sc.close")], ["Alt ← →", T("sc.reorder")], ["g h / g t / g r / g c", T("sc.goto")], ["n t / n s / n p / n b / n q", T("sc.create")], ["r / e / o", T("sc.task_keys")]];
+    var rows = [["Mod+K", T("sc.palette")], ["?", T("sc.help")], ["↑ ↓", T("sc.move")], ["Enter", T("sc.run")], ["j / k", T("sc.rows")], ["Enter / o", T("sc.open_row")], ["x / r", T("sc.row_acts")], ["/", T("sc.search")], ["Mod+Enter", T("sc.submit")], ["Esc", T("sc.close")], ["Alt+← / Alt+→", T("sc.reorder")], ["g h / g t / g r / g c", T("sc.goto")], ["n t / n s / n p / n b / n q", T("sc.create")], ["r / e / o", T("sc.task_keys")]];
     modal('<div class="card-head"><span class="ico">' + ic("more") + "</span><h2>" + esc(T("sc.title")) + '</h2></div><table class="tbl sc-table"><tbody>' +
-      rows.map(function (r) { return "<tr><td>" + r[0].split(" / ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join(" / ") + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") +
+      rows.map(function (r) { return "<tr><td>" + r[0].split(" / ").map(kbdHtml).join(" / ") + "</td><td>" + esc(r[1]) + "</td></tr>"; }).join("") +
       '</tbody></table><div class="actions"><button class="btn" id="sc-close">' + esc(T("btn.close")) + "</button></div>", function (r, close) { $("#sc-close").addEventListener("click", close); });
   }
   // Navigate, then press a button on the new page once it has rendered.
@@ -753,7 +800,8 @@
   var gPending = 0;
   document.addEventListener("keydown", function (e) {
     if ($("#shell") && $("#shell").classList.contains("hidden")) return;
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); return; }
+    var key = kbLetter(e);
+    if (modKey(e) && key.toLowerCase() === "k") { e.preventDefault(); openPalette(); return; }
     var t = e.target, typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
     if (typing || e.metaKey || e.ctrlKey || e.altKey || $("#modal-root").innerHTML || ($("#pal-root") && $("#pal-root").innerHTML)) return;
     if (e.key === "?") { e.preventDefault(); shortcutsHelp(); return; }
@@ -761,21 +809,21 @@
       var lead = gPending.k;
       gPending = 0;
       if (lead === "g") {
-        var dest = { h: "#/", t: "#/tasks", r: "#/runs", s: "#/skills", b: "#/buttons", p: "#/plugins", c: "#/spend", ",": "#/settings" }[e.key];
+        var dest = { h: "#/", t: "#/tasks", r: "#/runs", s: "#/skills", b: "#/buttons", p: "#/plugins", c: "#/spend", ",": "#/settings" }[key];
         if (dest) { e.preventDefault(); location.hash = dest; }
       } else {
         // "n x" creates (same scheme as Plane's Power K: n i / n p …).
-        var mk = { t: function () { taskFormModal(null); }, s: function () { skillImportModal(function () { location.hash = "#/skills"; refresh(); }); }, p: function () { goClick("#/settings/providers", "#pv-add"); }, b: function () { goClick("#/buttons", "#b-add"); }, q: function () { quickRunModal(); } }[e.key];
+        var mk = { t: function () { taskFormModal(null); }, s: function () { skillImportModal(function () { location.hash = "#/skills"; refresh(); }); }, p: function () { goClick("#/settings/providers", "#pv-add"); }, b: function () { goClick("#/buttons", "#b-add"); }, q: function () { quickRunModal(); } }[key];
         if (mk) { e.preventDefault(); mk(); }
       }
       return;
     }
-    if (e.key === "g" || e.key === "n") { gPending = { k: e.key, valueOf: function () { return this.t; }, t: Date.now() }; return; }
+    if (key === "g" || key === "n") { gPending = { k: key, valueOf: function () { return this.t; }, t: Date.now() }; return; }
     if (kbKey(e)) return;
     // page-level single keys
     // r / e: run & edit on a task page, rerun & edit-and-rerun on a run page.
     // o: open the task's folder (desktop app, overview tab).
-    var act = { r: ["#t-run", "#rd-rerun"], e: ["#t-edit", "#rd-edit"], o: ["#ws-open"] }[e.key], hit = act && (($(act[0]) || $(act[1])));
+    var act = { r: ["#t-run", "#rd-rerun"], e: ["#t-edit", "#rd-edit"], o: ["#ws-open"] }[key], hit = act && (($(act[0]) || $(act[1])));
     if (hit && hit.classList.contains("hidden")) hit = null; // e.g. "o" in the browser, where there is no file manager
     if (hit && !hit.disabled) { e.preventDefault(); hit.click(); }
   });
@@ -819,7 +867,7 @@
   // A focused control keeps its own Enter (buttons, links, chips); j / k / o / x work anywhere.
   function kbFocusFree(cur) { var a = document.activeElement; return !a || a === cur || a === document.body || a === page() || !(a.closest && a.closest("a,button,input,select,textarea,summary,[tabindex],[contenteditable]")); }
   function kbKey(e) {
-    var k = e.key;
+    var k = kbLetter(e);
     if (k === "j" || k === "k") { if (kbMove(k === "j" ? 1 : -1)) { e.preventDefault(); return true; } return false; }
     if (k === "/") {
       var s = $$("input[type=search]", page()).filter(function (x) { return x.offsetParent !== null && !x.disabled; })[0];
@@ -1623,13 +1671,12 @@
       try { lastProv = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
       if (pre && pre.provider) lastProv = pre.provider;
       if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
-      var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
       modal('<div class="card-head"><span class="ico">' + ic(pre ? "edit" : "sparkle") + "</span><h2>" + esc(T(pre ? "qr.edit_title" : "home.quick")) + "</h2></div>" +
         '<form id="qr"><div class="field"><span class="qr-lbl"><span id="qr-lbl">' + esc(T("f.prompt")) + "</span>" + (pre ? '<button type="button" class="linkish qr-reset hidden" id="qr-reset" data-tip="' + esc(T("qr.revert_tip")) + '">' + ic("rollback", "sm") + esc(T("qr.revert")) + "</button>" : draftTagHtml()) + '</span><textarea name="prompt" aria-labelledby="qr-lbl" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></div>' +
         '<div class="qr-recent hidden" id="qr-recent" role="group" aria-label="' + esc(T("qr.recent")) + '"><span class="muted">' + esc(T("qr.recent")) + "</span></div>" +
         '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label>" +
         '<p class="hint">' + esc(T(pre ? "qr.edit_hint" : "qr.hint")) + "</p>" +
-        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit" data-tip="' + esc(T("qr.run_key", { k: mod })) + '">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
+        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit" data-tip="' + esc(T("qr.run_key", { k: keyLabel("Mod+Enter") })) + '">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
         function (root, close) {
           var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root);
           var orig = pre ? { prompt: pre.prompt, provider: form.provider.value } : null;
@@ -1647,7 +1694,7 @@
           form.provider.addEventListener("change", sync);
           if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; sync(); ta.focus(); });
           box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); sync(); ta.focus(); });
-          ta.addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); } });
+          ta.addEventListener("keydown", function (e) { if (submitKey(e)) { e.preventDefault(); form.requestSubmit(); } });
           form.addEventListener("submit", function (e) {
             e.preventDefault();
             var f = e.target;
@@ -2136,7 +2183,7 @@
       if (el.classList.contains("editing")) return;
       var old = el.textContent;
       el.classList.add("editing");
-      el.innerHTML = multi ? '<textarea rows="4" maxlength="32000"></textarea><small class="hint">' + esc(T("ie.keys_multi")) + "</small>" : '<input maxlength="80">';
+      el.innerHTML = multi ? '<textarea rows="4" maxlength="32000"></textarea><small class="hint">' + esc(T("ie.keys_multi", { k: keyLabel("Mod+Enter") })) + "</small>" : '<input maxlength="80">';
       var inp = $(multi ? "textarea" : "input", el);
       inp.value = old; inp.focus(); inp.select();
       var done = false;
@@ -2149,7 +2196,7 @@
       };
       inp.addEventListener("keydown", function (e) {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(false); }
-        else if (e.key === "Enter" && (!multi || e.ctrlKey || e.metaKey)) { e.preventDefault(); end(true); }
+        else if (e.key === "Enter" && (!multi || submitKey(e))) { e.preventDefault(); end(true); }
       });
       inp.addEventListener("blur", function () { end(true); });
     };
@@ -2714,14 +2761,14 @@
         var tIco = b.task_id ? "tasks" : b.skill_id ? "skills" : "chat";
         var tName = b.task_id ? tname[b.task_id] || b.task_id : b.skill_id ? sname[b.skill_id] || b.skill_id : b.prompt;
         return '<div class="card qa bt-card' + (b.color ? " colored" : "") + '" draggable="true" tabindex="0" data-idx="' + i + '" aria-roledescription="' + esc(T("bt.sortable")) + '" aria-label="' + esc(b.label) + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '">' +
-          '<div class="bt-top"><span class="qa-ico">' + ic(btnIcon(b)) + '</span><div class="bt-acts"><span class="grip qa-grip" aria-hidden="true" data-tip="' + esc(T("bt.sort_hint")) + '">⋮⋮</span>' +
+          '<div class="bt-top"><span class="qa-ico">' + ic(btnIcon(b)) + '</span><div class="bt-acts"><span class="grip qa-grip" aria-hidden="true" data-tip="' + esc(T("bt.sort_hint", { k: keyLabel("Alt+← →") })) + '">⋮⋮</span>' +
           '<button class="icon-btn sm" data-edit="' + i + '" data-tip="' + esc(T("btn.edit")) + '" aria-label="' + esc(T("btn.edit")) + '">' + ic("edit", "sm") + '</button>' +
           '<button class="icon-btn sm danger-text" data-del="' + i + '" data-tip="' + esc(T("btn.remove")) + '" aria-label="' + esc(T("btn.remove")) + '">' + ic("trash", "sm") + "</button></div></div>" +
           "<strong>" + esc(b.label) + "</strong>" + (b.description ? '<small class="bt-sub">' + esc(b.description) + "</small>" : "") +
           '<div class="bt-foot"><span class="bt-target" data-tip="' + esc(target) + '">' + ic(tIco, "sm") + "<span>" + esc(tName) + '</span></span><span class="bt-go">' + ic("play", "sm") + esc(T("bt.run")) + "</span></div></div>";
       });
       if (!list.length) cards.push('<div class="bt-empty">' + emptyState("bolt", T("bt.none"), T("bt.new_sub")) + "</div>");
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + tip(T("bt.sort_hint")) + '</p></div><div class="actions"><button class="btn primary" id="b-add">' + ic("plus", "sm") + esc(T("bt.new")) + '</button></div></div><div class="grid g4" id="bt-grid">' + cards.join("") + '</div><div class="sr-only" aria-live="polite" id="bt-live"></div>', "buttons", [[T("nav.buttons")]]);
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.buttons")) + "</h1><p>" + esc(T("bt.sub")) + tip(T("bt.sort_hint", { k: keyLabel("Alt+← →") })) + '</p></div><div class="actions"><button class="btn primary" id="b-add">' + ic("plus", "sm") + esc(T("bt.new")) + '</button></div></div><div class="grid g4" id="bt-grid">' + cards.join("") + '</div><div class="sr-only" aria-live="polite" id="bt-live"></div>', "buttons", [[T("nav.buttons")]]);
       applyColors(page());
       var save = function (nl, quiet) { return api("/api/buttons", { method: "PUT", body: nl }).then(function () { if (!quiet) toast(T("toast.buttons_saved")); renderButtons(); }); };
       $("#b-add").addEventListener("click", function () { buttonModal(list, null, tasks, skills, save); });
@@ -3063,7 +3110,7 @@
       box.innerHTML = '<div class="pv-toolbar"><p class="muted">' + tip(T("pv.sub")) + '</p><button class="btn primary" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + "</button></div>" +
         (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
         (hidden.length ? '<details class="pv-more"><summary>' + esc(T("pv.more", { n: hidden.length })) + '</summary><ul class="pv-cards">' + hidden.map(card).join("") + "</ul></details>" : "") +
-        '<small class="hint">' + esc(T("pv.sort_hint")) + "</small>";
+        '<small class="hint">' + esc(T("pv.sort_hint", { k: keyLabel("Alt+↑/↓") })) + "</small>";
       // Re-render, then reopen through the *new* render's opener: the old closure's
       // byName predates a just-created provider (that crashed on "preset.id").
       var again = function (sel) { return providerCards(box).then(function () { if (sel && $("#drawer") && pvOpen) pvOpen(sel); }); };

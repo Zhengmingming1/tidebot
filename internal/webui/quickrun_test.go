@@ -17,7 +17,7 @@ func TestQuickRunMemory(t *testing.T) {
 	for _, want := range []string{
 		`api("/api/runs/recent-prompts")`,
 		`localStorage.setItem("tb_qr_provider", f.provider.value)`,
-		`if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); }`,
+		`if (submitKey(e)) { e.preventDefault(); form.requestSubmit(); }`,
 		`'">' + esc(p.length > 36 ? p.slice(0, 36) + "…" : p) + "</button>"`,
 		`ta.value = recent[+b.dataset.i]`,
 	} {

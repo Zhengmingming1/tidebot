@@ -57,6 +57,10 @@ func TestListKeyboardCursor(t *testing.T) {
 	if block == "" {
 		t.Fatal("list cursor block not found")
 	}
+	kbHelpers := regexp.MustCompile(`(?s)  function kbLetter\(e\) \{.*?\n  \}\n`).FindString(src)
+	if kbHelpers == "" {
+		t.Fatal("kbLetter not found")
+	}
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed; static checks only")
@@ -102,7 +106,7 @@ var MutationObserver = function (f) { this.observe = function () { listeners.mo 
 var requestAnimationFrame = function (f) { f(); return 0; };
 var prefetched = [];
 function prefetchRoute(h) { prefetched.push(h); }
-` + block + `
+` + kbHelpers + block + `
 function key(k) { var e = { key: k, prevented: false, preventDefault: function () { this.prevented = true; } }; return { used: kbKey(e), prevented: e.prevented }; }
 var rows = $$("[data-href]").filter(function (r) { return r.offsetParent; });
 if (kbStep(0, -1, 1) !== -1 || kbStep(3, -1, 1) !== 0 || kbStep(3, -1, -1) !== 2 || kbStep(3, 2, 1) !== 2 || kbStep(3, 0, -1) !== 0) bad.push("kbStep clamps wrong");
