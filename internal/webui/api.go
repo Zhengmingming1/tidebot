@@ -86,6 +86,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/webui", s.withAuthCSRF(s.handleWebUIToggle))
 	mux.HandleFunc("/api/budgets", s.withAuthCSRF(s.handleBudgets))
 	mux.HandleFunc("/api/settings/language", s.withAuthCSRF(s.handleLanguage))
+	mux.HandleFunc("/api/settings/appearance", s.withAuthCSRF(s.handleAppearance))
 	mux.HandleFunc("/api/rpc/", s.withAuthCSRF(s.handleExt))
 }
 

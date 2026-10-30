@@ -284,7 +284,7 @@ func (s *Server) routes() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Security-Policy", csp)
-		_, _ = w.Write(b)
+		_, _ = w.Write(withAppearance(b, s.Appearance(r.Context())))
 	})
 
 	s.registerAPI(mux)
