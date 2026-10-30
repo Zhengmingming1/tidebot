@@ -4357,3 +4357,43 @@ the way back and the batch token keeps undo exact.
 3. Channels (email, chat robots) still get the update notes as Markdown text; send the same
    summary plus the notes link.
 4. Settings page width at large windows (second item of the 14:26 feedback) is still open.
+
+## 2026-10-31 (00:00): Settings fill wide windows — two columns when there's room
+
+User feedback from 2026-10-30 14:26 (second item): with a bigger window the settings content stayed
+720px wide and left a large blank area on the right.
+
+**Done**
+
+- The 720px cap on `.set-main` is gone; the settings column (`.set-col`) is a CSS size container,
+  so the layout follows the column's own width (sidebar, settings nav and padding included), not
+  the window.
+- Column ≥ 1040px (window ≈ 1500px and up): pages with two or more ordinary cards (General, Data,
+  Network, About) flow them into two balanced columns (`columns: 2`, cards never split); the
+  About header and the Danger zone span both columns. Single-card pages (Providers, Budgets,
+  Security, Notifications, Pricing) fill the width.
+- Column ≥ 880px: the Budgets form grid adds columns (`auto-fill, minmax(200px, 1fr)`) instead
+  of three stretched fields; first grid under a card head gets 8px top space.
+- Whole page stops at 1600px, so rows stay readable on 2560px screens.
+- 1024×655 (column ≈ 576px) is unchanged: one stacked column, same as before.
+- Tests: CSS rules (no 720 cap, container thresholds above the 1024 width), page wrapper, and
+  `setFlow` under node (one card, hero + one, about, danger zone).
+
+**Learned** — Cherry Studio (CherryHQ/cherry-studio, `src/renderer/components/SettingsPrimitives.tsx`)
+splits settings pages in two kinds: "simple right-content" pages use `SettingsContentColumn`
+(`mx-auto max-w-3xl`, a centred 768px column), while pages with their own split layout (Data,
+MCP, Channels) use `SettingContainer` and take the full width. tidebot takes the same split by
+content, but fills instead of centring (the user asked for fill): list/table pages fill, pages
+of several row cards go to two columns. Container queries (Chrome 105, Safari 16, WebKitGTK 2.40+)
+make the decision depend on the settings column, so a narrower sidebar or the stacked nav at
+≤ 860px can't put two cramped columns side by side; without support the page simply stacks.
+A multi-column container drops a column's last bottom margin at a `column-span: all` element,
+so the Danger zone needs its own top margin.
+
+**Ideas for later**
+
+1. Within a single wide card, show the row's description beside the label instead of under it
+   when there's room (fewer lines on Security / Notifications at 1600px+).
+2. Same container rule for the task form drawer and the run dialog at large widths.
+3. Keep the settings nav item for the card under the viewport highlighted while scrolling
+   (scroll-spy) now that two cards can be side by side.

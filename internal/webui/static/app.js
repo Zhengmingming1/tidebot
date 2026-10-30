@@ -6675,11 +6675,24 @@
           $("#up-every").addEventListener("change", save);
         };
       }
-      mount('<h1 class="sr-only">' + esc(T("nav.settings")) + "</h1>" + '<div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
+      mount('<h1 class="sr-only">' + esc(T("nav.settings")) + "</h1>" + '<div class="settings-layout">' + nav + '<div class="set-col"><div class="set-main">' + body + "</div></div></div>",
         "settings", [[T("nav.settings"), "#/settings"], [T("setnav." + section)]]);
+      setFlow($(".set-main"));
       after();
       jumpTo(item);
     });
+  }
+  // Settings fill wide windows: with two or more ordinary cards the page may flow
+  // them into two balanced columns (CSS decides when, by the column's own width —
+  // see .set-flow in styles.css); the about header and the danger zone always span.
+  function setFlow(main) {
+    if (!main) return;
+    var n = 0;
+    for (var i = 0; i < main.children.length; i++) {
+      var c = main.children[i];
+      if (!c.classList.contains("about-hero") && !c.classList.contains("danger-zone") && !c.classList.contains("set-wide")) n++;
+    }
+    main.classList.toggle("set-flow", n >= 2);
   }
   // Settings › About › Updates. Check and update run as a background job on the
   // server (update.check / update.apply with async), this view polls update.status

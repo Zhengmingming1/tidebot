@@ -2991,3 +2991,21 @@ input.tgl:disabled { opacity: .5; cursor: default; }
 .kv dd.rn-kv-ws .tag .i { width: 12px; height: 12px; }
 @media (max-width: 640px) { .rn-two { grid-template-columns: 1fr; } }
 .stat span.ell { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- settings fill wide windows ----------
+   The column is a size container: up to 1040px wide the cards stack and fill it (1024×655
+   unchanged); wider, pages with two or more cards flow them into two balanced columns
+   (about header and danger zone span both), form grids add columns, and the whole
+   page stops at 1600px so rows stay readable on very large screens. */
+.set-col { min-width: 0; container: setcol / inline-size; }
+.set-main { max-width: 1600px; }
+.set-main > .card > .card-head + .grid { margin-top: 8px; }
+@container setcol (min-width: 880px) {
+  .set-main .grid.g3 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+}
+@container setcol (min-width: 1040px) {
+  .set-main.set-flow { display: block; columns: 2; column-gap: 16px; }
+  .set-main.set-flow > * { break-inside: avoid; margin: 0 0 16px; }
+  .set-main.set-flow > .about-hero, .set-main.set-flow > .danger-zone, .set-main.set-flow > .set-wide { column-span: all; }
+  .set-main.set-flow > * + .danger-zone, .set-main.set-flow > * + .set-wide { margin-top: 16px; } /* a column's last margin is dropped at the span */
+}
