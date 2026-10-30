@@ -130,3 +130,36 @@ var guardDirError = guard.DirError{Problem: guard.DirSensitive}
 var errBusyForTest = guard.ErrDirBusy
 
 func urlQ(s string) string { return url.QueryEscape(s) }
+
+// The Run dialog's wiring lives in app.js; these are the pieces that make it a
+// skill + folder runner rather than the old prompt-only quick run.
+func TestRunDialogUI(t *testing.T) {
+	js, err := os.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := os.ReadFile("static/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"/api/tasks/workspace-check?mode=run&path="`,
+		`"/api/runs/defaults"`,
+		`data-sk-run="`,
+		`T("pal.run_skill"`,
+		`name="mode" value="edit"`,
+		`T("rn.hint_dirty", { n: g.dirty })`,
+		`r.task_name || r.skill_name || T("trig.quick")`,
+		`function runCtxText(r, short)`,
+		`setWs(l.workspace); setMode(l.mode); drawDirs();`,
+	} {
+		if !strings.Contains(string(js), want) {
+			t.Errorf("app.js lost %q", want)
+		}
+	}
+	for _, want := range []string{".modal:has(.rn-form)", ".rn-mode label[data-tip]:hover::after", ".rn-hint.warn"} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("styles.css lost %q", want)
+		}
+	}
+}

@@ -57,7 +57,7 @@ func TestRunPromptUI(t *testing.T) {
 		`<div class="rd-prompt" id="rd-prompt">' + esc(p) + "</div>"`,
 		`copyText(r.prompt || "").catch(fail)`,
 		`box.scrollHeight <= box.clientHeight + 1`,
-		`quickRunModal({ prompt: r.prompt, provider: r.provider })`,
+		`quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace, mode: r.run_mode })`,
 	} {
 		if !strings.Contains(src, s) {
 			t.Errorf("app.js lacks %s", s)

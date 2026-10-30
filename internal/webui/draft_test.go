@@ -20,7 +20,7 @@ func TestPromptDrafts(t *testing.T) {
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });`,
-		`if (!pre) draftClear("qr");`,
+		`if (!edit) draftClear("qr");`,
 		`var drafty = !taskId && !pre.prompt;`,
 		`if (drafty) wireDraft(root, f.prompt, "task");`,
 		`if (drafty) draftClear("task");`,

@@ -18,7 +18,7 @@ func TestRunDetailActions(t *testing.T) {
 		`id="rd-rerun"' + (live ? " disabled" : "")`,
 		`api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} })`,
 		`(r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task"`,
-		`taskFormModal(null, { prompt: r.prompt, provider: r.provider })`,
+		`taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace })`,
 		`prompt: pre.prompt || ""`,
 	} {
 		if !strings.Contains(src, want) {

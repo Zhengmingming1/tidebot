@@ -684,10 +684,19 @@
     if (/digest|week|summar/.test(n)) return "pie";
     if (/clean|log|trash/.test(n)) return "trash";
     if (/backup/.test(n)) return "shield";
-    if (r.trigger === "quick") return "sparkle";
+    if (r.trigger === "quick") return r.skill_id ? "skills" : "sparkle";
     return "terminal";
   }
-  function runTitle(r) { return (r.task_name || T("trig.quick")) + " #" + shortId(r.id); }
+  // a run of a skill (no task) is titled by the skill, so the list and the breadcrumb say what ran
+  function runTitle(r) { return (r.task_name || r.skill_name || T("trig.quick")) + " #" + shortId(r.id); }
+  // runCtxText: "Quick run · tidebot · Read-only" for runs started in a folder from the Run dialog
+  // (short: just "tidebot · Read-only", for the narrow status card)
+  function runCtxText(r, short) {
+    var t = triggerText(r.trigger);
+    if (!r.workspace || !r.run_mode) return t;
+    var nm = r.workspace.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || r.workspace;
+    return (short ? "" : t + " · ") + nm + " · " + T(r.run_mode === "edit" ? "rn.edit" : "rn.read");
+  }
   function cronHuman(c) {
     if (!c) return T("cron.manual");
     var p = c.split(/\s+/);
@@ -963,7 +972,10 @@
             extra.push({ kind: "run_task", icon: "play", label: T("pal.run_task", { name: h.name }), run: function () {
               api("/api/tasks/" + enc(h.id) + "/run", { method: "POST", body: {} }).then(function () { toast(T("toast.run_started")); }).catch(fail);
             } });
-          } else if (h.kind === "skill") extra.push({ kind: "skill", icon: "skills", label: h.name, sub: h.sub, run: function () { location.hash = "#/skills/" + enc(h.id); } });
+          } else if (h.kind === "skill") {
+            extra.push({ kind: "skill", icon: "skills", label: h.name, sub: h.sub, run: function () { location.hash = "#/skills/" + enc(h.id); } });
+            extra.push({ kind: "run_skill", icon: "play", label: T("pal.run_skill", { name: h.name }), run: function () { quickRunModal({ skill_id: h.id }); } });
+          }
           else extra.push({ kind: "run", icon: "runs", label: T("search.run", { id: shortId(h.id) }), sub: h.sub, run: function () { location.hash = "#/runs/" + enc(h.id); } });
         });
         pal.items = extra.concat(pal.items);
@@ -1756,7 +1768,7 @@
     return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.provider")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
       runs.map(function (r) {
         var running = r.status === "running", active = running || r.status === "queued";
-        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon(r)) + '">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + hlText(runTitle(r), lq) + "</strong></a>" + (runHitHtml(r.match) || '<small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small>") + "</div></div></td>" +
+        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon(r)) + '">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + hlText(runTitle(r), lq) + "</strong></a>" + (runHitHtml(r.match) || '<small class="ell">' + esc(runCtxText(r)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small>") + "</div></div></td>" +
           '<td class="run-prov"><span class="ell">' + esc(r.provider || "—") + "</span>" + (r.model ? '<small class="ell">' + esc(r.model) + "</small>" : "") + "</td>" +
           "<td>" + statusPill(r.status, r.queue_pos, r.error) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
           '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && active ? '<button class="icon-btn sm row-act" data-stop="' + esc(r.id) + '" data-st="' + esc(r.status) + '" data-tip="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '" aria-label="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '">' + ic("stop", "sm") + "</button>" : "") + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
@@ -1927,53 +1939,161 @@
     scheduleRefresh._t = setTimeout(function () { if ((location.hash || "#/") === hash && !$("#modal-root").innerHTML) refresh(); }, ms);
   }
 
-  // Quick run remembers what you did: recent prompts come back as chips (filtered as you
-  // type), the last provider is preselected, and Ctrl/⌘+Enter runs.
-  // quickRunModal(pre) with pre = {prompt, provider} is "edit & rerun" from a run page: the
-  // old run's prompt and provider are filled in, "Revert" appears once you change them, and
-  // the original run is left alone (the edited one is a new ad-hoc run).
+  // The Run dialog (quick run, merged): a prompt, optionally with a skill and a working
+  // folder. Recent prompts come back as chips (filtered as you type), the last provider is
+  // preselected, and Ctrl/⌘+Enter runs. Picking a skill fills in the folder, permission and
+  // provider of its last run; the folder shows its git branch and uncommitted changes. With
+  // a folder the run is read-only unless "Can edit files" is chosen.
+  // quickRunModal(pre): pre.prompt set = "edit & rerun" from a run page (the old run's
+  // fields are filled in, "Revert" appears once you change them, the original run is left
+  // alone); pre = {skill_id} alone opens it with that skill picked (skills page, palette).
   function quickRunModal(pre) {
-    pre = pre && pre.prompt ? pre : null;
-    Promise.all([api("/api/settings"), api("/api/runs/recent-prompts").catch(function () { return { prompts: [] }; })]).then(function (res) {
-      var st = res[0], recent = pre ? [] : (res[1] && res[1].prompts) || [], lastProv = "";
+    var edit = pre && pre.prompt ? pre : null;
+    pre = pre || {};
+    Promise.all([api("/api/settings"), api("/api/runs/recent-prompts").catch(function () { return { prompts: [] }; }), api("/api/skills").catch(function () { return []; })]).then(function (res) {
+      var st = res[0], recent = edit ? [] : (res[1] && res[1].prompts) || [], skills = res[2] || [], lastProv = "";
       try { lastProv = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
-      if (pre && pre.provider) lastProv = pre.provider;
+      if (edit && edit.provider) lastProv = edit.provider;
       if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
-      modal('<div class="card-head"><span class="ico">' + ic(pre ? "edit" : "sparkle") + "</span><h2>" + esc(T(pre ? "qr.edit_title" : "home.quick")) + "</h2></div>" +
-        '<form id="qr"><div class="field"><span class="qr-lbl"><span id="qr-lbl">' + esc(T("f.prompt")) + "</span>" + (pre ? '<button type="button" class="linkish qr-reset hidden" id="qr-reset" data-tip="' + esc(T("qr.revert_tip")) + '">' + ic("rollback", "sm") + esc(T("qr.revert")) + "</button>" : draftTagHtml()) + '</span><textarea name="prompt" aria-labelledby="qr-lbl" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></div>' +
+      var skOpts = '<option value="">' + esc(T("rn.no_skill")) + "</option>" + skills.map(function (k) { return '<option value="' + esc(k.id) + '"' + (k.id === pre.skill_id ? " selected" : "") + ">" + esc(k.name) + "</option>"; }).join("");
+      modal('<div class="card-head"><span class="ico">' + ic(edit ? "edit" : "play") + "</span><h2>" + esc(T(edit ? "qr.edit_title" : "rn.title")) + "</h2></div>" +
+        '<form id="qr" class="rn-form">' +
+        '<div class="rn-two"><label class="field"><span>' + esc(T("rn.skill")) + tip(T("rn.skill_tip")) + '</span><select name="skill_id" id="rn-skill">' + skOpts + "</select></label>" +
+        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label></div>" +
+        '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">' + esc(T("rn.folder")) + "</span>" + tip(T("rn.folder_tip")) + '<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>' +
+          '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '"><label data-tip="' + esc(T("rn.read_tip")) + '"><input type="radio" name="mode" value="read" checked><span>' + ic("eye", "sm") + esc(T("rn.read")) + '</span></label><label data-tip="' + esc(T("rn.edit_tip")) + '"><input type="radio" name="mode" value="edit"><span>' + ic("edit", "sm") + esc(T("rn.edit")) + "</span></label></span></span>" +
+          '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="rn-wlbl" placeholder="' + esc(T("rn.folder_ph")) + '">' +
+          '<button type="button" class="icon-btn sm hidden" id="rn-ws-pick" data-tip="' + esc(T("tf.ws_pick")) + '" aria-label="' + esc(T("tf.ws_pick")) + '">' + ic("folder", "sm") + "</button>" +
+          '<button type="button" class="icon-btn sm hidden" id="rn-ws-clear" data-tip="' + esc(T("rn.folder_clear")) + '" aria-label="' + esc(T("rn.folder_clear")) + '">' + ic("x", "sm") + "</button></div>" +
+          '<div class="qr-recent rn-dirs hidden" id="rn-dirs" role="group" aria-label="' + esc(T("rn.recent_dirs")) + '"><span class="muted">' + esc(T("rn.recent_dirs")) + "</span></div></div>" +
+        '<div class="field"><span class="qr-lbl"><span id="qr-lbl">' + esc(T("f.prompt")) + '</span><span class="muted rn-arg hidden" id="rn-arg"></span>' + (edit ? '<button type="button" class="linkish qr-reset hidden" id="qr-reset" data-tip="' + esc(T("qr.revert_tip")) + '">' + ic("rollback", "sm") + esc(T("qr.revert")) + "</button>" : draftTagHtml()) + '</span><textarea name="prompt" aria-labelledby="qr-lbl" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></div>' +
         '<div class="qr-recent hidden" id="qr-recent" role="group" aria-label="' + esc(T("qr.recent")) + '"><span class="muted">' + esc(T("qr.recent")) + "</span></div>" +
-        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label>" +
-        '<p class="hint">' + esc(T(pre ? "qr.edit_hint" : "qr.hint")) + "</p>" +
+        '<p class="hint rn-hint" id="rn-hint"></p><p class="field-err" id="rn-err"></p>' +
         '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit" data-tip="' + esc(T("qr.run_key", { k: keyLabel("Mod+Enter") })) + '">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
         function (root, close) {
-          var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root);
-          var orig = pre ? { prompt: pre.prompt, provider: form.provider.value } : null;
+          var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root), ws = form.workspace;
+          var pill = $("#rn-ws-st", root), pick = $("#rn-ws-pick", root), clear = $("#rn-ws-clear", root), dirsBox = $("#rn-dirs", root), hint = $("#rn-hint", root), err = $("#rn-err", root), argEl = $("#rn-arg", root);
+          var wsState = { problem: "", git: null }, seq = 0, timer = 0, wsTouched = false, recentDirs = [];
+          var modeVal = function () { var c = form.querySelector('input[name="mode"]:checked'); return c ? c.value : "read"; };
+          var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" ? "edit" : "read"); }); };
+          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, workspace: ws.value.trim(), mode: ws.value.trim() ? modeVal() : "" }; };
+          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: edit.skill_id || "", workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : "" } : null;
+          // the hint under the form says what the run may do; a dirty git folder warns before "Can edit"
+          var paintHint = function () {
+            var dir = ws.value.trim(), m = modeVal(), g = wsState.git, warn = false, txt;
+            $(".rn-mode", root).classList.toggle("off", !dir);
+            $$('input[name="mode"]', form).forEach(function (i) { i.disabled = !dir; });
+            if (!dir) txt = T(form.skill_id.value ? "rn.hint_skill" : (edit ? "qr.edit_hint" : "qr.hint"));
+            else if (m === "edit") { txt = T("rn.hint_edit"); if (g && g.dirty > 0) { txt = T("rn.hint_dirty", { n: g.dirty }); warn = true; } }
+            else txt = T("rn.hint_read");
+            hint.textContent = txt;
+            hint.classList.toggle("warn", warn);
+          };
+          var paintWs = function (r) {
+            wsState = { problem: r.problem || "", git: r.git || null };
+            var cls = "", txt = "", tipTxt = "";
+            if (!ws.value.trim()) { /* nothing */ }
+            else if (wsState.problem) { cls = "bad"; txt = T("rn.ws_" + wsState.problem); tipTxt = T("rn.ws_" + wsState.problem + "_tip"); }
+            else if (wsState.git) { cls = wsState.git.dirty > 0 ? "warn" : "ok"; txt = (wsState.git.branch || "git") + (wsState.git.dirty > 0 ? " · " + T("rn.dirty", { n: wsState.git.dirty }) : ""); tipTxt = r.path; }
+            else { cls = "ok"; txt = T("rn.ws_ok"); tipTxt = r.path; }
+            pill.className = "pill sm " + (cls || "hidden");
+            pill.textContent = txt;
+            if (tipTxt) pill.setAttribute("data-tip", tipTxt); else pill.removeAttribute("data-tip");
+            ws.title = r.path || "";
+            paintHint();
+          };
+          var check = function () {
+            var my = ++seq, v = ws.value.trim();
+            clear.classList.toggle("hidden", !v);
+            if (!v) { paintWs({}); return; }
+            api("/api/tasks/workspace-check?mode=run&path=" + enc(v)).then(function (r) { if (my === seq) paintWs(r || {}); }).catch(function () { /* keep last state */ });
+          };
+          var setWs = function (v) { ws.value = v; clearTimeout(timer); err.textContent = ""; check(); syncEdit(); };
+          var drawDirs = function () {
+            $$(".rn-dir", dirsBox).forEach(function (b) { b.remove(); });
+            var v = ws.value.trim(), shown = recentDirs.filter(function (d) { return d !== v; }).slice(0, 4);
+            dirsBox.insertAdjacentHTML("beforeend", shown.map(function (d) { var nm = d.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || d; return '<button type="button" class="chip qr-chip rn-dir" data-dir="' + esc(d) + '" data-tip="' + esc(d) + '">' + ic("folder", "sm") + esc(nm) + "</button>"; }).join(""));
+            dirsBox.classList.toggle("hidden", !shown.length);
+          };
+          // defaults: the picked skill's last folder, permission and provider (only into fields you haven't touched)
+          var loadDefaults = function (fill) {
+            var sk = form.skill_id.value;
+            api("/api/runs/defaults" + (sk ? "?skill_id=" + enc(sk) : "")).then(function (d) {
+              if (form.skill_id.value !== sk) return;
+              recentDirs = (d && d.recent_dirs) || [];
+              drawDirs();
+              var l = d && d.last;
+              if (fill && sk && l && !wsTouched && !ws.value.trim()) {
+                setWs(l.workspace); setMode(l.mode); drawDirs();
+                if (l.provider && st.providers.some(function (p) { return p.name === l.provider; })) form.provider.value = l.provider;
+                paintHint();
+              }
+            }).catch(function () {});
+          };
+          var paintSkill = function () {
+            var k = skills.filter(function (x) { return x.id === form.skill_id.value; })[0];
+            argEl.textContent = k ? T("rn.arg_as", { name: k.name }) : "";
+            argEl.classList.toggle("hidden", !k);
+            if (k) argEl.setAttribute("data-tip", k.description || ""); else argEl.removeAttribute("data-tip");
+            ta.placeholder = k ? T("rn.ph_skill", { name: k.name }) : T("qr.placeholder");
+          };
           box.insertAdjacentHTML("beforeend", recent.map(function (p, i) { return '<button type="button" class="chip qr-chip" data-i="' + i + '" data-tip="' + esc(p.length > 280 ? p.slice(0, 280) + "…" : p) + '">' + esc(p.length > 36 ? p.slice(0, 36) + "…" : p) + "</button>"; }).join(""));
           var filterChips = function () {
             var q = ta.value.trim().toLowerCase(), shown = 0;
-            $$(".qr-chip", box).forEach(function (b) { var p = recent[+b.dataset.i], on = !q || (p.toLowerCase().indexOf(q) >= 0 && p.trim().toLowerCase() !== q); b.classList.toggle("hidden", !on || shown >= 4); if (on) shown++; });
+            $$("#qr-recent .qr-chip", root).forEach(function (b) { var p = recent[+b.dataset.i], on = !q || (p.toLowerCase().indexOf(q) >= 0 && p.trim().toLowerCase() !== q); b.classList.toggle("hidden", !on || shown >= 4); if (on) shown++; });
             box.classList.toggle("hidden", !shown);
           };
-          var sync = function () { fitTextarea(ta); if (reset) reset.classList.toggle("hidden", !qrEdited(orig, ta.value, form.provider.value)); };
-          if (pre) { ta.value = pre.prompt; ta.setSelectionRange(ta.value.length, ta.value.length); }
-          else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });
-          filterChips(); sync();
+          var syncEdit = function () { if (reset) reset.classList.toggle("hidden", !rnEdited(orig, cur())); };
+          var sync = function () { fitTextarea(ta); syncEdit(); };
+          if (edit) {
+            ta.value = edit.prompt; ta.setSelectionRange(ta.value.length, ta.value.length);
+            if (edit.workspace) { ws.value = edit.workspace; setMode(edit.mode); wsTouched = true; }
+          } else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });
+          paintSkill(); filterChips(); sync(); check(); loadDefaults(!edit && !!pre.skill_id);
           ta.addEventListener("input", function () { filterChips(); sync(); });
           form.provider.addEventListener("change", sync);
-          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; sync(); ta.focus(); });
+          form.skill_id.addEventListener("change", function () { paintSkill(); paintHint(); loadDefaults(true); syncEdit(); });
+          ws.addEventListener("input", function () { wsTouched = true; err.textContent = ""; clear.classList.toggle("hidden", !ws.value.trim()); clearTimeout(timer); timer = setTimeout(check, 300); syncEdit(); drawDirs(); });
+          $$('input[name="mode"]', form).forEach(function (i) { i.addEventListener("change", function () { paintHint(); syncEdit(); }); });
+          clear.addEventListener("click", function () { wsTouched = true; setWs(""); drawDirs(); ws.focus(); });
+          dirsBox.addEventListener("click", function (e) { var b = e.target.closest(".rn-dir"); if (!b) return; wsTouched = true; setWs(b.getAttribute("data-dir")); drawDirs(); });
+          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; form.skill_id.value = orig.skill_id; setWs(orig.workspace); setMode(orig.mode); paintSkill(); sync(); ta.focus(); });
           box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); sync(); ta.focus(); });
+          folderPickable().then(function (ok) {
+            if (!ok || !root.contains(pick)) return;
+            pick.classList.remove("hidden");
+            pick.addEventListener("click", function () {
+              pick.disabled = true;
+              api("/api/desktop/pick-folder", { method: "POST", body: { start: ws.value.trim() } }).then(function (r) { if (r && r.path) { wsTouched = true; setWs(r.path); drawDirs(); } })
+                .catch(fail).then(function () { pick.disabled = false; });
+            });
+          });
           ta.addEventListener("keydown", function (e) { if (submitKey(e)) { e.preventDefault(); form.requestSubmit(); } });
           form.addEventListener("submit", function (e) {
             e.preventDefault();
-            var f = e.target;
-            try { localStorage.setItem("tb_qr_provider", f.provider.value); } catch (e2) {}
-            api("/api/runs/quick", { method: "POST", body: { prompt: f.prompt.value, provider: f.provider.value } }).then(function (r) {
-              if (!pre) draftClear("qr");
+            var body = cur();
+            if (body.workspace && wsState.problem) { err.textContent = T("rn.ws_" + wsState.problem + "_tip"); ws.focus(); return; }
+            var btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            try { localStorage.setItem("tb_qr_provider", body.provider); } catch (e2) {}
+            api("/api/runs/quick", { method: "POST", body: body }).then(function (r) {
+              if (!edit) draftClear("qr");
               close(); openStarted(r, "toast.quick_started");
-            }).catch(fail);
+            }).catch(function (ex) {
+              btn.disabled = false;
+              var pr = ex && ex.data && ex.data.problem;
+              if (pr) { err.textContent = T("rn.ws_" + pr + "_tip"); return; }
+              fail(ex);
+            });
           });
         });
     }).catch(fail);
+  }
+  // rnEdited: has the edit-&-rerun form moved away from the original run? Trailing
+  // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).
+  function rnEdited(orig, c) {
+    if (!orig) return false;
+    return qrEdited(orig, c.prompt, c.provider) || (c.skill_id || "") !== (orig.skill_id || "") || (c.workspace || "") !== (orig.workspace || "") || (c.workspace ? c.mode : "") !== (orig.workspace ? orig.mode : "");
   }
   // qrEdited: has the edit-&-rerun form moved away from the original run? Trailing
   // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).
@@ -2620,7 +2740,7 @@
       var rows = skills.length ? '<table class="table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
         skills.map(function (s) {
           return '<tr class="click" data-href="#/skills/' + enc(s.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue("skills") + '">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + '</td><td class="nowrap">' + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
-            '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
+            '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="btn sm" data-sk-run="' + esc(s.id) + '" data-tip="' + esc(T("rn.run_skill_tip", { name: s.name })) + '">' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
         '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
@@ -2628,6 +2748,7 @@
       $("#sk-import").addEventListener("click", function () { skillImportModal(renderSkills); });
       $$("[data-versions]").forEach(function (b) { b.addEventListener("click", function () { location.hash = "#/skills/" + enc(b.getAttribute("data-versions")); }); });
       $$("[data-sk-export]").forEach(function (b) { b.addEventListener("click", function () { exportSkill(b.getAttribute("data-sk-export"), "", b); }); });
+      $$("[data-sk-run]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); quickRunModal({ skill_id: b.getAttribute("data-sk-run") }); }); });
     });
   }
 
@@ -4165,7 +4286,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: "", skill_version_id: "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_version_id: "", workspace: pre.workspace || "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -5238,11 +5359,19 @@
     connect();
     return { push: push, lines: lines };
   }
+  // Run dialog runs: which skill (and version) ran, in which folder, read-only or not.
+  function runSkillKv(r) {
+    var out = "";
+    if (r.skill_id) out += "<dt>" + esc(T("rn.skill")) + '</dt><dd><a href="#/skills/' + enc(r.skill_id) + '">' + esc(r.skill_name || r.skill_id) + "</a>" + (r.skill_version ? ' <span class="tag perm">v' + esc(r.skill_version) + "</span>" : "") + "</dd>";
+    if (r.workspace) out += "<dt>" + esc(T("rn.folder")) + '</dt><dd class="rn-kv-ws"><code class="mono" data-tip="' + esc(r.workspace) + '">' + esc(r.workspace) + "</code>" +
+      '<span class="tag ' + (r.run_mode === "edit" ? "warn" : "perm") + '" data-tip="' + esc(T(r.run_mode === "edit" ? "rn.edit_tip" : "rn.read_tip")) + '">' + ic(r.run_mode === "edit" ? "edit" : "eye", "sm") + esc(T(r.run_mode === "edit" ? "rn.edit" : "rn.read")) + "</span></dd>";
+    return out;
+  }
   function renderRunDetail(id) {
     return api("/api/runs/" + enc(id)).then(function (r) {
       var live = r.status === "running" || r.status === "queued", queued = r.status === "queued";
       mount('<div class="grid g4">' +
-        '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status, r.queue_pos, r.error) + "</strong><span>" + esc(triggerText(r.trigger)) + "</span></div>" +
+        '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status, r.queue_pos, r.error) + "</strong><span class=\"ell\"" + (r.workspace ? ' data-tip="' + esc(r.workspace) + '"' : "") + ">" + esc(runCtxText(r, true)) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(queued ? T("rd.waiting") : live ? T("rd.running") : r.started_at ? dur(r.duration_ms) : "—") + "</strong><span>" + esc(r.started_at || !r.finished_at ? T(queued ? "rd.queued_at" : "rd.started", { t: when(r.started_at || r.created_at) }) : T("rd.never_started")) + "</span></div>" +
         '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
         '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +
@@ -5255,7 +5384,7 @@
           (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
           '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>" +
           (r.task_id ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") + '</span></div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
-        "</dd><dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd>" + runPromptHtml(r) + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
+        "</dd>" + runSkillKv(r) + "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd>" + runPromptHtml(r) + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();
       $("#rd-rerun").addEventListener("click", function (e) {
@@ -5270,8 +5399,8 @@
       });
       if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
       bindRunPrompt(r);
-      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider }); });
-      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider }); });
+      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace, mode: r.run_mode }); });
+      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace }); });
       logView($("#lv"), id, live, function (why) {
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);

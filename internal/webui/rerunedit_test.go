@@ -19,9 +19,9 @@ func TestEditAndRerun(t *testing.T) {
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`(r.task_id ? "" : '<button type="button" class="icon-btn sm" id="rd-edit"`,
-		`quickRunModal({ prompt: r.prompt, provider: r.provider })`,
-		`if (pre && pre.provider) lastProv = pre.provider;`,
-		`reset.classList.toggle("hidden", !qrEdited(orig, ta.value, form.provider.value))`,
+		`quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace, mode: r.run_mode })`,
+		`if (edit && edit.provider) lastProv = edit.provider;`,
+		`reset.classList.toggle("hidden", !rnEdited(orig, cur()))`,
 		`e: ["#t-edit", "#rd-edit"]`,
 		`if (hit && !hit.disabled)`,
 	} {
