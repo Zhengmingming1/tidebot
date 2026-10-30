@@ -22,6 +22,10 @@ It's not a platform and doesn't want to become one. Single user, runs locally, o
 
 All screenshots are taken in a 1024×655 window, which is the size I actually keep it at on my Mac. The data comes from the demo script, not a real account.
 
+The task list. Each row ends with a strip of the last 10 runs, tags sit next to the name, and clicking a tag filters by it; "Failing" picks out the tasks whose latest run didn't make it. It works from the keyboard too: `j`/`k` to move, Enter to open, `r` to run now.
+
+![Task list](docs/images/tasks.png)
+
 Task detail. The conversation with the task lives in the Requirements tab. What you say gets split into individual requirements, and nothing changes until you confirm. Items from the same message can be confirmed together as a single version; uncheck the ones you don't want.
 
 ![Task detail](docs/images/task-detail.png)
@@ -34,7 +38,7 @@ Live run log. Output is pushed as soon as it's written, so new lines show up alm
 
 ![Live log](docs/images/run-live.png)
 
-A finished run can be rerun with one click. Quick runs can also be edited and rerun (press `e`), or saved as a scheduled task.
+A finished run gets a "Final answer" card: the Markdown is rendered, and you can switch to the source, copy it or download it as .md. "Compare" diffs it line by line against the task's previous successful answer, and an identical answer is marked "Same as last time". At the bottom of the page a run can be rerun with one click; quick runs can also be edited and rerun (press `e`), or saved as a scheduled task.
 
 ![Run details](docs/images/run-detail.png)
 
@@ -42,7 +46,7 @@ Quick run. Recent prompts show up as chips you can click, the provider you used 
 
 ![Quick run](docs/images/quick-run.png)
 
-Spend. Every model is priced at its own rate; subscription plans count tokens, not money. The daily budget resets at midnight in your own timezone (not UTC). Going over pauses the task and records an event. The selected range can be exported as CSV.
+Spend. Every model is priced at its own rate; subscription plans count tokens, not money. The daily budget resets at midnight in your own timezone (not UTC). Going over pauses the task and records an event. You can break it down by task, provider, model or tag, click a day in the chart to see just that day, and export the selected range as CSV.
 
 ![Spend](docs/images/spend.png)
 
@@ -58,7 +62,7 @@ Ctrl+K (⌘K on a Mac) opens a command palette. It searches tasks, skills and ru
 
 ![Command palette](docs/images/palette.png)
 
-Settings are split into General / Providers / Budgets / Price catalog / Security / Notifications / Network / Data & backup / About, and every item has its own URL, e.g. `#/settings/security/2fa`. You can turn on two-factor sign-in there: scan, type one code, save the recovery codes. Nothing changes until a code checks out.
+Settings are split into General / Providers / Budgets / Price catalog / Security / Notifications / Network / Data & backup / About, and every item has its own URL, e.g. `#/settings/security/2fa`. You can turn on two-factor sign-in there: scan, type one code, save the recovery codes. Nothing changes until a code checks out. Changing your password, seeing which devices are signed in and signing the others out are under Security too. Notification channels (Feishu, DingTalk, WeCom, Telegram, email, webhook) are added here as well; paste the URL and it figures out which one it is, and you can send a test before saving.
 
 ![Settings](docs/images/settings.png)
 
@@ -74,9 +78,15 @@ Optional skill optimization (off by default). Three modes: off, suggest only, ca
 
 Buttons and plugins. A button is a one-click preset bound to a task or a prompt. The home page shows them in the order you set, by drag or Alt+arrow keys. When you install a plugin you tick its permissions one by one (high-risk ones start unticked), and you can revoke a single one later. Plugins with settings get a form; password-type fields can't be read back once saved.
 
+Keeping lots of tasks in order. Tasks take tags, which you can filter by and add or remove in bulk. Tasks export to a JSON file you can import on another machine (with a preview of each one first; imports start paused). Need a break? Pause all schedules with one click, or pause a single task for 1 hour, 4 hours or until 9 tomorrow, and it resumes on its own. Tasks that got paused automatically say why, e.g. repeated failures or an exhausted budget.
+
+Schedules you can trust. Schedules follow the timezone you set (searchable in Settings → General), and the day clocks change for DST nothing is skipped or run twice. On a laptop running on battery, low-priority tasks can wait; when the disk is nearly full no new runs start, and they pick up again once there's space.
+
+Notifications that don't nag. Success notifications include the first few lines of the answer, and email gets the whole thing. You can also notify only when the answer changed, so a daily report that says the same thing every day stays quiet. Each channel shows whether its last message went out, and you get a heads-up after 3 failures in a row.
+
 Quick runs and reruns. If you don't want a task yet, hit "New quick run" on the home page, type a sentence and go. Not happy with the result? Rerun it as is, or edit the prompt and run again, and save it as a scheduled task once it's right. A running run can be stopped at any time, a queued one can be taken out of the queue, and the page shows where it is in line.
 
-Cost caps. Daily limits per global / task / bucket (production, canary, optimization, assist). Checked before every run, checked again when a queued run gets its slot (if the budget ran out while it waited, it's skipped), with `--max-budget-usd` as a backstop during the run. Usage is saved every 5 seconds while a run is going, so a crash doesn't lose the bill.
+Cost caps. Daily limits per global / task / bucket (production, canary, optimization, assist). Checked before every run, checked again when a queued run gets its slot (if the budget ran out while it waited, it's skipped), with `--max-budget-usd` as a backstop during the run. Runs that start at the same time each reserve their share of what's left first, so they can't overshoot the cap together. Usage is saved every 5 seconds while a run is going, so a crash doesn't lose the bill.
 
 Priced per model. Each run is priced from its actual token usage at that model's own rate, instead of applying Claude's prices to everything; subscription plans (like Kimi Coding Plan) just count tokens. The price list syncs itself weekly from a signed price catalog (source and last update live in Settings → Price catalog). The Spend page breaks things down by task, provider and model, and exports CSV.
 
@@ -84,17 +94,17 @@ Data doesn't pile up. Settings → Data & backup shows how much space tidebot us
 
 Any model provider. Anything with an Anthropic-compatible endpoint works. Built in: Anthropic, Kimi (including Coding Plan), DeepSeek, Zhipu GLM / Z.AI, Qwen DashScope, and the local magpie gateway. Keys are injected only into the `claude` child process environment. They never go into the database or the logs.
 
-Small footprint. Measured on 2026-10-23 on a Linux x86_64 box (`go build -trimpath -ldflags="-s -w"`, i.e. `make build`; `scripts/measure.sh` reproduces it):
+Small footprint. Measured on 2026-10-30 on a Linux x86_64 box (`go build -trimpath -ldflags="-s -w"`, i.e. `make build`; `scripts/measure.sh` reproduces it):
 
 | What | Number |
 |---|---|
-| `agentd` binary (stripped) | 16.7 MB |
-| `agentctl` binary | 3.7 MB |
-| Idle RSS, WebUI off | ~27 MB |
-| Idle RSS, WebUI on | ~32 MB |
-| WebUI frontend (JS + CSS, gzipped) | ~128 KB, no CDN, no framework; cached by content hash, so a second visit downloads nothing |
+| `agentd` binary (stripped) | 17.8 MB |
+| `agentctl` binary | 4.1 MB |
+| Idle RSS, WebUI off | ~29 MB |
+| Idle RSS, WebUI on | ~31 MB |
+| WebUI frontend (JS + CSS, gzipped) | ~195 KB, no CDN, no framework; cached by content hash, so a second visit downloads nothing |
 
-It has grown since the first versions (there's a lot more in it now). I'm still working on bringing memory back down.
+A lot went in this week, so the frontend got bigger; memory stayed about the same. API responses are gzipped too: 100 runs in the runs list went from ~70 KB to 12 KB.
 
 ## Architecture
 
@@ -107,13 +117,14 @@ flowchart LR
   subgraph agentd[agentd daemon]
     IPC[Local IPC<br/>Unix socket 0600]
     Web[WebUI server<br/>127.0.0.1 · session + CSRF]
-    Sched[Scheduler<br/>cron]
+    Sched[Scheduler<br/>cron · scheduling timezone]
     Tasks[Tasks / amendments]
     Ver[Version store<br/>immutable versions + pointers]
     Cost[Budget check + per-model pricing<br/>resets at local midnight]
     Queue[Queue / stop]
     Runner[Runner]
     Upd[Update check<br/>price catalog sync]
+    Notify[Notifications<br/>Feishu / DingTalk / WeCom / Telegram / email / webhook]
     DB[(SQLite)]
   end
   Claude[claude -p<br/>stream-json]
@@ -137,6 +148,7 @@ flowchart LR
   Runner -- logs pushed on write / SSE --> Web
   Upd -- daily / weekly --> Rel
   Upd --> Cost
+  Runner -- done / failed / answer excerpt --> Notify
 ```
 
 ## Download
@@ -154,13 +166,19 @@ Prebuilt packages are on the [Releases](https://github.com/Zhengmingming1/tidebo
 Whichever you pick, you still need the `claude` CLI installed to actually run tasks.
 
 - **Server (agentd + agentctl)**: grab `tidebot-server_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) and put the two binaries on your PATH.
-  On Debian/Ubuntu there's a `.deb`: `sudo apt install ./tidebot-server_0.1.7_amd64.deb`, then `systemctl --user enable --now tidebot`.
-- **Desktop app**: `.dmg` on macOS (universal, Intel and Apple silicon), `_setup.exe` on Windows (per-user, no admin),
+  On Debian/Ubuntu there's a `.deb`: `sudo apt install ./tidebot-server_0.1.8_amd64.deb`, then `systemctl --user enable --now tidebot`.
+- **Desktop app**: `.dmg` on macOS (universal, Intel and Apple silicon), `-Windows-x64-Setup.exe` on Windows (per-user, no admin),
   `.deb` or `.AppImage` on Linux (the AppImage doesn't bundle WebKitGTK; you need `libwebkit2gtk-4.1` on the system).
   Unsigned builds: on macOS right-click → Open the first time; Windows shows a SmartScreen prompt.
-- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:0.1.7`. The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
+- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:0.1.8`. The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
 
 Auto-update: the desktop app and the server check for a new version once a day (you can turn that off in Settings → About → Updates). By hand it's `agentctl update check` / `agentctl update apply`: the update manifest's signature and the package's sha256 are verified, the binaries are swapped in place (the old ones stay as `.prev`), and if the new version doesn't come up within 90 seconds it rolls back. Installs owned by a package manager, like `.deb` or Docker, only get a notification. If GitHub is slow or blocked where you are, Settings → Network has proxy and download mirror options.
+
+Settings → About shows whether there's a new version and its release notes. "Update" asks in an in-app dialog first, then downloads, verifies, swaps the files and restarts, with the progress shown right there.
+
+![Updates](docs/images/update.png)
+
+**On the macOS desktop app 0.1.7? Install this one by hand, once.** In the 0.1.7 Mac build the "Update" button does nothing (WKWebView doesn't support `window.confirm()`; 0.1.8 uses an in-app dialog instead). Quit tidebot from its menu bar icon, download the new [.dmg](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg) and drag tidebot.app into Applications to replace the old one, then open it the first time with right-click → Open (or run `xattr -dr com.apple.quarantine /Applications/tidebot.app`). Your data stays put. Later versions update in-app again.
 
 ## Quick start
 
@@ -271,7 +289,7 @@ scripts/build-desktop.sh linux        # needs Go 1.26, libgtk-3-dev, libwebkit2g
 bin/tidebot-desktop --autostart enable --hidden   # start on login, hidden in the tray
 ```
 
-Honest status: I've only really used it on Linux. The macOS and Windows builds compile and get packaged in CI, but I haven't run them on real machines.
+Honest status: I use it on Linux and on an Apple Silicon Mac. The Windows build compiles, gets packaged and passes the tests in CI, but I haven't clicked through it on a real machine.
 It's built on Wails v3 beta, which still moves. It isn't light either: with WebKit it's 400 to 500 MB RSS (the core alone is ~14 MB). Numbers are in docs/phase0-results.md.
 
 ## Status
@@ -280,8 +298,9 @@ This is a personal project maintained by one person, and it's early.
 
 Works today:
 
-- Scheduling, manual runs, quick runs, concurrency limit, timeouts; stop a running run or drop a queued one; retries with backoff, a breaker after 3 failures in a row, catch-up after downtime, overlap rules; quitting lets running runs finish
-- Rerun, edit-and-rerun and save-as-task from the run page; duplicate a task; prompt drafts are saved automatically
+- Scheduling (configurable scheduling timezone, DST-safe), manual runs, quick runs, concurrency limit, timeouts; timed pause for everything or one task; runs deferred on battery or when the disk is nearly full; stop a running run or drop a queued one; retries with backoff, a breaker after 3 failures in a row, catch-up after downtime, overlap rules; quitting lets running runs finish
+- The run page shows the final answer and can diff it against the last one; rerun, edit-and-rerun and save-as-task; duplicate a task; prompt drafts are saved automatically
+- Task tags, last-10-runs strips and a "Failing" filter; task export/import; runs filtered by date, search snippets, CSV / JSONL export
 - Immutable task versions, rollback, version tree
 - Plain-language amendments: structured items, conflict detection, batch confirm; it offers to consolidate once items pile up
 - Skill import, versions, pinning, rollback; auto-optimization (off / suggest / canary), and a canary that does worse gets withdrawn automatically
@@ -289,11 +308,11 @@ Works today:
 - Execution guard: a workspace per task, tool allow-lists, dangerous commands held until you confirm, external input wrapped as data
 - Plugins: separate processes speaking JSON-RPC over stdio, versioned installs, permissions approved item by item, a breaker after 3 crashes; they can add MCP tools and triggers
 - Triggers: webhook (token or HMAC), file changes, email and IM (via plugins); workflow pack import/export
-- Notifications: email, webhook, Feishu, DingTalk, WeCom, Telegram, with quiet hours and a daily digest
+- Notifications: email, webhook, Feishu, DingTalk, WeCom, Telegram, added and tested from Settings; answer excerpts, optional "only when the answer changed"; per-channel delivery status and alerts on repeated failures; quiet hours and a daily digest
 - Backups (`.agentbak`, secrets only with a passphrase) and restore (`agentd restore`), log cleanup, a health summary and Prometheus `/metrics`
 - Sandbox dry-runs: runs against a copy of the workspace, billed to the dry_run bucket, and tells you which files changed
 - WebUI in English and Chinese, with a CI check that both dictionaries have the same keys; command palette and shortcuts; notifications grouped into failed / needs me / other
-- Optional two-factor sign-in (TOTP) with one-time recovery codes; after too many failed logins it tells you how long to wait
+- Optional two-factor sign-in (TOTP) with one-time recovery codes; after too many failed logins it tells you how long to wait; change your password, see and sign out other devices
 - A desktop app (tray + window)
 - CI runs the tests on Linux, macOS and Windows on every push; Windows uses a named pipe for local IPC; gitleaks scans the full history in CI so keys don't get committed
 - Auto-update: signed manifest + sha256 check, automatic rollback on failure; system proxy and download mirrors
@@ -305,7 +324,7 @@ Not there yet:
 - No CPU limits for plugins; memory is only roughly capped with rlimit on Linux.
 - Secrets live in a local encrypted file; OS keychain support isn't wired up.
 - The guard's path checks assume Unix paths, so the write-outside-workspace check isn't reliable on Windows.
-- I've only installed and run the Linux packages myself. The macOS .dmg and Windows installer come out of CI and nobody has clicked through them yet.
+- I've installed the Linux packages and the macOS .dmg myself. The Windows installer comes out of CI and hasn't been clicked through on a real machine yet.
 - Builds are unsigned by default.
 
 ## About Anthropic

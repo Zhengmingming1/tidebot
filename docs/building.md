@@ -5,7 +5,7 @@ tidebot is GNU AGPL-3.0-only, and anyone can build it:
 ```bash
 go build -o bin/ ./cmd/agentd ./cmd/agentctl           # server + CLI (Go 1.26+)
 (cd cmd/tidebot-desktop && go build -tags gtk3 .)     # desktop; Linux needs libgtk-3-dev libwebkit2gtk-4.1-dev
-scripts/package-server.sh 0.1.7 dist                  # release-style archives
+scripts/package-server.sh 0.1.8 dist                  # release-style archives
 ```
 
 ## Self-built copies don't self-update
@@ -15,7 +15,7 @@ Official releases come from `.github/workflows/release.yml` and are stamped with
 replace themselves with a downloaded update. Anything else is **notify-only**: plain
 `go build`, `scripts/package-*.sh` without `TIDEBOT_OFFICIAL=1`, or a fork's build.
 
-- With a version stamped (`-X …/buildinfo.Version=0.1.6`), Settings → About and
+- With a version stamped (`-X …/buildinfo.Version=0.1.7`), Settings → About and
   `agentctl update check` say a newer official release exists. They never download or swap
   files. The text reads "built from source, … download the official build by hand".
 - A `dev` build (no version) only says it's a development build and which official release is
@@ -48,7 +48,7 @@ and the WebUI's Settings → About links that exact version (`/tree/v<version>` 
 scripts/e2e-update.sh
 ```
 
-This builds an "official" 0.1.6 and a 0.1.7 tarball, signs a local feed with a throwaway key,
-and checks three things: 0.1.6 updates in place and restarts as 0.1.7; a self-built 0.1.6 only
+This builds an "official" 0.1.7 and a 0.1.8 tarball, signs a local feed with a throwaway key,
+and checks three things: 0.1.7 updates in place and restarts as 0.1.8; a self-built 0.1.7 only
 announces the update and leaves its files alone; a dev build announces nothing to install.
 It never touches the real signing key.

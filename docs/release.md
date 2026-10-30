@@ -91,7 +91,7 @@ Nobody can force-push or delete `main`, or move or delete a `v*` tag.
 
 Only release-workflow binaries carry `buildinfo.Official=1` (`TIDEBOT_OFFICIAL=1` in
 `release.yml`). Anything built from source is notify-only; see [building.md](building.md).
-`scripts/e2e-update.sh` runs a full 0.1.6 → 0.1.7 update against a local feed signed with a
+`scripts/e2e-update.sh` runs a full 0.1.7 → 0.1.8 update against a local feed signed with a
 throwaway key. CI runs it on Linux.
 
 On the client, agentd / the desktop app check `latest.json` once a day (Settings → About →
