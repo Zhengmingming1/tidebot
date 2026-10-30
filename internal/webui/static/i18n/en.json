@@ -1172,7 +1172,7 @@
   "cc.m_login_shell": "your login shell",
   "cc.m_path": "PATH",
   "cc.m_known_dir": "common install folder",
-  "cc.no_key_hint": "No API key saved for this provider. Fine if Claude Code is logged in with your subscription (claude login); otherwise add a key in model settings and press Test.",
+  "cc.no_key_hint": "No key saved for this provider, so runs will fail. tidebot runs use the provider's key only, not Claude Code's subscription login (claude login); add an API key in model settings and press Test.",
   "pv.sec_basic": "Basics",
   "pv.sec_auth": "Authentication",
   "pv.sec_adv": "Advanced",

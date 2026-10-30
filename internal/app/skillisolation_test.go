@@ -247,3 +247,30 @@ func argAfter(args []string, flag string) string {
 	}
 	return ""
 }
+
+// Runs sign in with the provider's key only: --bare (Claude Code reads no
+// subscription login or keychain there), so pointing CLAUDE_CONFIG_DIR at
+// tidebot's folder can't sign the owner's Claude Code out, and a subscription
+// token in tidebot's own environment is not passed on.
+func TestRunsUseProviderKeyNotClaudeLogin(t *testing.T) {
+	a := newTestApp(t)
+	fakeHome(t)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy-not-a-real-token")
+	argsFile, envFile := filepath.Join(t.TempDir(), "args"), filepath.Join(t.TempDir(), "env")
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", argsFile)
+	t.Setenv("TIDEBOT_MOCK_ENV_FILE", envFile)
+	if _, err := a.RunPrompt(context.Background(), "hi", "", "", "", "quick", 0); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(argsFile)
+	if !strings.Contains("\n"+string(b), "\n--bare\n") {
+		t.Fatalf("run is not --bare, Claude Code would use its own login: %s", b)
+	}
+	env, _ := os.ReadFile(envFile)
+	if !strings.Contains(string(env), "CLAUDE_CONFIG_DIR="+a.claudeConfigDir()) {
+		t.Fatalf("config dir not isolated: %s", env)
+	}
+	if strings.Contains(string(env), "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatal("subscription token passed to the run")
+	}
+}

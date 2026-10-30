@@ -4289,3 +4289,31 @@ desktop and browser). The last rounds were the UI redesign and ⌘/Ctrl+Enter in
 4. `agentctl skills run`, "save as button" from a run, and a version picker in the dialog.
 5. `git status` still runs a repo's configured filter drivers; consider `-c filter.*` overrides
    or reading the index directly.
+
+## 2026-10-30 (18:00): does CLAUDE_CONFIG_DIR sign a Claude subscription out? — no
+
+**Checked**
+
+- Claude Code keeps a `claude login` under its config dir: `<config>/.credentials.json` on
+  Linux/Windows; on macOS a keychain item `Claude Code-credentials`, suffixed with
+  `-<sha256(config dir)[:8]>` once `CLAUDE_CONFIG_DIR` is set. So a run that used the login
+  and got a new config dir would be signed out.
+- tidebot runs never use that login. Every run is `--bare` (since 2026-10-16), where "Anthropic
+  auth is strictly ANTHROPIC_API_KEY or apiKeyHelper (OAuth and keychain are never read)", and a
+  run without a provider key stops before starting ("resolve api key"). Seen with Claude Code
+  2.1.301, a fake HOME holding a dummy login and a local fake API: no `--bare` + default dir →
+  Bearer from the login; no `--bare` + other dir → "Not logged in"; `--bare` with either dir
+  (even one holding the login) → "Not logged in"; `--bare` + `ANTHROPIC_API_KEY` + other dir →
+  works (`x-api-key`). The 17:00 change didn't change anyone's sign-in.
+
+**Done**
+
+- `CLAUDE_CONFIG_DIR` is set only for `--bare` runs (a test holds runs to `--bare`).
+- `CLAUDE_CODE_OAUTH_TOKEN` from tidebot's environment is no longer passed to runs.
+- The "no key" hint no longer says a subscription login is enough; README says runs need a
+  provider key and leave `~/.claude` and the login alone.
+
+**Ideas for later**
+
+1. If runs ever drop `--bare`: keep `CLAUDE_CONFIG_DIR` off for them (or check
+   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, which decouples the credential slot, on a real Mac first).

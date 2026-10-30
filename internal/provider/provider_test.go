@@ -163,3 +163,12 @@ func TestNormalizeSecretEnv(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+func TestChildEnvDropsClaudeSubscriptionToken(t *testing.T) {
+	out := ChildEnv([]string{"PATH=/bin", "CLAUDE_CODE_OAUTH_TOKEN=dummy"}, Profile{Name: "x", AuthEnv: "ANTHROPIC_API_KEY"}, "k")
+	for _, kv := range out {
+		if strings.HasPrefix(kv, "CLAUDE_CODE_OAUTH_TOKEN=") {
+			t.Fatal("subscription token passed to the child")
+		}
+	}
+}

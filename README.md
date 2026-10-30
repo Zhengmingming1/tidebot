@@ -223,6 +223,8 @@ scripts/demo-webui.sh          # 打开 http://127.0.0.1:17421，密码 demo-pas
 
 最省事的是在 WebUI 的「设置 → 服务商」里加：选一个预设（Anthropic、Kimi、DeepSeek、智谱、Qwen 等），填 Key，点「测试连接」。Key 加密存在本机，页面上只显示「已配置」和后 4 位，保存后就读不回来了。
 
+每个服务商都要填 Key（Anthropic 官方填 API key）。tidebot 的运行不用 Claude Code 的订阅登录（`claude login`），也不会读、复制或转发它：运行以 `--bare` 启动，这时 Claude Code 只认服务商的 Key，不读登录信息和钥匙串。Claude Code 在运行里产生的状态（使用统计、会话记录等）写在 tidebot 自己的数据目录（`CLAUDE_CONFIG_DIR=<数据目录>/claude-config`），所以你本机的 `~/.claude`、`~/.claude.json` 和订阅登录都不受影响。
+
 也可以用环境变量，不要把密钥写进配置文件。变量名是 `TIDEBOT_API_KEY_<服务商 ID>`，Kimi Coding Plan 也认 `KIMI_API_KEY`。
 
 ```bash
@@ -339,7 +341,7 @@ bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏�
 
 ## 关于 Anthropic
 
-tidebot 调用的是你本机安装的 Claude Code CLI，用的是你自己的 API key 或订阅。它和 Anthropic 没有任何关系，没有得到 Anthropic 的认可或赞助。请按 Anthropic 和你所用模型服务商的使用条款来用。“Claude”和“Claude Code”是 Anthropic 的商标。
+tidebot 调用的是你本机安装的 Claude Code CLI，用的是你自己的 API key（包括 Kimi Coding Plan 这类套餐的 Key）。它和 Anthropic 没有任何关系，没有得到 Anthropic 的认可或赞助。请按 Anthropic 和你所用模型服务商的使用条款来用。“Claude”和“Claude Code”是 Anthropic 的商标。
 
 ## 许可证
 

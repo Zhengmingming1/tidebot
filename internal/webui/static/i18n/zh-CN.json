@@ -1172,7 +1172,7 @@
   "cc.m_login_shell": "登录 shell",
   "cc.m_path": "PATH",
   "cc.m_known_dir": "常见安装目录",
-  "cc.no_key_hint": "这个服务商还没保存密钥。如果 Claude Code 已用订阅登录（claude login）可以不填；否则到模型设置里填 API key 并点「测试」。",
+  "cc.no_key_hint": "这个服务商还没保存密钥，运行会失败。tidebot 的运行只用服务商的 Key，不用 Claude Code 的订阅登录（claude login）；到模型设置里填 API key 并点「测试」。",
   "pv.sec_basic": "基本信息",
   "pv.sec_auth": "认证",
   "pv.sec_adv": "高级",

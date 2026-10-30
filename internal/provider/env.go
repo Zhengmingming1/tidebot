@@ -67,6 +67,9 @@ func ChildEnv(base []string, profile Profile, apiKey string) []string {
 		"CLAUDE_CODE_EFFORT_LEVEL":        {},
 		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": {},
 		"CLAUDE_CODE_MAX_CONTEXT_TOKENS":  {},
+		// The owner's Claude subscription token (claude setup-token) is never passed
+		// on: runs use the provider's key only.
+		"CLAUDE_CODE_OAUTH_TOKEN": {},
 	}
 	// Also strip the source secret env name so the child only sees AuthEnv.
 	if name := NormalizeSecretEnv(profile.SecretEnv); name != "" {

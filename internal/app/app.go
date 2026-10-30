@@ -292,8 +292,16 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		return runner.Result{}, err
 	}
 	// Keep Claude Code from self-updating mid-run; version is recorded per run.
+	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
 	// Its own state for the run stays in tidebot's directory, not the owner's home.
-	opts.EnvBase = append(append(opts.EnvBase, "DISABLE_AUTOUPDATER=1"), a.isolationEnv()...)
+	// Only for --bare runs: they authenticate strictly with the provider's key
+	// (Claude Code never reads its subscription login or the keychain there), so
+	// moving the config dir can't sign anything out. A run that used the owner's
+	// `claude login` must not get CLAUDE_CONFIG_DIR: the login lives under the
+	// config dir (.credentials.json) or in a keychain item named after it (macOS).
+	if opts.Bare {
+		opts.EnvBase = append(opts.EnvBase, a.isolationEnv()...)
+	}
 	if a.modernClaude() {
 		opts.ContextArgs = append(opts.ContextArgs, "--no-session-persistence")
 	}

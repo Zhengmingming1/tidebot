@@ -223,6 +223,8 @@ To turn on the WebUI for your own instance:
 
 The easy way is Settings → Providers in the WebUI: pick a preset (Anthropic, Kimi, DeepSeek, Zhipu, Qwen, ...), paste the key, hit Test. The key is encrypted on this machine; the page only shows that it is set and its last 4 characters, and never sends it back.
 
+Every provider needs a key (for official Anthropic, an API key). tidebot runs don't use Claude Code's subscription login (`claude login`) and never read, copy or pass it on: runs start with `--bare`, where Claude Code accepts only the provider's key and reads no login or keychain. What Claude Code records during a run (usage stats, session files) goes to tidebot's data folder (`CLAUDE_CONFIG_DIR=<data>/claude-config`), so your own `~/.claude`, `~/.claude.json` and subscription login are left alone.
+
 Environment variables still work:
 
 Keys live in environment variables, never in config files. The variable is `TIDEBOT_API_KEY_<PROVIDER_ID>`; Kimi Coding Plan also accepts `KIMI_API_KEY`.
@@ -341,7 +343,7 @@ Not there yet:
 
 ## About Anthropic
 
-tidebot drives the Claude Code CLI installed on your machine, with your own API key or subscription. It is not affiliated with, endorsed by, or sponsored by Anthropic. Please follow the terms of Anthropic and of whichever model provider you use. "Claude" and "Claude Code" are trademarks of Anthropic.
+tidebot drives the Claude Code CLI installed on your machine, with your own API key (including plan keys such as Kimi Coding Plan). It is not affiliated with, endorsed by, or sponsored by Anthropic. Please follow the terms of Anthropic and of whichever model provider you use. "Claude" and "Claude Code" are trademarks of Anthropic.
 
 ## License
 
