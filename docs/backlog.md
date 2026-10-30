@@ -4183,3 +4183,8 @@ desktop and browser). The last rounds were the UI redesign and ⌘/Ctrl+Enter in
    for all six palettes (a quick check found Tide light `text-3` on `bg-sunk` 4.1:1, Midnight
    light accent on `bg` 4.2:1, Graphite / Midnight light `info` on `info-50` 4.2:1).
 4. Preview the desktop window's own background during the palette preview (now it follows on save).
+
+## 2026-10-30：用户反馈，下一轮优先处理
+
+- **已读通知要能清掉。** 通知面板里已读的通知一直留着，比如「tidebot 0.1.8 可以更新了」。要能清除已读（单条或全部），已读的不要一直占着「其他」分组。另外通知正文直接显示了 release notes 的 Markdown 原文（`#`、`##`、链接语法），应改成简短摘要，完整内容通过链接查看。
+- **设置页要随窗口变宽铺满。** 窗口放大后设置页内容区仍是固定宽度，右侧留了一大片空白。要像其他页面一样自适应宽度（必要时给一个舒适的最大宽度并合理分布），1024×655 下仍保持紧凑。
