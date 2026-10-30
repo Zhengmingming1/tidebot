@@ -1380,6 +1380,8 @@ tr:hover .row-act, .row-act:focus-visible, tr:focus-within .row-act { opacity: 1
   box-shadow: var(--shadow-pop); pointer-events: none;
 }
 .drawer [data-tip]:hover::after, .drawer [data-tip]:focus-visible::after, .table [data-tip]:hover::after { left: auto; right: -4px; transform: none; }
+/* the main button sits at the right end of a dialog footer: its tooltip (with the ⌘/Ctrl+Enter hint) opens leftwards, inside the dialog */
+.modal .actions > .btn:last-child[data-tip]:hover::after, .modal .actions > .btn:last-child[data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
 
 /* info popover (details/summary, no JS) */
 .pop-info { position: relative; display: inline-flex; }

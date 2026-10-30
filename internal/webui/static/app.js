@@ -1513,6 +1513,51 @@
   function guardDirty(box) {
     return $$("input,textarea,select", box).some(function (el) { return el._tbTouched && guardable(el) && el._tbBase !== undefined && fieldVal(el) !== el._tbBase; });
   }
+  // ⌘/Ctrl+Enter in a dialog or drawer does what its main button does, from any field
+  // (idea: Dify create-app-modal useHotkey("Mod+Enter") scoped to the dialog, skipped while
+  // composing, disabled with the button). The button is the form's primary submit when the
+  // focus is in a form, else the last enabled primary in the footer; a red confirm counts
+  // only when there is no primary. Nothing happens while the discard bar asks, with an input
+  // method open, when a field handled the key itself, or on auto-repeat.
+  var DLG_FOOT = ".actions:not(.discard-bar), .drawer-foot";
+  function dlgUsable(b) { return !!b && !b.disabled && b.offsetParent !== null && !(b.closest && b.closest(".hidden, .discard-bar, [aria-busy=true]")); }
+  function dlgLast(list, ok) { for (var i = list.length - 1; i >= 0; i--) if (ok(list[i])) return list[i]; return null; }
+  function dialogPrimary(box, from) {
+    if (!box || $(".discard-bar", box)) return null;
+    var f = from && from.closest ? from.closest("form") : null;
+    if (f && box.contains(f)) {
+      var subs = $$("button", f).filter(function (b) { return b.type === "submit" && dlgUsable(b); });
+      var sb = dlgLast(subs, function (b) { return b.classList.contains("primary"); }) || dlgLast(subs, function () { return true; });
+      if (sb) return sb;
+    }
+    var all = $$("button.btn", box).filter(function (b) { return b.closest && b.closest(DLG_FOOT) && dlgUsable(b); });
+    return dlgLast(all, function (b) { return b.classList.contains("primary"); }) || dlgLast(all, function (b) { return b.classList.contains("danger-solid"); });
+  }
+  function dialogKeySubmit(e, box) {
+    if (!submitKey(e) || e.defaultPrevented || e.isComposing || e.keyCode === 229) return false;
+    var b = dialogPrimary(box, e.target);
+    if (!b) return false;
+    e.preventDefault(); e.stopPropagation();
+    if (e.repeat) return true;
+    if (b.type === "submit" && b.form && b.form.requestSubmit) b.form.requestSubmit(b); else b.click();
+    return true;
+  }
+  // The key goes into the main button's tooltip ("保存 · ⌘Enter"), added when the pointer or
+  // focus reaches it, so buttons drawn later get it too; a tooltip that already names it stays.
+  function dialogKeyHint(b) {
+    if (!b || b._kbHint) return;
+    b._kbHint = true;
+    var k = keyLabel("Mod+Enter"), t = b.getAttribute("data-tip") || "";
+    if (t.indexOf(k) < 0) b.setAttribute("data-tip", t ? t + " · " + k : T("dlg.key", { k: k }));
+    var ks = b.getAttribute("aria-keyshortcuts");
+    if (!ks) b.setAttribute("aria-keyshortcuts", KB_MAC ? "Meta+Enter" : "Control+Enter");
+  }
+  function dialogKeys(box) {
+    box.addEventListener("keydown", function (e) { dialogKeySubmit(e, box); });
+    var hint = function (e) { var b = e.target && e.target.closest && e.target.closest("button"); if (b && b === dialogPrimary(box, b)) dialogKeyHint(b); };
+    box.addEventListener("mouseover", hint);
+    box.addEventListener("focusin", hint);
+  }
   // Modal: role=dialog, Esc closes, Tab stays inside, focus returns to the opener.
   // Esc, the backdrop, × / Cancel and the browser Back button ask before dropping edits;
   // the close() handed to onMount (used after a successful save) never asks.
@@ -1570,6 +1615,7 @@
     var edges = function () { box.classList.toggle("sc-top", box.scrollTop > 0); box.classList.toggle("sc-bot", box.scrollTop + box.clientHeight < box.scrollHeight - 1); };
     box.addEventListener("scroll", edges, { passive: true });
     $$("[data-close]", root).forEach(function (b) { b.addEventListener("click", tryClose); });
+    dialogKeys(box);
     if (onMount) onMount(root, close);
     requestAnimationFrame(edges);
     var first = $("[autofocus]", box) || $("input:not([type=hidden]):not(.hidden),textarea,select", box);
@@ -3213,6 +3259,7 @@
     bg._off = function () { document.removeEventListener("keydown", onKey, true); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
     document.addEventListener("keydown", onKey, true);
     bg.addEventListener("mousedown", function (e) { if (e.target === bg) closeDrawer(); });
+    dialogKeys(d);
     fill(d);
         requestAnimationFrame(function () { bg.classList.add("open"); });
     var first = $("input:not([type=hidden]):not([type=radio])", d); (first || d).focus();

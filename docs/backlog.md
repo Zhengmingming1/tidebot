@@ -4037,3 +4037,58 @@ Category: security / settings UX.
 2. Name a device ("办公室电脑") so the list reads better than the browser name.
 3. Sign-in history (successful and failed attempts from `login_attempts`) under the device list.
 4. Shorter session lifetime option (1 day / 7 days / 30 days) in the same section.
+
+## 2026-10-30 (08:00): ⌘/Ctrl+Enter confirms any dialog or drawer — from whichever field has focus
+
+Category: UX / keyboard (all dialogs at once, same on macOS / Windows / Linux, desktop and browser).
+
+**Done**
+
+- Before, ⌘/Ctrl+Enter only worked in the quick-run prompt and inline edits; in the task form,
+  provider drawer, notification channel form, confirm dialogs and the rest you had to reach for the
+  mouse or Tab to the button. Now `modal()` and `openDrawer()` both call `dialogKeys(box)`: ⌘Enter on
+  a Mac, Ctrl+Enter elsewhere (the existing `submitKey`) presses the dialog's main button from any
+  field, textareas included.
+- Which button: when the focus is inside a form, that form's primary submit (`requestSubmit(button)`,
+  so browser validation and the form's own submit handler run exactly as on click), else the form's
+  last usable submit; outside a form, the last enabled `.btn.primary` in a footer (`.actions`,
+  `.drawer-foot`); a red `danger-solid` confirm counts only when there is no primary. Disabled,
+  hidden, `aria-busy` and off-screen buttons are skipped, so "type the name to delete" still guards.
+- Not taken: while the unsaved-changes bar asks, while an input method is composing
+  (`isComposing` / keyCode 229 — Chinese / Japanese candidates), when a field already handled the key
+  (`defaultPrevented`: quick run, model picker), on Alt / AltGr. Auto-repeat is swallowed so holding
+  the keys does not create two tasks. A dialog stacked over a drawer handles it first and stops it.
+- The main button's tooltip says so: "在任意输入框按 ⌘Enter 也可确认" / "Ctrl+Enter from any field";
+  a button that already has a tooltip gets " · ⌘Enter" appended, one that already names the key is left
+  alone. Added on first hover / focus, so buttons drawn later get it too; `aria-keyshortcuts` is set
+  for screen readers. The footer's right-most tooltip opens leftwards so it stays inside the dialog.
+- Shortcut help (`?`) row reworded: "弹窗里从任意输入框直接确认（保存、运行、创建），或保存就地编辑".
+- Tests: `TestDialogSubmitKey` (wiring in modal + drawer, i18n, CSS; node run over a stand-in DOM:
+  primary submit chosen, Mac ⌘, repeat, plain Enter, AltGr, IME, handled key, discard bar, disabled
+  fallbacks, footer only, danger only without a primary, nothing to press, tooltip text per OS).
+  Checked in Chrome at 1024×655: Ctrl+Enter / ⌘Enter in the new-task prompt creates the task and
+  opens it; Ctrl+Enter in the provider drawer saves.
+- Shots: `/workspace/tidebot-shots/2026-10-30-0800-dialog-mod-enter-mac-1024x655.png`,
+  `…-en-win-1024x655.png`.
+
+**Inspiration**
+
+- langgenius/dify `web/app/components/app/create-app-modal/index.tsx` (`useHotkey('Mod+Enter')` with
+  the dialog content as target, `event.isComposing` / `defaultPrevented` / `repeat` checks, enabled only
+  while the create button is), same pattern in `app/create-from-dsl-modal/index.tsx` and
+  `snippets/create-snippet-dialog.tsx`. Idea only: Dify wires it per dialog and prints the keys inside
+  the button; we do it once in the shared dialog/drawer code and keep the key in the tooltip.
+
+**Learned**
+
+- Wiring the shortcut in the shared modal / drawer is what makes it trustworthy: per-dialog wiring
+  always leaves a few dialogs where the key does nothing.
+- `requestSubmit(button)` rather than `button.click()` for forms: the submitter is passed (the provider
+  drawer's "save" vs "save & test" read `data-mode` from it) and validation runs.
+
+**Ideas for later**
+
+1. ⌘/Ctrl+S in the skill file editor and the task form (save without closing).
+2. Show the key on the button itself in wide dialogs (a faint `kbd` like Dify), tooltip-only at 1024.
+3. Desktop menu accelerators (⌘, Settings, ⌘N new task) wired to the same commands.
+4. Key hints in more button tooltips ("立即运行 · r", "编辑 · e").
