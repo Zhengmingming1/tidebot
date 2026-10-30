@@ -72,9 +72,11 @@ func (a *App) StartDryRun(taskID string) (*DryRun, error) {
 		os.RemoveAll(box)
 		return nil, err
 	}
+	var st *skillStage
 	if v.Spec != nil && len(v.Spec.SkillBindings) > 0 {
-		_ = a.Skills.Materialize(ctx, box, v.Spec.SkillBindings)
-		before = hashTree(box)
+		if st, err = a.stageSkills(ctx, v.Spec.SkillBindings); err != nil {
+			a.Log.Warn("stage skills", "task_id", taskID, "error", err)
+		}
 	}
 	dr := &DryRun{ID: id.New("dry"), TaskID: taskID, Status: "running"}
 	dryRuns.Lock()
@@ -82,8 +84,9 @@ func (a *App) StartDryRun(taskID string) (*DryRun, error) {
 	dryRuns.Unlock()
 	go func() {
 		defer os.RemoveAll(box)
+		defer st.Close()
 		res, err := a.RunPromptEx(ctx, runner.Options{Prompt: prompt, WorkspaceDir: box, TriggerKind: "dry_run", TaskID: taskID,
-			TaskVersionID: versionID, CostBucket: cost.BucketDryRun}, "", 15*time.Minute)
+			TaskVersionID: versionID, CostBucket: cost.BucketDryRun, ContextArgs: st.Args(a.modernClaude(), false)}, "", 15*time.Minute)
 		after := hashTree(box)
 		dryRuns.Lock()
 		defer dryRuns.Unlock()

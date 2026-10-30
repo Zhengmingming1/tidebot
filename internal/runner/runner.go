@@ -26,12 +26,15 @@ import (
 
 // Options configure a single Claude Code invocation.
 type Options struct {
-	ClaudeBin       string
-	Prompt          string
-	WorkspaceDir    string
-	Timeout         time.Duration
-	Bare            bool
-	ExtraArgs       []string
+	ClaudeBin    string
+	Prompt       string
+	WorkspaceDir string
+	Timeout      time.Duration
+	Bare         bool
+	ExtraArgs    []string
+	// ContextArgs are added after ExtraArgs whether or not the caller set ExtraArgs
+	// (e.g. --plugin-dir for skills tidebot staged in its own directory).
+	ContextArgs     []string
 	Profile         provider.Profile
 	APIKey          string // injected into child env only; never logged
 	EnvBase         []string
@@ -552,6 +555,7 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 		args = append(args, "--bare")
 	}
 	args = append(args, opts.ExtraArgs...)
+	args = append(args, opts.ContextArgs...)
 
 	// budgetStop kills the run when CostControl says the caps are exceeded.
 	ctx, budgetStop := context.WithCancel(ctx)

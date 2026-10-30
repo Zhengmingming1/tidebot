@@ -292,7 +292,11 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		return runner.Result{}, err
 	}
 	// Keep Claude Code from self-updating mid-run; version is recorded per run.
-	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
+	// Its own state for the run stays in tidebot's directory, not the owner's home.
+	opts.EnvBase = append(append(opts.EnvBase, "DISABLE_AUTOUPDATER=1"), a.isolationEnv()...)
+	if a.modernClaude() {
+		opts.ContextArgs = append(opts.ContextArgs, "--no-session-persistence")
+	}
 	// The run's cap is held against the daily budgets from its start until it ends
 	// (see cost.ReserveRun), so runs going at the same time share what is left.
 	var hold atomic.Pointer[cost.Hold]
@@ -506,6 +510,7 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		_ = os.MkdirAll(ws, 0o755)
 	}
 	var choices []skillChoice
+	var skillArgs []string
 	if view.Spec != nil && len(view.Spec.SkillBindings) > 0 {
 		var bindings []tasksvc.SkillBinding
 		bindings, choices = a.chooseSkillVersions(ctx, task.ID, bucket, view.Spec.SkillBindings)
@@ -514,9 +519,13 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 				bucket = cost.BucketCanary
 			}
 		}
-		if err := a.Skills.Materialize(ctx, ws, bindings); err != nil {
-			a.Log.Warn("materialize skills", "error", err)
+		// Staged in tidebot's own directory, never in ws (see skillstage.go).
+		st, err := a.stageSkills(ctx, bindings)
+		if err != nil {
+			a.Log.Warn("stage skills", "task_id", task.ID, "error", err)
 		}
+		defer st.Close()
+		skillArgs = st.Args(a.modernClaude(), false)
 	}
 	timeout := time.Duration(task.TimeoutMinutes) * time.Minute
 	if view.Spec != nil && view.Spec.TimeoutMinutes > 0 {
@@ -528,7 +537,7 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	res, err := a.RunPromptEx(ctx, runner.Options{
 		Prompt: prompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
 		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket,
-		OnStart: onStart,
+		OnStart: onStart, ContextArgs: skillArgs,
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
@@ -663,7 +672,9 @@ func (a *App) startQuickRunAsync(prompt, providerName string) (string, error) {
 	}, func(err error) { a.Log.Warn("quick run", "error", err) })
 }
 
-// startQuickRunSkill runs an ad-hoc prompt in a scratch workspace with one skill materialized.
+// startQuickRunSkill runs an ad-hoc prompt with one skill (buttons). The skill is
+// staged in tidebot's own directory and invoked as its slash command; the run's
+// working folder is an empty scratch folder inside the same stage.
 func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string) (string, error) {
 	if _, err := a.ResolveProfile(providerName); err != nil {
 		return "", err
@@ -672,17 +683,20 @@ func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string
 	if versionID != "" {
 		mode = "pinned"
 	}
-	ws, err := os.MkdirTemp(a.Cfg.DataDir, "button-")
+	st, err := a.stageSkills(context.Background(), []tasksvc.SkillBinding{{SkillID: skillID, Mode: mode, VersionID: versionID}})
 	if err != nil {
-		return "", err
-	}
-	if err := a.Skills.Materialize(context.Background(), ws, []tasksvc.SkillBinding{{SkillID: skillID, Mode: mode, VersionID: versionID}}); err != nil {
-		os.RemoveAll(ws)
 		return "", fmt.Errorf("skill: %w", err)
 	}
+	ws := filepath.Join(st.Dir, "work")
+	if err := os.MkdirAll(ws, 0o700); err != nil {
+		st.Close()
+		return "", err
+	}
+	modern := a.modernClaude()
 	return launch(startWait, func(onStart func(string)) error {
-		defer os.RemoveAll(ws)
-		_, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: prompt, WorkspaceDir: ws, TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: onStart}, providerName, 0)
+		defer st.Close()
+		_, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: st.Invoke(modern, prompt), WorkspaceDir: ws, TriggerKind: "quick",
+			CostBucket: cost.BucketProduction, OnStart: onStart, ContextArgs: st.Args(modern, true)}, providerName, 0)
 		return err
 	}, func(err error) { a.Log.Warn("button run", "error", err) })
 }

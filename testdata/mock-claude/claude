@@ -41,6 +41,9 @@ done
 if [[ -n "${TIDEBOT_MOCK_ARGS_FILE:-}" ]]; then
   printf '%s\n' "$@" > "$TIDEBOT_MOCK_ARGS_FILE"
 fi
+if [[ -n "${TIDEBOT_MOCK_ENV_FILE:-}" ]]; then
+  env | grep -E '^(CLAUDE_CONFIG_DIR|HOME)=' > "$TIDEBOT_MOCK_ENV_FILE" || true
+fi
 if [[ -n "${TIDEBOT_MOCK_FAIL_MSG:-}" ]]; then
   if [[ -z "${TIDEBOT_MOCK_FAIL_COUNTER:-}" ]] || [[ "$(cat "$TIDEBOT_MOCK_FAIL_COUNTER" 2>/dev/null || echo 0)" -gt 0 ]]; then
     [[ -n "${TIDEBOT_MOCK_FAIL_COUNTER:-}" ]] && echo $(( $(cat "$TIDEBOT_MOCK_FAIL_COUNTER") - 1 )) > "$TIDEBOT_MOCK_FAIL_COUNTER"

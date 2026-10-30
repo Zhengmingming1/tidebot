@@ -44,10 +44,11 @@ func TestImportPinMaterialize(t *testing.T) {
 		t.Fatalf("%+v", view.Spec)
 	}
 	ws := t.TempDir()
-	if err := svc.Materialize(ctx, ws, view.Spec.SkillBindings); err != nil {
-		t.Fatal(err)
+	staged, err := svc.Stage(ctx, ws, view.Spec.SkillBindings)
+	if err != nil || len(staged) != 1 || staged[0].Command() != "/tidebot:hello" {
+		t.Fatal(staged, err)
 	}
-	got, err := os.ReadFile(filepath.Join(ws, ".claude", "skills", "hello", "SKILL.md"))
+	got, err := os.ReadFile(filepath.Join(ws, "skills", "hello", "SKILL.md"))
 	if err != nil || string(got) == "" {
 		t.Fatal(err)
 	}

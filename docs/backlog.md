@@ -4188,3 +4188,62 @@ desktop and browser). The last rounds were the UI redesign and ⌘/Ctrl+Enter in
 
 - **已读通知要能清掉。** 通知面板里已读的通知一直留着，比如「tidebot 0.1.8 可以更新了」。要能清除已读（单条或全部），已读的不要一直占着「其他」分组。另外通知正文直接显示了 release notes 的 Markdown 原文（`#`、`##`、链接语法），应改成简短摘要，完整内容通过链接查看。
 - **设置页要随窗口变宽铺满。** 窗口放大后设置页内容区仍是固定宽度，右侧留了一大片空白。要像其他页面一样自适应宽度（必要时给一个舒适的最大宽度并合理分布），1024×655 下仍保持紧凑。
+
+## 2026-10-30 (17:00): skills tidebot manages stay inside tidebot — never in your project or ~/.claude
+
+**Done**
+
+- **Bug fixed: skills were copied into the task's folder.** A task bound to skills, or a button
+  running one, wrote them into `<working folder>/.claude/skills/<name>/`. For a task pointed at
+  your own project, the Claude Code you run there yourself would then list tidebot's skills too.
+  Now each run stages its skills in tidebot's own `data/skillstage/run-*/`, laid out as a Claude
+  Code plugin (`.claude-plugin/plugin.json` + `skills/<name>/`), loads it with `--plugin-dir`
+  (plus `--add-dir` on the stage's `skills/` so a skill's own files can be read) and deletes it
+  when the run ends. Leftover stages and old `data/button-*` scratch folders are removed at start.
+- **Skills actually load now (P0).** Runs are `--bare`, which skips `.claude/skills` discovery in
+  the working folder, so the old copies were never loaded at all. Checked with Claude Code
+  2.1.301 against a local fake API: `--bare` + cwd `.claude/skills` → the skill is not in the
+  init `skills` list and `/name` goes to the model as plain text; `--bare` + `--add-dir <dir with
+  .claude/skills>` loads it but not together with `--restricted`; `--plugin-dir` loads it with
+  `--bare --restricted` and `/tidebot:<name> args` expands the skill with `$ARGUMENTS`.
+  Buttons invoke the skill as `/tidebot:<name> <prompt>`. `--bare` has no Skill tool, so a task's
+  bound skills (any number) are attached with `--append-system-prompt-file` (a file in the stage;
+  older Claude Code < 2.1: `--append-system-prompt`, 16 KB cap).
+- **Claude Code's own state for tidebot runs stays in tidebot's folder.** Claude Code writes
+  `~/.claude.json` (incl. `skillUsage`), `~/.claude/sessions` and `~/.claude/projects/<dir>/*.jsonl`
+  on every run. Runs now get `CLAUDE_CONFIG_DIR=<data>/claude-config` and (2.1+)
+  `--no-session-persistence`: with a fake HOME the home folder is byte-for-byte unchanged after a
+  real Claude Code run. `--bare` never reads the owner's login, so nothing changes for auth.
+- **One-time cleanup of copies older versions left.** At start, for every folder a task ran in
+  (its own folder and every `workspace_dir` any task version named), `<dir>/.claude/skills/*` is
+  removed only when its files are exactly one stored skill version (same paths and SHA-256, nothing
+  extra, no symlinks); an empty `.claude/skills` / `.claude` left behind goes too. Edited copies and
+  your own skills stay. Every decision is logged ("legacy skill cleanup: removed / kept"). Marked
+  done in settings (`skills.legacy_cleanup_v1`); an unreadable folder makes it retry next start.
+- Stage paths from the store must be local (`filepath.IsLocal`); `../` in a stored path is refused.
+- **Audit:** no code writes `~/.claude`, `~/.claude.json`, a project's `.claude/settings*.json`,
+  `.mcp.json` or `CLAUDE.md` (`guard.ScanWorkspace` only reads them). The hook settings
+  (`data/guard-settings.json`), plugin MCP config (`data/mcp-plugins*.json`), skills and system
+  prompt file are all in tidebot's data folder and passed as flags.
+- Tests: `TestTaskSkillsStayOutOfUserFolders` (snapshot of a project with CLAUDE.md, .mcp.json,
+  .claude/settings*.json and its own skill, and of a fake HOME with ~/.claude: unchanged after a
+  task run; every path flag points into tidebot's data; stage gone; CLAUDE_CONFIG_DIR set),
+  `TestButtonSkillRunInvokesStagedSkill`, `TestPurgeSkillStages`,
+  `TestCleanLegacySkillCopiesInTaskWorkspaces`, skillstore `TestStageWritesPluginLayout`,
+  `TestStageRejectsUnsafePaths`, `TestCleanLegacyCopies`.
+
+**Learned**
+
+- `claude --help` (2.1.301): `--bare` "skip[s] hooks (those defined in settings …)". Verified: a
+  PreToolUse hook passed with `--settings` runs without `--bare` and does **not** run with it. So
+  tidebot's guard hook is not enforced in its (always `--bare`) runs; what holds today is
+  `--restricted` (no Bash/code tools, file tools confined to the working folders) and
+  `--allowedTools` / `--disallowedTools`. New run modes must not rely on the hook.
+- Under `--bare` the tool set is Bash, Edit, Read (Edit, Read with `--restricted`); `--tools`
+  can't add Write/Grep/Glob/Skill there.
+
+**Ideas for later**
+
+1. Guard without the hook: decide whether runs drop `--bare` (with `--setting-sources ""`,
+   `--strict-mcp-config` and the isolated config dir) so the PreToolUse hook works again, or move
+   the rules into `--disallowedTools` patterns. Needs its own check of what non-bare loads.
