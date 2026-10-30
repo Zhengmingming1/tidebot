@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"io"
 	"math"
 	"net/http"
@@ -56,6 +57,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/skills/", s.withAuthCSRF(s.handleSkillSub))
 	mux.HandleFunc("/api/runs", s.withAuthCSRF(s.handleRuns))
 	mux.HandleFunc("/api/runs/quick", s.withAuthCSRF(s.handleQuickRun))
+	mux.HandleFunc("/api/runs/defaults", s.withAuthCSRF(s.handleRunDefaults))
 	mux.HandleFunc("/api/runs/recent-prompts", s.withAuthCSRF(s.handleRecentPrompts))
 	mux.HandleFunc("/api/runs/counts", s.withAuthCSRF(s.handleRunCounts))
 	mux.HandleFunc("/api/runs/export", s.withAuthCSRF(s.handleRunsExport))
@@ -209,6 +211,14 @@ type runDTO struct {
 	CacheRead    int64   `json:"cache_read_tokens"`
 	CacheWrite   int64   `json:"cache_write_tokens"`
 	Requests     int64   `json:"requests"`
+	// Run dialog runs: the working folder, the skill (name and version) and
+	// whether the run could change files ("read" | "edit"; "" otherwise).
+	Workspace    string `json:"workspace,omitempty"`
+	SkillID      string `json:"skill_id,omitempty"`
+	SkillName    string `json:"skill_name,omitempty"`
+	SkillVersion int    `json:"skill_version,omitempty"`
+	SkillVerID   string `json:"skill_version_id,omitempty"`
+	RunMode      string `json:"run_mode,omitempty"`
 	// QueuePos is a queued run's place in line for a free slot (1 = next).
 	QueuePos int `json:"queue_pos,omitempty"`
 	// Match: with search text, which field matched and an excerpt around the hit.
@@ -221,8 +231,10 @@ func (s *Server) runSelect() string {
  COALESCE(r.input_tokens,0), COALESCE(r.output_tokens,0), COALESCE(r.duration_ms,0),
  COALESCE(r.started_at,''), COALESCE(r.finished_at,''), r.created_at, COALESCE(r.error_message,''),
  r.prompt, COALESCE(v.version_no,0), COALESCE(r.cost_bucket,'production'),
- r.cost_amount, r.cost_currency, r.cost_source, r.cache_read_tokens, r.cache_write_tokens, r.requests
-FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN versions v ON v.id = r.task_version_id`
+ r.cost_amount, r.cost_currency, r.cost_source, r.cache_read_tokens, r.cache_write_tokens, r.requests,
+ CASE WHEN r.run_mode<>'' THEN r.workspace_dir ELSE '' END, r.skill_id, COALESCE(sk.name,''), COALESCE(sv.version_no,0), r.skill_version_id, r.run_mode
+FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN versions v ON v.id = r.task_version_id
+ LEFT JOIN skills sk ON r.skill_id<>'' AND sk.id = r.skill_id LEFT JOIN versions sv ON r.skill_version_id<>'' AND sv.id = r.skill_version_id`
 }
 
 // listPromptMax: lists carry a preview of each run's prompt (cut on a character boundary);
@@ -267,7 +279,8 @@ func scanRun(rows *sql.Rows) (runDTO, error) {
 	err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
 		&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
 		&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
-		&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests)
+		&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests,
+		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode)
 	return d, err
 }
 
@@ -402,21 +415,46 @@ func (s *Server) handleButtonRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Prompt   string `json:"prompt"`
-		Provider string `json:"provider"`
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "POST only")
+		return
 	}
+	var body RunRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil || strings.TrimSpace(body.Prompt) == "" {
 		writeErr(w, 400, "prompt required")
 		return
 	}
-	if s.deps.QuickRun == nil {
-		writeErr(w, 500, "execution not available")
+	if msg := body.validate(); msg != "" {
+		writeErr(w, 400, msg)
 		return
 	}
-	runID, err := s.deps.QuickRun(body.Prompt, body.Provider)
+	var runID string
+	var err error
+	switch {
+	case body.SkillID == "" && strings.TrimSpace(body.Workspace) == "":
+		if s.deps.QuickRun == nil {
+			writeErr(w, 500, "execution not available")
+			return
+		}
+		runID, err = s.deps.QuickRun(body.Prompt, body.Provider)
+	case s.deps.StartRun == nil:
+		writeErr(w, 500, "execution not available")
+		return
+	default:
+		runID, err = s.deps.StartRun(body)
+	}
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		var de *guard.DirError
+		switch {
+		case errors.As(err, &de):
+			writeJSON(w, 400, map[string]string{"error": err.Error(), "problem": de.Problem})
+		case errors.Is(err, guard.ErrDirBusy):
+			writeJSON(w, 409, map[string]string{"error": err.Error(), "problem": "busy"})
+		case errors.Is(err, ErrUnknownSkill):
+			writeErr(w, 404, err.Error())
+		default:
+			writeErr(w, 500, err.Error())
+		}
 		return
 	}
 	s.writeStarted(w, runID)

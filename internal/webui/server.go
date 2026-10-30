@@ -59,6 +59,9 @@ type Deps struct {
 	Location *time.Location
 	// LocFn, when set, wins over Location: the scheduling timezone can change in Settings.
 	LocFn func() *time.Location
+	// StartRun starts a run from the Run dialog: a prompt with an optional skill and an
+	// optional working folder (read-only unless Mode is "edit"). Optional.
+	StartRun func(req RunRequest) (string, error)
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
 	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
 	Providers     ProviderAdmin

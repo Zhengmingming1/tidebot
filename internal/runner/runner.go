@@ -32,6 +32,12 @@ type Options struct {
 	Timeout      time.Duration
 	Bare         bool
 	ExtraArgs    []string
+	// DisplayPrompt, if set, is the prompt the run row keeps (what the owner typed)
+	// when Prompt carries more, e.g. a leading /skill command.
+	DisplayPrompt string
+	// SkillID / SkillVersionID / RunMode ('read' | 'edit') label runs started from
+	// the Run dialog.
+	SkillID, SkillVersionID, RunMode string
 	// ContextArgs are added after ExtraArgs whether or not the caller set ExtraArgs
 	// (e.g. --plugin-dir for skills tidebot staged in its own directory).
 	ContextArgs     []string
@@ -253,7 +259,7 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		ID:           runID,
 		Status:       "queued",
 		TriggerKind:  nullDefault(opts.TriggerKind, "manual"),
-		Prompt:       opts.Prompt,
+		Prompt:       nullDefault(opts.DisplayPrompt, opts.Prompt),
 		WorkspaceDir: opts.WorkspaceDir,
 		CreatedAt:    created,
 		ProviderName: sql.NullString{String: opts.Profile.Name, Valid: opts.Profile.Name != ""},
@@ -271,6 +277,10 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	}
 	if opts.CostBucket != "" {
 		_, _ = r.store.DB.ExecContext(ctx, `UPDATE runs SET cost_bucket=? WHERE id=?`, opts.CostBucket, runID)
+	}
+	if opts.SkillID != "" || opts.RunMode != "" {
+		_, _ = r.store.DB.ExecContext(ctx, `UPDATE runs SET skill_id=?, skill_version_id=?, run_mode=? WHERE id=?`,
+			opts.SkillID, opts.SkillVersionID, opts.RunMode, runID)
 	}
 
 	// The cause tells execute why it was canceled (user, or Drain on quit).

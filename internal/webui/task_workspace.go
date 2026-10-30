@@ -125,6 +125,10 @@ func (s *Server) handleWorkspaceCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	if q.Get("mode") == "run" { // the Run dialog: any folder but sensitive ones, plus git state
+		writeJSON(w, 200, s.runDirCheck(r.Context(), q.Get("path")))
+		return
+	}
 	id := q.Get("id")
 	if id != "" {
 		if _, err := s.deps.Tasks.Get(r.Context(), id); err != nil {

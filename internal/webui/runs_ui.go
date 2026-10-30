@@ -30,6 +30,20 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			writeErr(w, 400, err.Error())
 			return
 		}
+	} else if run.SkillID != "" || run.RunMode != "" {
+		if s.deps.StartRun == nil {
+			writeErr(w, 503, "runner not available")
+			return
+		}
+		ws := run.Workspace
+		if run.RunMode == "" {
+			ws = "" // skill run in a scratch folder
+		}
+		if newID, err = s.deps.StartRun(RunRequest{Prompt: run.Prompt, Provider: run.Provider, SkillID: run.SkillID,
+			VersionID: run.SkillVerID, Workspace: ws, Mode: run.RunMode}); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
 	} else {
 		if s.deps.QuickRun == nil {
 			writeErr(w, 503, "runner not available")

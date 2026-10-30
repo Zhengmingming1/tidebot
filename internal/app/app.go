@@ -182,9 +182,9 @@ func Open(cfg config.Config) (*App, error) {
 			return st
 		},
 		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
-		QuickRunSkill: a.startQuickRunSkill,
-		Providers:     providerAdmin{a},
-		Public:        map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
+		QuickRunSkill: a.startQuickRunSkill, StartRun: a.startRun,
+		Providers: providerAdmin{a},
+		Public:    map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
 	})
 	return a, nil
 }
