@@ -1583,8 +1583,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .seg-opt input:focus-visible + span { box-shadow: 0 0 0 2px var(--accent); }
 
 /* providers: single column of cards */
-.pv-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-.pv-toolbar p { margin: 0; flex: 1; min-width: 200px; }
 .pv-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .pv-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; transition: border-color .12s, box-shadow .12s; min-width: 0; }
 .pv-card:hover, .pv-card:focus-visible { border-color: var(--accent); box-shadow: var(--shadow-hover); outline: none; }
@@ -1914,6 +1912,8 @@ body { font-size: var(--fs-md); line-height: 1.5; }
 .seg:has(.seg-opt) { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%; }
 .seg-opt span { padding: 4px 10px; border-radius: 4px; }
 .card-head .seg { margin-left: auto; }
+.card-head .card-act { margin-left: auto; flex: none; }
+#pv-box { padding-top: var(--sp-4); }
 
 /* filter chips → same family as seg */
 .filters { gap: var(--sp-1); }

@@ -3387,8 +3387,7 @@
           '<small class="pv-meta"><code>' + esc((p.base_url || "https://api.anthropic.com").replace(/^https?:\/\//, "")) + "</code>" + (p.model ? " · " + esc(p.model) : "") + "</small></div>" +
           '<span class="pv-key ' + (p.key_set ? "ok" : "") + '"><span class="dot ' + (p.key_set ? "ok" : "") + '"></span>' + esc(T(p.key_set ? "pv.key_ok" : "pv.key_none")) + "</span>" + ic("chev", "sm") + "</li>";
       };
-      box.innerHTML = '<div class="pv-toolbar"><p class="muted">' + tip(T("pv.sub")) + '</p><button class="btn primary" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + "</button></div>" +
-        (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
+      box.innerHTML = (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
         (hidden.length ? '<details class="pv-more"><summary>' + esc(T("pv.more", { n: hidden.length })) + '</summary><ul class="pv-cards">' + hidden.map(card).join("") + "</ul></details>" : "") +
         '<small class="hint">' + esc(T("pv.sort_hint", { k: keyLabel("Alt+↑/↓") })) + "</small>";
       // Re-render, then reopen through the *new* render's opener: the old closure's
@@ -3421,7 +3420,13 @@
         var names = $$(".pv-card", box).map(function (x) { return x.getAttribute("data-pv"); });
         api("/api/providers/order", { method: "POST", body: { names: names } }).then(function () { toast(T("pv.order_saved")); }).catch(fail);
       }
-      $("#pv-add", box).addEventListener("click", function () { presetPicker(presets, function (pr) { provSel = "+new"; openDrawer(function (dw) { providerDetail(dw, null, pr, presetById, again); }); }); });
+      // "Add provider" sits in the card head, outside box: assign (not add) so a re-render
+      // doesn't stack handlers, and honour a click that came before the list loaded.
+      var addBtn = $("#pv-add");
+      if (addBtn) {
+        addBtn.onclick = function () { presetPicker(presets, function (pr) { provSel = "+new"; openDrawer(function (dw) { providerDetail(dw, null, pr, presetById, again); }); }); };
+        if (addBtn._want) { addBtn._want = false; addBtn.onclick(); }
+      }
     });
   }
   // Brand metadata for the "add provider" card wall. cat: official|cn|coding|local; tag: i18n key; b: brand color class.
@@ -3483,7 +3488,8 @@
         if (e.target.closest && e.target.closest(".ap-rail")) return;
         var vis = tiles(), i = vis.findIndex(function (t) { return +t.getAttribute("data-pr") === sel; });
         if (e.key === "Enter" && !(e.target.tagName === "BUTTON" && !e.target.classList.contains("ap-tile"))) { e.preventDefault(); go(); return; }
-        var cols = (getComputedStyle($(".ap-grid", root)).gridTemplateColumns.split(" ").length) || 3;
+        var grid = $(".ap-grid", root); if (!grid) return; // Esc already closed the picker
+        var cols = (getComputedStyle(grid).gridTemplateColumns.split(" ").length) || 3;
         var d = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key];
         if (!d || !vis.length) return;
         if (e.target === q && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
@@ -6260,8 +6266,12 @@
           });
         };
       } else if (section === "providers") {
-        body = '<section class="card">' + head + '<div id="pv-box" class="pad-x"><p class="muted">…</p></div></section>';
-        after = function () { providerCards($("#pv-box")).catch(fail); };
+        body = '<section class="card">' + head.replace("</h2></div>", "</h2>" + tip(T("pv.sub")) + '<button type="button" class="btn primary sm card-act" id="pv-add">' + ic("plus", "sm") + esc(T("pv.add")) + "</button></div>") +
+          '<div id="pv-box" class="pad-x"><p class="muted">…</p></div></section>';
+        after = function () {
+          $("#pv-add").onclick = function (e) { e.currentTarget._want = true; };
+          providerCards($("#pv-box")).catch(fail);
+        };
       } else if (section === "budgets") {
         var g = (st.budgets || []).filter(function (x) { return x.scope === "global" && x.period === "day"; })[0] || {};
         var buckets = (st.budgets || []).filter(function (x) { return x.scope === "bucket"; });
