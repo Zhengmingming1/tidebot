@@ -4397,3 +4397,42 @@ so the Danger zone needs its own top margin.
 2. Same container rule for the task form drawer and the run dialog at large widths.
 3. Keep the settings nav item for the card under the viewport highlighted while scrolling
    (scroll-spy) now that two cards can be side by side.
+
+## 2026-10-31 (04:00): database log rows are trimmed — sign-in attempts, old notifications, budget alerts
+
+Category: resource usage. Cleanup removed run logs and artifacts but no database row was ever
+deleted: every sign-in attempt (a password-guessing script adds thousands), every notification
+(cleared ones only hidden) and every budget alert stayed forever, and the sign-in rate limit
+scanned the whole `login_attempts` table on each try.
+
+**Done**
+
+- `internal/app/rowprune.go`: with each cleanup (every 6 hours and "Clean up now") delete
+  sign-in attempts after 30 days, cleared notifications after 30 days, other notifications after
+  180 days (never ones still queued for the digest), budget alerts after a year. Run history,
+  spend, tasks and versions are never touched.
+- Deletes go in batches of 2000 (`DELETE … WHERE id IN (SELECT … LIMIT ?)`), at most 50 per table
+  per pass, stopping when the context ends, so a big backlog never holds the write lock long.
+- Migration 022: indexes `login_attempts(ip, at)` (rate limit), `login_attempts(at)`,
+  `notifications(created_at)`, `budget_events(at)`; a test checks the query plans use them.
+- The cleanup record and report carry `deleted_rows`; an automatic pass that only removed rows
+  is recorded too. Settings › Data: the size tooltip says what is trimmed and when, and how many
+  records the last cleanup removed (toast after "Clean up now" too). The text no longer says
+  cleanup only touches files. That tooltip now opens downward (it was cut off at the top of the
+  window at 1024×655).
+- Tests: keep periods, queued notifications kept, runs untouched, second pass is a no-op,
+  batching over 2×2000 rows, canceled context, record after a rows-only pass, index use, UI
+  wiring and both languages.
+
+**Learned** — Uptime Kuma (louislam/uptime-kuma, `server/jobs/clear-old-data.js`) trims its
+heartbeat and `stat_daily` tables by a keep period and then runs `PRAGMA optimize`; tidebot's
+loop already calls `db.Optimize` after each pass. Unlike Kuma, tidebot's periods are fixed: the
+rows are logs nobody browses past the first screen, so a setting would be noise. SQLite reuses
+freed pages, so the file doesn't grow back; "Shrink database" returns them to disk when wanted.
+
+**Ideas for later**
+
+1. `operation_log` is append-only by design (audit); if it ever gets big, archive rather than delete.
+2. `canary_runs`, `plugin_ai_messages`, `amendment_messages` for deleted skills/plugins/tasks
+   could go with their owner.
+3. Show the database's row counts per table in the storage bar tooltip.

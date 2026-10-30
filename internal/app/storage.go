@@ -51,6 +51,7 @@ type CleanupRecord struct {
 	Auto         bool   `json:"auto"`
 	DeletedFiles int    `json:"deleted_files"`
 	FreedBytes   int64  `json:"freed_bytes"`
+	DeletedRows  int64  `json:"deleted_rows,omitempty"`
 }
 
 func (a *App) runCleanup(ctx context.Context, now time.Time, auto bool) (RetentionReport, error) {
@@ -58,8 +59,13 @@ func (a *App) runCleanup(ctx context.Context, now time.Time, auto bool) (Retenti
 	if err != nil {
 		return rep, err
 	}
-	if !auto || rep.DeletedFiles > 0 {
-		_ = a.saveJSONSetting(ctx, setRetentionLast, CleanupRecord{At: now.UTC().Format(time.RFC3339), Auto: auto, DeletedFiles: rep.DeletedFiles, FreedBytes: rep.FreedBytes})
+	rows, rerr := a.pruneRows(ctx, now)
+	rep.DeletedRows = rows
+	if rerr != nil && a.Log != nil {
+		a.Log.Warn("prune rows", "error", rerr, "deleted", rows)
+	}
+	if !auto || rep.DeletedFiles > 0 || rows > 0 {
+		_ = a.saveJSONSetting(ctx, setRetentionLast, CleanupRecord{At: now.UTC().Format(time.RFC3339), Auto: auto, DeletedFiles: rep.DeletedFiles, FreedBytes: rep.FreedBytes, DeletedRows: rows})
 	}
 	return rep, nil
 }
@@ -68,8 +74,8 @@ func (a *App) retentionTick(ctx context.Context, now time.Time) {
 	defer a.compactLogs(ctx, now) // after cleanup: don't gzip what is about to go
 	if rep, err := a.runCleanup(ctx, now, true); err != nil {
 		a.Log.Warn("retention", "error", err)
-	} else if rep.DeletedFiles > 0 {
-		a.Log.Info("retention", "deleted", rep.DeletedFiles, "freed_bytes", rep.FreedBytes)
+	} else if rep.DeletedFiles > 0 || rep.DeletedRows > 0 {
+		a.Log.Info("retention", "deleted", rep.DeletedFiles, "freed_bytes", rep.FreedBytes, "deleted_rows", rep.DeletedRows)
 	}
 }
 

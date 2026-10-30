@@ -5976,10 +5976,10 @@
       return '<li data-tip="' + esc(tipOf(k)) + '" tabindex="0"><i class="dot s-' + k + '"></i><span>' + esc(T("st.p_" + k)) + "</span><b>" + esc(fmtBytes((parts[k] || {}).bytes)) + "</b></li>";
     }).join("") + "</ul>";
     applySizes(box);
-    var last = v.last ? T(v.last.auto ? "st.last_auto" : "st.last_manual", { t: fullTime(v.last.at), f: fmtBytes(v.last.freed_bytes) }) : T("st.last_none");
+    var last = v.last ? T(v.last.auto ? "st.last_auto" : "st.last_manual", { t: fullTime(v.last.at), f: fmtBytes(v.last.freed_bytes) }) + (v.last.deleted_rows > 0 ? "\n" + T("st.rows", { n: v.last.deleted_rows }) : "") : T("st.last_none");
     // Free space on the data volume: in the tooltip normally, as a notice only when low.
     var dk = v.disk, diskLine = dk ? T("st.disk_free", { f: fmtBytes(dk.free_bytes), t: fmtBytes(dk.total_bytes) }) : "";
-    $("#st-total").innerHTML = esc(T("st.total", { s: fmtBytes(total) })) + tip(T("st.where") + "\n" + (diskLine ? diskLine + "\n" : "") + last);
+    $("#st-total").innerHTML = esc(T("st.total", { s: fmtBytes(total) })) + tip(T("st.where") + "\n" + T("st.tidy") + "\n" + (diskLine ? diskLine + "\n" : "") + last);
     // Under the minimum free space runs don't start: that outranks the "low" warning.
     $("#st-disk").innerHTML = dk && v.blocked ? '<p class="notice bad" role="status">' + ic("database", "sm") + "<span>" + esc(T("st.disk_blocked", { f: fmtBytes(dk.free_bytes), m: mbLabel(v.min_free_mb || 0) })) + tip(T("st.disk_blocked_tip")) + "</span></p>"
       : dk && dk.low ? '<p class="notice warn" role="status">' + ic("database", "sm") + "<span>" + esc(T("st.disk_low", { f: fmtBytes(dk.free_bytes) })) + tip(T("st.disk_low_tip", { th: fmtBytes(dk.threshold_bytes) })) + "</span></p>" : "";
@@ -6020,7 +6020,7 @@
       confirmDialog({ title: T("st.clean_title"), body: T("st.clean_confirm", { n: pv.files, s: fmtBytes(pv.bytes) }) + "\n" + T(keep ? "st.clean_keeps" : "st.clean_keeps0", { k: keep }), ok: T("st.clean_btn"), danger: true }).then(function (y) {
         if (!y) return;
         b.disabled = true;
-        rpc("storage.cleanup", {}).then(function (r) { toast(T("st.cleaned", { n: r.report.deleted_files, s: fmtBytes(r.report.freed_bytes) })); storagePaint(r.storage); }).catch(function (err) { fail(err); b.disabled = false; });
+        rpc("storage.cleanup", {}).then(function (r) { toast(T("st.cleaned", { n: r.report.deleted_files, s: fmtBytes(r.report.freed_bytes) }) + (r.report.deleted_rows > 0 ? " · " + T("st.rows", { n: r.report.deleted_rows }) : "")); storagePaint(r.storage); }).catch(function (err) { fail(err); b.disabled = false; });
       });
     });
     $("#st-shrink").addEventListener("click", function (e) {

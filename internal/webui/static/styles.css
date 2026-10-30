@@ -2223,7 +2223,7 @@ button.spc-col:focus-visible .spc-bar { outline: 2px solid var(--accent); outlin
 .s-database { background: var(--hue-amber); }
 .s-backups { background: var(--hue-slate); }
 .st-total { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.st-total [data-tip]:hover::after, .st-total [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
+.st-total [data-tip]:hover::after, .st-total [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; top: calc(100% + 6px); bottom: auto; } /* several lines, card sits at the top: open downward */
 #set-storage .set-row select { min-width: 128px; }
 .confirm-body { white-space: pre-line; }
 @media (prefers-reduced-motion: reduce) { .st-bar .st-seg { transition: none; } }

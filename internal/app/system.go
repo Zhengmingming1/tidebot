@@ -38,6 +38,7 @@ type RetentionReport struct {
 	DeletedFiles int   `json:"deleted_files"`
 	FreedBytes   int64 `json:"freed_bytes"`
 	TotalBytes   int64 `json:"total_bytes"`
+	DeletedRows  int64 `json:"deleted_rows"` // old log rows trimmed from the database (see rowprune.go)
 }
 
 type runFile struct {
