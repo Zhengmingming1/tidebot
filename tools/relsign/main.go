@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/updater"
 )
 
@@ -118,8 +119,11 @@ func changelog(s string) string {
 	if i := strings.LastIndex(s, "\n---\n"); i >= 0 {
 		s = s[i+5:]
 	}
-	if len(s) > 4000 {
-		s = s[:4000]
+	if len(s) > 4000 { // cut at a line end, never inside a UTF-8 character
+		s = textclip.Head(s, 4000)
+		if i := strings.LastIndex(s, "\n"); i > 0 {
+			s = s[:i]
+		}
 	}
 	return strings.TrimSpace(s)
 }
