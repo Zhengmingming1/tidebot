@@ -323,6 +323,7 @@
   "nc.empty": "Nothing here",
   "nc.failed": "Failed",
   "nc.mark_all": "Mark all read",
+  "nc.mark_all_tip": "Marks them read in every signed-in browser and the desktop window",
   "nc.marked": "All marked as read",
   "nc.other": "Other",
   "nc.pending_amend": "{n} pending amendment(s) on “{name}”",

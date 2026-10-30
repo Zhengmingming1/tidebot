@@ -78,6 +78,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/desktop/open", s.withAuthCSRF(s.handleDesktopOpen))
 	mux.HandleFunc("/api/notifications/center", s.withAuthCSRF(s.handleNotifCenter))
 	mux.HandleFunc("/api/notifications/clear", s.withAuthCSRF(s.handleNotifClear))
+	mux.HandleFunc("/api/notifications/read", s.withAuthCSRF(s.handleNotifRead))
 	mux.HandleFunc("/api/auth/2fa/", s.withAuthCSRF(s.handle2FA))
 	mux.HandleFunc("/api/auth/password", s.withAuthCSRF(s.handlePassword))
 	mux.HandleFunc("/api/auth/sessions/others", s.withAuthCSRF(s.handleSessionsOthers))

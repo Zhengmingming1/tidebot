@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -68,7 +69,62 @@ WHERE r.status='pending' GROUP BY r.task_id ORDER BY MAX(r.created_at) DESC LIMI
 	// enabled notification channels whose last send failed: a dot on Settings › Notifications
 	failing := 0
 	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM notify_channels WHERE enabled=1 AND last_at IS NOT NULL AND last_ok=0`).Scan(&failing)
-	writeJSON(w, 200, map[string]any{"items": items, "pending": pending, "channels_failing": failing})
+	writeJSON(w, 200, map[string]any{"items": items, "pending": pending, "channels_failing": failing, "seen_at": s.notifSeenAt(ctx)})
+}
+
+// notifSeenKey holds the "read up to" mark of the bell: one per tidebot, not per browser,
+// so marking read in the desktop window clears the dot in every browser too.
+const notifSeenKey = "notif.seen_at"
+
+func (s *Server) notifSeenAt(ctx context.Context) string {
+	var v string
+	if s.deps.DB.QueryRowContext(ctx, `SELECT value_json FROM settings WHERE user_id='owner' AND key=?`, notifSeenKey).Scan(&v) != nil {
+		return ""
+	}
+	var t string
+	if json.Unmarshal([]byte(v), &t) != nil {
+		return ""
+	}
+	return t
+}
+
+// handleNotifRead moves the shared read mark forward (never back, so a stale tab or an
+// old browser can't bring read notices back as unread): {"seen_at": t}. A time in the
+// future is capped at now, so a wrong client clock can't silence notices still to come.
+// Returns the mark now in force.
+func (s *Server) handleNotifRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method")
+		return
+	}
+	var body struct {
+		SeenAt string `json:"seen_at"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json")
+		return
+	}
+	t, err := time.Parse(time.RFC3339Nano, body.SeenAt)
+	if err != nil {
+		writeErr(w, 400, "bad time")
+		return
+	}
+	if now := time.Now(); t.After(now) {
+		t = now
+	}
+	// created_at is UTC RFC3339 (seconds); the mark uses the same form so text order is time order.
+	v, _ := json.Marshal(t.UTC().Format(time.RFC3339))
+	ctx := r.Context()
+	_, err = s.deps.DB.ExecContext(ctx, `
+INSERT INTO settings(user_id, key, value_json, updated_at) VALUES('owner',?,?,?)
+ON CONFLICT(user_id, key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
+WHERE excluded.value_json > settings.value_json`, notifSeenKey, string(v), time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		writeErr(w, 500, "save failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"seen_at": s.notifSeenAt(ctx)})
 }
 
 var notifIDRe = regexp.MustCompile(`^[\w-]{1,64}$`)

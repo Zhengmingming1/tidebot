@@ -777,10 +777,41 @@
   }
   function notifTitle(n) { var k = "notif." + n.event, v = T(k); return v === k ? cap(n.event.replace(/_/g, " ")) : v; }
   function markAllRead(list) {
-    if (list && list[0]) { state.notifSeen = list[0].created_at; try { localStorage.setItem("tb_notif_seen", state.notifSeen); } catch (e) {} }
+    if (list && list[0] && list[0].created_at > state.notifSeen) { seenLocal(list[0].created_at); seenPush(); }
     var dot = $("#bell-dot"); if (dot) dot.classList.add("hidden");
     fav.failed = 0; paintFavicon();
   }
+  // The "read up to" mark lives in tidebot (Novu keeps isRead on the server), so read in
+  // the desktop window is read in every browser. localStorage only paints the first frame.
+  function seenLocal(v) {
+    state.notifSeen = v;
+    try { localStorage.setItem("tb_notif_seen", v); } catch (e) {}
+  }
+  // Send this browser's mark when it's ahead of tidebot's (marked here, or read before the
+  // mark was shared); once per value, a failed send retries on the next bell refresh.
+  function seenPush() {
+    var v = state.notifSeen;
+    if (!v || state.seenSent === v) return;
+    state.seenSent = v;
+    api("/api/notifications/read", { method: "POST", body: { seen_at: v }, read: true }).then(function (r) {
+      if (r && r.seen_at && r.seen_at > state.notifSeen) seenLocal(r.seen_at);
+    }).catch(function () { if (state.seenSent === v) state.seenSent = ""; });
+  }
+  // Another window marked read: catch up when this one comes back (at most every 10s),
+  // at once for tabs of this browser.
+  function seenSync() {
+    if (!state.csrf || ($("#shell") && $("#shell").classList.contains("hidden"))) return;
+    if (Date.now() - (state.seenSyncAt || 0) < 10000) return;
+    state.seenSyncAt = Date.now();
+    api("/api/notifications/center", { fresh: true }).then(noteNotifs).catch(function () {});
+  }
+  window.addEventListener("focus", seenSync);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) seenSync(); });
+  window.addEventListener("storage", function (e) {
+    if (e.key !== "tb_notif_seen" || !e.newValue || !(e.newValue > state.notifSeen)) return;
+    state.notifSeen = e.newValue;
+    if (state.lastNotifs) noteNotifs(state.lastNotifs);
+  });
   function renderNotifCenter(pop, data) {
     var items = data.items || [], pend = data.pending || [];
     var groups = { failed: [], confirm: [], other: [] };
@@ -809,7 +840,7 @@
       return '<a class="item link-item" href="#/tasks/' + enc(p.task_id) + '/thread">' + ic("sparkle", "sm") + "<span>" + esc(T("nc.pending_amend", { name: p.task_name || shortId(p.task_id), n: p.count })) + "</span></a>";
     }).join("") + groups.confirm.slice(0, 5).map(it).join("");
     var nconf = pend.reduce(function (a, p) { return a + p.count; }, 0) + groups.confirm.length;
-    pop.innerHTML = '<div class="nc-head"><h4>' + esc(T("top.notifications")) + '</h4><span class="nc-acts"><button class="btn sm ghost" id="nc-read"' + (items.length > nread ? "" : " disabled") + ">" + esc(T("nc.mark_all")) + "</button>" +
+    pop.innerHTML = '<div class="nc-head"><h4>' + esc(T("top.notifications")) + '</h4><span class="nc-acts"><button class="btn sm ghost" id="nc-read" title="' + esc(T("nc.mark_all_tip")) + '"' + (items.length > nread ? "" : " disabled") + ">" + esc(T("nc.mark_all")) + "</button>" +
       '<button class="btn sm ghost" id="nc-clear"' + (nread ? ' title="' + esc(T("nc.clear_read_tip", { n: nread })) + '"' : " disabled") + ">" + esc(T("nc.clear_read")) + "</button></span></div>" +
       sec("failed", groups.failed.slice(0, 5).map(it).join(""), groups.failed.length) +
       sec("confirm", confirmInner, nconf) +
@@ -1468,7 +1499,9 @@
   }
   // Unread failures from the notification center feed the badge (and the bell dot).
   function noteNotifs(d) {
-    var list = d.items || [];
+    var list = d.items || [], sv = d.seen_at || "";
+    state.lastNotifs = d;
+    if (sv > state.notifSeen) seenLocal(sv); else if (state.notifSeen > sv) seenPush();
     var dot = $("#bell-dot");
     if (dot) dot.classList.toggle("hidden", !((list[0] && list[0].created_at > state.notifSeen) || (d.pending || []).length));
     fav.failed = list.filter(function (n) { return n.group === "failed" && n.created_at > state.notifSeen; }).length;
@@ -6451,7 +6484,9 @@
               if (!y) return;
               try { Object.keys(localStorage).filter(function (k) { return /^tb_/.test(k); }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
               draftsClearAll();
-              state.notifSeen = ""; fav.failed = 0; paintFavicon(); toast(T("set.reset_done"));
+              state.notifSeen = ""; state.seenSent = ""; fav.failed = 0; paintFavicon(); toast(T("set.reset_done"));
+              // the read mark is tidebot's, not this browser's: take it back from there
+              api("/api/notifications/center", { fresh: true }).then(noteNotifs).catch(function () {});
             });
           });
         };

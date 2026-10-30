@@ -323,6 +323,7 @@
   "nc.empty": "暂无",
   "nc.failed": "失败",
   "nc.mark_all": "全部标为已读",
+  "nc.mark_all_tip": "在所有登录的浏览器和桌面窗口同步标为已读",
   "nc.marked": "已全部标为已读",
   "nc.other": "其他",
   "nc.pending_amend": "「{name}」有 {n} 条需求补充待确认",
