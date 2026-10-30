@@ -746,8 +746,34 @@
     var p = {}, src = n.params || {};
     Object.keys(src).forEach(function (k) { p[k] = src[k]; });
     if (!p.name) p.name = T("ntf.quick_task");
+    // An update notice carries the start of the release notes (Markdown): the bell shows a
+    // one-line plain summary, the whole text on hover, the full notes on the update card.
+    if (/^update_/.test(n.key)) { var full = notesPlain(p.detail || ""); p.detail = notesSummary(p.detail || ""); }
     var bk = "ntf." + n.key + ".b", b = T(bk, p);
-    return { t: T("ntf." + n.key + ".t", p), b: b === bk ? "" : b.trim() };
+    return { t: T("ntf." + n.key + ".t", p), b: b === bk ? "" : b.trim(), full: full || "" };
+  }
+  // Release notes → plain lines: headings, list marks, emphasis, code ticks and link syntax
+  // go, link text stays; blank lines dropped. CRLF and LF alike.
+  function notesPlain(md) {
+    return String(md).split(/\r?\n/).map(function (l) {
+      return l.replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/, "").replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/<(https?:[^>]+)>/g, "$1")
+        .replace(/(\*\*|__)(.+?)\1/g, "$2").replace(/`([^`]*)`/g, "$1").replace(/\s+/g, " ").trim();
+    }).filter(Boolean).join("\n");
+  }
+  // Summary: the list items' lead (bold lead-in if any, else up to the first comma or stop),
+  // at most three, " · " between; notes without a list fall back to their first plain line.
+  function notesSummary(md) {
+    var items = [];
+    String(md).split(/\r?\n/).forEach(function (l) {
+      var m = /^\s{0,3}(?:[-*+]|\d+[.)])\s+(.*)$/.exec(l);
+      if (!m) return;
+      var lead = /^(?:\*\*|__)(.+?)(?:\*\*|__)/.exec(m[1]), t = notesPlain(lead ? lead[1] : m[1]);
+      if (!lead) t = t.split(/[。；;：:，]|[.,]\s/)[0];
+      t = t.replace(/[：:，,。.\s]+$/, "");
+      if (t) items.push(t.length > 40 ? t.slice(0, 39) + "…" : t);
+    });
+    if (!items.length) return (notesPlain(md).split("\n")[0] || "").slice(0, 80);
+    return items.slice(0, 3).join(" · ") + (items.length > 3 ? " " + T("nc.more_items", { n: items.length - 3 }) : "");
   }
   function notifTitle(n) { var k = "notif." + n.event, v = T(k); return v === k ? cap(n.event.replace(/_/g, " ")) : v; }
   function markAllRead(list) {
@@ -760,18 +786,21 @@
     var groups = { failed: [], confirm: [], other: [] };
     items.forEach(function (n) { (groups[n.group] || groups.other).push(n); });
     var unread = function (n) { return n.created_at > state.notifSeen; };
+    var nread = items.filter(function (n) { return !unread(n); }).length;
     var it = function (n) {
       var nt = notifText(n), pr = n.params || {};
       // A success notice may carry the start of the answer: three lines here, all of it on hover.
       var ex = pr.excerpt ? '<p class="nc-ex" title="' + esc(pr.excerpt) + '">' + esc(pr.excerpt) + "</p>" : "";
-      var inner = "<strong>" + esc(nt.t) + "</strong><div>" + esc(nt.b) + "</div>" + ex + '<small class="muted">' + esc(when(n.created_at)) + "</small>";
+      var inner = "<strong>" + esc(nt.t) + "</strong><div" + (nt.full ? ' class="nc-sum" title="' + esc(nt.full) + '"' : "") + ">" + esc(nt.b) + "</div>" + ex + '<small class="muted">' + esc(when(n.created_at)) + "</small>";
       // low disk space opens the storage card; a channel that stopped (or started) delivering
-      // opens the channel list; a run notice opens its run. Same stacked layout as the plain
-      // items, the whole row clickable.
+      // opens the channel list; a run notice opens its run; an update opens the update card.
+      // Same stacked layout as the plain items, the whole row clickable.
       var to = n.key === "disk_low" ? "#/settings/data/storage" : n.key === "channel_down" || n.key === "channel_up" ? "#/settings/notifications" :
+        /^update_/.test(n.key || "") ? "#/settings/about/update" :
         /^run_/.test(n.key || "") && /^[\w-]{1,64}$/.test(pr.run || "") ? "#/runs/" + enc(pr.run) : "";
-      if (to) return '<a class="item link-item note' + (unread(n) ? " unread" : "") + '" href="' + to + '">' + inner + "</a>";
-      return '<div class="item' + (unread(n) ? " unread" : "") + '">' + inner + "</div>";
+      var row = to ? '<a class="item link-item note' + (unread(n) ? " unread" : "") + '" href="' + to + '">' + inner + "</a>" : '<div class="item' + (unread(n) ? " unread" : "") + '">' + inner + "</div>";
+      // × beside the row (not inside the link): shows on hover / keyboard focus, always on touch
+      return '<div class="nc-row">' + row + '<button type="button" class="nc-x" data-clear="' + esc(n.id) + '" title="' + esc(T("nc.clear_one")) + '" aria-label="' + esc(T("nc.clear_one") + " · " + nt.t) + '">' + ic("x", "sm") + "</button></div>";
     };
     var sec = function (key, inner, count) {
       return '<div class="ngroup"><h5>' + esc(T("nc." + key)) + (count ? ' <span class="pill sm">' + esc(count) + "</span>" : "") + "</h5>" + (inner || '<div class="item muted">' + esc(T("nc.empty")) + "</div>") + "</div>";
@@ -780,12 +809,44 @@
       return '<a class="item link-item" href="#/tasks/' + enc(p.task_id) + '/thread">' + ic("sparkle", "sm") + "<span>" + esc(T("nc.pending_amend", { name: p.task_name || shortId(p.task_id), n: p.count })) + "</span></a>";
     }).join("") + groups.confirm.slice(0, 5).map(it).join("");
     var nconf = pend.reduce(function (a, p) { return a + p.count; }, 0) + groups.confirm.length;
-    pop.innerHTML = '<div class="nc-head"><h4>' + esc(T("top.notifications")) + '</h4><button class="btn sm ghost" id="nc-read">' + esc(T("nc.mark_all")) + "</button></div>" +
+    pop.innerHTML = '<div class="nc-head"><h4>' + esc(T("top.notifications")) + '</h4><span class="nc-acts"><button class="btn sm ghost" id="nc-read"' + (items.length > nread ? "" : " disabled") + ">" + esc(T("nc.mark_all")) + "</button>" +
+      '<button class="btn sm ghost" id="nc-clear"' + (nread ? ' title="' + esc(T("nc.clear_read_tip", { n: nread })) + '"' : " disabled") + ">" + esc(T("nc.clear_read")) + "</button></span></div>" +
       sec("failed", groups.failed.slice(0, 5).map(it).join(""), groups.failed.length) +
       sec("confirm", confirmInner, nconf) +
       sec("other", groups.other.slice(0, 5).map(it).join(""), 0);
-    $("#nc-read", pop).addEventListener("click", function (e) { e.stopPropagation(); markAllRead(items); $$(".item.unread", pop).forEach(function (x) { x.classList.remove("unread"); }); toast(T("nc.marked")); });
+    $("#nc-read", pop).addEventListener("click", function (e) { e.stopPropagation(); markAllRead(items); renderNotifCenter(pop, data); toast(T("nc.marked")); });
+    $("#nc-clear", pop).addEventListener("click", function (e) { e.stopPropagation(); clearNotifs(pop, { read_before: state.notifSeen }); });
+    $$(".nc-x", pop).forEach(function (b) {
+      b.addEventListener("click", function (e) {
+        e.stopPropagation();
+        // keep the keyboard where it was: focus moves to the next row's ×, else the header
+        var all = $$(".nc-x", pop), i = all.indexOf(b);
+        clearNotifs(pop, { ids: [b.getAttribute("data-clear")] }, i);
+      });
+    });
     $$("a.link-item", pop).forEach(function (a) { a.addEventListener("click", function () { pop.classList.add("hidden"); }); });
+  }
+  // Clear from the bell (one row, or everything this browser has seen): the rows leave the
+  // center at once, the popover stays open and redraws in place, and the toast can undo it.
+  function clearNotifs(pop, body, focusAt) {
+    var redraw = function () {
+      return api("/api/notifications/center", { fresh: true }).then(function (d) {
+        noteNotifs(d);
+        if (pop.classList.contains("hidden")) return;
+        renderNotifCenter(pop, d);
+        var xs = $$(".nc-x", pop), f = focusAt == null ? null : xs[Math.min(focusAt, xs.length - 1)] || $("#nc-read", pop);
+        if (f) f.focus();
+      });
+    };
+    api("/api/notifications/clear", { method: "POST", body: body }).then(function (r) {
+      var n = r.cleared || 0;
+      return redraw().then(function () {
+        if (!n) return;
+        toastUndo(T(body.ids ? "nc.cleared_one" : "nc.cleared", { n: n }), function () {
+          api("/api/notifications/clear", { method: "POST", body: { undo: r.batch } }).then(redraw).then(function () { toast(T("nc.restored")); }).catch(fail);
+        });
+      });
+    }).catch(fail);
   }
   function toggleNotif() {
     var pop = $("#notif");

@@ -77,6 +77,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/desktop/save", s.withAuthCSRF(s.handleDesktopSave))
 	mux.HandleFunc("/api/desktop/open", s.withAuthCSRF(s.handleDesktopOpen))
 	mux.HandleFunc("/api/notifications/center", s.withAuthCSRF(s.handleNotifCenter))
+	mux.HandleFunc("/api/notifications/clear", s.withAuthCSRF(s.handleNotifClear))
 	mux.HandleFunc("/api/auth/2fa/", s.withAuthCSRF(s.handle2FA))
 	mux.HandleFunc("/api/auth/password", s.withAuthCSRF(s.handlePassword))
 	mux.HandleFunc("/api/auth/sessions/others", s.withAuthCSRF(s.handleSessionsOthers))
@@ -1602,7 +1603,7 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 		CreatedAt string `json:"created_at"`
 	}
 	out := []n{}
-	rows, err := s.deps.DB.QueryContext(r.Context(), `SELECT id, event, body, created_at FROM notifications ORDER BY created_at DESC LIMIT 20`)
+	rows, err := s.deps.DB.QueryContext(r.Context(), `SELECT id, event, body, created_at FROM notifications WHERE cleared_at='' ORDER BY created_at DESC LIMIT 20`)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

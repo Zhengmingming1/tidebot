@@ -1375,6 +1375,19 @@ table.cmp th, table.cmp td { padding: 6px 8px; font-size: 13px; }
 .popover a.link-item { display: flex; gap: 8px; align-items: center; color: var(--accent); }
 .popover a.link-item:hover { background: var(--accent-50); }
 .popover a.link-item.note { display: block; color: inherit; }
+/* clear one notification: an × at the row's top right, shown on hover / keyboard focus
+   (always on touch screens); the row keeps room for it so text never runs under it */
+.nc-head .nc-acts { display: flex; gap: 4px; }
+.nc-row { position: relative; }
+.nc-row > .item { padding-right: 32px; }
+.nc-row .nc-x { position: absolute; top: 6px; right: 0; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-3); cursor: pointer; opacity: 0; transition: opacity .12s; }
+.nc-row:hover .nc-x, .nc-row:focus-within .nc-x { opacity: 1; }
+.nc-row .nc-x:hover { background: var(--bg-sunk); color: var(--text); }
+.nc-row .nc-x:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (hover: none) { .nc-row .nc-x { opacity: 1; } }
+/* update notice: the release-notes summary on one line, all of it on hover */
+.notif-center .nc-sum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 
 /* ---------- I6: settings ---------- */
 .settings-layout { display: grid; grid-template-columns: 200px 1fr; gap: var(--gutter); align-items: start; }
