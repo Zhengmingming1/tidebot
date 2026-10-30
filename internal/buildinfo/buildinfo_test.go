@@ -4,8 +4,8 @@ import "testing"
 
 func TestSourceRefAndOfficial(t *testing.T) {
 	defer func(v, c, o string) { Version, Commit, Official = v, c, o }(Version, Commit, Official)
-	Version, Commit = "0.1.8", "abc"
-	if g := SourceRef(); g != "https://github.com/Zhengmingming1/tidebot/tree/v0.1.8" {
+	Version, Commit = "0.1.9", "abc"
+	if g := SourceRef(); g != "https://github.com/Zhengmingming1/tidebot/tree/v0.1.9" {
 		t.Fatal(g)
 	}
 	Version = "dev"

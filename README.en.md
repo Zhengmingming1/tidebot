@@ -20,7 +20,7 @@ It's not a platform and doesn't want to become one. Single user, runs locally, o
 
 ## Screenshots
 
-All screenshots are taken in a 1024×655 window, which is the size I actually keep it at on my Mac. The data comes from the demo script, not a real account.
+All screenshots are taken in a 1024×655 window, which is the size I actually keep it at on my Mac, in the default Graphite theme. The data comes from the demo script, not a real account.
 
 The task list. Each row ends with a strip of the last 10 runs, tags sit next to the name, and clicking a tag filters by it; "Failing" picks out the tasks whose latest run didn't make it. It works from the keyboard too: `j`/`k` to move, Enter to open, `r` to run now.
 
@@ -58,9 +58,21 @@ Skill versions and diffs. Compare any two versions. Rollback only moves the poin
 
 ![Skill diff](docs/images/skill-diff.png)
 
-Ctrl+K (⌘K on a Mac) opens a command palette. It searches tasks, skills and runs, and can run a task, run a button or switch language. You can do all of it from the keyboard; `?` lists the shortcuts.
+Ctrl+K (⌘K on a Mac) opens a command palette. It searches tasks, skills and runs, and can run a task, run a button, switch language or change the theme. You can do all of it from the keyboard; `?` lists the shortcuts.
 
 ![Command palette](docs/images/palette.png)
+
+Appearance. 0.1.9 redid the UI. The default is Graphite: white surfaces, near-black primary buttons, an indigo accent, and cards split by hairlines instead of boxes inside boxes. The icons keep their colours, so you can still find things at a glance. There are two more themes: Tide (the old blue-green, toned down) and Midnight (amber accent, dark first). Each comes in light and dark, or follows your system. Pick one in Settings → General → Appearance. The choice is saved in tidebot, so another browser or the desktop app gets the same look, and the page opens in your colours without a white flash first.
+
+![Appearance settings](docs/images/appearance.png)
+
+If you'd rather not open Settings, pick "Change theme…" in the command palette. Moving up and down previews the whole window, Enter keeps it, and Esc or a click outside puts it back. Typing "dark" or "midnight" works too.
+
+![Changing the theme from the palette](docs/images/palette-theme.png)
+
+Midnight, dark:
+
+![Midnight dark](docs/images/dark.png)
 
 Settings are split into General / Providers / Budgets / Price catalog / Security / Notifications / Network / Data & backup / About, and every item has its own URL, e.g. `#/settings/security/2fa`. You can turn on two-factor sign-in there: scan, type one code, save the recovery codes. Nothing changes until a code checks out. Changing your password, seeing which devices are signed in and signing the others out are under Security too. Notification channels (Feishu, DingTalk, WeCom, Telegram, email, webhook) are added here as well; paste the URL and it figures out which one it is, and you can send a test before saving.
 
@@ -98,13 +110,13 @@ Small footprint. Measured on 2026-10-30 on a Linux x86_64 box (`go build -trimpa
 
 | What | Number |
 |---|---|
-| `agentd` binary (stripped) | 17.8 MB |
+| `agentd` binary (stripped) | 17.9 MB |
 | `agentctl` binary | 4.1 MB |
 | Idle RSS, WebUI off | ~29 MB |
 | Idle RSS, WebUI on | ~31 MB |
-| WebUI frontend (JS + CSS, gzipped) | ~195 KB, no CDN, no framework; cached by content hash, so a second visit downloads nothing |
+| WebUI frontend (JS + CSS, gzipped) | ~205 KB, no CDN, no framework; cached by content hash, so a second visit downloads nothing |
 
-This version adds quite a lot, so the frontend got bigger; memory stayed about the same. API responses are gzipped too: 100 runs in the runs list went from ~70 KB to 12 KB.
+This version has a new UI, and the stylesheet now carries three themes, so the frontend is about 10 KB bigger than 0.1.8; memory didn't move. API responses are gzipped too: 100 runs in the runs list went from ~70 KB to 12 KB.
 
 ## Architecture
 
@@ -166,11 +178,11 @@ Prebuilt packages are on the [Releases](https://github.com/Zhengmingming1/tidebo
 Whichever you pick, you still need the `claude` CLI installed to actually run tasks.
 
 - **Server (agentd + agentctl)**: grab `tidebot-server_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) and put the two binaries on your PATH.
-  On Debian/Ubuntu there's a `.deb`: `sudo apt install ./tidebot-server_0.1.8_amd64.deb`, then `systemctl --user enable --now tidebot`.
+  On Debian/Ubuntu there's a `.deb`: `sudo apt install ./tidebot-server_0.1.9_amd64.deb`, then `systemctl --user enable --now tidebot`.
 - **Desktop app**: `.dmg` on macOS (universal, Intel and Apple silicon), `-Windows-x64-Setup.exe` on Windows (per-user, no admin),
   `.deb` or `.AppImage` on Linux (the AppImage doesn't bundle WebKitGTK; you need `libwebkit2gtk-4.1` on the system).
   Unsigned builds: on macOS right-click → Open the first time; Windows shows a SmartScreen prompt.
-- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:0.1.8`. The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
+- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:0.1.9`. The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
 
 Auto-update: the desktop app and the server check for a new version once a day (you can turn that off in Settings → About → Updates). By hand it's `agentctl update check` / `agentctl update apply`: the update manifest's signature and the package's sha256 are verified, the binaries are swapped in place (the old ones stay as `.prev`), and if the new version doesn't come up within 90 seconds it rolls back. Installs owned by a package manager, like `.deb` or Docker, only get a notification. If GitHub is slow or blocked where you are, Settings → Network has proxy and download mirror options.
 
@@ -178,7 +190,7 @@ Settings → About shows whether there's a new version and its release notes. "U
 
 ![Updates](docs/images/update.png)
 
-**On the macOS desktop app 0.1.7? Install this one by hand, once.** In the 0.1.7 Mac build the "Update" button does nothing (WKWebView doesn't support `window.confirm()`; 0.1.8 uses an in-app dialog instead). Quit tidebot from its menu bar icon, download the new [.dmg](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg) and drag tidebot.app into Applications to replace the old one, then open it the first time with right-click → Open (or run `xattr -dr com.apple.quarantine /Applications/tidebot.app`). Your data stays put. Later versions update in-app again.
+**Still on the macOS desktop app 0.1.7? Install a newer one by hand, once.** In the 0.1.7 Mac build the "Update" button does nothing (WKWebView doesn't support `window.confirm()`; 0.1.8 uses an in-app dialog instead). Quit tidebot from its menu bar icon, download the new [.dmg](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg) and drag tidebot.app into Applications to replace the old one, then open it the first time with right-click → Open (or run `xattr -dr com.apple.quarantine /Applications/tidebot.app`). Your data stays put. Later versions update in-app again.
 
 ## Quick start
 
@@ -311,7 +323,7 @@ Works today:
 - Notifications: email, webhook, Feishu, DingTalk, WeCom, Telegram, added and tested from Settings; answer excerpts, optional "only when the answer changed"; per-channel delivery status and alerts on repeated failures; quiet hours and a daily digest
 - Backups (`.agentbak`, secrets only with a passphrase) and restore (`agentd restore`), log cleanup, a health summary and Prometheus `/metrics`
 - Sandbox dry-runs: runs against a copy of the workspace, billed to the dry_run bucket, and tells you which files changed
-- WebUI in English and Chinese, with a CI check that both dictionaries have the same keys; command palette and shortcuts; notifications grouped into failed / needs me / other
+- WebUI in English and Chinese, with a CI check that both dictionaries have the same keys; Graphite / Tide / Midnight themes, each light and dark or following the system; command palette and shortcuts; notifications grouped into failed / needs me / other
 - Optional two-factor sign-in (TOTP) with one-time recovery codes; after too many failed logins it tells you how long to wait; change your password, see and sign out other devices
 - A desktop app (tray + window)
 - CI runs the tests on Linux, macOS and Windows on every push; Windows uses a named pipe for local IPC; gitleaks scans the full history in CI so keys don't get committed

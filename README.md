@@ -20,7 +20,7 @@ tidebot 是我给自己写的一个小工具：一个常驻在本机后台的进
 
 ## 截图
 
-下面的截图都是按 1024×655 的窗口拍的，也就是我平时在 Mac 上开着的大小。数据是演示脚本造的，不是真账号。
+下面的截图都是按 1024×655 的窗口拍的，也就是我平时在 Mac 上开着的大小，用的是默认的石墨主题。数据是演示脚本造的，不是真账号。
 
 任务列表。每行后面是最近 10 次运行的色块，名字旁边是标签，点一下标签就只看这一类；“失败中”能直接筛出最近没跑成功的任务。纯键盘也能用：`j`/`k` 选行，回车打开，`r` 立即运行。
 
@@ -58,9 +58,21 @@ Skill 的版本和 diff。任意两个版本可以对比，回滚同样只挪指
 
 ![Skill 版本对比](docs/images/zh-skill-diff.png)
 
-按 Ctrl+K（Mac 上 ⌘K）打开命令面板，能搜任务、技能、运行记录，也能直接跑任务、跑按钮、切语言。只用键盘就够了，`?` 看全部快捷键。
+按 Ctrl+K（Mac 上 ⌘K）打开命令面板，能搜任务、技能、运行记录，也能直接跑任务、跑按钮、切语言、换主题。只用键盘就够了，`?` 看全部快捷键。
 
 ![命令面板](docs/images/zh-palette.png)
+
+外观。0.1.9 把界面重新做了一遍：默认是“石墨”，白底、深色主按钮、靛蓝强调色，卡片用细线分组，不再一层框套一层框；图标保留了颜色，扫一眼就知道哪是哪。另外还有“潮汐”（以前的蓝绿色，调得更安静）和“午夜”（琥珀色强调，深色优先）两套，每套都有浅色和深色，也可以跟随系统。在“设置 → 通用 → 外观”里点色卡就能换，选择存在 tidebot 里，换个浏览器或打开桌面版也是同一套。页面一打开就是你选的颜色，不会先闪一下白。
+
+![外观设置](docs/images/zh-appearance.png)
+
+不想进设置的话，在命令面板里选“切换主题…”，上下移动时整个窗口跟着预览，回车保存，Esc 或点外面就恢复原样；直接输入“深色”“午夜”也行。
+
+![命令面板切换主题](docs/images/zh-palette-theme.png)
+
+午夜 · 深色长这样：
+
+![午夜深色](docs/images/zh-dark.png)
 
 设置按“通用 / 供应商 / 预算 / 价格目录 / 安全 / 通知 / 网络 / 数据与备份 / 关于”分开，每一项都有自己的地址，比如 `#/settings/security/2fa`。两步验证可以直接在这里开：扫码、输一次验证码、存好恢复码，验证码没对上之前不会生效。改密码、看哪些设备登录着、把别的设备踢下线也在“安全”里。通知渠道（飞书、钉钉、企业微信、Telegram、邮件、Webhook）同样在这里加，粘贴地址会自动认出是哪家，保存前可以先发一条测试。
 
@@ -98,13 +110,13 @@ Skill 自动优化（可选，默认关）。有三种模式：关、只提建�
 
 | 项目 | 数值 |
 |---|---|
-| `agentd` 二进制（已 strip） | 17.8 MB |
+| `agentd` 二进制（已 strip） | 17.9 MB |
 | `agentctl` 二进制 | 4.1 MB |
 | 空闲内存 RSS（不开 WebUI） | 约 29 MB |
 | 空闲内存 RSS（开 WebUI） | 约 31 MB |
-| WebUI 前端（JS + CSS，gzip 后） | 约 195 KB，不依赖 CDN 和框架；按内容哈希缓存，第二次打开不用再下载 |
+| WebUI 前端（JS + CSS，gzip 后） | 约 205 KB，不依赖 CDN 和框架；按内容哈希缓存，第二次打开不用再下载 |
 
-比上一版多了不少功能，前端大了一圈；内存基本没涨。接口返回的 JSON 也会压缩，运行列表 100 条从约 70 KB 降到 12 KB。
+这一版换了界面，样式表里多了三套主题的配色，前端比 0.1.8 大了约 10 KB；内存没变。接口返回的 JSON 也会压缩，运行列表 100 条从约 70 KB 降到 12 KB。
 
 ## 架构
 
@@ -166,11 +178,11 @@ GitHub 的 README 没法自动识别你的系统，所以只能列出来让你�
 不管装哪种，真跑任务都需要你自己装好 `claude` CLI。
 
 - **服务端（agentd + agentctl）**：下载 `tidebot-server_<版本>_<系统>_<架构>.tar.gz`（Windows 是 `.zip`），解压后放进 PATH。
-  Debian/Ubuntu 可以直接装 `.deb`：`sudo apt install ./tidebot-server_0.1.8_amd64.deb`，然后 `systemctl --user enable --now tidebot`。
+  Debian/Ubuntu 可以直接装 `.deb`：`sudo apt install ./tidebot-server_0.1.9_amd64.deb`，然后 `systemctl --user enable --now tidebot`。
 - **桌面版**：macOS 用 `.dmg`（通用包，Intel 和 Apple 芯片都行），Windows 用 `-Windows-x64-Setup.exe`（装到当前用户，不要管理员权限），
   Linux 用 `.deb` 或 `.AppImage`（AppImage 没打包 WebKitGTK，系统里得有 `libwebkit2gtk-4.1`）。
   没签名的话 macOS 第一次打开要右键 → 打开，Windows 会弹 SmartScreen。
-- **Docker**：`docker pull ghcr.io/zhengmingming1/tidebot:0.1.8`。镜像里没有 `claude` CLI，怎么加见 [docs/release.md](docs/release.md)。
+- **Docker**：`docker pull ghcr.io/zhengmingming1/tidebot:0.1.9`。镜像里没有 `claude` CLI，怎么加见 [docs/release.md](docs/release.md)。
 
 自动更新：桌面版和服务端每天查一次新版本（“设置 → 关于 → 更新”里可以关）。也可以手动 `agentctl update check` / `agentctl update apply`：先验更新清单的签名和安装包的 sha256，再原地替换（旧文件留成 `.prev`），新版本 90 秒内起不来会自动回滚。`.deb`、Docker 这类由包管理器管的安装只提示，不自动替换。国内连 GitHub 慢的话，“设置 → 网络”里可以配代理和下载镜像。
 
@@ -178,7 +190,7 @@ GitHub 的 README 没法自动识别你的系统，所以只能列出来让你�
 
 ![更新](docs/images/zh-update.png)
 
-**用 macOS 桌面版 0.1.7 的话，这次要手动装一下。** 0.1.7 的 Mac 版里“更新”按钮点了没反应（WKWebView 不支持 `window.confirm()`，0.1.8 已经改成应用内的确认框）。步骤：点菜单栏的 tidebot 图标 → 退出；下载新的 [.dmg](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg)，把 tidebot.app 拖进“应用程序”替换旧的；第一次打开时右键 → 打开，或者在终端执行 `xattr -dr com.apple.quarantine /Applications/tidebot.app`。数据不受影响。之后的版本在应用里点“更新”就行。
+**还在用 macOS 桌面版 0.1.7 的话，需要手动装一次。** 0.1.7 的 Mac 版里“更新”按钮点了没反应（WKWebView 不支持 `window.confirm()`，0.1.8 已经改成应用内的确认框）。步骤：点菜单栏的 tidebot 图标 → 退出；下载新的 [.dmg](https://github.com/Zhengmingming1/tidebot-releases/releases/latest/download/tidebot-desktop-macOS-AppleSilicon-Intel.dmg)，把 tidebot.app 拖进“应用程序”替换旧的；第一次打开时右键 → 打开，或者在终端执行 `xattr -dr com.apple.quarantine /Applications/tidebot.app`。数据不受影响。之后的版本在应用里点“更新”就行。
 
 ## 快速开始
 
@@ -309,7 +321,7 @@ bin/tidebot-desktop --autostart enable --hidden   # 登录自启，启动时藏�
 - 通知：邮件、webhook、飞书、钉钉、企业微信、Telegram，在设置页直接添加和测试；带回答摘要、可只在回答有变化时通知；显示每个渠道的发送结果，连续失败会提醒；免打扰时段和每日汇总
 - 备份（`.agentbak`，带口令才会包含密钥）和恢复（`agentd restore`）、日志清理、运行概况和 Prometheus `/metrics`
 - 沙箱试跑：拷一份工作目录跑，记到 dry_run 预算桶，告诉你改了哪些文件
-- WebUI 中英文，CI 里会检查两份词条的 key 是否一致；命令面板和快捷键；通知按“失败 / 需要我确认 / 其他”分组
+- WebUI 中英文，CI 里会检查两份词条的 key 是否一致；石墨 / 潮汐 / 午夜三套主题，各有浅色深色，可跟随系统；命令面板和快捷键；通知按“失败 / 需要我确认 / 其他”分组
 - 登录可开两步验证（TOTP），带一次性恢复码；连续输错会告诉你还要等多久；可改密码、查看并退出其他已登录设备
 - 桌面版（托盘 + 窗口）
 - Linux、macOS、Windows 上 CI 每次提交都跑测试；Windows 用命名管道做本地 IPC；CI 里还会用 gitleaks 扫一遍完整历史，防止把密钥提交进来
