@@ -104,7 +104,7 @@ Small footprint. Measured on 2026-10-30 on a Linux x86_64 box (`go build -trimpa
 | Idle RSS, WebUI on | ~31 MB |
 | WebUI frontend (JS + CSS, gzipped) | ~195 KB, no CDN, no framework; cached by content hash, so a second visit downloads nothing |
 
-A lot went in this week, so the frontend got bigger; memory stayed about the same. API responses are gzipped too: 100 runs in the runs list went from ~70 KB to 12 KB.
+This version adds quite a lot, so the frontend got bigger; memory stayed about the same. API responses are gzipped too: 100 runs in the runs list went from ~70 KB to 12 KB.
 
 ## Architecture
 
