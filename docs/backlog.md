@@ -4247,3 +4247,45 @@ desktop and browser). The last rounds were the UI redesign and ⌘/Ctrl+Enter in
 1. Guard without the hook: decide whether runs drop `--bare` (with `--setting-sources ""`,
    `--strict-mcp-config` and the isolated config dir) so the PreToolUse hook works again, or move
    the rules into `--disallowedTools` patterns. Needs its own check of what non-bare loads.
+
+## 2026-10-30 (17:45): Run dialog — run a skill in a folder you pick
+
+**Done**
+
+- **One "Run" dialog instead of Quick run.** Home, the command palette and every row on the
+  Skills page open it. Skill and folder are both optional: no skill and no folder is the old
+  quick run; a skill gets your prompt as its arguments (`/tidebot:<name> <prompt>`).
+- **Folder + permission.** Read-only by default (`--disallowedTools Edit,Write,MultiEdit,
+  NotebookEdit,Bash,PowerShell`, not the hook, see the 17:00 entry). "Can edit" changes the
+  folder itself; one edit run per folder at a time (409 `busy`). The status pill shows the git
+  branch and the number of uncommitted changes; switching to "Can edit" in a dirty repo warns
+  to commit or stash first.
+- **Folder rules.** Symlinks are resolved first, then the real path is checked: `/`, system
+  folders (`/etc`, `/usr`, `C:\Windows`, Program Files…), `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.claude`, `~/.config/gh`, `~/.kube`, `~/.docker` and the like, any folder that contains
+  one of them (e.g. your home) and tidebot's own data folder are refused, server-side.
+- **Auto-filled.** Picking a skill fills the folder, permission and provider it last ran
+  with (only into fields you haven't touched); recent folders are one click.
+- **Runs say what ran.** A skill run is titled by the skill (`code-review #475E`), the status
+  card reads "tidebot · Read-only", details list skill, version, folder and permission; edit &
+  rerun and "save as task" carry them over.
+- API: `POST /api/runs/quick` takes `skill_id`, `version_id`, `workspace`, `mode`
+  (login + CSRF); `GET /api/runs/defaults?skill_id=`; `workspace-check?mode=run` returns the git
+  state without touching the repo (`GIT_OPTIONAL_LOCKS=0`, fsmonitor/untracked cache/hooks off,
+  2 s timeout). Migration 020 adds `runs.skill_id`, `skill_version_id`, `run_mode`.
+- Fixed: form selects had lost their chevron (`.field select` reset the background image).
+
+**Learned**
+
+- Claude Code's own run view puts what and where above everything else; at 1024×655 the run
+  page only has the status card above the fold, so folder and permission go there.
+
+**Ideas for later**
+
+1. Folder browser served by agentd for the browser/Docker case (today: type a path, or the
+   desktop picker).
+2. `{{var}}` fields from a skill's arguments, so a skill can ask for its inputs.
+3. "Changed files" panel after an edit run (git diff against the start), with undo.
+4. `agentctl skills run`, "save as button" from a run, and a version picker in the dialog.
+5. `git status` still runs a repo's configured filter drivers; consider `-c filter.*` overrides
+   or reading the index directly.
