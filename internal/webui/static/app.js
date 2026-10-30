@@ -186,6 +186,10 @@
     git: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/>',
     chat: '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>',
     image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+    ext: '<path d="M14 5h5v5"/><path d="m19 5-8 8"/><path d="M18 14v5H5V6h5"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
+    moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+    palette: '<path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.3-1-1.6-1-2.8 0-1 .8-1.7 1.8-1.7h2.2a3.7 3.7 0 0 0 3.7-3.7c0-4-3.8-7.1-8.5-7.1z"/><circle cx="8" cy="11" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15.5" cy="8" r="1"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     download: '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
     chevUp: '<path d="m18 15-6-6-6 6"/>',
@@ -219,18 +223,18 @@
   function wavePath(y) { var d = "M-24 " + y; for (var i = 0; i < 5; i++) d += (i ? "s" : "c4-3 8-3 12 0s") + "8 3 12 0" + (i < 4 ? " 8-3 12 0" : ""); return d; }
   function waveMark() {
     var g = "tbg" + (markN++), c = "tbc" + markN;
-    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#4c8df2"/><stop offset="1" stop-color="#1640a3"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
-      '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/><circle cx="45" cy="18" r="6" fill="#ffd98a"/>' +
+    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".35" y2="1"><stop class="mk-a" offset="0"/><stop class="mk-b" offset="1"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
+      '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/><circle class="mk-sun" cx="45" cy="18" r="6"/>' +
       '<g class="tw-swell s1"><path class="tw tw1" d="' + wavePath(29) + '" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="4" stroke-linecap="round"/></g>' +
       '<g class="tw-swell s2"><path class="tw tw2" d="' + wavePath(38) + '" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/></g>' +
-      '<path class="tw-sand" d="M0 48c8-3.6 16-4 24-2 8 2 16 2.4 40-1.6V64H0z" fill="#efe4cf"/></g></svg>';
+      '<path class="tw-sand" d="M0 48c8-3.6 16-4 24-2 8 2 16 2.4 40-1.6V64H0z"/></g></svg>';
   }
   document.addEventListener("visibilitychange", function () { document.documentElement.classList.toggle("tb-hidden", document.hidden); });
   function waveArt() {
     return '<svg class="wave" viewBox="0 0 300 170" aria-hidden="true">' +
-      '<path d="M0 170V120c40-10 70-40 110-38 30 2 40 26 66 22 22-3 26-36 4-46-16-7-34 4-30 18-14-26 10-56 46-50 44 7 66 54 104 60v84z" fill="#e6eefc"/>' +
-      '<path d="M0 170v-28c50-6 90-34 140-30 40 3 60 30 100 26 24-2 44-14 60-24v56z" fill="#d3e1f8"/>' +
-      '<path d="M150 98c-6-18 14-38 40-32" stroke="#b5cdf3" stroke-width="2" fill="none"/>' +
+      '<path d="M0 170V120c40-10 70-40 110-38 30 2 40 26 66 22 22-3 26-36 4-46-16-7-34 4-30 18-14-26 10-56 46-50 44 7 66 54 104 60v84z" class="wa1"/>' +
+      '<path d="M0 170v-28c50-6 90-34 140-30 40 3 60 30 100 26 24-2 44-14 60-24v56z" class="wa2"/>' +
+      '<path d="M150 98c-6-18 14-38 40-32" class="wa3" stroke-width="2" fill="none"/>' +
       '<path d="M120 160c40-10 80-14 180-6" stroke="#fff" stroke-width="2" fill="none" opacity=".8"/></svg>';
   }
   // ---------- time ----------
@@ -713,7 +717,9 @@
 
   function renderTopbar(crumbs) {
     // A single crumb repeats the page title right below it: only detail pages get a trail.
-    var c = crumbs && crumbs.length > 1 ? '<div class="crumbs">' + crumbs.map(function (x, i) {
+    // The page title lives here (the narrow top bar), with the trail for detail pages.
+    if ((!crumbs || !crumbs.length) && renderTopbar.nav) crumbs = [[T("nav." + renderTopbar.nav)]];
+    var c = crumbs && crumbs.length ? '<div class="crumbs">' + crumbs.map(function (x, i) {
       return (i ? '<span class="sep">' + ic("chev", "sm") + "</span>" : "") + (x[1] ? '<a href="' + esc(x[1]) + '">' + esc(x[0]) + "</a>" : "<span>" + esc(x[0]) + "</span>");
     }).join("") + "</div>" : "";
     $("#topbar").innerHTML = c + '<div class="spacer"></div>' +
@@ -1493,6 +1499,7 @@
   function mount(html, nav, crumbs) {
     mountSeq++;
     setNav(nav);
+    renderTopbar.nav = nav;
     renderTopbar(crumbs);
     var leaf = crumbs && crumbs.length ? crumbs[crumbs.length - 1][0] : "";
     setDocTitle({ page: leaf || (nav ? T("nav." + nav) : "") });
@@ -1666,7 +1673,7 @@
     return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.provider")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
       runs.map(function (r) {
         var running = r.status === "running", active = running || r.status === "queued";
-        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + hlText(runTitle(r), lq) + "</strong></a>" + (runHitHtml(r.match) || '<small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small>") + "</div></div></td>" +
+        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon(r)) + '">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + hlText(runTitle(r), lq) + "</strong></a>" + (runHitHtml(r.match) || '<small class="ell">' + esc(triggerText(r.trigger)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small>") + "</div></div></td>" +
           '<td class="run-prov"><span class="ell">' + esc(r.provider || "—") + "</span>" + (r.model ? '<small class="ell">' + esc(r.model) + "</small>" : "") + "</td>" +
           "<td>" + statusPill(r.status, r.queue_pos, r.error) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
           '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && active ? '<button class="icon-btn sm row-act" data-stop="' + esc(r.id) + '" data-st="' + esc(r.status) + '" data-tip="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '" aria-label="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '">' + ic("stop", "sm") + "</button>" : "") + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
@@ -1771,40 +1778,47 @@
     return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r) {
       var o = r[0], d = r[1];
       renderStatus(o);
+      // Quick actions: one compact row of buttons, each with its colour tile (the button's own
+      // colour, else a hue picked from its icon), "new quick run" as the primary on the right.
       var qa = (o.buttons || []).slice(0, 5).map(function (b) {
-        return '<button class="card qa' + (b.color ? " colored" : "") + '" data-color="' + esc(b.color || "") + '" data-btn="' + esc(b.id) + '" title="' + esc(b.description || b.label) + '"><span class="qa-ico">' + ic(btnIcon(b)) + '</span><span class="qa-txt"><strong>' + esc(b.label) + "</strong><small>" + esc(b.description || "") + "</small></span></button>";
+        return '<button class="qb" data-color="' + esc(b.color || "") + '" data-hue="' + esc(iconHue(btnIcon(b))) + '" data-btn="' + esc(b.id) + '" data-tip="' + esc(b.description || b.label) + '"><span class="qb-ico">' + ic(btnIcon(b), "sm") + '</span><span class="qb-txt">' + esc(b.label) + "</span></button>";
       });
-      qa.push('<button class="card qa tint" id="qa-new"><span class="qa-ico">' + ic("sparkle") + '</span><span class="qa-txt"><strong>' + esc(T("home.quick")) + "</strong><small>" + esc(T("home.quick_sub")) + "</small></span></button>");
-      qa.push('<a class="card qa add" href="#/buttons" title="' + esc(T("home.add_button")) + '" aria-label="' + esc(T("home.add_button")) + '">' + ic("plus") + "</a>");
+      qa.push('<a class="qb add" href="#/buttons" data-tip="' + esc(T("home.add_button")) + '" aria-label="' + esc(T("home.add_button")) + '">' + ic("plus", "sm") + "</a>");
       var noTasks = !d.tasks.length;
-      mount('<div class="home"><div class="grid g4 kpis" id="kpis"></div>' +
-        '<div class="qa-row">' + qa.join("") + "</div>" +
+      mount('<div class="home"><div class="kstrip" id="kpis"></div>' +
+        '<div class="qbar"><span class="qbar-lab">' + esc(T("home.quick_label")) + "</span>" + qa.join("") + '<span class="spacer"></span><button class="btn primary" id="qa-new" data-tip="' + esc(T("home.quick_sub")) + '">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div>" +
         (noTasks ? '<section class="card">' + '<div class="empty">' + ic("tasks") + "<strong>" + esc(T("home.empty_title")) + "</strong>" + esc(T("home.empty_sub")) + '<div class="mt"><button class="btn primary" id="home-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div></section>" : "") +
-        '<div class="home-mid' + (noTasks ? " two" : "") + '"><section class="card hc"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("home.running")) + '</h2><span class="link muted" id="run-n"></span></div><div id="running"></div></section>' +
-        '<section class="card hc"><div class="card-head"><span class="ico">' + ic("calendar") + "</span><h2>" + esc(T("home.next24")) + '</h2><button type="button" class="icon-btn sm spz-home" id="spz-home" aria-haspopup="menu" aria-expanded="false"></button><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("arrow", "sm") + '</a></div><div id="spz-banner"></div><div id="next24"></div><div class="hc-foot">' + ic("info", "sm") + "<span>" + esc(T("home.times_in", { tz: tzLabel() })) + "</span></div></section>" +
-        (noTasks ? "" : '<section class="card hc"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.health")) + '</h2><span class="link muted">' + esc(T("home.health_sub")) + '</span></div><div id="beats"></div></section>') + "</div>" +
-        '<section class="card flush home-recent"><div class="card-head"><span class="ico">' + ic("runs") + "</span><h2>" + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("arrow", "sm") + '</a></div><div id="recent"></div></section></div>', "home", []);
+        '<div class="home-cols' + (noTasks ? " one" : "") + '">' +
+        (noTasks ? "" : '<section class="card flush hc"><div class="card-head"><h2>' + esc(T("nav.tasks")) + '</h2><span class="muted">' + esc(T("home.health")) + '</span><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("chev", "sm") + '</a></div><div id="beats"></div></section>') +
+        '<section class="card flush hc"><div class="card-head"><h2>' + esc(T("home.next24")) + '</h2><span class="muted run-n" id="run-n"></span><button type="button" class="icon-btn sm spz-home" id="spz-home" aria-haspopup="menu" aria-expanded="false"></button></div>' +
+        '<div id="running"></div><div id="spz-banner"></div><div id="next24"></div><div class="hc-foot" data-tip="' + esc(T("home.tz_tip")) + '">' + ic("info", "sm") + "<span>" + esc(tzLabel()) + "</span></div></section></div>" +
+        '<section class="card flush home-recent"><div class="card-head"><h2>' + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("chev", "sm") + '</a></div><div id="recent"></div></section></div>', "home", []);
       applyColors(page());
       var paint = function (o, d, asked) {
         var k = d.kpi, rate = k.runs_today ? Math.round(k.succeeded_today / k.runs_today * 100) + "%" : "—", left = k.budget_usd ? Math.max(0, k.budget_usd - k.spent_today) : null;
         var bp = k.budget_usd ? Math.min(100, k.spent_today / k.budget_usd * 100) : 0;
-        $("#kpis").innerHTML = [[T("home.k_runs"), num(k.runs_today), T("home.k_runs_sub", { n: k.succeeded_today })], [T("home.k_rate"), rate, T("time.today")], [T("home.k_spent"), usd(k.spent_today, 2), k.budget_usd ? T("home.pct_budget", { p: Math.round(bp) }) : T("home.no_budget")], [T("home.k_left"), left == null ? "∞" : usd(left, 2), T("sp.global_daily")]].map(function (x, i) {
+        // One strip of four figures; the line under each never truncates (details in the tooltip).
+        $("#kpis").innerHTML = [[T("home.k_runs"), num(k.runs_today), T("home.k_runs_sub", { n: k.succeeded_today }), T("home.k_runs_tip")],
+          [T("home.k_rate"), rate, T("time.today"), ""],
+          [T("home.k_spent"), usd(k.spent_today, 2), k.budget_usd ? T("home.of_budget", { v: usd(k.budget_usd, 2) }) : T("home.no_budget_short"), k.budget_usd ? T("home.pct_budget", { p: Math.round(bp) }) : T("home.no_budget")],
+          [T("home.k_left"), left == null ? "∞" : usd(left, 2), T("sp.global_daily"), ""]].map(function (x, i) {
           // "today's runs" opens the runs list for today (same day boundary as this count)
-          var tag = i === 0 ? 'a class="card stat stat-link" href="#/runs?range=today" data-tip="' + esc(T("home.k_runs_tip")) + '"' : 'div class="card stat"';
-          return "<" + tag + "><small>" + esc(x[0]) + '</small><div class="stat-v"><strong class="num">' + esc(x[1]) + "</strong><span>" + esc(x[2]) + "</span></div>" + (i === 3 && k.budget_usd ? '<div class="progress' + (bp >= 100 ? " bad" : bp >= 80 ? " warn" : "") + '"><span data-w="' + bp + '"></span></div>' : "") + (i === 0 ? "</a>" : "</div>");
+          var tag = i === 0 ? 'a class="stat stat-link" href="#/runs?range=today"' : 'div class="stat"';
+          return "<" + tag + (x[3] ? ' data-tip="' + esc(x[3]) + '"' : "") + "><small>" + esc(x[0]) + '</small><strong class="num">' + esc(x[1]) + "</strong><span>" + esc(x[2]) + "</span>" + ((i === 3 || i === 2) && k.budget_usd ? '<div class="progress' + (bp >= 100 ? " bad" : bp >= 80 ? " warn" : "") + '"><span data-w="' + (i === 2 ? bp : Math.max(0, 100 - bp)) + '"></span></div>' : "") + (i === 0 ? "</a>" : "</div>");
         }).join("");
         $("#run-n").textContent = d.running.length ? T("home.n_running", { n: d.running.length }) : "";
         setDocTitle({ running: d.running.filter(function (x) { return x.status === "running"; }).length });
         $("#running").innerHTML = d.running.length ? '<ul class="live-list">' + d.running.map(function (x) {
           return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + (x.status === "queued" ? esc(x.queue_pos ? T("st.queued_n", { n: x.queue_pos }) : T("st.queued")) : tAgo("home.started_ago", null, "t", x.started_at || x.created_at)) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
-        }).join("") + "</ul>" : '<p class="hc-empty">' + ic("checkc", "sm") + "<span><strong>" + esc(T("home.idle")) + "</strong> · " + esc(T("home.idle_sub")) + "</span></p>";
+        }).join("") + "</ul>" : '<p class="hc-empty" data-tip="' + esc(T("home.idle_sub")) + '"><span class="idle-dot" aria-hidden="true"></span><span>' + esc(T("home.idle")) + "</span></p>";
         $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.slice(0, 4).map(function (s) {
           return '<li data-at="' + esc(s.at) + '"><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
         }).join("") + "</ul>" : '<p class="hc-empty">' + ic("calendar", "sm") + "<span><strong>" + esc(T("home.no_sched")) + "</strong> · " + esc(T("home.no_sched_sub")) + "</span></p>";
         if (d.sched_pause && spAdopt(d.sched_pause, asked || Date.now())) paintCC();
         paintHomePause();
-        if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.slice(0, 5).map(function (t) {
-          return '<div class="beat-row"><a href="#/tasks/' + enc(t.id) + '" class="bn">' + esc(t.name) + (t.status === "paused" ? " " + taskPill("paused", t, true) : "") + "</a>" + beatsBar(t.beats) + "</div>";
+        if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.slice(0, 6).map(function (t) {
+          var last = (t.beats || [])[(t.beats || []).length - 1], st = last ? (last.status === "succeeded" ? "ok" : last.status === "running" || last.status === "queued" ? "run" : last.status === "skipped" ? "skip" : "bad") : "none";
+          return '<div class="beat-row"><a href="#/tasks/' + enc(t.id) + '" class="bn"><span class="sdot ' + st + '" aria-hidden="true"></span><span class="bn-t">' + esc(t.name) + "</span>" + (t.status === "paused" ? taskPill("paused", t, true) : "") + "</a>" + beatsBar(t.beats) + '<span class="b-ago">' + (last ? agoHtml(last.at) : "—") + "</span></div>";
         }).join("") + "</div>";
         $("#recent").innerHTML = runsTable((o.runs || []).slice(0, 5));
         applySizes(page()); wireRows(page());
@@ -2090,7 +2104,7 @@
         var list = base.filter(function (t) { return taskMatchesStatus(t, v.status); }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
-          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
+          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
             '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
@@ -2522,7 +2536,7 @@
     return api("/api/skills").then(function (skills) {
       var rows = skills.length ? '<table class="table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
         skills.map(function (s) {
-          return '<tr class="click" data-href="#/skills/' + enc(s.id) + '"><td><div class="cell-main"><span class="ico">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + '</td><td class="nowrap">' + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
+          return '<tr class="click" data-href="#/skills/' + enc(s.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue("skills") + '">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + '</td><td class="nowrap">' + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
             '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
@@ -2931,7 +2945,7 @@
         var target = b.task_id ? T("bt.runs_task", { name: tname[b.task_id] || b.task_id }) : b.skill_id ? T("bt.runs_skill", { name: sname[b.skill_id] || b.skill_id }) : T("bt.prompt", { p: b.prompt });
         var tIco = b.task_id ? "tasks" : b.skill_id ? "skills" : "chat";
         var tName = b.task_id ? tname[b.task_id] || b.task_id : b.skill_id ? sname[b.skill_id] || b.skill_id : b.prompt;
-        return '<div class="card qa bt-card' + (b.color ? " colored" : "") + '" draggable="true" tabindex="0" data-idx="' + i + '" aria-roledescription="' + esc(T("bt.sortable")) + '" aria-label="' + esc(b.label) + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '">' +
+        return '<div class="card qa bt-card' + (b.color ? " colored" : "") + '" draggable="true" tabindex="0" data-idx="' + i + '" aria-roledescription="' + esc(T("bt.sortable")) + '" aria-label="' + esc(b.label) + '" data-hue="' + esc(iconHue(btnIcon(b))) + '" data-color="' + esc(b.color || "") + '" data-run="' + esc(b.id) + '">' +
           '<div class="bt-top"><span class="qa-ico">' + ic(btnIcon(b)) + '</span><div class="bt-acts"><span class="grip qa-grip" aria-hidden="true" data-tip="' + esc(T("bt.sort_hint", { k: keyLabel("Alt+← →") })) + '">⋮⋮</span>' +
           '<button class="icon-btn sm" data-edit="' + i + '" data-tip="' + esc(T("btn.edit")) + '" aria-label="' + esc(T("btn.edit")) + '">' + ic("edit", "sm") + '</button>' +
           '<button class="icon-btn sm danger-text" data-del="' + i + '" data-tip="' + esc(T("btn.remove")) + '" aria-label="' + esc(T("btn.remove")) + '">' + ic("trash", "sm") + "</button></div></div>" +
@@ -2993,7 +3007,18 @@
     });
   }
   // Colors go through CSSOM (CSP blocks inline style attributes).
-  function applyColors(root) { $$("[data-color]", root).forEach(function (el) { var c = el.getAttribute("data-color"); if (/^#[0-9a-fA-F]{6}$/.test(c)) el.style.setProperty("--qa-color", c); }); }
+  // A button's own colour also tints its icon tile (same hue at low alpha, so it reads on light and dark).
+  function applyColors(root) {
+    $$("[data-color]", root).forEach(function (el) {
+      var c = el.getAttribute("data-color");
+      if (!/^#[0-9a-fA-F]{6}$/.test(c)) return;
+      el.style.setProperty("--qa-color", c);
+      el.style.setProperty("--qa-bg", "rgba(" + parseInt(c.slice(1, 3), 16) + ", " + parseInt(c.slice(3, 5), 16) + ", " + parseInt(c.slice(5, 7), 16) + ", .16)");
+    });
+  }
+  // Icons without a chosen colour still get one: a stable hue per icon name.
+  var HUES = ["blue", "teal", "violet", "orange", "pink", "green", "cyan", "indigo"];
+  function iconHue(name) { var h = 0; for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; return HUES[h % HUES.length]; }
   var SWATCHES = ["", "#2f6fed", "#0f9d8a", "#7b5cd6", "#d9822b", "#d64545", "#3b8b3b", "#5a6b7d"];
   // Secondary help lives in a tooltip next to the label (hover or keyboard focus), not under every field.
   // An id the user may need (support, the CLI) without it taking a row on the page: a small
@@ -6124,7 +6149,7 @@
       var head = '<div class="card-head"><span class="ico">' + ic(SET_ICONS[section]) + "</span><h2>" + esc(T("setnav." + section)) + "</h2></div>";
       var body = "", after = function () {};
       if (section === "general") {
-        body = '<section class="card">' + head +
+        body = lookCardHtml() + '<section class="card">' + head +
           row("language", T("set.language"), T("set.language_sub"), langSelect("set-lang")) +
           row("timezone", T("set.tz"), T("set.tz_sub"), tzButtonHtml(st.tz_offset)) +
           row("webui", T("set.addr"), T(st.allow_lan ? "set.lan_on" : "set.lan_off"), "<code>" + esc(st.addr) + "</code>") +
@@ -6136,6 +6161,7 @@
           row("reset_ui", T("set.reset_ui"), T("set.reset_ui_sub"), '<button class="btn danger sm" id="dz-reset">' + esc(T("set.reset")) + "</button>") + "</section>";
         after = function () {
           $("#set-lang").addEventListener("change", function (e) { setLanguage(e.target.value).then(function () { savedMark($("#set-lang")); }); });
+          lookWire();
           powerWire();
           $("#tz-open").addEventListener("click", function () { tzPicker(function () { route(); }); });
           $("#dz-webui").addEventListener("click", function () {
@@ -6342,16 +6368,20 @@
           rpc("network.get", {}).then(paint).catch(fail);
         };
       } else if (section === "about") {
-        body = '<section class="card">' + head +
-          row("version", T("set.version"), T("set.version_sub"), "<code>" + esc(state.version || "dev") + "</code>") +
-          row("terms", T("set.terms"), T("set.terms_sub"), "") +
-          row("source", T("set.source"), T("set.source_sub"), '<a href="' + esc(RELEASES_PAGE) + '" target="_blank" rel="noopener"><code>github.com/Zhengmingming1/tidebot-releases</code></a>') +
-          row("code", T("set.code"), T("set.code_sub"), '<a href="' + esc(state.sourceURL || SOURCE_REPO) + '" target="_blank" rel="noopener"><code>' + esc((state.sourceURL || SOURCE_REPO).replace(/^https:\/\//, "")) + "</code></a>") +
-          row("license", T("set.license"), T("set.license_sub"), '<a href="' + esc(SOURCE_REPO + "/blob/main/LICENSE") + '" target="_blank" rel="noopener"><code>' + esc(state.license || "AGPL-3.0-only") + "</code></a>") + "</section>" +
+        // Short link text with an external-link mark; the full address is the tooltip.
+        var ext = function (href, text) { return '<a class="ext-link" href="' + esc(href) + '" target="_blank" rel="noopener" data-tip="' + esc(href.replace(/^https:\/\//, "")) + '">' + esc(text) + ic("ext", "sm") + "</a>"; };
+        var src = state.sourceURL || SOURCE_REPO, ref = (/\/tree\/([^/?#]+)/.exec(src) || [])[1];
+        body = '<section class="card about-hero" id="set-version"><span class="about-mark">' + waveMark() + '</span><div class="about-t"><strong>tidebot ' + esc(state.version || "dev") + "</strong><small>" + esc(T("set.version_sub")) + "</small></div>" +
+          '<span class="pill plain mono">' + esc(state.license || "AGPL-3.0-only") + "</span></section>" +
+          '<section class="card">' +
+          row("source", T("set.source"), T("set.source_sub"), ext(RELEASES_PAGE, "tidebot-releases")) +
+          row("code", T("set.code"), T("set.code_sub"), ext(src, "tidebot" + (ref ? " @ " + ref : ""))) +
+          row("license", T("set.license"), T("set.license_sub"), ext(SOURCE_REPO + "/blob/main/LICENSE", state.license || "AGPL-3.0-only")) +
+          row("terms", T("set.terms"), T("set.terms_sub"), "") + "</section>" +
           '<section class="card" id="set-update"><div class="card-head"><span class="ico">' + ic("refresh") + "</span><h2>" + esc(T("up.title")) + "</h2></div>" +
-          row("up_auto", T("up.auto"), T("up.auto_sub"), '<label class="check"><input type="checkbox" id="up-auto"> ' + esc(T("up.on")) + "</label>") +
+          row("up_auto", T("up.auto"), T("up.auto_sub"), '<input type="checkbox" class="tgl" role="switch" id="up-auto" aria-label="' + esc(T("up.auto")) + '">') +
           row("up_every", T("up.every"), T("up.every_sub"), '<select id="up-every"><option value="24">' + esc(T("up.daily")) + '</option><option value="168">' + esc(T("up.weekly")) + "</option></select>") +
-          row("up_channel", T("up.channel"), T("up.channel_sub"), "<code>stable</code>") +
+          row("up_channel", T("up.channel"), T("up.channel_sub"), '<span class="pill plain">' + esc(T("up.stable")) + "</span>") +
           '<div id="up-box" class="pad-x" aria-live="polite"><p class="muted">…</p></div></section>';
         after = function () {
           upAbout();
@@ -6362,7 +6392,7 @@
           $("#up-every").addEventListener("change", save);
         };
       }
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.settings")) + "</h1></div></div>" + '<div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
+      mount('<h1 class="sr-only">' + esc(T("nav.settings")) + "</h1>" + '<div class="settings-layout">' + nav + '<div class="set-main">' + body + "</div></div>",
         "settings", [[T("nav.settings"), "#/settings"], [T("setnav." + section)]]);
       after();
       jumpTo(item);
@@ -6751,6 +6781,47 @@
   window.addEventListener("beforeunload", function (e) {
     if (!state.native && modalGuard && modalGuard.dirty()) { e.preventDefault(); e.returnValue = ""; return ""; }
   });
+
+  // ---------- appearance: theme × colour mode ----------
+  // The server puts the saved look on <html data-theme data-mode> in the page itself, so the
+  // first paint is already right; switching here only flips the attributes (styles.css has
+  // every palette) and saves. Transitions are held for a frame so nothing fades between themes.
+  var THEMES = ["graphite", "tide", "midnight"], MODES = ["system", "light", "dark"];
+  function curLook() {
+    var h = document.documentElement, t = h.getAttribute("data-theme"), m = h.getAttribute("data-mode");
+    return { theme: THEMES.indexOf(t) >= 0 ? t : "graphite", mode: MODES.indexOf(m) >= 0 ? m : "system" };
+  }
+  function setLook(look) {
+    var h = document.documentElement;
+    h.classList.add("tb-theming");
+    h.setAttribute("data-theme", look.theme); h.setAttribute("data-mode", look.mode);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { h.classList.remove("tb-theming"); }); });
+    return api("/api/settings/appearance", { method: "PUT", body: look });
+  }
+  function lookCardHtml() {
+    var cur = curLook();
+    var sw = THEMES.map(function (t) {
+      return '<button type="button" class="tsw' + (t === cur.theme ? " on" : "") + '" data-pv="' + t + '" data-look-theme="' + t + '" role="radio" aria-checked="' + (t === cur.theme) + '" data-tip="' + esc(T("theme." + t + "_sub")) + '">' +
+        '<span class="tsw-pv" aria-hidden="true"><i class="pv-side"></i><i class="pv-main"><b class="pv-bar"></b><b class="pv-card"></b><b class="pv-card"></b><b class="pv-btn"></b></i></span>' +
+        '<span class="tsw-name">' + ic("checkc", "sm") + esc(T("theme." + t)) + "</span></button>";
+    }).join("");
+    var modes = MODES.map(function (m) {
+      return '<button type="button" data-look-mode="' + m + '" class="' + (m === cur.mode ? "active" : "") + '" aria-pressed="' + (m === cur.mode) + '">' + ic(m === "system" ? "monitor" : m === "light" ? "sun" : "moon", "sm") + esc(T("mode." + m)) + "</button>";
+    }).join("");
+    return '<section class="card" id="set-appearance"><div class="card-head"><span class="ico">' + ic("palette") + "</span><h2>" + esc(T("set.appearance")) + "</h2></div>" +
+      '<div class="set-row" id="set-theme"><div class="lbl"><strong>' + esc(T("set.theme")) + "</strong><small>" + esc(T("set.theme_sub")) + "</small></div></div>" +
+      '<div class="tsw-row" role="radiogroup" aria-label="' + esc(T("set.theme")) + '">' + sw + "</div>" +
+      '<div class="set-row" id="set-mode"><div class="lbl"><strong>' + esc(T("set.mode")) + "</strong><small>" + esc(T("set.mode_sub")) + '</small></div><div class="seg" role="group" aria-label="' + esc(T("set.mode")) + '">' + modes + "</div></div></section>";
+  }
+  function lookWire() {
+    var save = function (look, el) {
+      setLook(look).then(function () { savedMark(el); }).catch(fail);
+      $$("[data-look-theme]").forEach(function (b) { var on = b.getAttribute("data-look-theme") === look.theme; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); });
+      $$("[data-look-mode]").forEach(function (b) { var on = b.getAttribute("data-look-mode") === look.mode; b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on)); });
+    };
+    $$("[data-look-theme]").forEach(function (b) { b.addEventListener("click", function () { var l = curLook(); l.theme = b.getAttribute("data-look-theme"); save(l, $("#set-theme .lbl")); }); });
+    $$("[data-look-mode]").forEach(function (b) { b.addEventListener("click", function () { var l = curLook(); l.mode = b.getAttribute("data-look-mode"); save(l, $("#set-mode .seg")); }); });
+  }
 
   function langSelect(id) {
     var opts = [["auto", T("lang.auto")], ["zh-CN", "简体中文"], ["en", "English"]];
