@@ -152,9 +152,10 @@ def css():
         return "--pv-bg: %s; --pv-side: %s; --pv-surface: %s; --pv-border: %s; --pv-text: %s; --pv-accent: %s;" % (
             c["bg"], c["side_bg"], c["surface"], c["border_strong"], c["text"], c["accent"])
     for theme in ("graphite", "tide", "midnight"):
-        parts.append('.tsw[data-pv="%s"] { %s }' % (theme, pv(theme, "light")))
-        parts.append('html[data-mode="dark"] .tsw[data-pv="%s"] { %s }' % (theme, pv(theme, "dark")))
-        parts.append('@media (prefers-color-scheme: dark) { html[data-mode="system"] .tsw[data-pv="%s"] { %s } }' % (theme, pv(theme, "dark")))
+        # .pv-dot: the small swatch in the command palette's theme page.
+        parts.append('.tsw[data-pv="%s"], .pv-dot[data-pv="%s"] { %s }' % (theme, theme, pv(theme, "light")))
+        parts.append('html[data-mode="dark"] .tsw[data-pv="%s"], html[data-mode="dark"] .pv-dot[data-pv="%s"] { %s }' % (theme, theme, pv(theme, "dark")))
+        parts.append('@media (prefers-color-scheme: dark) { html[data-mode="system"] .tsw[data-pv="%s"], html[data-mode="system"] .pv-dot[data-pv="%s"] { %s } }' % (theme, theme, pv(theme, "dark")))
     parts.append("/* @themes:end */")
     return "\n".join(parts)
 

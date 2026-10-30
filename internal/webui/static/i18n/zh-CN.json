@@ -2020,5 +2020,16 @@
   "mode.system": "跟随系统",
   "mode.light": "浅色",
   "mode.dark": "深色",
-  "up.stable": "稳定版"
+  "up.stable": "稳定版",
+  "pal.look": "切换主题…",
+  "pal.look_kw": "外观 主题 颜色 深色 浅色 暗色 theme appearance dark light",
+  "pal.look_ph": "选择主题或颜色模式，移动即预览…",
+  "pal.look_set": "外观已切换：{t} · {m}",
+  "pal.current": "当前",
+  "pal.back": "返回命令列表（Esc 或退格）",
+  "pal.k_preview": "预览",
+  "pal.k_apply": "应用",
+  "pal.k_back": "返回",
+  "pal.kind.theme": "主题",
+  "pal.kind.mode": "模式"
 }

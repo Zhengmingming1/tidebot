@@ -2020,5 +2020,16 @@
   "mode.system": "System",
   "mode.light": "Light",
   "mode.dark": "Dark",
-  "up.stable": "Stable"
+  "up.stable": "Stable",
+  "pal.look": "Change theme…",
+  "pal.look_kw": "appearance theme colour color dark light 外观 主题",
+  "pal.look_ph": "Pick a theme or colour mode — moving previews it…",
+  "pal.look_set": "Appearance: {t} · {m}",
+  "pal.current": "Current",
+  "pal.back": "Back to commands (Esc or Backspace)",
+  "pal.k_preview": "Preview",
+  "pal.k_apply": "Apply",
+  "pal.k_back": "Back",
+  "pal.kind.theme": "Theme",
+  "pal.kind.mode": "Mode"
 }

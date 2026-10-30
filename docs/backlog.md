@@ -4128,3 +4128,58 @@ Category: UX / keyboard (all dialogs at once, same on macOS / Windows / Linux, d
 3. Check the pre-paint window colour on real macOS, Windows and Linux desktops (so far it
    is only compiled and checked in CI).
 4. A high-contrast variant for each theme.
+
+## 2026-10-30 (12:30): command palette changes the theme — moving previews it, Enter keeps it
+
+Category: UX / interaction (the palette, all three themes, same on macOS / Windows / Linux,
+desktop and browser). The last rounds were the UI redesign and ⌘/Ctrl+Enter in dialogs.
+
+**Done**
+
+- ⌘K / Ctrl+K › 「切换主题…」 / "Change theme…" opens a page of its own: three themes (a small
+  split swatch: the theme's background and accent, in the current colour mode) and three colour
+  modes (跟随系统 / 浅色 / 深色, colourful icons). The current ones say 「当前」 and the cursor
+  starts on the current theme.
+- Moving with ↑ ↓ or the mouse repaints the whole window with that look after a 90 ms beat (holding
+  ↓ does not repaint every row); nothing is saved. Enter saves it (same `/api/settings/appearance`
+  as Settings, toast 「外观已切换：午夜 · 深色」, the Settings swatches follow if open). Esc or
+  Backspace on an empty box go back to the command list, closing by clicking outside — both put the
+  opening look back. A preview still pending when leaving is dropped. Each item changes one thing
+  on top of the opening look, so a mode never carries along a theme that was only hovered.
+- The input row shows a 「‹ 外观」 crumb (click to go back, tooltip names Esc / Backspace); the footer
+  switches to 预览 / 应用 / 返回.
+- First page: typing a name (「深色」, 「午夜」, "dark", "midnight") lists that look directly above
+  the commands and applies it on Enter; 「主题」 / "theme" still puts 「切换主题…」 first.
+- `applyLook` (repaint only) split out of `setLook` (repaint + save); `lookMark` shared with
+  Settings › General. `gen-themes.py` emits the `--pv-*` swatch variables for `.pv-dot` too.
+- Tests: `TestPaletteLook` (wiring, `.pv-dot` in light / dark / follow-system blocks for every theme,
+  i18n; node run: first-page labels and current marks, each item keeps the other half of the look,
+  preview waits and is debounced, back reverts, pending preview dropped, Enter saves + marks +
+  toasts and closing keeps it, empty filter shows the opening look). Checked in Chrome at 1024×655.
+- Shots: `/workspace/tidebot-shots/2026-10-30-palette-theme-zh-1024x655.png` (Graphite, previewing
+  Tide), `…-en-midnight-dark-1024x655.png`.
+
+**Inspiration**
+
+- microsoft/vscode `src/vs/workbench/contrib/themes/browser/themes.contribution.ts`
+  (`openQuickPick`: auto-focus the current theme, `onDidChangeActive` previews after a 200 ms
+  timeout, `onDidHide` without accept puts `currentTheme` back).
+- pacocoursey/cmdk `README.md` "Nested items" (a "Change theme…" page; Escape, or Backspace on an
+  empty search, goes to the previous page). Ideas only, no code.
+
+**Learned**
+
+- The preview must repaint without saving, and the revert must run from every exit (Esc, Backspace,
+  click outside, choosing another command) — putting it in the palette's single `close` plus the page
+  switch covers them all.
+- Debouncing the preview matters more than speed: an instant repaint per arrow press makes holding ↓
+  flash through every palette.
+
+**Ideas for later**
+
+1. A global shortcut for colour mode (e.g. ⌘/Ctrl+Shift+L) with the same toast.
+2. Same palette pages for language and "pause all for…" (1 h / until 9:00 / until resumed).
+3. Contrast guard: a test computing WCAG ratios of text / accent / status tokens on their surfaces
+   for all six palettes (a quick check found Tide light `text-3` on `bg-sunk` 4.1:1, Midnight
+   light accent on `bg` 4.2:1, Graphite / Midnight light `info` on `info-50` 4.2:1).
+4. Preview the desktop window's own background during the palette preview (now it follows on save).

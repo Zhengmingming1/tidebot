@@ -804,7 +804,10 @@
   // Ctrl/⌘+K opens it. Arrow keys move, Enter runs. Search responses that arrive
   // after a newer query was typed are dropped (seq check), so slow requests never
   // overwrite fresh results.
-  var pal = { seq: 0, items: [], sel: 0, buttons: null, timer: null };
+  // "Change theme…" opens a page of its own (pacocoursey/cmdk "pages"): moving through it
+  // previews the theme or mode on the whole window (VS Code's theme picker), Enter keeps it,
+  // Esc / Backspace on an empty box go back and closing without Enter puts the old look back.
+  var pal = { seq: 0, items: [], sel: 0, buttons: null, timer: null, page: "", look0: null, pv: 0, kept: false };
   function palCommands() {
     var go = function (h) { return function () { location.hash = h; }; };
     return [
@@ -815,6 +818,7 @@
       { kind: "cmd", icon: "bolt", label: T("bt.new"), keys: "n b", run: function () { goClick("#/buttons", "#b-add"); } },
       { kind: "cmd", icon: "globe", label: T("pal.lang_to", { l: state.lang === "zh-CN" ? "English" : "简体中文" }), run: function () { setLanguage(state.lang === "zh-CN" ? "en" : "zh-CN"); } },
       { kind: "cmd", icon: "bell", label: T("pal.notifications"), run: function () { setTimeout(toggleNotif, 0); } },
+      { kind: "cmd", icon: "palette", label: T("pal.look"), kw: T("pal.look_kw"), stay: true, run: function () { palPage("look"); } },
     ].concat(spState && spState.paused ? [
       { kind: "cmd", icon: "play", label: T("spz.pal_resume"), run: function () { setSchedPause(false); } }
     ] : [
@@ -834,20 +838,80 @@
     ]).concat(SET_SECTIONS.map(function (k) { return { kind: "nav", icon: "settings", label: T("nav.settings") + " › " + T("setnav." + k), run: go("#/settings/" + k) }; }));
   }
   function palMatch(label, q) { return !q || label.toLowerCase().indexOf(q.toLowerCase()) >= 0; }
+  // The look page: three themes, then three colour modes. Each previews its own change on top
+  // of the look the page was opened with, so a mode never drags along a theme only hovered.
+  function palLookItems(root) {
+    var base = pal.look0 || curLook(), cur = curLook();
+    if (root) base = cur;
+    var keep = function (look) { return function () { palKeepLook(look); }; };
+    var crumb = root ? T("set.appearance") + " › " : "";
+    return THEMES.map(function (t) {
+      var look = { theme: t, mode: base.mode };
+      return { kind: "theme", swatch: t, label: crumb + T("theme." + t), kw: t, sub: t === base.theme ? T("pal.current") : "", look: look, run: keep(look) };
+    }).concat(MODES.map(function (m) {
+      var look = { theme: base.theme, mode: m };
+      return { kind: "mode", icon: m === "system" ? "monitor" : m === "light" ? "sun" : "moon", label: crumb + T("mode." + m), kw: m, sub: m === base.mode ? T("pal.current") : "", look: look, run: keep(look) };
+    }));
+  }
+  function palPage(page) {
+    var input = $("#pal-q");
+    if (!input) return;
+    if (page === "look") { pal.look0 = curLook(); pal.kept = false; } else palRevertLook();
+    pal.page = page;
+    var crumb = $("#pal-crumb");
+    crumb.textContent = page === "look" ? T("set.appearance") : "";
+    crumb.classList.toggle("hidden", !page);
+    input.value = "";
+    input.setAttribute("placeholder", T(page === "look" ? "pal.look_ph" : "pal.placeholder"));
+    palFoot();
+    palUpdate("");
+    input.focus();
+  }
+  function palFoot() {
+    var f = $(".pal-foot");
+    if (!f) return;
+    var k = function (keys, what) { return "<span>" + keys.map(function (x) { return "<kbd>" + esc(x) + "</kbd>"; }).join("") + " " + esc(T(what)) + "</span>"; };
+    f.innerHTML = pal.page === "look" ? k(["↑", "↓"], "pal.k_preview") + k(["Enter"], "pal.k_apply") + k(["Esc"], "pal.k_back")
+      : k(["↑", "↓"], "pal.k_move") + k(["Enter"], "pal.k_run") + k(["Esc"], "pal.k_close") + k(["?"], "pal.shortcuts");
+  }
+  // Preview waits a beat (like VS Code's 200 ms) so holding ↓ does not repaint every theme.
+  function palPreview() {
+    clearTimeout(pal.pv);
+    if (pal.page !== "look") return;
+    var it = pal.items[pal.sel];
+    var look = it && it.look ? it.look : pal.look0;
+    pal.pv = setTimeout(function () { if (pal.page === "look" && !pal.kept) applyLook(look); }, 90);
+  }
+  function palRevertLook() {
+    clearTimeout(pal.pv);
+    if (pal.page === "look" && !pal.kept && pal.look0) {
+      var c = curLook();
+      if (c.theme !== pal.look0.theme || c.mode !== pal.look0.mode) applyLook(pal.look0);
+    }
+    pal.page = ""; pal.look0 = null;
+  }
+  function palKeepLook(look) {
+    pal.kept = true;
+    clearTimeout(pal.pv);
+    setLook(look).then(function () { toast(T("pal.look_set", { t: T("theme." + look.theme), m: T("mode." + look.mode) })); }).catch(fail);
+    lookMark(look);
+  }
   function openPalette() {
     var root = $("#pal-root");
     if (!root) { root = document.createElement("div"); root.id = "pal-root"; document.body.appendChild(root); }
     if (root.innerHTML) { var qi = $("#pal-q"); if (qi) qi.focus(); return; }
     var opener = document.activeElement;
     root.innerHTML = '<div class="modal-bg pal-bg"><div class="card palette" role="dialog" aria-modal="true" aria-label="' + esc(T("pal.title")) + '">' +
-      '<div class="pal-in">' + ic("search") + '<input id="pal-q" type="text" autocomplete="off" maxlength="200" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" placeholder="' + esc(T("pal.placeholder")) + '"></div>' +
-      '<ul id="pal-list" role="listbox"></ul><div class="pal-foot muted"><span><kbd>↑</kbd><kbd>↓</kbd> ' + esc(T("pal.k_move")) + "</span><span><kbd>Enter</kbd> " + esc(T("pal.k_run")) + "</span><span><kbd>Esc</kbd> " + esc(T("pal.k_close")) + "</span><span><kbd>?</kbd> " + esc(T("pal.shortcuts")) + "</span></div></div></div>";
+      '<div class="pal-in">' + ic("search") + '<button type="button" id="pal-crumb" class="pal-crumb hidden" data-tip="' + esc(T("pal.back")) + '"></button><input id="pal-q" type="text" autocomplete="off" maxlength="200" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" placeholder="' + esc(T("pal.placeholder")) + '"></div>' +
+      '<ul id="pal-list" role="listbox"></ul><div class="pal-foot muted"></div></div></div>';
     var input = $("#pal-q");
-    var close = function () { root.innerHTML = ""; pal.seq++; document.removeEventListener("keydown", onKey, true); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
+    pal.page = ""; pal.look0 = null;
+    var close = function () { palRevertLook(); root.innerHTML = ""; pal.seq++; document.removeEventListener("keydown", onKey, true); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
     pal.close = close;
     var onKey = function (e) {
       if (!root.innerHTML) return;
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (pal.page) palPage(""); else close(); }
+      else if (e.key === "Backspace" && pal.page && !input.value && e.target === input) { e.preventDefault(); palPage(""); }
       else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); palSelect(pal.sel + (e.key === "ArrowDown" ? 1 : -1)); }
       else if (e.key === "Enter") { e.preventDefault(); palRun(pal.sel); }
       else if (e.key === "Tab") { e.preventDefault(); input.focus(); }
@@ -855,12 +919,28 @@
     document.addEventListener("keydown", onKey, true);
     $(".pal-bg", root).addEventListener("mousedown", function (e) { if (e.target.classList.contains("pal-bg")) close(); });
     imeInput(input, 0, function (v) { palUpdate(v.trim()); });
+    $("#pal-crumb").addEventListener("click", function () { palPage(""); });
+    palFoot();
     if (!pal.buttons) api("/api/buttons").then(function (l) { pal.buttons = l || []; if (root.innerHTML) palUpdate(input.value.trim()); }).catch(function () { pal.buttons = []; });
     palUpdate("");
     input.focus();
   }
   function palUpdate(q) {
-    var local = palCommands().filter(function (c) { return palMatch(c.label, q); });
+    var m = function (c) { return palMatch(c.label + (c.kw ? " " + c.kw : ""), q); };
+    if (pal.page === "look") {
+      clearTimeout(pal.timer); pal.seq++;
+      pal.items = palLookItems().filter(m);
+      var b = pal.look0, at = -1;
+      pal.items.forEach(function (it, i) { if (at < 0 && it.kind === "theme" && it.look.theme === b.theme) at = i; });
+      pal.sel = q || at < 0 ? 0 : at;
+      palDraw();
+      palPreview();
+      return;
+    }
+    // Typing "深色" / "midnight" on the first page lists the looks directly (applied on Enter, no preview).
+    // Only names count here ("深色", "Midnight"), so "主题" still puts "Change theme…" first.
+    var looks = q ? palLookItems(true).filter(function (c) { return palMatch(c.label.split(" › ").pop() + " " + c.kw, q); }) : [];
+    var local = looks.concat(palCommands().filter(m));
     var btns = (pal.buttons || []).filter(function (b) { return palMatch(b.label, q); }).slice(0, 5).map(function (b) {
       return { kind: "button", icon: "play", label: T("pal.run_button", { name: b.label }), run: function () { runButton(b.id); } };
     });
@@ -896,7 +976,7 @@
     var ul = $("#pal-list");
     if (!ul) return;
     ul.innerHTML = pal.items.length ? pal.items.map(function (it, i) {
-      return '<li role="option" id="pal-o' + i + '" data-i="' + i + '" aria-selected="' + (i === pal.sel) + '" class="' + (i === pal.sel ? "sel" : "") + '">' + ic(it.icon, "sm") + '<span class="kind">' + esc(T("pal.kind." + it.kind)) + "</span><span class=\"lbl\">" + esc(it.label) + "</span>" + (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "") + (it.keys ? '<span class="pal-keys">' + it.keys.split(" ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join("") + "</span>" : "") + "</li>";
+      return '<li role="option" id="pal-o' + i + '" data-i="' + i + '" data-ic="' + esc(it.icon || "") + '" aria-selected="' + (i === pal.sel) + '" class="' + (i === pal.sel ? "sel" : "") + '">' + (it.swatch ? '<i class="pv-dot" data-pv="' + esc(it.swatch) + '" aria-hidden="true"></i>' : ic(it.icon, "sm")) + '<span class="kind">' + esc(T("pal.kind." + it.kind)) + "</span><span class=\"lbl\">" + esc(it.label) + "</span>" + (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "") + (it.keys ? '<span class="pal-keys">' + it.keys.split(" ").map(function (k) { return "<kbd>" + esc(k) + "</kbd>"; }).join("") + "</span>" : "") + "</li>";
     }).join("") : '<li class="none muted">' + esc(T("search.none")) + "</li>";
     $$("li[data-i]", ul).forEach(function (li) {
       li.addEventListener("mousemove", function () { if (pal.sel !== +li.getAttribute("data-i")) palSelect(+li.getAttribute("data-i")); });
@@ -908,11 +988,14 @@
     if (!pal.items.length) return;
     pal.sel = (i + pal.items.length) % pal.items.length;
     palDraw();
+    palPreview();
     var li = $("#pal-o" + pal.sel); if (li && li.scrollIntoView) li.scrollIntoView({ block: "nearest" });
   }
   function palRun(i) {
     var it = pal.items[i];
     if (!it) return;
+    if (it.stay) { it.run(); return; }
+    if (it.look) { it.run(); if (pal.close) pal.close(); return; } // keep first, so closing does not revert
     if (pal.close) pal.close();
     it.run();
   }
@@ -6791,12 +6874,21 @@
     var h = document.documentElement, t = h.getAttribute("data-theme"), m = h.getAttribute("data-mode");
     return { theme: THEMES.indexOf(t) >= 0 ? t : "graphite", mode: MODES.indexOf(m) >= 0 ? m : "system" };
   }
-  function setLook(look) {
+  // applyLook only repaints (palette preview); setLook also saves.
+  function applyLook(look) {
     var h = document.documentElement;
     h.classList.add("tb-theming");
     h.setAttribute("data-theme", look.theme); h.setAttribute("data-mode", look.mode);
     requestAnimationFrame(function () { requestAnimationFrame(function () { h.classList.remove("tb-theming"); }); });
+  }
+  function setLook(look) {
+    applyLook(look);
     return api("/api/settings/appearance", { method: "PUT", body: look });
+  }
+  // Settings › General shows the saved look on its swatches and mode segment.
+  function lookMark(look) {
+    $$("[data-look-theme]").forEach(function (b) { var on = b.getAttribute("data-look-theme") === look.theme; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); });
+    $$("[data-look-mode]").forEach(function (b) { var on = b.getAttribute("data-look-mode") === look.mode; b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on)); });
   }
   function lookCardHtml() {
     var cur = curLook();
@@ -6816,8 +6908,7 @@
   function lookWire() {
     var save = function (look, el) {
       setLook(look).then(function () { savedMark(el); }).catch(fail);
-      $$("[data-look-theme]").forEach(function (b) { var on = b.getAttribute("data-look-theme") === look.theme; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); });
-      $$("[data-look-mode]").forEach(function (b) { var on = b.getAttribute("data-look-mode") === look.mode; b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on)); });
+      lookMark(look);
     };
     $$("[data-look-theme]").forEach(function (b) { b.addEventListener("click", function () { var l = curLook(); l.theme = b.getAttribute("data-look-theme"); save(l, $("#set-theme .lbl")); }); });
     $$("[data-look-mode]").forEach(function (b) { b.addEventListener("click", function () { var l = curLook(); l.mode = b.getAttribute("data-look-mode"); save(l, $("#set-mode .seg")); }); });
