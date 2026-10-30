@@ -79,7 +79,7 @@ func TestThemeTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	css := string(raw)
+	css := strings.ReplaceAll(string(raw), "\r\n", "\n") // Windows checkouts may use CRLF
 	bg := func(sel string) string {
 		i := strings.Index(css, "\n"+sel+" {")
 		if i < 0 {
