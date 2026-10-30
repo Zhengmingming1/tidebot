@@ -4317,3 +4317,43 @@ desktop and browser). The last rounds were the UI redesign and ⌘/Ctrl+Enter in
 
 1. If runs ever drop `--bare`: keep `CLAUDE_CONFIG_DIR` off for them (or check
    `CLAUDE_SECURESTORAGE_CONFIG_DIR`, which decouples the credential slot, on a real Mac first).
+
+## 2026-10-30 (20:00): the bell can clear notifications — read ones in one click, any one by its ×
+
+User feedback from 14:26 (first item): read notices such as "tidebot 0.1.8 is available" stayed
+in the bell forever, and the update notice showed raw Markdown from the release notes.
+
+**Done**
+
+- Bell header: "Mark all read" and **"Clear read"** (disabled when nothing is read; the tooltip
+  says how many and that tasks and runs aren't touched). It clears everything up to this
+  browser's "seen" mark, including rows older than the 50 the bell lists.
+- Each row has an **×** at its top right (beside the link, not inside it), shown on hover and
+  keyboard focus, always on touch screens (`hover: none`); labelled with the notice title.
+- Clearing redraws the open bell in place (focus moves to the next ×), refreshes the bell dot
+  and favicon count, and toasts "Cleared N" with **Undo** — no confirm dialog, as it's reversible.
+- Server: `POST /api/notifications/clear` with `ids` (≤ 100, validated), `read_before`
+  (RFC 3339) or `undo` (batch token). Migration 021 adds `notifications.cleared_at` holding the
+  batch token, so Undo restores exactly that click's rows; rows stay in the log; both list
+  endpoints skip cleared rows; index on `(cleared_at, created_at)`. CSRF as every API route.
+- Update notices show a one-line summary of the notes (each list item's bold lead-in, else up to
+  the first comma or stop, three at most, "+N more"), the plain text without Markdown on hover,
+  and open Settings › About › Update, where the full notes are.
+- Tests: clear one / read / undo / bad input / no CSRF / legacy list, UI wiring and CSS, both
+  languages, and `notesSummary` / `notesPlain` under node (LF and CRLF).
+
+**Learned** — Novu's inbox (novuhq/novu, `packages/js/src/ui/components/elements/Header/MoreActionsOptions.tsx`)
+puts "Mark all as read", "Archive all" and "Archive read" in the header menu, and its row actions
+(`packages/js/src/ui/components/Notification/NotificationDefaultActions.tsx`, styled in
+`packages/js/src/ui/core/style/tables.ts` `defaultActions`) appear on hover *and* keyboard focus.
+Archive there is reversible (an Archived tab); tidebot has no tab for that, so the undo toast is
+the way back and the batch token keeps undo exact.
+
+**Ideas for later**
+
+1. Read state is still per browser (`localStorage tb_notif_seen`): store it in tidebot so
+   "read" on the desktop app is read in the browser too (Novu keeps `isRead` on the server).
+2. Prune cleared notifications older than 90 days with the other retention jobs.
+3. Channels (email, chat robots) still get the update notes as Markdown text; send the same
+   summary plus the notes link.
+4. Settings page width at large windows (second item of the 14:26 feedback) is still open.
