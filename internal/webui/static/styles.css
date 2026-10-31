@@ -3035,3 +3035,13 @@ input.tgl:disabled { opacity: .5; cursor: default; }
   .set-main.set-flow > .about-hero, .set-main.set-flow > .danger-zone, .set-main.set-flow > .set-wide { column-span: all; }
   .set-main.set-flow > * + .danger-zone, .set-main.set-flow > * + .set-wide { margin-top: 16px; } /* a column's last margin is dropped at the span */
 }
+
+/* runs list: an edit run's change size beside its title (files, +added −removed) */
+.run-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.run-line .row-link { min-width: 0; overflow: hidden; }
+.chg-badge { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; line-height: 1; color: var(--text-2); text-decoration: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chg-badge .i { width: 12px; height: 12px; color: var(--text-3); }
+.chg-badge .add, .chg-badge .del { font-weight: 500; }
+.chg-badge:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
+.chg-badge:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+#rd-chg { scroll-margin-top: calc(var(--topbar-h) + 16px); } /* jump from a list badge lands below the sticky top bar */

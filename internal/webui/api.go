@@ -225,7 +225,24 @@ type runDTO struct {
 	QueuePos int `json:"queue_pos,omitempty"`
 	// Match: with search text, which field matched and an excerpt around the hit.
 	Match *runHit `json:"match,omitempty"`
+	// Changes: how much an edit run changed in its folder (files, lines added/removed),
+	// read from the recorded file list; nil when nothing was recorded (not an edit run,
+	// not a git work tree, still running). The file list itself is only on the detail.
+	Changes *runChangeSum `json:"changes,omitempty"`
 }
+
+// runChangeSum is the size of an edit run's changes, for list rows and exports.
+type runChangeSum struct {
+	Files int `json:"files"`
+	Add   int `json:"add"`
+	Del   int `json:"del"`
+}
+
+// runChangeCols reads runChangeSum from runs.file_changes in SQL, so lists never load the
+// file list: -1 when there is none (or it isn't valid JSON).
+const runChangeCols = `CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.count'),0) ELSE -1 END,
+ CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.add'),0) ELSE 0 END,
+ CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.del'),0) ELSE 0 END`
 
 func (s *Server) runSelect() string {
 	return `SELECT r.id, COALESCE(r.task_id,''), COALESCE(t.name,''), r.status, r.trigger_kind,
@@ -234,7 +251,8 @@ func (s *Server) runSelect() string {
  COALESCE(r.started_at,''), COALESCE(r.finished_at,''), r.created_at, COALESCE(r.error_message,''),
  r.prompt, COALESCE(v.version_no,0), COALESCE(r.cost_bucket,'production'),
  r.cost_amount, r.cost_currency, r.cost_source, r.cache_read_tokens, r.cache_write_tokens, r.requests,
- CASE WHEN r.run_mode<>'' THEN r.workspace_dir ELSE '' END, r.skill_id, COALESCE(sk.name,''), COALESCE(sv.version_no,0), r.skill_version_id, r.run_mode
+ CASE WHEN r.run_mode<>'' THEN r.workspace_dir ELSE '' END, r.skill_id, COALESCE(sk.name,''), COALESCE(sv.version_no,0), r.skill_version_id, r.run_mode,
+ ` + runChangeCols + `
 FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN versions v ON v.id = r.task_version_id
  LEFT JOIN skills sk ON r.skill_id<>'' AND sk.id = r.skill_id LEFT JOIN versions sv ON r.skill_version_id<>'' AND sv.id = r.skill_version_id`
 }
@@ -278,11 +296,15 @@ func (s *Server) queryRunsOpt(ctx context.Context, promptMax int, where string, 
 // scanRun reads one row of runSelect().
 func scanRun(rows *sql.Rows) (runDTO, error) {
 	var d runDTO
+	var files, add, del int
 	err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
 		&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
 		&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
 		&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests,
-		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode)
+		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode, &files, &add, &del)
+	if err == nil && files >= 0 {
+		d.Changes = &runChangeSum{Files: files, Add: add, Del: del}
+	}
 	return d, err
 }
 

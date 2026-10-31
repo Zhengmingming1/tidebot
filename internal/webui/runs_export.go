@@ -21,8 +21,8 @@ const (
 )
 
 var runsExportHead = map[string][]string{
-	"zh": {"日期", "开始时间", "结束时间", "任务", "运行 ID", "状态", "触发方式", "服务商", "模型", "任务版本", "用时（秒）", "请求数", "输入 tokens", "输出 tokens", "缓存读 tokens", "缓存写 tokens", "金额", "币种", "错误", "提示词"},
-	"en": {"Date", "Started", "Finished", "Task", "Run ID", "Status", "Trigger", "Provider", "Model", "Task version", "Duration (s)", "Requests", "Input tokens", "Output tokens", "Cache read tokens", "Cache write tokens", "Amount", "Currency", "Error", "Prompt"},
+	"zh": {"日期", "开始时间", "结束时间", "任务", "运行 ID", "状态", "触发方式", "服务商", "模型", "任务版本", "用时（秒）", "请求数", "输入 tokens", "输出 tokens", "缓存读 tokens", "缓存写 tokens", "金额", "币种", "改动文件", "增加行", "删除行", "错误", "提示词"},
+	"en": {"Date", "Started", "Finished", "Task", "Run ID", "Status", "Trigger", "Provider", "Model", "Task version", "Duration (s)", "Requests", "Input tokens", "Output tokens", "Cache read tokens", "Cache write tokens", "Amount", "Currency", "Files changed", "Lines added", "Lines removed", "Error", "Prompt"},
 }
 
 var runsExportTrigger = map[string]map[string]string{
@@ -56,6 +56,8 @@ type exportRun struct {
 	Currency     string  `json:"currency"`
 	Error        string  `json:"error,omitempty"`
 	Prompt       string  `json:"prompt"`
+	// Changes: files and lines an edit run changed in its folder (absent when not recorded)
+	Changes *runChangeSum `json:"changes,omitempty"`
 }
 
 // handleRunsExport: GET /api/runs/export?format=csv|jsonl&lang=zh|en plus the runs list's own
@@ -130,7 +132,7 @@ func (s *Server) handleRunsExport(w http.ResponseWriter, r *http.Request) {
 				Provider: d.Provider, Model: d.Model, VersionNo: d.VersionNo, CreatedAt: d.CreatedAt, StartedAt: d.StartedAt,
 				FinishedAt: d.FinishedAt, DurationMS: d.DurationMS, Requests: d.Requests, InputTokens: d.InputTokens,
 				OutputTokens: d.OutputTokens, CacheRead: d.CacheRead, CacheWrite: d.CacheWrite, Amount: roundAmt(d.CostUSD),
-				Currency: cur, Error: d.Error, Prompt: d.Prompt})
+				Currency: cur, Error: d.Error, Prompt: d.Prompt, Changes: d.Changes})
 			continue
 		}
 		task := d.TaskName
@@ -160,9 +162,14 @@ func (s *Server) handleRunsExport(w http.ResponseWriter, r *http.Request) {
 			ver = "v" + strconv.Itoa(d.VersionNo)
 		}
 		i64 := func(n int64) string { return strconv.FormatInt(n, 10) }
+		// changes: empty cells when nothing was recorded, so "0" means "ran, changed nothing"
+		cf, ca, cd := "", "", ""
+		if c := d.Changes; c != nil {
+			cf, ca, cd = strconv.Itoa(c.Files), strconv.Itoa(c.Add), strconv.Itoa(c.Del)
+		}
 		_ = cw.Write([]string{local(d.CreatedAt, "2006-01-02"), local(start, "15:04:05"), fin, csvSafe(task), d.ID, status, csvSafe(trig),
 			csvSafe(d.Provider), csvSafe(d.Model), ver, dur, i64(d.Requests), i64(d.InputTokens), i64(d.OutputTokens),
-			i64(d.CacheRead), i64(d.CacheWrite), fmtAmount(d.CostUSD), cur, csvSafe(oneLine(d.Error)), csvSafe(d.Prompt)})
+			i64(d.CacheRead), i64(d.CacheWrite), fmtAmount(d.CostUSD), cur, cf, ca, cd, csvSafe(oneLine(d.Error)), csvSafe(d.Prompt)})
 	}
 	scanErr := rows.Err()
 	rows.Close()

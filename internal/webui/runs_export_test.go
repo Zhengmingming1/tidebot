@@ -56,7 +56,7 @@ line two',800,10,2,?,?,?),
 
 	// all runs, newest first, Chinese
 	recs := read("/api/runs/export?lang=zh-CN")
-	if len(recs) != 5 || recs[0][0] != "日期" || len(recs[0]) != 20 {
+	if len(recs) != 5 || recs[0][0] != "日期" || len(recs[0]) != 23 {
 		t.Fatalf("all: %d rows, head %v", len(recs), recs[0])
 	}
 	if recs[1][4] != "xr3" || recs[4][4] != "xr4" {
@@ -73,11 +73,11 @@ line two',800,10,2,?,?,?),
 	if want := now.Add(-3 * time.Minute).In(c.s.loc()).Format("15:04:05"); r1[1] != want || r1[2] == "" {
 		t.Fatalf("xr1 times %q %q want %q", r1[1], r1[2], want)
 	}
-	if r2[5] != "失败" || r2[6] != "手动" || r2[18] != "boom line two" {
+	if r2[5] != "失败" || r2[6] != "手动" || r2[21] != "boom line two" {
 		t.Fatalf("xr2 %v", r2)
 	}
-	if r3[3] != "快速运行" || r3[5] != "超时" || r3[2] != "" || r3[10] != "" || !strings.HasSuffix(r3[19], "…") || len(r3[19]) > exportPromptMax+len("…") {
-		t.Fatalf("xr3 len %d %v", len(r3[19]), r3[:12])
+	if r3[3] != "快速运行" || r3[5] != "超时" || r3[2] != "" || r3[10] != "" || !strings.HasSuffix(r3[22], "…") || len(r3[22]) > exportPromptMax+len("…") {
+		t.Fatalf("xr3 len %d %v", len(r3[22]), r3[:12])
 	}
 
 	// the list's filters: failed chip (failed + timeout), today, search, task, sort

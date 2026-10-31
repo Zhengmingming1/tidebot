@@ -1856,13 +1856,25 @@
     return '<small class="ell run-hit" data-tip="' + esc(T("runs.hit_tip", { f: T("runs.hit_" + m.field), n: num(m.count || 1) })) + '"><span class="hit-f">' + esc(T("runs.hit_" + m.field)) + "</span>" +
       m.parts.map(function (p, i) { return i % 2 ? "<mark>" + esc(p) + "</mark>" : esc(p); }).join("") + "</small>";
   }
+  // "▢ 3 +12 −3" beside an edit run's title: how much it changed in its folder, without opening
+  // it. A side with no lines is left out (+40 is a new file, −40 a deletion); a run that changed
+  // nothing shows no badge. Clicking it opens the run at its "Changed files" card. Idea:
+  // siteboon/claudecodeui src/modules/chat/tools/DiffStatsBadge.tsx (+N −N in green/red on a
+  // collapsed edit so its size reads without expanding it).
+  function runChgBadge(r) {
+    var c = r.changes;
+    if (!c || !(c.files > 0)) return "";
+    var tip = T("runs.chg_tip", { f: plural(c.files, "runs.chg_files_one", "runs.chg_files_many"), a: num(c.add || 0), d: num(c.del || 0) });
+    return '<a class="chg-badge" href="#/runs/' + enc(r.id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + ic("git", "sm") +
+      '<span class="n">' + esc(num(c.files)) + "</span>" + (c.add ? '<span class="add">+' + esc(num(c.add)) + "</span>" : "") + (c.del ? '<span class="del">−' + esc(num(c.del)) + "</span>" : "") + "</a>";
+  }
   function runsTable(runs, rerun, q) {
     var lq = (q || "").trim().toLowerCase();
     if (!runs.length) return emptyState("runs", T("runs.none"), T("runs.none_sub"));
     return '<table class="table"><thead><tr><th>' + esc(T("col.run")) + "</th><th>" + esc(T("col.provider")) + "</th><th>" + esc(T("col.status")) + "</th><th>" + esc(T("col.started")) + '</th><th class="c-opt">' + esc(T("col.duration")) + '</th><th class="right">' + esc(T("col.cost")) + '</th><th class="c-act"></th></tr></thead><tbody>' +
       runs.map(function (r) {
         var running = r.status === "running", active = running || r.status === "queued";
-        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon(r)) + '">' + ic(runIcon(r), "sm") + "</span><div>" + '<a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + hlText(runTitle(r), lq) + "</strong></a>" + (runHitHtml(r.match) || '<small class="ell">' + esc(runCtxText(r)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small>") + "</div></div></td>" +
+        return '<tr class="click" data-href="#/runs/' + enc(r.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon(r)) + '">' + ic(runIcon(r), "sm") + "</span><div>" + '<div class="run-line"><a class="row-link" href="#/runs/' + enc(r.id) + '"><strong class="ell">' + hlText(runTitle(r), lq) + "</strong></a>" + runChgBadge(r) + "</div>" + (runHitHtml(r.match) || '<small class="ell">' + esc(runCtxText(r)) + (r.version_no ? " · v" + esc(r.version_no) : "") + "</small>") + "</div></div></td>" +
           '<td class="run-prov"><span class="ell">' + esc(r.provider || "—") + "</span>" + (r.model ? '<small class="ell">' + esc(r.model) + "</small>" : "") + "</td>" +
           "<td>" + statusPill(r.status, r.queue_pos, r.error) + '</td><td class="nowrap">' + esc(when(r.started_at || r.created_at)) + '</td><td class="nowrap c-opt">' + esc(running ? dur(Date.now() - new Date(r.started_at).getTime()) : dur(r.duration_ms)) +
           '</td><td class="right"><strong>' + esc(usd(r.cost_usd)) + '</strong></td><td class="right nowrap">' + (rerun && active ? '<button class="icon-btn sm row-act" data-stop="' + esc(r.id) + '" data-st="' + esc(r.status) + '" data-tip="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '" aria-label="' + esc(T(r.status === "queued" ? "run.dequeue" : "run.stop")) + '">' + ic("stop", "sm") + "</button>" : "") + (rerun && /failed|timeout|canceled/.test(r.status) ? '<button class="icon-btn sm row-act" data-rerun="' + esc(r.id) + '" data-tip="' + esc(T("runs.rerun")) + '" aria-label="' + esc(T("runs.rerun")) + '">' + ic("refresh", "sm") + "</button>" : "") + "</td></tr>";
@@ -3323,6 +3335,7 @@
   // "ID" chip whose tooltip shows the id; clicking copies it.
   function idChip(label, id) { return '<button type="button" class="id-chip" data-copyid="' + esc(id) + '" data-tip="' + esc(T("id.tip", { l: label, id: id })) + '" aria-label="' + esc(T("id.copy", { l: label })) + '">ID</button>'; }
   document.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-copyid]"); if (b) copyText(b.getAttribute("data-copyid")).catch(fail); });
+  document.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-chg-jump]"); if (b) state.chgJump = decodeURIComponent((b.getAttribute("href") || "").replace(/^#\/runs\//, "")); });
   function tip(text) { return text ? '<span class="info-tip" tabindex="0" role="img" aria-label="' + esc(text) + '" data-tip="' + esc(text) + '">' + ic("info", "sm") + "</span>" : ""; }
   function fieldHtml(label, inner, hint, extra) { return '<label class="field"><span>' + esc(label) + tip(hint) + (extra || "") + "</span>" + inner + "</label>"; }
   function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (sel ? " selected" : "") + ">" + esc(label) + "</option>"; }
@@ -5494,6 +5507,9 @@
       });
       if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
       if ($("#rd-chg")) bindRunChanges($("#rd-chg"), r);
+      // opened from a list row's change badge: bring the card into view
+      if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });
+      state.chgJump = null;
       bindRunPrompt(r);
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace, mode: r.run_mode }); });
       if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace }); });
