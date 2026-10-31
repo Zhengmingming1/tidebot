@@ -4619,3 +4619,46 @@ nothing is touched on a conflict.
 1. Undo a single file from its row (filter the patch to that file's section).
 2. Scheduled tasks with a git workspace: record changes (opt-in) so they get the same undo.
 3. A "changed since" hint before the confirm: dry-run `git apply --check` when the card opens.
+
+## 2026-11-01 (00:00): every palette passes a contrast check — tags, danger button, muted text readable in all six
+
+Category: UI polish / accessibility (recent rounds: features, UX, correctness, resource usage).
+Idea 3 of the 2026-10-30 (12:30) palette entry: nothing checked the six palettes (three themes ×
+light / dark), and a quick count found the danger button's white label at 2.8–3.1:1 in every dark
+palette (the in-app confirm for delete / undo), tag text at 3.5–4.2:1 on its tint (light themes),
+Tide light muted text at 4.1:1 on sunk areas, Midnight light amber links at 3.9:1.
+
+**Done**
+
+- `internal/webui/contrast_test.go` (`TestThemeContrast`): parses the generated theme blocks in
+  `styles.css` and checks 209 real foreground / background pairs per palette with the WCAG 2 formula —
+  4.5:1 for text (primary / secondary / muted text on every surface, links, status text on its tint,
+  button labels, tooltips, failed toast, sidebar, search marks), 3:1 for coloured icons on every
+  surface incl. the sidebar's active item. Translucent tiles are composited over the surface first.
+  Failures name the palette, both tokens, their hex values and the ratio.
+- `TestContrastInksUsed`: text on a hue tile must use `--hue-*-fg` (icon tiles, selectors naming
+  `.ico`, may keep the plain hue), and no white text on a theme fill.
+- `gen-themes.py`: new derived tokens — `--hue-*-fg` (the hue moved toward black / white in 1% steps
+  until it reads 4.5:1 on its tile in that palette) and `--on-fill` (white in light palettes, the page
+  background in dark ones). Icons keep the vivid hues (they only need 3:1), so colourful icons stay.
+- Fixed tokens (small shifts, same hues): Graphite light `info`; Tide light `text-3`, `accent`, `ok`,
+  `warn`, `danger`; Midnight light `accent`, `ok`, `warn`, `danger`, `info`; Midnight dark `text-3`.
+- CSS: tags, the log's tool chip / tool lines and the "AI generated" pill use `--hue-*-fg`; the danger
+  button, finished AI step and avatar use `--on-fill`.
+- Shots: `/workspace/tidebot-shots/2026-11-01-0000-contrast-tide-tags-1024x655.png`,
+  `…-midnight-dark-confirm-1024x655.png` (dark danger button now dark text on red).
+
+**Learned** — primer/primitives `scripts/colorContrast.config.ts` lists required pairs per role
+(`fgColor-muted` on `bgColor-default` / `-muted` / `-inset`, button fg on its bg…) at 4.5 for text and
+3 for borders, and `scripts/colorContrast.ts` flattens alpha colours over their background before
+measuring (`getOpaqueColor`); CI (`.github/workflows/a11y-contrast.yml`) posts the failing table.
+tidebot keeps the same idea as a plain Go test, so it runs on all three OSes with no extra tooling.
+The shared light hues were fine as icons but too light as 12px tag text on a 14% tint — splitting
+"icon hue" and "text ink" fixes legibility without dulling the icons.
+
+**Ideas for later**
+
+1. High-contrast variant per theme (7:1 text, like Primer's high-contrast rules) as a 4th mode.
+2. Check `border-strong` (form fields, 3:1 per 1.4.11) — inputs currently rely on it.
+3. Brand-coloured provider avatars (`.pv-av`, `.ap-logo`) pick white text on any brand colour;
+   choose black / white per colour by contrast.

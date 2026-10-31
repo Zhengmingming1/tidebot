@@ -10,8 +10,9 @@ script. Only this block between the @themes markers is rewritten.
 """
 import os, re
 
-# Colour hues for icons and tags: (ink, tile background) per mode. Inks are ≥ 4.5:1 on the
-# matching surface; tiles are the hue at low alpha so they sit on any surface.
+# Colour hues for icons and tags per mode. The hue itself is for icons (≥ 3:1 on every surface);
+# tiles are the hue at low alpha so they sit on any surface; text on a tile uses --hue-*-fg,
+# derived below so it reads at 4.5:1 in every theme.
 HUES = {
     "light": {
         "blue": "#2f6fed", "teal": "#0d8f80", "violet": "#7357d6", "pink": "#c4316f", "orange": "#c86a12",
@@ -36,7 +37,7 @@ T = {
     accent="#5b5bd6", accent_600="#4a4ac2", accent_50="#f1f1fd", accent_100="#e1e1fa", accent_fg="#ffffff",
     primary_bg="#18181b", primary_hover="#3f3f46", primary_fg="#ffffff",
     ok="#1a7f4b", ok_50="#e9f6ef", ok_100="#bfe5cf", warn="#a35a00", warn_50="#fdf4e5", warn_100="#f2d7a8",
-    danger="#cf2e3f", danger_50="#fdeef0", danger_100="#f6c3c9", info="#3b6fd8", info_50="#edf2fd",
+    danger="#cf2e3f", danger_50="#fdeef0", danger_100="#f6c3c9", info="#386acd", info_50="#edf2fd",
     beat_ok="#3fa76c",
     side_bg="#f7f7f8", side_fg="#52525b", side_hover="#ededef", side_active_bg="#e6e6e9", side_active_fg="#18181b", side_line="#ececef",
     shadow="0 0 0 0 transparent", shadow_hover="0 2px 8px rgba(0, 0, 0, .06)",
@@ -64,11 +65,11 @@ T = {
   "light": dict(
     bg="#f4f7f8", bg_sunk="#e9f0f2", surface="#ffffff", surface_2="#f8fbfb", row_hover="#f3f8f9",
     border="#e1e9ec", border_strong="#cbd8dd",
-    text="#0f2530", text_2="#44606d", text_3="#5e7783",
-    accent="#0e7c86", accent_600="#0a6870", accent_50="#e5f3f3", accent_100="#c6e6e7", accent_fg="#ffffff",
+    text="#0f2530", text_2="#44606d", text_3="#58707b",
+    accent="#0e7882", accent_600="#0a6870", accent_50="#e5f3f3", accent_100="#c6e6e7", accent_fg="#ffffff",
     primary_bg="#0e7c86", primary_hover="#0a6870", primary_fg="#ffffff",
-    ok="#16804a", ok_50="#e6f5ec", ok_100="#bde3cb", warn="#a5600a", warn_50="#fdf4e4", warn_100="#f0d6a6",
-    danger="#c93445", danger_50="#fcedef", danger_100="#f3c2c8", info="#1f6fb8", info_50="#e8f2fb",
+    ok="#157c48", ok_50="#e6f5ec", ok_100="#bde3cb", warn="#9e5c0a", warn_50="#fdf4e4", warn_100="#f0d6a6",
+    danger="#c73344", danger_50="#fcedef", danger_100="#f3c2c8", info="#1f6fb8", info_50="#e8f2fb",
     beat_ok="#2fa36b",
     side_bg="#e8f0f2", side_fg="#3f5866", side_hover="#dde8eb", side_active_bg="#ffffff", side_active_fg="#0b3a4a", side_line="#dbe5e8",
     shadow="0 1px 2px rgba(15, 60, 80, .05)", shadow_hover="0 2px 4px rgba(15, 60, 80, .06), 0 8px 20px rgba(15, 60, 80, .08)",
@@ -97,10 +98,10 @@ T = {
     bg="#f7f7f8", bg_sunk="#eeeef1", surface="#ffffff", surface_2="#fbfbfc", row_hover="#f6f6f8",
     border="#e4e4e8", border_strong="#d2d2d8",
     text="#111114", text_2="#4f4f58", text_3="#6b6b75",
-    accent="#a76800", accent_600="#8c5700", accent_50="#fbf2df", accent_100="#f3dfb4", accent_fg="#ffffff",
+    accent="#985f00", accent_600="#8c5700", accent_50="#fbf2df", accent_100="#f3dfb4", accent_fg="#ffffff",
     primary_bg="#111114", primary_hover="#33333a", primary_fg="#ffffff",
-    ok="#16804a", ok_50="#e7f5ed", ok_100="#bfe4cd", warn="#c2410c", warn_50="#fdf0e8", warn_100="#f5cdb6",
-    danger="#cf2e3f", danger_50="#fdeef0", danger_100="#f6c3c9", info="#3b6fd8", info_50="#edf2fd",
+    ok="#157c48", ok_50="#e7f5ed", ok_100="#bfe4cd", warn="#c0400c", warn_50="#fdf0e8", warn_100="#f5cdb6",
+    danger="#cb2d3e", danger_50="#fdeef0", danger_100="#f6c3c9", info="#3768c9", info_50="#edf2fd",
     beat_ok="#3fa76c",
     side_bg="#ededf0", side_fg="#4f4f58", side_hover="#e3e3e7", side_active_bg="#dcdce1", side_active_fg="#111114", side_line="#e2e2e6",
     shadow="0 1px 2px rgba(0, 0, 0, .04)", shadow_hover="0 2px 8px rgba(0, 0, 0, .07)",
@@ -111,7 +112,7 @@ T = {
   "dark": dict(
     bg="#0d0d10", bg_sunk="#1a1a1e", surface="#141417", surface_2="#17171b", row_hover="#18181c",
     border="#232328", border_strong="#303037",
-    text="#ececef", text_2="#a0a0a9", text_3="#85858f",
+    text="#ececef", text_2="#a0a0a9", text_3="#898992",
     accent="#f2b33d", accent_600="#f6c464", accent_50="#2a2214", accent_100="#41321a", accent_fg="#1a1204",
     primary_bg="#f4f4f5", primary_hover="#ffffff", primary_fg="#0b0b0d",
     ok="#4ccf8a", ok_50="#11281c", ok_100="#1d4a33", warn="#ff8f4d", warn_50="#2e1a10", warn_100="#55301b",
@@ -126,6 +127,45 @@ T = {
  },
 }
 
+# WCAG 2 contrast. Text needs 4.5:1, icons and other non-text marks 3:1. The pairs the UI
+# actually uses are checked by TestThemeContrast (internal/webui/contrast_test.go); run
+# `go test ./internal/webui -run Contrast` after editing a palette.
+def _rgb(hexc):
+    h = hexc.lstrip("#")
+    return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+
+def _hex(c):
+    return "#" + "".join("%02x" % max(0, min(255, int(round(x)))) for x in c)
+
+def _lum(hexc):
+    c = [x / 255 for x in _rgb(hexc)]
+    c = [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+def contrast(a, b):
+    la, lb = _lum(a), _lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+def _mix(a, b, p):
+    x, y = _rgb(a), _rgb(b)
+    return _hex([x[i] * (1 - p) + y[i] * p for i in range(3)])
+
+def tile_alpha(mode):
+    return ".14" if mode == "light" else ".18"
+
+def hue_fg(v, c, mode):
+    """Text ink for a hue on its own tile (tags, chips): the hue, moved toward black (light) or
+    white (dark) in 1% steps until it reads at 4.5:1 on the tile over every surface it sits on.
+    The plain hue stays for icons, which only need 3:1."""
+    a = float(tile_alpha(mode))
+    tiles = [_mix(c[s], v, a) for s in ("bg", "bg_sunk", "surface", "surface_2")]
+    to = "#000000" if mode == "light" else "#ffffff"
+    for step in range(101):
+        f = _mix(v, to, step / 100)
+        if min(contrast(f, t) for t in tiles) >= 4.5:
+            return f
+    return to
+
 def block(theme, mode):
     c = dict(T[theme][mode])
     out = ["  color-scheme: %s;" % mode]
@@ -134,8 +174,11 @@ def block(theme, mode):
     out.append("  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px %s;" % rgba(c["accent"], ".55"))
     out.append("  --ok-line: var(--ok-100); --warn-line: var(--warn-100); --danger-line: var(--danger-100);")
     out.append("  --surface-tint: var(--accent-50); --muted: var(--text-3); --bad: var(--danger); --card: var(--surface);")
+    # Text on solid status / hue fills (danger button, finished step, avatar): white in light
+    # palettes, the page background in dark ones (white on a light red is under 3:1).
+    out.append("  --on-fill: %s;" % ("#ffffff" if mode == "light" else c["bg"]))
     for h, v in HUES[mode].items():
-        out.append("  --hue-%s: %s; --hue-%s-bg: %s;" % (h, v, h, rgba(v, ".14" if mode == "light" else ".18")))
+        out.append("  --hue-%s: %s; --hue-%s-bg: %s; --hue-%s-fg: %s;" % (h, v, h, rgba(v, tile_alpha(mode)), h, hue_fg(v, c, mode)))
     return "\n".join(out)
 
 def css():
