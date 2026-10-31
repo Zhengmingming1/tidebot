@@ -3045,3 +3045,8 @@ input.tgl:disabled { opacity: .5; cursor: default; }
 .chg-badge:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
 .chg-badge:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 #rd-chg { scroll-margin-top: calc(var(--topbar-h) + 16px); } /* jump from a list badge lands below the sticky top bar */
+/* "Undo changes": once taken back, the run's file list and its list badge read as history */
+.rd-chg.undone .rd-chg-list { opacity: .6; }
+.rd-chg.undone .rd-chg-list:hover, .rd-chg.undone .rd-chg-list:focus-within { opacity: 1; }
+.chg-badge.undone { border-style: dashed; color: var(--text-3); }
+.chg-badge.undone .n, .chg-badge.undone .add, .chg-badge.undone .del { text-decoration: line-through; color: var(--text-3); }

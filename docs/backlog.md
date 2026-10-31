@@ -4567,3 +4567,55 @@ to a whole run, and keeps the per-file list on the run page. Reading the three n
 1. Runs list filter chip "Changed files" (`file_changes` count > 0) for edit runs.
 2. Same pill in the command palette's run results and the bell's "run finished" notice.
 3. "Undo this run's changes" from the card (idea 1 of the 12:00 entry), with the in-app confirm.
+
+## 2026-10-31 (20:00): edit runs can be undone — the run's own changes back out, and put back
+
+Category: features / correctness (recent rounds: UX, features, correctness, resource usage).
+Idea 1 of the 12:00 entry (and 3 of 16:00): the run page showed what a "Can edit" run changed,
+but taking it back meant a terminal and `git checkout` / `git apply -R` by hand — and
+`git checkout` would also throw away edits you made before or after the run.
+
+**Done**
+
+- `gitsnap.Apply(dir, patch, reverse)`: `git apply [-R] -` with the patch on stdin, hooks /
+  fsmonitor / filter programs off like the snapshots, `GIT_*` dropped. git apply checks every
+  hunk before writing anything, so a file changed since the run refuses the whole undo with
+  nothing touched (`*ErrConflict` carries git's first lines). Run from the work-tree top with
+  `--directory=<prefix>`: started in a subfolder, git apply reads paths from the top and
+  **quietly skips** them (caught by a test). Paths escaping the folder are refused (git default).
+  Only the work tree is written — no index, ref, object or stash.
+- Patches now carry binary data (`diff-tree --binary`), so runs that change images can be undone
+  too; older runs' "Binary files … differ" patches are refused with their own reason.
+- App: `undoRunChanges(run, redo)` — edit runs only, finished only, patch not cut, re-checks the
+  folder with `guard.CheckRunDir` (sensitive folders refused) and holds it like an edit run (an
+  edit run going there = busy, and no edit run can start mid-undo). Migration 024
+  `runs.changes_undone_at` ('' after put back).
+- API `POST /api/runs/{id}/undo-changes {"redo": bool}` (CSRF, 1 KB body); refusals are 409
+  `{code, detail}` (none / running / cut / binary / state / dir / busy / conflict). Run detail
+  returns `changes_undone_at`; list rows' `changes.undone`.
+- Run page: "Undo changes" button in the Changed files card (disabled with the reason in the
+  tooltip while running or when the patch was cut), in-app danger confirm naming the folder; then
+  an "Undone" pill (time in the tooltip), the file list dimmed, the button becomes "Put back", and
+  the toast offers "Put back" for 10 s. A conflict names the files git refused. Runs list badge is
+  dashed / struck through with "Changes undone" in its tooltip.
+- Tests: gitsnap (byte-for-byte undo + redo incl. binary, CJK path, deleted file, emptied folder
+  removed, earlier uncommitted edit kept, `.git` unchanged; conflict touches nothing; subfolder;
+  escaping path), app (undo, double undo, redo, hand edit → conflict, busy folder, unknown run,
+  none/running/cut/binary refusals), webui (API codes, 404/400/503, no-CSRF 403, detail and list
+  state; UI under node: buttons, disabled reasons, undone state, conflict file names, escaping).
+- Shots: `/workspace/tidebot-shots/2026-10-31-2000-undo-changes-1024x655.png` (+ `-confirm`).
+
+**Learned** — cline/cline `sdk/packages/core/src/session/checkpoint-restore.ts`
+(`beginWorktreeRestoreTransaction`): its restore is `reset --hard` + `clean -fd`, which wipes
+everything since the checkpoint, so it first stashes the whole tree (`stash push
+--include-untracked`, moved to a private ref) to be able to roll back. Reversing only the run's
+hunks needs no safety copy — git apply is all-or-nothing — and leaves edits made around the run
+alone. Their CLI's `apps/cli/src/tui/components/dialogs/checkpoint-confirm.tsx` spells out
+"rewind conversation and reset files" before acting; tidebot's confirm names the folder and says
+nothing is touched on a conflict.
+
+**Ideas for later**
+
+1. Undo a single file from its row (filter the patch to that file's section).
+2. Scheduled tasks with a git workspace: record changes (opt-in) so they get the same undo.
+3. A "changed since" hint before the confirm: dry-run `git apply --check` when the card opens.

@@ -137,7 +137,8 @@ func (s *Snap) Finish(ctx context.Context) (*Changes, error) {
 	parseRawNumstat(out, c)
 	var pb limitBuf
 	pb.max = MaxPatch
-	if _, err := s.git(ctx, &pb, append(diff, "-p", "-U3", s.tree, end)...); err != nil && !pb.cut {
+	// --binary: binary files too, so the patch can be applied (or undone) as a whole
+	if _, err := s.git(ctx, &pb, append(diff, "-p", "--binary", "-U3", s.tree, end)...); err != nil && !pb.cut {
 		return nil, err
 	}
 	c.Patch, c.PatchCut = pb.String(), pb.cut
@@ -147,6 +148,78 @@ func (s *Snap) Finish(ctx context.Context) (*Changes, error) {
 		}
 	}
 	return c, nil
+}
+
+// ErrConflict: the patch no longer applies — a file it touches was changed since.
+// Message is git's own explanation (first lines), for the UI's tooltip.
+type ErrConflict struct{ Message string }
+
+func (e *ErrConflict) Error() string { return "patch does not apply: " + e.Message }
+
+// Apply applies a patch Finish produced to dir's files (reverse: takes it back).
+// git apply checks every hunk first and writes nothing unless all of them fit, so a
+// file edited since the run leaves the folder untouched (*ErrConflict). Only the
+// work tree is written: no index, ref or object, hooks and filter programs off,
+// paths outside dir refused (git's default). dir need not be a repo root: the
+// patch's paths are relative to it (diff-tree --relative).
+func Apply(ctx context.Context, dir, patch string, reverse bool) error {
+	bin, err := exec.LookPath("git")
+	if err != nil {
+		return ErrNotRepo
+	}
+	s := &Snap{bin: bin, dir: dir, env: baseEnv()}
+	s.cfg = []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.quotePath=false",
+		"-c", "core.safecrlf=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false"}
+	// the snapshots read the bytes on disk with filter programs off: do the same here
+	if out, err := s.git(ctx, nil, "config", "--name-only", "--get-regexp", `^filter\.`); err == nil {
+		seen := map[string]bool{}
+		for _, k := range strings.Fields(string(out)) {
+			i := strings.LastIndexByte(k, '.')
+			if i <= len("filter.") || seen[k[:i]] {
+				continue
+			}
+			seen[k[:i]] = true
+			s.cfg = append(s.cfg, "-c", k[:i]+".clean=", "-c", k[:i]+".smudge=", "-c", k[:i]+".process=", "-c", k[:i]+".required=false")
+		}
+	}
+	args := []string{"apply", "--whitespace=nowarn"}
+	// Run from the top of the work tree with the run folder as --directory: started in
+	// a subfolder, git apply would read the paths from the top and quietly skip them.
+	top := dir
+	if out, err := s.git(ctx, nil, "rev-parse", "--show-toplevel", "--show-prefix"); err == nil {
+		ln := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
+		if len(ln) == 2 && strings.TrimSpace(ln[0]) != "" {
+			top = filepath.FromSlash(strings.TrimSpace(ln[0]))
+			if pre := strings.Trim(strings.TrimSpace(ln[1]), "/"); pre != "" {
+				args = append(args, "--directory="+pre)
+			}
+		}
+	}
+	if reverse {
+		args = append(args, "-R")
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, s.bin, append(append([]string{}, s.cfg...), append(args, "-")...)...)
+	cmd.Dir, cmd.Env, cmd.Stdin = top, s.env, strings.NewReader(patch)
+	errb := limitBuf{max: 4 << 10, drop: true}
+	cmd.Stdout, cmd.Stderr = io.Discard, &errb
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if ctx.Err() == nil && errors.As(err, &ee) {
+			return &ErrConflict{Message: firstLines(errb.String(), 4)}
+		}
+		return fmt.Errorf("git apply: %w", err)
+	}
+	return nil
+}
+
+func firstLines(s string, n int) string {
+	ln := strings.Split(strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n")), "\n")
+	if len(ln) > n {
+		ln = ln[:n]
+	}
+	return strings.Join(ln, "\n")
 }
 
 // Close removes the scratch folder.

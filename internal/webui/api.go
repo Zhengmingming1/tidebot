@@ -236,13 +236,16 @@ type runChangeSum struct {
 	Files int `json:"files"`
 	Add   int `json:"add"`
 	Del   int `json:"del"`
+	// Undone: the changes were taken back out of the folder ("Undo changes").
+	Undone bool `json:"undone,omitempty"`
 }
 
 // runChangeCols reads runChangeSum from runs.file_changes in SQL, so lists never load the
 // file list: -1 when there is none (or it isn't valid JSON).
 const runChangeCols = `CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.count'),0) ELSE -1 END,
  CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.add'),0) ELSE 0 END,
- CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.del'),0) ELSE 0 END`
+ CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.del'),0) ELSE 0 END,
+ r.changes_undone_at<>''`
 
 func (s *Server) runSelect() string {
 	return `SELECT r.id, COALESCE(r.task_id,''), COALESCE(t.name,''), r.status, r.trigger_kind,
@@ -297,13 +300,14 @@ func (s *Server) queryRunsOpt(ctx context.Context, promptMax int, where string, 
 func scanRun(rows *sql.Rows) (runDTO, error) {
 	var d runDTO
 	var files, add, del int
+	var undone bool
 	err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
 		&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
 		&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
 		&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests,
-		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode, &files, &add, &del)
+		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode, &files, &add, &del, &undone)
 	if err == nil && files >= 0 {
-		d.Changes = &runChangeSum{Files: files, Add: add, Del: del}
+		d.Changes = &runChangeSum{Files: files, Add: add, Del: del, Undone: undone}
 	}
 	return d, err
 }
@@ -1266,9 +1270,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		// result: the agent's final answer (Markdown, capped) — only on the detail, never in lists
 		// answer_same: the earlier run of the task that gave the same answer (whitespace ignored)
 		// file_changes: files an edit run changed in its folder (git work trees only)
-		var detail, result, sameID, changes string
+		// changes_undone_at: when "Undo changes" took them back out of the folder ('' = in place)
+		var detail, result, sameID, changes, undoneAt string
 		var cut int
-		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes)
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes, changes_undone_at FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes, &undoneAt)
 		out := struct {
 			runDTO
 			CostDetail      json.RawMessage `json:"cost_detail"`
@@ -1278,7 +1283,8 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			AnswerSame      *answerSameDTO  `json:"answer_same,omitempty"`
 			AnswerPrev      *answerSameDTO  `json:"answer_prev,omitempty"`
 			FileChanges     json.RawMessage `json:"file_changes,omitempty"`
-		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil, nil}
+			ChangesUndoneAt string          `json:"changes_undone_at,omitempty"`
+		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil, nil, undoneAt}
 		if changes != "" && json.Valid([]byte(changes)) {
 			out.FileChanges = json.RawMessage(changes)
 		}
@@ -1306,6 +1312,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[1] == "stop" && r.Method == http.MethodPost {
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.stopRun(w, r, id) })).ServeHTTP(w, r)
+		return
+	}
+	if parts[1] == "undo-changes" && r.Method == http.MethodPost {
+		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.undoRunChanges(w, r, id) })).ServeHTTP(w, r)
 		return
 	}
 	if parts[1] == "changes" && r.Method == http.MethodGet {

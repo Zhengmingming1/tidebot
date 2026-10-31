@@ -111,7 +111,7 @@ func TestRunChangeBadgeUI(t *testing.T) {
 		`if (!c || !(c.files > 0)) return "";`,
 		`(c.add ? '<span class="add">+' + esc(num(c.add)) + "</span>" : "")`,
 		`(c.del ? '<span class="del">−' + esc(num(c.del)) + "</span>" : "")`,
-		`'<a class="chg-badge" href="#/runs/' + enc(r.id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">'`,
+		`'<a class="chg-badge' + (c.undone ? " undone" : "") + '" href="#/runs/' + enc(r.id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">'`,
 		`"</strong></a>" + runChgBadge(r) + "</div>"`,
 		`if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });`,
 		`e.target.closest("[data-chg-jump]")`,

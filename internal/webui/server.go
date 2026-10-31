@@ -62,6 +62,10 @@ type Deps struct {
 	// StartRun starts a run from the Run dialog: a prompt with an optional skill and an
 	// optional working folder (read-only unless Mode is "edit"). Optional.
 	StartRun func(req RunRequest) (string, error)
+	// UndoRunChanges takes an edit run's changes back out of its folder (redo: puts
+	// them back) and returns the new changes_undone_at ('' after redo). Refusals are
+	// *UndoError. Optional.
+	UndoRunChanges func(ctx context.Context, runID string, redo bool) (string, error)
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
 	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
 	Providers     ProviderAdmin

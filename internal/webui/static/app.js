@@ -143,6 +143,8 @@
     receipt: '<path d="M12 17V7"/><path d="M16 8h-6a2 2 0 0 0 0 4h4a2 2 0 0 1 0 4H8"/><path d="M4 3a1 1 0 0 1 1-1 1.3 1.3 0 0 1 .7.2l.933.6a1.3 1.3 0 0 0 1.4 0l.934-.6a1.3 1.3 0 0 1 1.4 0l.933.6a1.3 1.3 0 0 0 1.4 0l.933-.6a1.3 1.3 0 0 1 1.4 0l.934.6a1.3 1.3 0 0 0 1.4 0l.933-.6A1.3 1.3 0 0 1 19 2a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1 1.3 1.3 0 0 1-.7-.2l-.933-.6a1.3 1.3 0 0 0-1.4 0l-.934.6a1.3 1.3 0 0 1-1.4 0l-.933-.6a1.3 1.3 0 0 0-1.4 0l-.933.6a1.3 1.3 0 0 1-1.4 0l-.934-.6a1.3 1.3 0 0 0-1.4 0l-.933.6a1.3 1.3 0 0 1-.7.2 1 1 0 0 1-1-1z"/>',
     pulse: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
     arrow: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+    undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+    redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
     chev: '<path d="m9 18 6-6-6-6"/>',
     info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
     folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
@@ -1865,7 +1867,8 @@
     var c = r.changes;
     if (!c || !(c.files > 0)) return "";
     var tip = T("runs.chg_tip", { f: plural(c.files, "runs.chg_files_one", "runs.chg_files_many"), a: num(c.add || 0), d: num(c.del || 0) });
-    return '<a class="chg-badge" href="#/runs/' + enc(r.id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + ic("git", "sm") +
+    if (c.undone) tip = T("runs.chg_undone_tip") + " · " + tip;
+    return '<a class="chg-badge' + (c.undone ? " undone" : "") + '" href="#/runs/' + enc(r.id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + ic("git", "sm") +
       '<span class="n">' + esc(num(c.files)) + "</span>" + (c.add ? '<span class="add">+' + esc(num(c.add)) + "</span>" : "") + (c.del ? '<span class="del">−' + esc(num(c.del)) + "</span>" : "") + "</a>";
   }
   function runsTable(runs, rerun, q) {
@@ -5643,12 +5646,15 @@
     var c = r.file_changes;
     if (!c || r.run_mode !== "edit") return "";
     var files = c.files || [], st = { A: ["added", "ok"], D: ["removed", "bad"], M: ["modified", "info"], T: ["modified", "info"] };
+    var undone = !!r.changes_undone_at;
     var head = '<div class="card-head"><span class="ico">' + ic("git") + '</span><h3 data-tip="' + esc(T("rd.chg_tip")) + '">' + esc(T("rd.chg")) + "</h3>" +
-      (c.count ? '<span class="rd-chg-sum"><span class="pill plain sm">' + esc(T("diff.files_n", { n: num(c.count) })) + '</span><span class="add">+' + esc(num(c.add)) + '</span><span class="del">−' + esc(num(c.del)) + "</span></span>" +
-        '<span class="rd-acts"><button type="button" class="icon-btn sm" data-chg-copy aria-label="' + esc(T("rd.chg_copy")) + '" data-tip="' + esc(T("rd.chg_copy")) + '">' + ic("copy", "sm") + "</button>" +
+      (c.count ? '<span class="rd-chg-sum"><span class="pill plain sm">' + esc(T("diff.files_n", { n: num(c.count) })) + '</span><span class="add">+' + esc(num(c.add)) + '</span><span class="del">−' + esc(num(c.del)) + "</span>" +
+        (undone ? '<span class="pill warn sm" data-tip="' + esc(T("rd.chg_undone_tip", { t: when(r.changes_undone_at) })) + '">' + esc(T("rd.chg_undone")) + "</span>" : "") + "</span>" +
+        '<span class="rd-acts">' + chgUndoBtn(r, c, undone) + '<button type="button" class="icon-btn sm" data-chg-copy aria-label="' + esc(T("rd.chg_copy")) + '" data-tip="' + esc(T("rd.chg_copy")) + '">' + ic("copy", "sm") + "</button>" +
         '<button type="button" class="icon-btn sm" data-chg-dl aria-label="' + esc(T("rd.chg_dl")) + '" data-tip="' + esc(T(c.patch_cut ? "rd.chg_dl_cut" : "rd.chg_dl")) + '">' + ic("download", "sm") + "</button></span>"
         : '<span class="pill plain sm">' + ic("check", "sm") + esc(T("rd.chg_none")) + "</span>") + "</div>";
     if (!c.count) return '<section class="card rd-chg" id="rd-chg">' + head + "</section>";
+    var undoneCls = undone ? " undone" : "";
     var rows = files.map(function (f, i) {
       var s2 = st[f.status] || st.M, n = f.binary ? '<span class="muted">' + esc(T("rd.chg_bin")) + "</span>" :
         (f.add ? '<span class="add">+' + esc(num(f.add)) + "</span>" : "") + (f.del ? '<span class="del">−' + esc(num(f.del)) + "</span>" : "");
@@ -5656,7 +5662,55 @@
         '<div class="rd-chg-body"></div></details>';
     }).join("");
     var more = c.count > files.length ? '<p class="muted rd-chg-more">' + esc(T("rd.chg_more", { n: num(c.count - files.length) })) + "</p>" : "";
-    return '<section class="card rd-chg" id="rd-chg">' + head + '<div class="rd-chg-list">' + rows + more + "</div></section>";
+    return '<section class="card rd-chg' + undoneCls + '" id="rd-chg">' + head + '<div class="rd-chg-list">' + rows + more + "</div></section>";
+  }
+  // "Undo changes": take this run's own hunks back out of the folder (git apply -R in the
+  // core; every file is checked first, nothing is written unless all still match), and
+  // "Put back" to apply them again. Not offered while the run goes or when the patch was
+  // cut at 512 KB. Idea: cline/cline sdk/packages/core/src/session/checkpoint-restore.ts
+  // (restore the workspace to before the agent's step) — tidebot reverses only the run's
+  // hunks instead of resetting the whole tree, so your other edits stay.
+  function chgUndoBtn(r, c, undone) {
+    var live = r.status === "running" || r.status === "queued" || r.status === "pending";
+    var off = live ? T("rd.undo_off_live") : c.patch_cut ? T("rd.undo_off_cut") : "";
+    var k = undone ? "rd.chg_redo" : "rd.chg_undo";
+    return '<button type="button" class="btn sm" data-chg-undo="' + (undone ? "redo" : "undo") + '"' + (off ? " disabled" : "") +
+      ' data-tip="' + esc(off || T(k + "_tip")) + '">' + ic(undone ? "redo" : "undo", "sm") + esc(T(k)) + "</button>";
+  }
+  // git's refusal ("error: a.txt: patch does not apply") → the file names, for the message
+  function undoConflictFiles(detail) {
+    var seen = {}, out = [];
+    String(detail || "").split("\n").forEach(function (l) {
+      var m = /^error: (?:patch failed: )?(.+?)(?::\d+)?(?:: (?:patch does not apply|already exists in working directory|does not exist in index|No such file or directory))?$/.exec(l.trim());
+      if (m && !seen[m[1]] && !/^(patch|while|could not)\b/.test(m[1])) { seen[m[1]] = 1; out.push(m[1]); }
+    });
+    return out.slice(0, 3);
+  }
+  function undoErrText(e) {
+    var d = e.data || {}, code = d.code;
+    if (code === "conflict") {
+      var f = undoConflictFiles(d.detail);
+      return f.length ? T("rd.undo_err_conflict_f", { f: f.join(", ") }) : T("rd.undo_err_conflict");
+    }
+    return code && state.dict["rd.undo_err_" + code] ? T("rd.undo_err_" + code) : e.message;
+  }
+  function runUndoChanges(r, redo, btn) {
+    var n = (r.file_changes || {}).count || 0;
+    var go = function () {
+      if (btn) btn.disabled = true;
+      return api("/api/runs/" + enc(r.id) + "/undo-changes", { method: "POST", body: { redo: redo } }).then(function () {
+        if (location.hash === "#/runs/" + r.id) refresh();
+        if (redo) toast(T("rd.chg_redone", { n: num(n) }));
+        else toast(T("rd.chg_undone_t", { n: num(n) }), false, function () { runUndoChanges(r, true); }, T("rd.chg_redo"));
+      }).catch(function (e) {
+        if (btn && document.contains(btn)) btn.disabled = false;
+        if (e.auth) return;
+        toast(undoErrText(e), true);
+      });
+    };
+    if (redo) return go();
+    return confirmDialog({ title: T("rd.undo_title", { n: num(n) }), body: T("rd.undo_body", { dir: r.workspace || "" }), ok: T("rd.chg_undo"), danger: true, icon: "undo" })
+      .then(function (y) { if (y) return go(); });
   }
   function chgDiffHtml(d) {
     if (!d) return '<p class="muted pad">' + esc(T("rd.chg_cut")) + "</p>";
@@ -5685,6 +5739,8 @@
         }).catch(function (e) { if (document.contains(body)) body.innerHTML = errorState(e.message); });
       });
     });
+    var ub = $("[data-chg-undo]", card);
+    if (ub) ub.addEventListener("click", function () { runUndoChanges(r, ub.getAttribute("data-chg-undo") === "redo", ub); });
     var cp = $("[data-chg-copy]", card), dl = $("[data-chg-dl]", card);
     if (cp) cp.addEventListener("click", function () { load().then(function (x) { return copyText(x.patch || ""); }).catch(fail); });
     if (dl) dl.addEventListener("click", function () {

@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,6 +44,53 @@ func (s *Server) handleRunChanges(w http.ResponseWriter, r *http.Request, id str
 		"patch":     patch,
 		"patch_cut": strings.Contains(fc, `"patch_cut":true`),
 	})
+}
+
+// UndoError is why "Undo changes" (or putting them back) was refused. Code is one of
+// none (nothing recorded) | running | cut (patch over the size cap) | binary (an
+// older run's patch without binary data) | state (already undone / not undone) |
+// dir (folder gone or not allowed) | busy (an edit run is going there) | conflict
+// (a file was changed since; Detail is git's reason).
+type UndoError struct{ Code, Detail string }
+
+func (e *UndoError) Error() string {
+	if e.Detail != "" {
+		return "cannot undo the run's changes (" + e.Code + "): " + e.Detail
+	}
+	return "cannot undo the run's changes (" + e.Code + ")"
+}
+
+// ErrRunNotFound: no run with that id.
+var ErrRunNotFound = errors.New("run not found")
+
+// undoRunChanges: POST /api/runs/{id}/undo-changes {"redo": bool} → {"changes_undone_at": t}.
+// Takes the run's patch back out of its folder (redo: applies it again); every file
+// is checked first and nothing is written unless all of them still match.
+func (s *Server) undoRunChanges(w http.ResponseWriter, r *http.Request, id string) {
+	if s.deps.UndoRunChanges == nil {
+		writeErr(w, 503, "not available")
+		return
+	}
+	var body struct {
+		Redo bool `json:"redo"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "bad request")
+		return
+	}
+	at, err := s.deps.UndoRunChanges(r.Context(), id, body.Redo)
+	var ue *UndoError
+	switch {
+	case errors.As(err, &ue):
+		writeJSON(w, 409, map[string]any{"error": ue.Error(), "code": ue.Code, "detail": ue.Detail})
+	case errors.Is(err, ErrRunNotFound):
+		writeErr(w, 404, "run not found")
+	case err != nil:
+		writeErr(w, 500, err.Error())
+	default:
+		writeJSON(w, 200, map[string]any{"ok": true, "changes_undone_at": at})
+	}
 }
 
 // ParsePatch splits `git diff-tree -p` output into one entry per file section
