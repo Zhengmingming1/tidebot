@@ -241,25 +241,42 @@ func (s *Scheduler) missedTimes(task db.Task, now time.Time) []time.Time {
 	if err != nil {
 		return []time.Time{now}
 	}
+	// Fire times skipped by hand are not owed (next_run_at itself is never one of them,
+	// but the ones after it may be).
+	skip := skipSet(ParseSkips(task.SkipRuns))
 	out := []time.Time{first}
 	t := first
-	for len(out) < 100 {
+	for i := 0; len(out) < 100 && i < 100+maxHops; i++ {
 		nx, err := s.NextRun(task.CronExpr, t)
 		if err != nil || nx.After(now) {
 			break
 		}
-		out = append(out, nx)
 		t = nx
+		if skip[nx.UTC().Format(time.RFC3339)] {
+			continue
+		}
+		out = append(out, nx)
 	}
 	return out
 }
 
 func (s *Scheduler) advanceSchedule(ctx context.Context, task db.Task, from time.Time) error {
-	next, err := s.NextRun(task.CronExpr, from)
+	skips := ParseSkips(task.SkipRuns)
+	next, err := s.NextSkipping(task.CronExpr, from, skips)
 	if err != nil {
 		return err
 	}
-	return s.store.UpdateTaskSchedule(ctx, task.ID, &from, &next)
+	if err := s.store.UpdateTaskSchedule(ctx, task.ID, &from, &next); err != nil {
+		return err
+	}
+	if len(skips) == 0 {
+		return nil
+	}
+	// Skipped times now behind us are done with.
+	if left := FormatSkips(FutureSkips(skips, from)); left != task.SkipRuns {
+		_, err = s.store.DB.ExecContext(ctx, `UPDATE tasks SET skip_runs = ? WHERE id = ?`, left, task.ID)
+	}
+	return err
 }
 
 // SetLocation sets the timezone cron expressions are read in (nil = time.Local).
@@ -295,7 +312,7 @@ func (s *Scheduler) NextRun(expr string, from time.Time) (time.Time, error) {
 // version in the wrong zone, or the timezone was changed). Past-due times are left alone,
 // so missed-run handling is unchanged. Returns how many tasks were corrected.
 func (s *Scheduler) Realign(ctx context.Context, now time.Time) (int, error) {
-	rows, err := s.store.DB.QueryContext(ctx, `SELECT id, cron_expr, next_run_at FROM tasks
+	rows, err := s.store.DB.QueryContext(ctx, `SELECT id, cron_expr, next_run_at, skip_runs FROM tasks
 WHERE cron_expr <> '' AND next_run_at IS NOT NULL AND next_run_at > ?`, now.UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
@@ -303,12 +320,13 @@ WHERE cron_expr <> '' AND next_run_at IS NOT NULL AND next_run_at > ?`, now.UTC(
 	type fix struct{ id, next string }
 	var fixes []fix
 	for rows.Next() {
-		var id, expr, stored string
-		if err := rows.Scan(&id, &expr, &stored); err != nil {
+		var id, expr, stored, skips string
+		if err := rows.Scan(&id, &expr, &stored, &skips); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		nx, err := s.NextRun(expr, now)
+		// A run skipped by hand stays skipped (unless the timezone moved it off its time).
+		nx, err := s.NextSkipping(expr, now, ParseSkips(skips))
 		if err != nil || nx.IsZero() {
 			continue // a broken expression is reported where it is edited
 		}

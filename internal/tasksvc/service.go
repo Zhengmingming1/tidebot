@@ -160,7 +160,7 @@ func (s *Service) List(ctx context.Context) ([]TaskView, error) {
 	rows, err := s.Store.DB.QueryContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
   overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
-  pause_kind, pause_detail, paused_at
+  pause_kind, pause_detail, paused_at, skip_runs
 FROM tasks ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ FROM tasks ORDER BY created_at DESC`)
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 			&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
 			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
-			&t.PauseKind, &t.PauseDetail, &t.PausedAt); err != nil {
+			&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -286,7 +286,9 @@ func (s *Service) skipSnoozed(ctx context.Context, tx *sql.Tx, taskID, cronExpr 
 	if t, err := time.Parse(time.RFC3339, next.String); err == nil && t.After(now) {
 		return nil
 	}
-	nx, err := s.Sched.NextRun(cronExpr, now)
+	var skips string
+	_ = tx.QueryRowContext(ctx, `SELECT skip_runs FROM tasks WHERE id=?`, taskID).Scan(&skips)
+	nx, err := s.Sched.NextSkipping(cronExpr, now, scheduler.ParseSkips(skips))
 	if err != nil {
 		return nil // a broken expression is reported where it is edited
 	}
@@ -459,18 +461,26 @@ ORDER BY created_at`, taskID)
 
 // SetSchedule changes the cron expression ("" = manual only) and recomputes next_run_at.
 func (s *Service) SetSchedule(ctx context.Context, taskID, cronExpr string) error {
+	// Saving the form with the same schedule keeps the runs skipped by hand; a new schedule
+	// has other fire times, so they are dropped.
+	var oldCron, oldSkips string
+	_ = s.Store.DB.QueryRowContext(ctx, `SELECT cron_expr, skip_runs FROM tasks WHERE id=?`, taskID).Scan(&oldCron, &oldSkips)
+	var skips []string
+	if cronExpr != "" && cronExpr == oldCron {
+		skips = scheduler.FutureSkips(scheduler.ParseSkips(oldSkips), time.Now())
+	}
 	var next sql.NullString
 	if cronExpr != "" {
 		if s.Sched == nil {
 			return fmt.Errorf("scheduler unavailable")
 		}
-		t, err := s.Sched.ComputeInitialNext(cronExpr)
+		t, err := s.Sched.NextSkipping(cronExpr, time.Now(), skips)
 		if err != nil {
 			return fmt.Errorf("cron: %w", err)
 		}
 		next = sql.NullString{String: t.UTC().Format(time.RFC3339), Valid: true}
 	}
-	res, err := s.Store.DB.ExecContext(ctx, `UPDATE tasks SET cron_expr=?, next_run_at=?, updated_at=? WHERE id=?`, cronExpr, next, nowUTC(), taskID)
+	res, err := s.Store.DB.ExecContext(ctx, `UPDATE tasks SET cron_expr=?, next_run_at=?, skip_runs=?, updated_at=? WHERE id=?`, cronExpr, next, scheduler.FormatSkips(skips), nowUTC(), taskID)
 	if err != nil {
 		return err
 	}

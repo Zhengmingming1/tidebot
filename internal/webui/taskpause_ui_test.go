@@ -23,7 +23,7 @@ func TestTaskPauseUI(t *testing.T) {
 		`function taskPauseMenu(anchor, t, done) {`,
 		`if (act === "pause") { e.stopPropagation(); taskPauseMenu(tg, t, reload); return; }`,
 		`rpc("task.pause_for", { id: t.id, "for": f })`,
-		`"<small>" + heldNext(t.next_run_at) + "</small>"`,
+		`"<small>" + heldNext(t.next_run_at) + ((t.skip_runs || []).length ?`,
 		`'<span class="muted">' + heldNext(ts[0]) + "</span>"`,
 		`spAdopt(st.sched, asked); paintCC(); paintHeldNext();`,
 		`paintHomePause();

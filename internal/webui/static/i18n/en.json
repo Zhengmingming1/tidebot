@@ -2119,5 +2119,22 @@
   "rn.ph_skill": "Tell “{name}” what to do this time…",
   "rn.run_skill_tip": "Run “{name}” once: pick a folder, write a prompt",
   "pal.run_skill": "Run skill: {name}",
-  "runs.chg_undone_tip": "Changes undone"
+  "runs.chg_undone_tip": "Changes undone",
+  "skip.menu": "Skip next run",
+  "skip.menu_sub": "{t} won't run, then as usual",
+  "skip.or_pause": "Or pause",
+  "skip.this": "Skip this run",
+  "skip.this_tip": "Skip this run, then as usual",
+  "skip.skipped": "Skipped",
+  "skip.put_back": "Run it after all",
+  "skip.put_back_title": "Skipped runs",
+  "skip.put_back_sub": "Pick one to run after all",
+  "skip.chip": "{n} skipped",
+  "skip.chip_tip": "Skipped: {l}",
+  "skip.t_done": "Skipped the run at {t}",
+  "skip.t_done_next": "Skipped the run at {t}, next {n}",
+  "skip.t_back": "The run at {t} is back on",
+  "skip.e_many": "Too many runs skipped — pause the task instead",
+  "skip.e_time": "That time isn't one of this task's upcoming runs",
+  "skip.e_sched": "Only an active scheduled task can skip runs"
 }

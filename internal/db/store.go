@@ -35,6 +35,9 @@ type Task struct {
 	PauseKind   string
 	PauseDetail string
 	PausedAt    sql.NullString
+	// SkipRuns: upcoming fire times skipped by hand ("skip next run"), a JSON array of
+	// RFC 3339 UTC strings ('' = none); next_run_at already points past them.
+	SkipRuns string
 }
 
 // Run is one execution of a task (or ad-hoc prompt).
@@ -112,13 +115,13 @@ func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 	row := s.DB.QueryRowContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
   overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
-  pause_kind, pause_detail, paused_at
+  pause_kind, pause_detail, paused_at, skip_runs
 FROM tasks WHERE id = ?`, id)
 	var t Task
 	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 		&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
 		&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
-		&t.PauseKind, &t.PauseDetail, &t.PausedAt); err != nil {
+		&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -129,7 +132,7 @@ func (s *Store) ListDueTasks(ctx context.Context, now time.Time) ([]Task, error)
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
   overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
-  pause_kind, pause_detail, paused_at
+  pause_kind, pause_detail, paused_at, skip_runs
 FROM tasks
 WHERE status = 'active' AND cron_expr != '' AND next_run_at IS NOT NULL AND next_run_at <= ?
 ORDER BY next_run_at ASC`, now.UTC().Format(time.RFC3339))
@@ -143,7 +146,7 @@ ORDER BY next_run_at ASC`, now.UTC().Format(time.RFC3339))
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 			&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
 			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
-			&t.PauseKind, &t.PauseDetail, &t.PausedAt); err != nil {
+			&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

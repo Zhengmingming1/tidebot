@@ -4662,3 +4662,53 @@ The shared light hues were fine as icons but too light as 12px tag text on a 14%
 2. Check `border-strong` (form fields, 3:1 per 1.4.11) — inputs currently rely on it.
 3. Brand-coloured provider avatars (`.pv-av`, `.ap-logo`) pick white text on any brand colour;
    choose black / white per colour by contrast.
+
+## 2026-11-01 (04:00): skip one run — the schedule stays on, the run comes back with one click
+
+Category: features / UX (recent rounds: UI polish, features, UX, correctness). Idea 4 of the
+2026-10-26 (20:00) entry: to leave out one run (a day off, or a run already done by hand) you had
+to pause the task and remember to resume it — and a pause by hand catches up missed runs on resume.
+
+**Done**
+
+- Migration 025 `tasks.skip_runs` (JSON array of RFC 3339 UTC fire times, '' = none, max 20).
+  `next_run_at` always points past them, so every reader of the next run (lists, due query,
+  "pause all" hold check) needs nothing extra.
+- `scheduler`: `ParseSkips` / `FormatSkips` / `FutureSkips`, `NextSkipping` (NextRun hopping over
+  skipped times), `IsFireTime` (`NextRun(at-1s) == at` within a horizon). `advanceSchedule` hops
+  over skips and forgets the ones behind it; `missedTimes` doesn't count skipped times as owed;
+  `Realign` (start-up / timezone change) keeps a skip.
+- `tasksvc.SkipRun(id, at, undo)`: at zero = the next run; only an active scheduled task, only a
+  real upcoming fire time within 31 days; undo of a time before the current next makes it next
+  again; both idempotent. Saving the form with the same cron keeps the skips (next hops over
+  them), a new cron drops them; a snooze waking up hops over them too.
+- Ext RPC `task.skip_run {"id","at"?,"undo"?}` (WebUI through `/api/rpc/`, CSRF + owner session).
+  Task answer `skip_runs` (future only, omitted when none); `upcoming` marks `skipped` and keeps the
+  run listed.
+- WebUI: task page Pause menu gets "跳过下一次 · 今天 9:00 不运行，之后照常" on top, then "或暂停"
+  and the lengths; Overview schedule shows the run after, plus a dashed "已跳过 1 次" chip (times in
+  the tooltip, click → menu to put one back). Home › next 24 hours: each row has a skip button
+  (hover / focus, always on touch and on skipped rows); a skipped row stays, struck through and
+  dimmed, with "· 已跳过" and an undo button; updated in place, focus kept. Task list: a small
+  skip icon after "下次 …" with the skipped times in the tooltip. Toasts with Undo, errors
+  translated, no native dialogs, zh-CN + en.
+- Tests: `scheduler/skip_test.go` (format, hop, fire time, due task advances + prunes, skipped not
+  owed, Realign keeps it), `tasksvc/skip_test.go` (next / later / twice / undo / bad times / cap /
+  paused / manual / same vs new cron / snooze), `app/taskskip_test.go` (RPC), `webui/skipnext_test.go`
+  (DTO, upcoming flag, UI wiring, CSS, i18n keys, node: rows, chip, escaping, error mapping).
+- Shots: `/workspace/tidebot-shots/2026-11-01-0400-skip-run-home-1024x655.png` (+ `-menu`, `-task`,
+  `-home-en`).
+
+**Learned** — scaleapi/scale-agentex `agentex/src/adapters/temporal/adapter_temporal.py`
+(`skip_schedule_action`: a one-off exclusion, refused unless the time is one of the schedule's
+upcoming action times; `unskip_schedule_action` removes it) and
+`agentex-ui/components/scheduled-tasks/all-schedules-list.tsx` ("Skip next run" / "Unskip run" in
+the schedule's menu, disabled while paused). Keeping skipped times on the task and moving
+`next_run_at` past them means the scheduler, Realign and every "next run" label stay correct
+without special cases; the cron-based Home list is the only place that has to read the skips.
+
+**Ideas for later**
+
+1. Skip from the task list row (j/k cursor `s` key) and the command palette ("跳过下一次：Daily Report").
+2. Skip a whole date range (holiday) — Uptime Kuma recurring maintenance windows.
+3. Show skipped runs in the runs history as "跳过（手动）" rows so the gap is explained later.

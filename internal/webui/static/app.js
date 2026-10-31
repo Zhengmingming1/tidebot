@@ -154,6 +154,7 @@
     trash: '<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
     sparkle: '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/>',
     play: '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
+    skipFwd: '<path d="M5 5.5v13a1 1 0 0 0 1.55.83l9-6.5a1 1 0 0 0 0-1.66l-9-6.5A1 1 0 0 0 5 5.5z"/><path d="M19 5v14"/>',
     pause: '<rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>',
     stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
@@ -1335,9 +1336,10 @@
       id: "spz-menu", label: o.title,
       html: '<div class="spz-head">' + ic("pause", "sm") + "<div><strong>" + esc(o.title) + "</strong>" + (o.sub ? "<small>" + esc(o.sub) + "</small>" : "") + "</div></div>" +
         (o.paused ? '<button type="button" role="menuitem" class="spz-item spz-resume" data-resume="1"><span>' + ic("play", "sm") + esc(T("spz.resume")) + "</span></button><div class=\"spz-sep\">" + esc(T("spz.change")) + "</div>" : "") +
+        (o.skipAt ? '<button type="button" role="menuitem" class="spz-item spz-skip" data-skip="1"><span>' + ic("skipFwd", "sm") + esc(T("skip.menu")) + "</span><small>" + esc(T("skip.menu_sub", { t: when(o.skipAt) })) + '</small></button><div class="spz-sep">' + esc(T("skip.or_pause")) + "</div>" : "") +
         opts.map(item).join("") +
         '<p class="spz-note">' + ic("info", "sm") + "<span>" + esc(o.note) + "</span></p>",
-      pick: function (b) { o.pick(b.hasAttribute("data-resume") ? "" : b.getAttribute("data-for")); }
+      pick: function (b) { o.pick(b.hasAttribute("data-resume") ? "" : b.hasAttribute("data-skip") ? "skip" : b.getAttribute("data-for")); }
     });
   }
   // popMenu: a small menu (.popover.spz-menu) at the anchor ("up" opens above it). o: id,
@@ -1402,9 +1404,11 @@
     if ($("#spz-menu")) { $("#spz-menu")._close(); return; }
     api("/api/rpc/scheduler.pause.get", { method: "POST", body: {}, read: true }).then(function (r) {
       var v = r.result || {};
+      var nx = t.cron && t.status === "active" && t.next_run_at && new Date(t.next_run_at) > new Date() ? t.next_run_at : "";
       pzMenu(anchor, "down", {
-        title: T("tpz.title"), options: v.options, note: T(t.cron ? "tpz.note" : "tpz.note_nocron"),
+        title: T("tpz.title"), options: v.options, note: T(t.cron ? "tpz.note" : "tpz.note_nocron"), skipAt: nx,
         pick: function (f) {
+          if (f === "skip") { skipRun(t, nx, false, done); return; }
           rpc("task.pause_for", { id: t.id, "for": f }).then(function (res) {
             var u = res && res.until;
             toastUndo(u ? T("tpz.t_until", { t: when(u) }) : T("tpz.t_manual"), function () { api("/api/tasks/" + enc(t.id) + "/resume", { method: "POST", body: {} }).then(done).catch(fail); });
@@ -1418,6 +1422,90 @@
     $$("[data-next]").forEach(function (el) {
       var iso = el.getAttribute("data-next");
       if (el.classList.contains("held") !== spHolds(iso)) el.outerHTML = heldNext(iso);
+    });
+  }
+  // ---------- skip one run ----------
+  // "Skip next run" leaves one fire time out and keeps the schedule on — a day off, or a run
+  // already done by hand — instead of pausing and having to remember to resume. Idea from
+  // scaleapi/scale-agentex (agentex-ui/components/scheduled-tasks/all-schedules-list.tsx:
+  // "Skip next run" / "Unskip run" per upcoming time; the server only accepts a real upcoming
+  // fire time). Offered in the task's Pause menu and on each run in Home › next 24 hours; a
+  // skipped run stays listed, dimmed, so it can be put back.
+  function skipErr(e) {
+    var m = (e && e.message) || "";
+    if (/at most \d+ upcoming/.test(m)) return T("skip.e_many");
+    if (/not one of the task's upcoming/.test(m)) return T("skip.e_time");
+    if (/only an active scheduled/.test(m)) return T("skip.e_sched");
+    return m;
+  }
+  // skipRun(task {id, name}, at ISO, undo, done(result)): toast with Undo / "put back".
+  function skipRun(t, at, undo, done) {
+    return rpc("task.skip_run", { id: t.id, at: at, undo: !!undo }).then(function (res) {
+      res = res || {};
+      var again = function () { skipRun(t, at, !undo, done); };
+      if (undo) toast(T("skip.t_back", { t: when(at) }));
+      else toastUndo(res.next_run_at ? T("skip.t_done_next", { t: when(at), n: when(res.next_run_at) }) : T("skip.t_done", { t: when(at) }), again);
+      if (done) done(res);
+      return res;
+    }).catch(function (e) { toast(skipErr(e), true); });
+  }
+  // skipChip: "skipped 1" beside a task's next run; the tooltip lists the times, a click
+  // opens a menu to put one back.
+  function skipChip(t) {
+    var sk = t.skip_runs || [];
+    if (!sk.length) return "";
+    var tipTxt = T("skip.chip_tip", { l: sk.map(when).join(T("list.sep")) });
+    return '<button type="button" class="skip-chip" data-skipchip="' + esc(t.id) + '" aria-haspopup="menu" aria-expanded="false" data-tip="' + esc(tipTxt) + '" aria-label="' + esc(tipTxt) + '">' + ic("skipFwd", "sm") + "<span>" + esc(T("skip.chip", { n: sk.length })) + "</span></button>";
+  }
+  function wireSkipChip(t, done) {
+    var b = document.querySelector('[data-skipchip="' + (window.CSS && CSS.escape ? CSS.escape(t.id) : t.id) + '"]');
+    if (!b) return;
+    b.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      if ($("#skip-menu")) { $("#skip-menu")._close(); return; }
+      popMenu(b, "down", {
+        id: "skip-menu", label: T("skip.put_back_title"),
+        html: '<div class="spz-head">' + ic("skipFwd", "sm") + "<div><strong>" + esc(T("skip.put_back_title")) + "</strong><small>" + esc(T("skip.put_back_sub")) + "</small></div></div>" +
+          (t.skip_runs || []).map(function (x) { return '<button type="button" role="menuitem" class="spz-item" data-at="' + esc(x) + '"><span>' + ic("undo", "sm") + esc(when(x)) + "</span><small>" + esc(T("skip.put_back")) + "</small></button>"; }).join(""),
+        pick: function (it) { skipRun(t, it.getAttribute("data-at"), true, done); }
+      });
+    });
+  }
+  // Home › next 24 hours: each row's skip / put back button, updated in place (the list
+  // keeps skipped runs, so nothing moves).
+  function next24Row(s) {
+    var lbl = T(s.skipped ? "skip.put_back" : "skip.this") + " · " + s.task_name + " " + when(s.at);
+    return '<li data-at="' + esc(s.at) + '" data-task="' + esc(s.task_id) + '" class="' + (s.skipped ? "skipped" : "") + '"><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + (s.skipped ? '<span class="tl-skipped"> · ' + esc(T("skip.skipped")) + "</span>" : "") + "</small></div>" +
+      '<button type="button" class="icon-btn sm tl-skip" data-skip-at="' + esc(s.at) + '" data-tip="' + esc(T(s.skipped ? "skip.put_back" : "skip.this_tip")) + '" aria-label="' + esc(lbl) + '">' + ic(s.skipped ? "undo" : "skipFwd", "sm") + "</button>" +
+      '<a class="link" href="#/tasks/' + enc(s.task_id) + '" aria-label="' + esc(s.task_name) + '">' + ic("chev", "sm") + "</a></li>";
+  }
+  function wireNext24(list) {
+    var box = $("#next24");
+    if (!box) return;
+    box._list = list;
+    if (box._skipWired) return;
+    box._skipWired = true;
+    box.addEventListener("click", function (e) {
+      var b = e.target.closest(".tl-skip");
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      var li = b.closest("li"), at = li.getAttribute("data-at"), id = li.getAttribute("data-task");
+      var name = $(".tl-name strong", li).textContent;
+      var undo = li.classList.contains("skipped");
+      b.disabled = true;
+      var apply = function (sk) {
+        $$("#next24 li[data-at]").forEach(function (x) {
+          var xa = x.getAttribute("data-at"), on = sk.indexOf(xa) >= 0;
+          if (x.getAttribute("data-task") !== id || on === x.classList.contains("skipped")) return;
+          var row = (box._list || []).filter(function (y) { return y.task_id === id && y.at === xa; })[0] || { at: xa, task_id: id, task_name: name, cron: "" };
+          row.skipped = on;
+          var focus = x.contains(document.activeElement);
+          x.outerHTML = next24Row(row);
+          if (focus) { var nb = $('#next24 li[data-at="' + xa + '"][data-task="' + id + '"] .tl-skip'); if (nb) nb.focus(); }
+        });
+        paintHomePause();
+      };
+      skipRun({ id: id, name: name }, at, undo, function (res) { apply(res.skipped || []); }).then(function () { if (document.contains(b)) b.disabled = false; });
     });
   }
   // Home › next 24 hours: the card's pause button, the "paused" line and runs the pause holds back.
@@ -2015,9 +2103,8 @@
         $("#running").innerHTML = d.running.length ? '<ul class="live-list">' + d.running.map(function (x) {
           return '<li data-href="#/runs/' + enc(x.id) + '"><span class="spin" aria-hidden="true"></span><div><strong>' + esc(x.task_name || T("run.adhoc")) + "</strong><small>" + (x.status === "queued" ? esc(x.queue_pos ? T("st.queued_n", { n: x.queue_pos }) : T("st.queued")) : tAgo("home.started_ago", null, "t", x.started_at || x.created_at)) + '</small></div><span class="num muted" data-since="' + esc(x.started_at || "") + '">' + esc(x.started_at ? dur(Date.now() - new Date(x.started_at).getTime()) : "—") + '</span><strong class="num">' + esc(usd(x.cost_usd, 3)) + "</strong></li>";
         }).join("") + "</ul>" : '<p class="hc-empty" data-tip="' + esc(T("home.idle_sub")) + '"><span class="idle-dot" aria-hidden="true"></span><span>' + esc(T("home.idle")) + "</span></p>";
-        $("#next24").innerHTML = d.next.length ? '<ul class="timeline">' + d.next.slice(0, 4).map(function (s) {
-          return '<li data-at="' + esc(s.at) + '"><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + '</small></div><a class="link" href="#/tasks/' + enc(s.task_id) + '">' + ic("chev", "sm") + "</a></li>";
-        }).join("") + "</ul>" : '<p class="hc-empty">' + ic("calendar", "sm") + "<span><strong>" + esc(T("home.no_sched")) + "</strong> · " + esc(T("home.no_sched_sub")) + "</span></p>";
+        $("#next24").innerHTML = d.next.length ? '<ul class="timeline tl-sk">' + d.next.slice(0, 4).map(next24Row).join("") + "</ul>" : '<p class="hc-empty">' + ic("calendar", "sm") + "<span><strong>" + esc(T("home.no_sched")) + "</strong> · " + esc(T("home.no_sched_sub")) + "</span></p>";
+        wireNext24(d.next);
         if (d.sched_pause && spAdopt(d.sched_pause, asked || Date.now())) paintCC();
         paintHomePause();
         if ($("#beats")) $("#beats").innerHTML = '<div class="beats">' + d.tasks.slice(0, 6).map(function (t) {
@@ -2417,7 +2504,7 @@
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
           return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
-            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
+            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + ((t.skip_runs || []).length ? '<span class="nx-skip" data-tip="' + esc(T("skip.chip_tip", { l: t.skip_runs.map(when).join(T("list.sep")) })) + '">' + ic("skipFwd", "sm") + "</span>" : "") + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
         $$("[data-runnow]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); runTaskNow(b.getAttribute("data-runnow"), b); }); });
@@ -2735,14 +2822,17 @@
       inlineEdit($("#ie-name"), false, patch("name"));
       if ($("#ie-prompt")) inlineEdit($("#ie-prompt"), true, patch("prompt"));
       // Schedule: the next run inline; the cron expression, time zone and the runs after it in the tooltip.
-      if ($("#ov-next")) api("/api/scheduler/preview?cron=" + enc(t.cron) + "&n=4").then(function (d) {
-        var ts = d.times || [], box = $("#ov-next"), snz = pauseKind(t) === "snooze";
+      if ($("#ov-next")) api("/api/scheduler/preview?cron=" + enc(t.cron) + "&n=" + (4 + (t.skip_runs || []).length)).then(function (d) {
+        var ts = d.times || [], box = $("#ov-next"), snz = pauseKind(t) === "snooze", sk = t.skip_runs || [];
+        // Runs skipped by hand are left out; the chip beside the next run lists them.
+        ts = ts.filter(function (x) { return sk.indexOf(new Date(x).toISOString().replace(/\.\d{3}Z$/, "Z")) < 0; }).slice(0, 4);
         if (!box || !ts.length) return;
         // A snoozed task skips the times before its end; a task paused otherwise has no next run;
         // an active one shows whether "pause all" holds its next run back.
         if (snz) ts = ts.filter(function (x) { return new Date(x) > new Date(t.pause_detail); });
         var head = snz ? esc(T("tpz.wakes", { t: when(t.pause_detail) })) + (ts.length ? " · " + esc(T("td.next_at", { t: when(ts[0]) })) : "") : t.status !== "active" ? esc(T("tpz.no_next")) : "";
-        box.innerHTML = (head ? '<span class="muted">' + head + "</span>" : '<span class="muted">' + heldNext(ts[0]) + "</span>") + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : "") + (d.dst ? "\n" + dstNoteText(d.dst, d.scheduler_timezone) : ""));
+        box.innerHTML = (head ? '<span class="muted">' + head + "</span>" : '<span class="muted">' + heldNext(ts[0]) + "</span>" + skipChip(t)) + tip(T("td.sched_tip", { c: t.cron, z: state.tz || "" }) + (ts.length > 1 ? "\n" + T("td.then", { l: ts.slice(1).map(when).join(T("list.sep")) }) : "") + (d.dst ? "\n" + dstNoteText(d.dst, d.scheduler_timezone) : ""));
+        if (!head) wireSkipChip(t, reload);
       }).catch(function () {});
       if ($("#ws-copy")) $("#ws-copy").addEventListener("click", function () { copyText(t.workspace).catch(fail); });
       // Desktop app only: open the folder in Finder / File Explorer / the file manager ("o").

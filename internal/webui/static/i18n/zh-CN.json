@@ -2119,5 +2119,22 @@
   "rn.ph_skill": "告诉「{name}」这次要做什么…",
   "rn.run_skill_tip": "用「{name}」运行一次：选目录、写提示词",
   "pal.run_skill": "运行技能：{name}",
-  "runs.chg_undone_tip": "改动已撤销"
+  "runs.chg_undone_tip": "改动已撤销",
+  "skip.menu": "跳过下一次",
+  "skip.menu_sub": "{t} 不运行，之后照常",
+  "skip.or_pause": "或暂停",
+  "skip.this": "跳过这次",
+  "skip.this_tip": "跳过这次运行，之后照常",
+  "skip.skipped": "已跳过",
+  "skip.put_back": "恢复这次运行",
+  "skip.put_back_title": "已跳过的运行",
+  "skip.put_back_sub": "选一次恢复运行",
+  "skip.chip": "已跳过 {n} 次",
+  "skip.chip_tip": "已跳过：{l}",
+  "skip.t_done": "已跳过 {t} 的运行",
+  "skip.t_done_next": "已跳过 {t} 的运行，下次 {n}",
+  "skip.t_back": "已恢复 {t} 的运行",
+  "skip.e_many": "跳过的运行太多了，请改为暂停此任务",
+  "skip.e_time": "这个时间不是此任务接下来的运行时间",
+  "skip.e_sched": "只有启用中的定时任务可以跳过运行"
 }

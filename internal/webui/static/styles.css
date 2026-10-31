@@ -2555,6 +2555,22 @@ li.kb-cur, li.kb-cur:focus, li.kb-cur:focus-visible { outline: none; background:
 .timeline li.held .tl-time, .timeline li.held .tl-name { opacity: .55; }
 .timeline li.held .tl-dot { background: var(--border-strong); }
 .tl-held { color: var(--warn); }
+/* Skip one run: Home › next 24 hours rows get a skip / put back button (shown on hover or
+   focus, always on touch screens and on skipped rows); a skipped run stays, dimmed. */
+.timeline.tl-sk li { grid-template-columns: 16px 88px minmax(0, 1fr) auto auto; }
+.card.hc .timeline.tl-sk li { grid-template-columns: 16px 56px minmax(0, 1fr) auto auto; }
+.tl-skip { opacity: 0; transition: opacity var(--dur-fast, 120ms); }
+.timeline li:hover .tl-skip, .timeline li:focus-within .tl-skip, .timeline li.skipped .tl-skip { opacity: 1; }
+@media (hover: none) { .tl-skip { opacity: 1; } }
+.timeline li.skipped .tl-time, .timeline li.skipped .tl-name strong { opacity: .55; text-decoration: line-through; text-decoration-thickness: 1px; }
+.timeline li.skipped .tl-dot { background: transparent; border: 1px dashed var(--border-strong); }
+.tl-skipped { color: var(--text-2); }
+.spz-skip span { white-space: nowrap; }
+.skip-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; margin-left: var(--s1); padding: 0 8px; border: 1px dashed var(--border-strong); border-radius: 999px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; vertical-align: middle; }
+.skip-chip:hover { color: var(--text); background: var(--surface-2); }
+.skip-chip .i { width: 12px; height: 12px; }
+.nx-skip { display: inline-flex; margin-left: 4px; color: var(--text-3); vertical-align: -2px; }
+.nx-skip .i { width: 12px; height: 12px; }
 .spz-menu { position: fixed; right: auto; width: 280px; padding: var(--s1); z-index: 60; overscroll-behavior: contain; }
 .spz-head { display: flex; gap: var(--s1); align-items: flex-start; padding: 4px var(--s1) var(--s1); color: var(--warn); }
 .spz-head svg { flex: none; margin-top: 2px; }

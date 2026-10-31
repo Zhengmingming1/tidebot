@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -188,6 +189,28 @@ func (a *App) schedPauseRPC() map[string]rpcFunc {
 		// One task from the WebUI: {"id", "for": "1h" | "4h" | "tomorrow" | "manual"}; the same
 		// as agentctl's tasks.pause with "for" (see rpcTasksPause).
 		"task.pause_for": a.rpcTasksPause,
+		// Skip one run, the schedule stays on: {"id", "at"?: RFC 3339 (default: the next run),
+		// "undo"?: true puts it back}. agentctl: call task.skip_run '{"id":"task_…"}'.
+		"task.skip_run": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			in, err := decode[struct {
+				ID   string `json:"id"`
+				At   string `json:"at"`
+				Undo bool   `json:"undo"`
+			}](raw)
+			if err != nil {
+				return nil, err
+			}
+			if in.ID == "" {
+				return nil, fmt.Errorf("id required")
+			}
+			var at time.Time
+			if in.At != "" {
+				if at, err = time.Parse(time.RFC3339, in.At); err != nil {
+					return nil, fmt.Errorf("at: want an RFC 3339 time")
+				}
+			}
+			return a.Tasks.SkipRun(ctx, in.ID, at, in.Undo)
+		},
 	}
 }
 

@@ -147,6 +147,9 @@ type taskDTO struct {
 	PauseDetail string `json:"pause_detail,omitempty"`
 	PausedAt    string `json:"paused_at,omitempty"`
 	BreakerAt   int    `json:"breaker_at,omitempty"` // breaker pauses: failures in a row that tripped it
+	// SkipRuns: upcoming fire times skipped by hand (RFC 3339 UTC, oldest first); the
+	// schedule stays on and next_run_at is already the run after them.
+	SkipRuns []string `json:"skip_runs,omitempty"`
 }
 
 func toTaskDTO(v tasksvc.TaskView) taskDTO {
@@ -156,6 +159,9 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 		NextRunAt: v.Task.NextRunAt.String, LastFiredAt: v.Task.LastFiredAt.String,
 		CreatedAt: v.Task.CreatedAt, UpdatedAt: v.Task.UpdatedAt,
 		Constraints: []string{}, ConstraintIDs: []string{}, Skills: []string{}, Tags: []string{},
+	}
+	if v.Task.CronExpr != "" {
+		d.SkipRuns = scheduler.FutureSkips(scheduler.ParseSkips(v.Task.SkipRuns), time.Now())
 	}
 	if v.Task.Status == "paused" {
 		d.PauseKind, d.PauseDetail, d.PausedAt = v.Task.PauseKind, v.Task.PauseDetail, v.Task.PausedAt.String
@@ -509,20 +515,22 @@ type scheduleItem struct {
 	TaskName string `json:"task_name"`
 	At       string `json:"at"`
 	Cron     string `json:"cron"`
+	// Skipped: this run was skipped by hand (still listed, dimmed, so it can be put back).
+	Skipped bool `json:"skipped,omitempty"`
 }
 
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
 func (s *Server) upcoming(ctx context.Context, horizon time.Duration, max int) ([]scheduleItem, error) {
-	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, name, cron_expr FROM tasks WHERE status='active' AND cron_expr <> ''`)
+	rows, err := s.deps.DB.QueryContext(ctx, `SELECT id, name, cron_expr, skip_runs FROM tasks WHERE status='active' AND cron_expr <> ''`)
 	if err != nil {
 		return nil, err
 	}
-	type t3 struct{ id, name, expr string }
+	type t3 struct{ id, name, expr, skips string }
 	var list []t3
 	for rows.Next() {
 		var x t3
-		if err := rows.Scan(&x.id, &x.name, &x.expr); err != nil {
+		if err := rows.Scan(&x.id, &x.name, &x.expr, &x.skips); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -537,13 +545,18 @@ func (s *Server) upcoming(ctx context.Context, horizon time.Duration, max int) (
 		if err != nil {
 			continue
 		}
+		skipped := map[string]bool{}
+		for _, k := range scheduler.ParseSkips(x.skips) {
+			skipped[k] = true
+		}
 		next := now
 		for i := 0; i < 6; i++ {
 			next = scheduler.NextIn(sch, next, s.loc())
 			if next.IsZero() || next.After(end) {
 				break
 			}
-			out = append(out, scheduleItem{TaskID: x.id, TaskName: x.name, At: next.UTC().Format(time.RFC3339), Cron: x.expr})
+			at := next.UTC().Format(time.RFC3339)
+			out = append(out, scheduleItem{TaskID: x.id, TaskName: x.name, At: at, Cron: x.expr, Skipped: skipped[at]})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At < out[j].At })

@@ -26,7 +26,7 @@ func TestSchedPauseUI(t *testing.T) {
 		`spAdopt(st.sched, asked); paintCC();`,
 		`id="spz-home" aria-haspopup="menu"`,
 		`<div id="spz-banner"></div><div id="next24"></div>`,
-		`return '<li data-at="' + esc(s.at) + '">`,
+		`return '<li data-at="' + esc(s.at) + '" data-task="' + esc(s.task_id) + '"`,
 		`rpc("scheduler.pause.set", on ? { paused: true, "for": choice } : { paused: false })`,
 		`api("/api/rpc/scheduler.pause.get", { method: "POST", body: {}, read: true })`,
 		`var SPZ_FOR = ["1h", "4h", "tomorrow", "manual"];`,
