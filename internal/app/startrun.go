@@ -123,14 +123,19 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 	}
 	return launch(startWait, func(onStart func(string)) error {
 		defer st.Close()
-		if mode == "edit" {
-			defer unlockEditDir(dir)
-		}
-		_, err := a.RunPromptEx(ctx, runner.Options{
+		opts := runner.Options{
 			Prompt: st.Invoke(modern, req.Prompt), DisplayPrompt: req.Prompt, WorkspaceDir: dir,
 			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: onStart, ContextArgs: args,
 			SkillID: req.SkillID, SkillVersionID: versionID, RunMode: mode,
-		}, req.Provider, 0)
+		}
+		if mode == "edit" {
+			defer unlockEditDir(dir)
+			// what the run changed in the folder (git work trees), for the run page
+			tr := &changeTracker{a: a, dir: dir}
+			defer tr.close()
+			opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(onStart), tr.atStart, tr.afterExit
+		}
+		_, err := a.RunPromptEx(ctx, opts, req.Provider, 0)
 		return err
 	}, func(err error) { a.Log.Warn("run", "skill_id", req.SkillID, "error", err) })
 }

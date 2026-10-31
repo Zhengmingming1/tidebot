@@ -77,6 +77,11 @@ type Options struct {
 	// (e.g. the cost cap once runs already going are counted) or return an error:
 	// the run then ends as skipped, like with BeforeStart.
 	AtStart func(ctx context.Context, o *Options) error
+	// AfterExit, if set, runs once Claude Code has exited (whatever the outcome),
+	// before the run is marked finished, so what it records is there when the page
+	// sees the run end. It gets a context that isn't canceled with the run; a
+	// non-empty return is written to the run log.
+	AfterExit func(ctx context.Context, runID string) string
 }
 
 // Result is the outcome of one run.
@@ -392,6 +397,11 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	}
 	res, err := execute(runCtx, opts, logW, r.usageEvery(), onUsage)
 	res.RunID = runID
+	if opts.AfterExit != nil {
+		if msg := opts.AfterExit(context.WithoutCancel(ctx), runID); msg != "" {
+			fmt.Fprintf(logW, "[%s] %s\n", time.Now().Format("15:04:05"), msg)
+		}
+	}
 	finished := time.Now().UTC()
 	res.DurationMS = finished.Sub(started).Milliseconds()
 

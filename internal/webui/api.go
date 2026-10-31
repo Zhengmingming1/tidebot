@@ -1243,9 +1243,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		// cost_detail: the calculation (tokens × price snapshot) for the run detail page
 		// result: the agent's final answer (Markdown, capped) — only on the detail, never in lists
 		// answer_same: the earlier run of the task that gave the same answer (whitespace ignored)
-		var detail, result, sameID string
+		// file_changes: files an edit run changed in its folder (git work trees only)
+		var detail, result, sameID, changes string
 		var cut int
-		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID)
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes)
 		out := struct {
 			runDTO
 			CostDetail      json.RawMessage `json:"cost_detail"`
@@ -1254,7 +1255,11 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			ResultTruncated bool            `json:"result_truncated,omitempty"`
 			AnswerSame      *answerSameDTO  `json:"answer_same,omitempty"`
 			AnswerPrev      *answerSameDTO  `json:"answer_prev,omitempty"`
-		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil}
+			FileChanges     json.RawMessage `json:"file_changes,omitempty"`
+		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil, nil}
+		if changes != "" && json.Valid([]byte(changes)) {
+			out.FileChanges = json.RawMessage(changes)
+		}
 		if sameID != "" {
 			var at string
 			if s.deps.DB.QueryRowContext(r.Context(), `SELECT COALESCE(finished_at, created_at) FROM runs WHERE id=?`, sameID).Scan(&at) == nil {
@@ -1279,6 +1284,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[1] == "stop" && r.Method == http.MethodPost {
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.stopRun(w, r, id) })).ServeHTTP(w, r)
+		return
+	}
+	if parts[1] == "changes" && r.Method == http.MethodGet {
+		s.handleRunChanges(w, r, id)
 		return
 	}
 	if parts[1] == "answer-diff" && r.Method == http.MethodGet {

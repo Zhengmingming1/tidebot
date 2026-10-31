@@ -5470,6 +5470,7 @@
         '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
         '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +
         runAnswerHtml(r, ansMode(r)) +
+        runChangesHtml(r) +
         costCalcHtml(r) +
         '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + "</span>" +
         // Stop sits next to the live state, above the fold at 1024×655 (the details card is below the log there).
@@ -5492,6 +5493,7 @@
         stopRun(id, r.status).then(function (y) { if (y) refresh(); else b.disabled = false; }).catch(function (err) { b.disabled = false; fail(err); });
       });
       if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
+      if ($("#rd-chg")) bindRunChanges($("#rd-chg"), r);
       bindRunPrompt(r);
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace, mode: r.run_mode }); });
       if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace }); });
@@ -5613,6 +5615,64 @@
       e.preventDefault();
       var v = a.getAttribute("data-md-anchor"), h = body.querySelector('[data-md-id="' + (window.CSS && CSS.escape ? CSS.escape(v) : v) + '"]');
       if (h) body.scrollTop = h.offsetTop - 8;
+    });
+  }
+  // Files an edit run changed in its folder (git work trees; snapshots taken in tidebot's own
+  // folder, the repo is never written). One row per file, its diff opens in place and is
+  // fetched on first open; the patch can be copied or saved for `git apply`. Idea:
+  // cline/cline apps/vscode/src/core/controller/checkpoints/checkpointViewLatestChanges.ts
+  // (what the agent changed since the checkpoint, per file) and siteboon/claudecodeui
+  // server/modules/git/git-parsing.service.ts (status letter + counts per file).
+  function runChangesHtml(r) {
+    var c = r.file_changes;
+    if (!c || r.run_mode !== "edit") return "";
+    var files = c.files || [], st = { A: ["added", "ok"], D: ["removed", "bad"], M: ["modified", "info"], T: ["modified", "info"] };
+    var head = '<div class="card-head"><span class="ico">' + ic("git") + '</span><h3 data-tip="' + esc(T("rd.chg_tip")) + '">' + esc(T("rd.chg")) + "</h3>" +
+      (c.count ? '<span class="rd-chg-sum"><span class="pill plain sm">' + esc(T("diff.files_n", { n: num(c.count) })) + '</span><span class="add">+' + esc(num(c.add)) + '</span><span class="del">−' + esc(num(c.del)) + "</span></span>" +
+        '<span class="rd-acts"><button type="button" class="icon-btn sm" data-chg-copy aria-label="' + esc(T("rd.chg_copy")) + '" data-tip="' + esc(T("rd.chg_copy")) + '">' + ic("copy", "sm") + "</button>" +
+        '<button type="button" class="icon-btn sm" data-chg-dl aria-label="' + esc(T("rd.chg_dl")) + '" data-tip="' + esc(T(c.patch_cut ? "rd.chg_dl_cut" : "rd.chg_dl")) + '">' + ic("download", "sm") + "</button></span>"
+        : '<span class="pill plain sm">' + ic("check", "sm") + esc(T("rd.chg_none")) + "</span>") + "</div>";
+    if (!c.count) return '<section class="card rd-chg" id="rd-chg">' + head + "</section>";
+    var rows = files.map(function (f, i) {
+      var s2 = st[f.status] || st.M, n = f.binary ? '<span class="muted">' + esc(T("rd.chg_bin")) + "</span>" :
+        (f.add ? '<span class="add">+' + esc(num(f.add)) + "</span>" : "") + (f.del ? '<span class="del">−' + esc(num(f.del)) + "</span>" : "");
+      return '<details class="diff-file" data-chg="' + i + '"><summary><span class="pill sm ' + s2[1] + '">' + esc(T("diff.st_" + s2[0])) + '</span><code class="ell" data-tip="' + esc(f.path) + '">' + esc(f.path) + '</code><span class="grow"></span><span class="rd-chg-n">' + n + "</span></summary>" +
+        '<div class="rd-chg-body"></div></details>';
+    }).join("");
+    var more = c.count > files.length ? '<p class="muted rd-chg-more">' + esc(T("rd.chg_more", { n: num(c.count - files.length) })) + "</p>" : "";
+    return '<section class="card rd-chg" id="rd-chg">' + head + '<div class="rd-chg-list">' + rows + more + "</div></section>";
+  }
+  function chgDiffHtml(d) {
+    if (!d) return '<p class="muted pad">' + esc(T("rd.chg_cut")) + "</p>";
+    if (d.binary && !d.lines.length) return '<p class="muted pad">' + esc(T("diff.st_binary")) + "</p>";
+    if (!d.lines.length) return '<p class="muted pad">' + esc(T("rd.chg_mode")) + "</p>";
+    return '<table class="diff"><colgroup><col class="ln"><col class="ln"><col class="sg"><col></colgroup><tbody>' + d.lines.map(function (l) {
+      if (l.op === "@") return '<tr class="gap"><td colspan="4">' + esc(l.text) + "</td></tr>";
+      if (l.op === "\\") return '<tr class="gap"><td colspan="4">' + esc(T("rd.chg_noeol")) + "</td></tr>";
+      var c = l.op === "+" ? "ins" : l.op === "-" ? "del" : "";
+      return '<tr class="' + c + '"><td class="ln-a">' + (+l.a || "") + '</td><td class="ln-b">' + (+l.b || "") + '</td><td class="sg">' + (l.op === "+" ? "+" : l.op === "-" ? "−" : "") + '</td><td class="tx">' + esc(l.text) + "</td></tr>";
+    }).join("") + "</tbody></table>" + (d.cut ? '<p class="muted pad">' + esc(T("rd.chg_cut")) + "</p>" : "");
+  }
+  function bindRunChanges(card, r) {
+    var got = null;
+    var load = function () {
+      if (!got) got = api("/api/runs/" + enc(r.id) + "/changes").catch(function (e) { got = null; throw e; });
+      return got;
+    };
+    $$("details[data-chg]", card).forEach(function (d) {
+      d.addEventListener("toggle", function () {
+        var body = $(".rd-chg-body", d);
+        if (!d.open || body.firstChild) return;
+        body.innerHTML = skeleton("list");
+        load().then(function (x) {
+          if (document.contains(body)) body.innerHTML = chgDiffHtml((x.diffs || [])[+d.getAttribute("data-chg")]);
+        }).catch(function (e) { if (document.contains(body)) body.innerHTML = errorState(e.message); });
+      });
+    });
+    var cp = $("[data-chg-copy]", card), dl = $("[data-chg-dl]", card);
+    if (cp) cp.addEventListener("click", function () { load().then(function (x) { return copyText(x.patch || ""); }).catch(fail); });
+    if (dl) dl.addEventListener("click", function () {
+      load().then(function (x) { return saveBlob(new Blob([x.patch || ""], { type: "text/x-diff" }), r.id + ".diff"); }).catch(fail);
     });
   }
   // "Compare with last time": this answer against the task's previous successful one. Long

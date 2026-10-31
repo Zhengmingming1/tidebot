@@ -48,6 +48,7 @@ func TestRunAnswerUI(t *testing.T) {
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`runAnswerHtml(r, ansMode(r)) +
+        runChangesHtml(r) +
         costCalcHtml(r) +`,
 		`if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);`,
 		`'<div class="rd-ans-body md" tabindex="0">' + mdHtml(r.result, null) + "</div>"`,

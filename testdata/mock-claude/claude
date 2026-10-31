@@ -41,6 +41,9 @@ done
 if [[ -n "${TIDEBOT_MOCK_ARGS_FILE:-}" ]]; then
   printf '%s\n' "$@" > "$TIDEBOT_MOCK_ARGS_FILE"
 fi
+if [[ -n "${TIDEBOT_MOCK_WRITE_FILE:-}" ]]; then
+  printf 'mock edit\n' > "$TIDEBOT_MOCK_WRITE_FILE"
+fi
 if [[ -n "${TIDEBOT_MOCK_ENV_FILE:-}" ]]; then
   env | grep -E '^(CLAUDE_CONFIG_DIR|HOME|CLAUDE_CODE_OAUTH_TOKEN)=' > "$TIDEBOT_MOCK_ENV_FILE" || true
 fi

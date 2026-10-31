@@ -318,9 +318,13 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(runID, opts.TaskID, bucket, prof.Name, prof.Model, c))
 			hold.Load().SetSpent(c.Amount, c.Currency)
 		}
+		callerAt := opts.AtStart // e.g. the Run dialog's "before" snapshot of the folder
 		opts.AtStart = func(sctx context.Context, o *runner.Options) error {
 			h, err := a.holdRunBudget(sctx, o, bucket, prof)
 			hold.Store(h)
+			if err == nil && callerAt != nil {
+				err = callerAt(sctx, o)
+			}
 			return err
 		}
 	}

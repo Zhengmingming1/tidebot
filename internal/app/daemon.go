@@ -31,6 +31,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	// We own the instance now: close runs a crashed / force-quit core left behind.
 	a.recoverInterruptedRuns(ctx)
 	a.purgeSkillStages()
+	a.purgeRunSnaps()
 	a.cleanLegacySkillCopies(ctx)
 	srv := ipc.NewServer(a.Log)
 	a.RegisterRPC(srv)

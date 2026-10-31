@@ -4475,3 +4475,58 @@ on window focus — switching from the desktop window to a browser is exactly th
 2. Per-row "mark read" (Novu's row action) would need a read flag per notification; only worth it
    if users ask — clear (×) already covers "get rid of this one".
 3. The tray menu could show the unread failure count from the same mark.
+
+## 2026-10-31 (12:00): edit runs show the files they changed — per file diff, patch to download
+
+Category: features. Idea 3 of the 2026-10-30 (17:45) Run dialog entry: after a "Can edit" run the
+run page said nothing about what the agent changed in your folder; you had to open a terminal and
+`git diff`, which also mixed in changes you had made before the run.
+
+**Done**
+
+- `internal/gitsnap`: snapshot a git work tree **without writing to the repo**. Start copies the
+  repo's index into tidebot's `data/runsnap/<run>/`, runs `git add -A -- .` + `git write-tree` on
+  that copy with `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` (new objects go to the scratch) and the
+  repo's objects as `GIT_ALTERNATE_OBJECT_DIRECTORIES`; Finish does it again on the scratch index
+  (only stat-changed files are re-hashed) and diffs the two trees with `diff-tree --relative`, so
+  a subfolder of a bigger repo only reports itself. Hooks, fsmonitor, untracked cache, split
+  index, auto gc and every configured filter driver (git-lfs etc.) are switched off for these
+  calls; `GIT_*` variables from the environment are dropped. Up to 300 files listed (totals count
+  all), patch capped at 512 KB (git is stopped once the cap is hit), 60 s per git call.
+- Edit runs only: the "before" snapshot is taken right before Claude Code starts (runner
+  `AtStart`, after any wait for a slot — RunPromptEx now chains a caller's `AtStart` after the
+  budget hold), the "after" one in the new runner hook `AfterExit`, which runs before the run row
+  is marked finished, so the page that refreshes on "end" already has the result. Saved in
+  migration 023 `runs.file_changes` (JSON list) and `runs.file_patch`; the log gets
+  "files changed: N (+a -d)". Not a git repo / git missing / a git error: nothing recorded, the run
+  is never affected. Leftover snapshots are removed at startup.
+- Run page: "Changed files" card under the answer — count, +/−, one row per file with
+  added/modified/removed pill and counts; a row opens its diff in place (fetched once from
+  `GET /api/runs/{id}/changes`, session-only like every API route), file header sticks while
+  scrolling a long diff, the list scrolls inside the card (fits 1024×655). Copy patch and download
+  `<run>.diff` (works with `git apply`). No changes → one quiet "No files changed" line.
+  Changes you had uncommitted before the run are not counted (tooltip says so).
+- Tests: gitsnap (pre-existing edits excluded, untracked/ignored/binary/deleted/CJK paths, `.git`
+  byte-for-byte unchanged, subfolder scope, no-change, not a repo, file and patch caps, a failing
+  `required` filter doesn't run, raw/numstat parser), app (edit run records only its file, before
+  the run ends, scratch removed, repo index untouched, log line; read runs and plain folders record
+  nothing; startup purge), webui (`ParsePatch` incl. CRLF, no-newline marker, binary, mode-only,
+  caps; API detail/changes/404/POST/no session; UI wiring, CSS, both languages, escaping under node).
+
+**Learned** — Cline (cline/cline, `sdk/packages/core/src/hooks/checkpoint-hooks.ts`) keeps a
+per-session `GIT_INDEX_FILE` under its own data dir so unchanged untracked files aren't re-hashed
+every turn, but it still writes stash refs/objects into the user's repo;
+`sdk/packages/core/src/session/checkpoint-diff.ts` caps blob sizes and refuses paths escaping the
+workspace. With `GIT_OBJECT_DIRECTORY` + alternates the whole snapshot lives outside `.git`.
+Gotchas: an embedded `bytes.Buffer` gives a writer `ReadFrom`, so `io.Copy` (what `exec.Cmd`
+uses for stdout) bypasses a size-limiting `Write` — keep the buffer as a field; a `table-layout:
+fixed` diff table takes its column widths from the first row, which is a colspan hunk header
+here — use a `<colgroup>`.
+
+**Ideas for later**
+
+1. "Undo this run's changes": apply the patch in reverse (`git apply -R --check` first), with the
+   in-app confirm; only when the files still match the "after" snapshot.
+2. Same card for scheduled tasks whose workspace is a git repo (opt-in per task).
+3. Non-git folders: a size-capped file-hash snapshot (mtime+size first) to list changed files.
+4. Show the changed-file count in the runs list and in the success notice ("changed 4 files").
