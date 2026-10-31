@@ -4436,3 +4436,42 @@ freed pages, so the file doesn't grow back; "Shrink database" returns them to di
 2. `canary_runs`, `plugin_ai_messages`, `amendment_messages` for deleted skills/plugins/tasks
    could go with their owner.
 3. Show the database's row counts per table in the storage bar tooltip.
+
+## 2026-10-31 (08:00): notification read state is shared — read in the desktop window, read everywhere
+
+Category: correctness / cross-platform consistency. The bell's "read up to" mark lived only in
+each browser's `localStorage` (`tb_notif_seen`), so marking read in the desktop window left the
+dot and the favicon failure count on in every browser (and after "Reset UI", everything came back
+unread). Idea 1 of the 2026-10-30 (20:00) entry.
+
+**Done**
+
+- The mark is stored in tidebot (`settings` key `notif.seen_at`, UTC RFC 3339 seconds like
+  `notifications.created_at`). `GET /api/notifications/center` returns `seen_at`;
+  `POST /api/notifications/read {"seen_at": t}` (CSRF, 1 KB body, RFC 3339 only) moves it
+  **forward only** (upsert `… DO UPDATE … WHERE excluded.value_json > settings.value_json`), so a
+  stale tab can't bring read notices back; a time ahead of the server clock is capped at now so a
+  wrong client clock can't silence notices still to come. Returns the mark in force.
+- WebUI: `localStorage` stays as the first-frame cache only. Each bell refresh adopts a newer
+  server mark; a browser that is ahead (marked here, or read before this release) sends its mark
+  once per value, retrying on the next refresh if offline. "Mark all read" never moves the mark
+  back. Other windows catch up on `focus` / becoming visible (at most every 10 s, besides the
+  1-minute poll); tabs of the same browser at once via the `storage` event. "Reset UI" takes the
+  mark back from tidebot instead of blanking it. "Mark all read" tooltip says it syncs.
+- Tests: forward-only, UTC normalisation, future cap, bad input / SQL-ish text, GET 405, no-CSRF
+  403 (`notif_read_test.go`); the client logic (adopt, push once, retry, never back, storage
+  event) runs under node with stubs.
+
+**Learned** — Novu (novuhq/novu) keeps `isRead` on the server: `packages/js/src/notifications/helpers.ts`
+`readAll` updates the cache optimistically, then calls `inboxService.readAll`, and
+`packages/js/src/ws/socket.ts` pushes `notifications.unread_count_changed` so every open inbox
+updates. tidebot has no global push channel (SSE is per run), so it uses a single watermark
+instead of per-row flags (same model the bell already had, one row in `settings`), and catches up
+on window focus — switching from the desktop window to a browser is exactly that event.
+
+**Ideas for later**
+
+1. A small global SSE stream (`/api/events`) for bell/badge changes, replacing the 1-minute poll.
+2. Per-row "mark read" (Novu's row action) would need a read flag per notification; only worth it
+   if users ask — clear (×) already covers "get rid of this one".
+3. The tray menu could show the unread failure count from the same mark.
