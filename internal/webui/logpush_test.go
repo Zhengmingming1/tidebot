@@ -129,6 +129,10 @@ func TestLiveLogDisconnectReleases(t *testing.T) {
 	seedRun(t, c, "lv2", "x", "running", 0, time.Now())
 	br, cancel := openStream(t, c, "lv2")
 	waitData(t, br, "hello", 2*time.Second)
+	// the stream sends what's already in the log before it takes the bell
+	for wait := time.Now().Add(2 * time.Second); rn.LogWatchers() != 1 && time.Now().Before(wait); {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if rn.LogWatchers() != 1 {
 		t.Fatalf("watchers while open: %d", rn.LogWatchers())
 	}
