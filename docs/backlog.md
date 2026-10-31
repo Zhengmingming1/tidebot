@@ -4530,3 +4530,40 @@ here — use a `<colgroup>`.
 2. Same card for scheduled tasks whose workspace is a git repo (opt-in per task).
 3. Non-git folders: a size-capped file-hash snapshot (mtime+size first) to list changed files.
 4. Show the changed-file count in the runs list and in the success notice ("changed 4 files").
+
+## 2026-10-31 (16:00): runs list shows how much an edit run changed — files and +/− beside the title
+
+Category: UX / interaction (recent rounds: features, correctness, resource usage, UI polish).
+Idea 4 of the 12:00 entry: the "Changed files" card only showed on the run page, so in the runs
+list (and Home's recent runs) every "Can edit" run looked the same — you had to open each one to
+see whether it touched 1 file or 40.
+
+**Done**
+
+- `runDTO.changes` `{files, add, del}`: read in the list query with `json_valid` /
+  `json_extract` on `runs.file_changes` (edit runs only), so lists never load the file list or
+  the patch; absent when nothing was recorded (read runs, not a git tree, corrupt record), `files:
+  0` when the run changed nothing.
+- Runs list / Home recent: a small pill beside the title — git icon, file count, `+add` green,
+  `−del` red; a side with no lines is left out, a run that changed nothing shows no pill (the run
+  page still says "No files changed"). Tooltip and `aria-label` spell it out ("changed 4 files:
+  26 lines added, 4 removed · click to see the changes"). Clicking opens the run scrolled to its
+  "Changed files" card, landing below the sticky top bar (`scroll-margin-top`).
+- Runs export: CSV gets "Files changed / Lines added / Lines removed" (empty cells = not
+  recorded, 0 = ran and changed nothing); JSONL gets `changes`.
+- Tests: `run_chg_badge_test.go` (list sums, none for read/plain/corrupt, file paths never in the
+  list, CSV cells, JSONL), UI wiring/CSS/i18n; export column indexes updated.
+- Shot: `/workspace/tidebot-shots/2026-10-31-1600-runs-change-badge-1024x655.png` (+ `-en`).
+
+**Learned** — siteboon/claudecodeui `src/modules/chat/tools/DiffStatsBadge.tsx`: `+12 -3` in the
+git panel's green/red on every collapsed edit (and a total on a collapsed group in
+`src/modules/chat/transcript/ToolGroupContainer.tsx`), omitting a zero side and rendering nothing
+for `+0 -0` — so the size of a change reads without expanding it. tidebot applies the same rule
+to a whole run, and keeps the per-file list on the run page. Reading the three numbers with
+`json_extract` costs nothing at 50 rows and avoids a migration.
+
+**Ideas for later**
+
+1. Runs list filter chip "Changed files" (`file_changes` count > 0) for edit runs.
+2. Same pill in the command palette's run results and the bell's "run finished" notice.
+3. "Undo this run's changes" from the card (idea 1 of the 12:00 entry), with the in-app confirm.
