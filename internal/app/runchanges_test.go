@@ -19,7 +19,7 @@ func gitRepo(t *testing.T) string {
 	}
 	ws := t.TempDir()
 	_ = os.WriteFile(filepath.Join(ws, "main.go"), []byte("package main\n"), 0o644)
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-qm", "init"}} {
+	for _, args := range [][]string{{"init", "-q"}, {"config", "maintenance.auto", "false"}, {"config", "gc.auto", "0"}, {"add", "-A"}, {"commit", "-qm", "init"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = ws
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")

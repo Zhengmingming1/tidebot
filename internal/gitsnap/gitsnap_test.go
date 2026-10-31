@@ -63,6 +63,10 @@ func newRepo(t *testing.T) string {
 	repo := t.TempDir()
 	run(t, repo, "init", "-q")
 	run(t, repo, "config", "core.autocrlf", "false")
+	// the test's own commit must not start background maintenance (newer git on
+	// macOS does), which would change .git while the test compares it
+	run(t, repo, "config", "maintenance.auto", "false")
+	run(t, repo, "config", "gc.auto", "0")
 	write(t, filepath.Join(repo, "a.txt"), "one\ntwo\nthree\n")
 	write(t, filepath.Join(repo, "gone.txt"), "bye\n")
 	write(t, filepath.Join(repo, "sub", "s.txt"), "s\n")
