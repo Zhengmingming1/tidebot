@@ -4761,3 +4761,56 @@ file keeps them, and git apply's all-or-nothing check still guards against later
 1. Undo a single hunk from the open diff (split the file section at `@@` headers).
 2. Dry-run `git apply --check -R` when the card opens and mark rows that can no longer be undone.
 3. Keyboard: `u` on a focused file row to undo / put back it.
+
+## 2026-11-01 (12:00): quiet hours — scheduled runs wait out the night and go once when it ends
+
+Category: features / resource usage (recent rounds: UX / features, UI polish, features, UX).
+Idea 3 of the 2026-10-26 (12:00) entry: the only way to keep a laptop from spinning up Claude
+Code at night was "pause all" by hand every evening, and an hourly task paused overnight then
+either ran up to 8 times in the morning (run_all) or was dropped (past the 6 h catch-up window).
+
+**Done**
+
+- `scheduler/quiet.go`: `Quiet{On, From, To, Days}` (HH:MM in the scheduling timezone; To before
+  From = ends the next day; Days = weekdays the window starts on, empty = every day). `Normalize`
+  (format, start ≠ end, days 0–6, all seven → empty), `At(t)` (window that started today or
+  yesterday; the end is a wall-clock time so a DST night still ends at 07:00), `NextStart`,
+  `LastEnd`. Scheduler `SetQuiet` / `QuietState`; `poll` returns early in the window (Wake still
+  runs, transitions logged once). `deferQuiet`: missed slots inside a window that has ended move
+  to its end and fold into one, so every task runs once when quiet hours end and the catch-up
+  window counts from then ("skip" still means: only if tidebot was there at the end).
+- `app/quiet.go`: setting `scheduler.quiet` (JSON, off by default, restored at start), RPC
+  `scheduler.quiet.get` / `.set` (WebUI through `/api/rpc/`, CSRF + owner session; agentctl
+  `call`). `QuietView` adds active / until / next_start / due / timezone. The "pause all" brief
+  carries `quiet_until` (+ due) when quiet hours hold runs and nothing is paused. Runs held back on
+  battery wait through quiet hours too, their catch-up window counting from the end.
+- WebUI: Settings › General › 免打扰时段 card (between Power and the danger zone): switch in the
+  head, state pill (生效中 · 07:00 结束 / 下次 明天 23:00 开始, details in its tooltip), time range
+  with two `type="time"` fields, Mon…Sun chips (at least one), summary line "23:00 – 次日 07:00 ·
+  工作日"; saves on each change with the saved mark, toast on switch. Sidebar: a calm grey
+  "免打扰时段 · 今天 19:00 恢复" pill that opens the card (`#/settings/general/quiet`). Home ›
+  next 24 hours: runs inside the window get a hollow dot and "☾ 07:00 运行" in place of the cron
+  text (cron and the reason in the tooltip). zh-CN + en, all three themes via tokens only.
+- Tests: `scheduler/quiet_test.go` (normalize, overnight / weekday / midday windows, DST night,
+  held and fired, fold + run_once / run_all / skip after a window), `app/quiet_test.go` (default,
+  validation, restart, RPC, active view + due count, pause brief, power catch-up held),
+  `webui/quiet_ui_test.go` (`quiet_until` on upcoming, UI wiring, i18n keys, CSS, node: summary,
+  seven chips Monday first, quiet row, escaping).
+- Shots: `/workspace/tidebot-shots/2026-11-01-1200-quiet-hours-settings-1024x655.png`,
+  `…-home-1024x655.png`.
+
+**Learned** — louislam/uptime-kuma `server/model/maintenance.js` (`calcDuration` adds 24 h when the
+end is before the start; `generateCron` "recurring-weekday" fires on the listed weekdays at the
+start time; `getRunningTimeslot` = the window that started within the last duration) and
+`src/pages/EditMaintenance.vue` (time range + Mon…Sun weekday picker). Uptime Kuma keeps a fixed
+duration, which drifts an hour across DST; computing the end as a wall-clock time on the right day
+avoids that. Holding at the scheduler (task stays due) reuses the missed-run path, so the only new
+rule is "slots of one window count as one, timed at its end".
+
+**Ideas for later**
+
+1. Per-task "ignore quiet hours" (urgent tasks), like the power priority.
+2. Show the window in the tray tooltip and as a shaded band in Home's timeline.
+3. Notification quiet hours (`notify.quiet`, today agentctl only) in the same card, sharing the
+   time-range control.
+4. Task list "下次" hint when the next run falls in quiet hours.

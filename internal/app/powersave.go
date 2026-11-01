@@ -181,9 +181,17 @@ func (a *App) watchPower() {
 // powerTick releases the tasks that may run now and returns how many still wait.
 // When none wait, the watcher stops (watching is cleared under the same lock).
 func (a *App) powerTick(ctx context.Context, now time.Time) int {
+	w := &a.power
+	// Quiet hours hold scheduled runs, held-back ones too: they go once the window is over.
+	if a.Sched != nil {
+		if in, _ := a.Sched.QuietState(now); in {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			return len(w.deferred)
+		}
+	}
 	mode := a.PowerMode(ctx)
 	st := a.powerState(true)
-	w := &a.power
 	w.mu.Lock()
 	ids := make([]string, 0, len(w.deferred))
 	for id := range w.deferred {
@@ -215,6 +223,12 @@ func (a *App) catchUpAfterPower(ctx context.Context, taskID string, first, now t
 	t, err := a.Store.GetTask(ctx, taskID)
 	if err != nil || t.Status != "active" {
 		return
+	}
+	// held on through quiet hours: the catch-up window counts from when they ended
+	if a.Sched != nil {
+		if end := a.Sched.Quiet().LastEnd(now, a.Loc()); end.After(first) {
+			first = end
+		}
 	}
 	if a.Policy != nil {
 		p := a.Policy.Get(ctx, taskID)

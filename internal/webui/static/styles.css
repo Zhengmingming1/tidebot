@@ -3084,3 +3084,28 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-gone { min-width: 0; }
 .diff-file summary:hover .rd-chg-fx, .diff-file summary:focus-within .rd-chg-fx, .rd-chg-fx:focus-visible, .rd-chg-fx.on { opacity: 1; }
 @media (hover: none) { .rd-chg-fx { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .rd-chg-fx { transition: none; } }
+
+/* Settings › General › Quiet hours: switch in the head, time range and weekday chips */
+.qh-card .card-head .info-tip { margin-left: 4px; }
+.qh-now { margin-left: auto; display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
+.qh-now [data-tip]:hover::after, .qh-now [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
+.qh-now:empty { display: none; }
+.qh-card .card-head .switch { margin-left: 8px; }
+.qh-now:empty + .switch { margin-left: auto; }
+.qh-range { display: inline-flex; align-items: center; gap: 8px; }
+.qh-range input[type="time"] { width: 112px; font-variant-numeric: tabular-nums; }
+.qh-days { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.qh-days button { min-width: 40px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.qh-days button:hover { border-color: var(--border-strong); color: var(--text); }
+.qh-days button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-50); color: var(--accent); font-weight: 600; }
+.qh-days button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.qh-card.off .set-row { opacity: .6; }
+.qh-card.off .set-row:hover, .qh-card.off .set-row:focus-within { opacity: 1; }
+/* sidebar: quiet hours holding scheduled runs — calmer than "paused" */
+.spz-pill.qh-pill { border-color: var(--border); background: var(--bg-sunk); color: var(--text-2); text-decoration: none; }
+.spz-pill.qh-pill:hover { border-color: var(--border-strong); text-decoration: none; }
+.sidebar-status .spz-pill.qh-pill strong { color: var(--text); }
+/* Home › next 24 hours: a run that falls in quiet hours */
+.tl-quiet { color: var(--text-2); }
+.timeline li.quiet .tl-dot { background: var(--surface); border: 1.5px solid var(--text-3); }
+.tl-quiet .i { width: 12px; height: 12px; margin-right: 2px; vertical-align: -2px; }

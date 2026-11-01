@@ -32,6 +32,9 @@ type Scheduler struct {
 	paused  bool
 	// pausedUntil is when a timed pause ends (zero = until resumed by hand).
 	pausedUntil time.Time
+	// quiet: daily quiet hours (quiet.go); inQuiet is only touched by poll.
+	quiet   atomic.Pointer[Quiet]
+	inQuiet bool
 
 	// OnAutoResume, when set, is called once (from the poll loop) after a timed pause ran
 	// out and firing started again, so the owner can forget the stored pause.
@@ -171,6 +174,19 @@ func (s *Scheduler) poll(ctx context.Context) {
 	if p, _ := s.PauseState(now); p {
 		return
 	}
+	if q, end := s.QuietState(now); q != s.inQuiet || q {
+		if q != s.inQuiet {
+			s.inQuiet = q
+			if q {
+				s.log.Info("quiet hours: scheduled runs held", "until", end.UTC().Format(time.RFC3339))
+			} else {
+				s.log.Info("quiet hours over, firing resumes")
+			}
+		}
+		if q {
+			return
+		}
+	}
 	due, err := s.store.ListDueTasks(ctx, time.Now())
 	if err != nil {
 		s.log.Error("list due tasks", "error", err)
@@ -213,7 +229,7 @@ func (s *Scheduler) handleDue(ctx context.Context, task db.Task) error {
 	now := time.Now().UTC()
 	n := 1
 	if s.Catchup != nil {
-		n = s.Catchup(task, s.missedTimes(task, now), now)
+		n = s.Catchup(task, s.deferQuiet(s.missedTimes(task, now), now), now)
 		if n == 0 {
 			s.log.Info("skip missed run(s)", "task_id", task.ID)
 		}

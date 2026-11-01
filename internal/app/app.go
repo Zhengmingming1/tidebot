@@ -163,6 +163,7 @@ func Open(cfg config.Config) (*App, error) {
 	a.Sched.OnAutoResume = a.onSchedPauseEnded
 	a.Sched.Wake = a.wakeSnoozedTasks
 	a.loadSchedPause(context.Background())
+	a.loadQuiet(context.Background())
 	// Restore webui.enabled from settings if present.
 	if v, err := a.Auth.GetSetting(context.Background(), "webui.enabled"); err == nil && v != "" {
 		a.Cfg.WebUIEnabled = v == "true" || v == "1"
@@ -182,6 +183,7 @@ func Open(cfg config.Config) (*App, error) {
 			return st
 		},
 		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
+		QuietAt:       a.QuietAt,
 		QuickRunSkill: a.startQuickRunSkill, StartRun: a.startRun, UndoRunChanges: a.undoRunChanges,
 		Providers: providerAdmin{a},
 		Public:    map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},

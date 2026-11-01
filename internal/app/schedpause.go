@@ -41,8 +41,11 @@ type SchedPauseView struct {
 	Since  string `json:"since,omitempty"`
 	// Due counts active scheduled tasks whose time has come while paused; they follow
 	// their missed-run setting on resume.
-	Due     int                `json:"due"`
-	Options []SchedPauseOption `json:"options,omitempty"`
+	Due int `json:"due"`
+	// QuietUntil: not paused, but quiet hours hold scheduled runs until then (RFC3339 UTC);
+	// Due then counts the tasks that run once when they end.
+	QuietUntil string             `json:"quiet_until,omitempty"`
+	Options    []SchedPauseOption `json:"options,omitempty"`
 }
 
 // schedPauseEnd turns a menu choice into the pause's end ("manual" → zero time).
@@ -152,6 +155,10 @@ func (a *App) SchedPause(ctx context.Context) SchedPauseView {
 		var rec schedPauseRec
 		a.loadJSONSetting(ctx, setSchedPause, &rec)
 		v.Since = rec.Since
+		_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM tasks WHERE status='active' AND cron_expr != '' AND next_run_at IS NOT NULL AND next_run_at <= ?`,
+			now.UTC().Format(time.RFC3339)).Scan(&v.Due)
+	} else if in, end := a.Sched.QuietState(now); in {
+		v.QuietUntil = end.UTC().Format(time.RFC3339)
 		_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM tasks WHERE status='active' AND cron_expr != '' AND next_run_at IS NOT NULL AND next_run_at <= ?`,
 			now.UTC().Format(time.RFC3339)).Scan(&v.Due)
 	}

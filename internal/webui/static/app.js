@@ -1272,7 +1272,7 @@
   // Returns true when what's shown changes.
   function spAdopt(v, asked) {
     if (!v || (asked || 0) < spAt) return false;
-    var sig = function (x) { return x ? [!!x.paused, x.until || "", x.since || "", x.due || 0].join("|") : ""; };
+    var sig = function (x) { return x ? [!!x.paused, x.until || "", x.since || "", x.due || 0, x.quiet_until || ""].join("|") : ""; };
     var changed = sig(v) !== sig(spState);
     spState = v; spAt = asked || Date.now();
     return changed;
@@ -1286,6 +1286,12 @@
   }
   function spPillHtml() {
     var v = spState;
+    // quiet hours holding scheduled runs: a quieter pill that opens Settings › General › Quiet hours
+    if (v && !v.paused && v.quiet_until) {
+      var qt = T("qh.active_tip", { t: when(v.quiet_until) }) + (v.due ? "\n" + T("qh.due", { n: v.due }) : "");
+      return '<a class="spz-pill qh-pill" id="qh-pill" href="#/settings/general/quiet" data-tip="' + esc(qt) + '" aria-label="' + esc(T("qh.pill") + " · " + qt) + '">' + ic("moon", "sm") +
+        '<span class="spz-txt"><strong>' + esc(T("qh.pill")) + "</strong><small>" + esc(T("spz.pill_until", { t: when(v.quiet_until) })) + "</small></span></a>";
+    }
     if (!v || !v.paused) return "";
     return '<button class="spz-pill" id="spz-pill" aria-haspopup="menu" aria-expanded="false" data-tip="' + esc(spTip(v)) + '" aria-label="' + esc(T("spz.pill") + " · " + spEnds(v)) + '">' + ic("pause", "sm") +
       '<span class="spz-txt"><strong>' + esc(T("spz.pill")) + "</strong><small>" + esc(v.until ? T("spz.pill_until", { t: when(v.until) }) : T("spz.pill_manual")) + "</small></span></button>";
@@ -1474,8 +1480,10 @@
   // Home › next 24 hours: each row's skip / put back button, updated in place (the list
   // keeps skipped runs, so nothing moves).
   function next24Row(s) {
+    // in quiet hours: says when it will go instead of the schedule (that moves to the tooltip)
+    var quiet = !s.skipped && !!s.quiet_until;
     var lbl = T(s.skipped ? "skip.put_back" : "skip.this") + " · " + s.task_name + " " + when(s.at);
-    return '<li data-at="' + esc(s.at) + '" data-task="' + esc(s.task_id) + '" class="' + (s.skipped ? "skipped" : "") + '"><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · " + cronHuman(s.cron)) + (s.skipped ? '<span class="tl-skipped"> · ' + esc(T("skip.skipped")) + "</span>" : "") + "</small></div>" +
+    return '<li data-at="' + esc(s.at) + '" data-task="' + esc(s.task_id) + '" class="' + (s.skipped ? "skipped" : quiet ? "quiet" : "") + '"><span class="tl-dot"></span><span class="tl-time">' + esc(clock(s.at)) + '</span><div class="tl-name"><strong>' + esc(s.task_name) + "</strong><small>" + esc(relDay(s.at) + " · ") + (quiet ? '<span class="tl-quiet" data-tip="' + esc(T("qh.row_tip", { t: when(s.quiet_until) }) + "\n" + cronHuman(s.cron)) + '">' + ic("moon", "sm") + esc(T("qh.row", { t: clock(s.quiet_until) })) + "</span>" : esc(cronHuman(s.cron))) + (s.skipped ? '<span class="tl-skipped"> · ' + esc(T("skip.skipped")) + "</span>" : "") + "</small></div>" +
       '<button type="button" class="icon-btn sm tl-skip" data-skip-at="' + esc(s.at) + '" data-tip="' + esc(T(s.skipped ? "skip.put_back" : "skip.this_tip")) + '" aria-label="' + esc(lbl) + '">' + ic(s.skipped ? "undo" : "skipFwd", "sm") + "</button>" +
       '<a class="link" href="#/tasks/' + enc(s.task_id) + '" aria-label="' + esc(s.task_name) + '">' + ic("chev", "sm") + "</a></li>";
   }
@@ -5069,7 +5077,7 @@
 
   // ---------- PLUGINS ----------
   // Pure reads: they neither drop the page cache nor wait for the network when cached.
-  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "timezone.get", "network.get", "skills.proposals", "skills.compare"];
+  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "timezone.get", "network.get", "skills.proposals", "skills.compare", "scheduler.quiet.get"];
   function rpcKey(method, params) { return "rpc:" + method + ":" + JSON.stringify(params || {}); }
   function rpcCall(method, params, timeout, read) {
     return api("/api/rpc/" + method, { method: "POST", body: params || {}, timeout: timeout, read: read, cacheKey: read ? rpcKey(method, params) : "" }).then(function (r) { return r.result; });
@@ -6443,6 +6451,85 @@
       rpc("power.settings", { mode: sel.value }).then(function (v) { powerPaint(v); savedMark(sel); }).catch(function (e) { fail(e); rpc("power.get", {}).then(powerPaint); });
     });
   }
+  // ---- Settings › General › Quiet hours ----
+  // A daily window (scheduling timezone) in which scheduled runs don't start — a laptop that
+  // shouldn't spin its fan at night, a provider plan that's cheaper by day. A task that comes
+  // due inside runs once when the window ends; runs by hand, buttons and webhooks still go.
+  // Idea from Uptime Kuma's recurring maintenance (src/pages/EditMaintenance.vue: a time
+  // range plus a Mon…Sun weekday picker; server/model/maintenance.js: a window that ends
+  // before it starts runs into the next day). Saved on every change, like the power card.
+  var QH_DAYS = [1, 2, 3, 4, 5, 6, 0];
+  function quietCardHtml() {
+    var wd = function (d) { try { return new Intl.DateTimeFormat(state.lang, { weekday: "short", timeZone: "UTC" }).format(new Date(Date.UTC(2023, 0, 1 + d))); } catch (e) { return String(d); } };
+    return '<section class="card qh-card" id="set-quiet"><div class="card-head"><span class="ico">' + ic("moon") + "</span><h2>" + esc(T("qh.title")) + "</h2>" + tip(T("qh.tip")) +
+      '<span class="qh-now" id="qh-now"></span><button type="button" class="switch" id="qh-on" role="switch" aria-checked="false" aria-label="' + esc(T("qh.title")) + '" disabled></button></div>' +
+      '<div class="set-row" id="set-quiet_time"><div class="lbl"><strong>' + esc(T("qh.time")) + '</strong><small id="qh-sub">…</small></div>' +
+      '<span class="qh-range"><input type="time" id="qh-from" required aria-label="' + esc(T("qh.from")) + '" disabled><span class="muted" aria-hidden="true">–</span><input type="time" id="qh-to" required aria-label="' + esc(T("qh.to")) + '" disabled></span></div>' +
+      '<div class="set-row" id="set-quiet_days"><div class="lbl"><strong>' + esc(T("qh.days")) + "</strong><small>" + esc(T("qh.days_sub")) + "</small></div>" +
+      '<div class="qh-days" role="group" aria-label="' + esc(T("qh.days")) + '">' + QH_DAYS.map(function (d) { return '<button type="button" data-qh-day="' + d + '" aria-pressed="true" disabled>' + esc(wd(d)) + "</button>"; }).join("") + "</div></div></section>";
+  }
+  // "23:00 – 次日 07:00 · 工作日" from the setting.
+  function quietSummary(v) {
+    var overnight = v.to <= v.from, days = v.days || [];
+    var d = !days.length ? T("qh.every_day") : days.join(",") === "1,2,3,4,5" ? T("qh.weekdays") : days.join(",") === "0,6" ? T("qh.weekends") : T("qh.n_days", { n: days.length });
+    return T(overnight ? "qh.range_next" : "qh.range", { a: v.from, b: v.to }) + " · " + d;
+  }
+  function quietPaint(v) {
+    var card = $("#set-quiet");
+    if (!card || !v) return;
+    card._v = v;
+    var on = !!v.on, days = v.days && v.days.length ? v.days : QH_DAYS;
+    var sw = $("#qh-on", card);
+    sw.disabled = false; sw.classList.toggle("on", on); sw.setAttribute("aria-checked", String(on));
+    card.classList.toggle("off", !on);
+    $("#qh-from", card).value = v.from; $("#qh-to", card).value = v.to;
+    $("#qh-from", card).disabled = $("#qh-to", card).disabled = false;
+    $("#qh-sub", card).textContent = quietSummary(v);
+    $$("[data-qh-day]", card).forEach(function (b) { b.disabled = false; b.setAttribute("aria-pressed", String(days.indexOf(+b.getAttribute("data-qh-day")) >= 0)); });
+    // the state in a word in the head; when it holds runs / when it starts next in its tooltip
+    var now = $("#qh-now", card);
+    if (!on) now.innerHTML = "";
+    else if (v.active) now.innerHTML = '<span class="pill info" tabindex="0" data-tip="' + esc(T("qh.active_tip", { t: when(v.until) }) + (v.due ? "\n" + T("qh.due", { n: v.due }) : "")) + '">' + esc(T("qh.active", { t: clock(v.until) })) + "</span>";
+    else now.innerHTML = v.next_start ? '<span class="pill plain" tabindex="0" data-tip="' + esc(T("qh.next_tip")) + '">' + esc(T("qh.next", { t: when(v.next_start) })) + "</span>" : "";
+  }
+  function quietWire() {
+    var card = $("#set-quiet");
+    if (!card) return;
+    var load = function () { return rpc("scheduler.quiet.get", {}).then(quietPaint); };
+    load().catch(fail);
+    var save = function (patch, el) {
+      var v = Object.assign({}, card._v || {}, patch);
+      if (v.from === v.to) { toast(T("qh.e_same"), true); quietPaint(card._v); return; }
+      rpc("scheduler.quiet.set", { on: !!v.on, from: v.from, to: v.to, days: v.days || [] }).then(function (r) {
+        quietPaint(r);
+        if (el) savedMark(el);
+        if ("on" in patch) toast(T(r.on ? "qh.t_on" : "qh.t_off", { r: quietSummary(r) }));
+        // the sidebar pill and Home follow on the next status poll; ask now
+        rpc("scheduler.pause.get", {}).then(spApply).catch(function () {});
+      }).catch(function (e) { fail(e); load(); });
+    };
+    $("#qh-on", card).addEventListener("click", function () { save({ on: !(card._v && card._v.on) }, null); });
+    ["from", "to"].forEach(function (k) {
+      var inp = $("#qh-" + k, card);
+      inp.addEventListener("change", function () {
+        // a cleared field (some WebViews allow it) goes back to what was saved
+        if (!/^\d{2}:\d{2}$/.test(inp.value)) { quietPaint(card._v); return; }
+        var p = {}; p[k] = inp.value; save(p, inp);
+      });
+    });
+    $(".qh-days", card).addEventListener("click", function (e) {
+      var b = e.target.closest("[data-qh-day]");
+      if (!b || b.disabled) return;
+      var cur = $$("[data-qh-day]", card).filter(function (x) { return x.getAttribute("aria-pressed") === "true"; }).map(function (x) { return +x.getAttribute("data-qh-day"); });
+      var d = +b.getAttribute("data-qh-day"), i = cur.indexOf(d);
+      if (i >= 0) {
+        if (cur.length === 1) { toast(T("qh.e_no_day"), true); return; }
+        cur.splice(i, 1);
+      } else cur.push(d);
+      cur.sort();
+      save({ days: cur.length === 7 ? [] : cur }, b.parentNode);
+    });
+  }
   // ---- notification channels (Settings → Notifications) ----
   // Add / edit / test / switch off / remove a channel without agentctl. Ideas from Uptime Kuma
   // src/components/NotificationDialog.vue: the default name follows the type until you edit
@@ -6732,7 +6819,7 @@
           row("webui", T("set.addr"), T(st.allow_lan ? "set.lan_on" : "set.lan_off"), "<code>" + esc(st.addr) + "</code>") +
           row("https", "HTTPS", T("set.https_sub"), '<span class="pill ' + (st.tls ? "ok" : "plain") + '">' + esc(T(st.tls ? "set.enabled" : "set.off")) + "</span>") +
           row("idle", T("set.idle"), T("set.idle_sub"), "<span>" + esc(T("set.min", { n: st.idle_minutes })) + "</span>") + "</section>" +
-          powerCardHtml() +
+          powerCardHtml() + quietCardHtml() +
           '<section class="card danger-zone" id="set-danger"><div class="card-head"><span class="ico">' + ic("bolt") + "</span><h2>" + esc(T("set.danger")) + "</h2></div>" +
           row("webui_off", T("set.webui_on"), T("set.webui_on_sub"), '<button class="btn danger sm" id="dz-webui">' + esc(T("set.turn_off")) + "</button>", "agentctl webui on") +
           row("reset_ui", T("set.reset_ui"), T("set.reset_ui_sub"), '<button class="btn danger sm" id="dz-reset">' + esc(T("set.reset")) + "</button>") + "</section>";
@@ -6740,6 +6827,7 @@
           $("#set-lang").addEventListener("change", function (e) { setLanguage(e.target.value).then(function () { savedMark($("#set-lang")); }); });
           lookWire();
           powerWire();
+          quietWire();
           $("#tz-open").addEventListener("click", function () { tzPicker(function () { route(); }); });
           $("#dz-webui").addEventListener("click", function () {
             confirmDialog({ title: T("set.off_title"), body: T("set.confirm_off"), ok: T("set.turn_off"), danger: true }).then(function (y) { if (y) api("/api/webui", { method: "POST", body: { enabled: false } }).then(function () { toast(T("toast.webui_off")); }).catch(fail); });

@@ -79,6 +79,9 @@ type Deps struct {
 	ClaudeStatus func(ctx context.Context, force bool) any
 	// SchedPause (optional) is the "all schedules paused" state shown on Home and in the sidebar.
 	SchedPause func(ctx context.Context) any
+	// QuietAt (optional): is t inside quiet hours for scheduled runs, and when that window
+	// ends (Home's "next 24 hours" marks those runs as held until then).
+	QuietAt func(t time.Time) (bool, time.Time)
 }
 
 // Server is a togglable HTTP listener.

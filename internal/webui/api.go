@@ -521,6 +521,8 @@ type scheduleItem struct {
 	Cron     string `json:"cron"`
 	// Skipped: this run was skipped by hand (still listed, dimmed, so it can be put back).
 	Skipped bool `json:"skipped,omitempty"`
+	// QuietUntil: the run falls in quiet hours and starts when they end (RFC3339 UTC).
+	QuietUntil string `json:"quiet_until,omitempty"`
 }
 
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
@@ -560,7 +562,13 @@ func (s *Server) upcoming(ctx context.Context, horizon time.Duration, max int) (
 				break
 			}
 			at := next.UTC().Format(time.RFC3339)
-			out = append(out, scheduleItem{TaskID: x.id, TaskName: x.name, At: at, Cron: x.expr, Skipped: skipped[at]})
+			it := scheduleItem{TaskID: x.id, TaskName: x.name, At: at, Cron: x.expr, Skipped: skipped[at]}
+			if s.deps.QuietAt != nil {
+				if in, qe := s.deps.QuietAt(next); in {
+					it.QuietUntil = qe.UTC().Format(time.RFC3339)
+				}
+			}
+			out = append(out, it)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At < out[j].At })
