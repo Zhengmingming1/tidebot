@@ -28,17 +28,17 @@ func TestUndoChangesAPI(t *testing.T) {
 	var gotID string
 	var gotRedo bool
 	var next error
-	c.s.deps.UndoRunChanges = func(ctx context.Context, id string, redo bool) (string, error) {
+	c.s.deps.UndoRunChanges = func(ctx context.Context, id string, redo bool, path string) (UndoResult, error) {
 		gotID, gotRedo = id, redo
 		if next != nil {
-			return "", next
+			return UndoResult{}, next
 		}
 		at := ""
 		if !redo {
 			at = "2026-10-31T12:00:00Z"
 		}
 		_, err := c.s.deps.DB.Exec(`UPDATE runs SET changes_undone_at=? WHERE id=?`, at, id)
-		return at, err
+		return UndoResult{UndoneAt: at}, err
 	}
 	code, out := c.json(http.MethodPost, "/api/runs/ur1/undo-changes", map[string]any{})
 	if code != 200 || out["changes_undone_at"] != "2026-10-31T12:00:00Z" || gotID != "ur1" || gotRedo {

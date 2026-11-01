@@ -1956,7 +1956,8 @@
     if (!c || !(c.files > 0)) return "";
     var tip = T("runs.chg_tip", { f: plural(c.files, "runs.chg_files_one", "runs.chg_files_many"), a: num(c.add || 0), d: num(c.del || 0) });
     if (c.undone) tip = T("runs.chg_undone_tip") + " · " + tip;
-    return '<a class="chg-badge' + (c.undone ? " undone" : "") + '" href="#/runs/' + enc(r.id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + ic("git", "sm") +
+    else if (c.undone_n > 0) tip = T("runs.chg_partly_tip", { n: num(c.undone_n) }) + " · " + tip;
+    return '<a class="chg-badge' + (c.undone ? " undone" : c.undone_n > 0 ? " partly" : "") + '" href="#/runs/' + enc(r.id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + ic("git", "sm") +
       '<span class="n">' + esc(num(c.files)) + "</span>" + (c.add ? '<span class="add">+' + esc(num(c.add)) + "</span>" : "") + (c.del ? '<span class="del">−' + esc(num(c.del)) + "</span>" : "") + "</a>";
   }
   function runsTable(runs, rerun, q) {
@@ -5736,19 +5737,28 @@
     var c = r.file_changes;
     if (!c || r.run_mode !== "edit") return "";
     var files = c.files || [], st = { A: ["added", "ok"], D: ["removed", "bad"], M: ["modified", "info"], T: ["modified", "info"] };
-    var undone = !!r.changes_undone_at;
+    var undone = !!r.changes_undone_at, gone = {};
+    (undone ? [] : r.changes_undone_files || []).forEach(function (p) { gone[p] = 1; });
+    var nGone = Object.keys(gone).length, partly = nGone > 0;
     var head = '<div class="card-head"><span class="ico">' + ic("git") + '</span><h3 data-tip="' + esc(T("rd.chg_tip")) + '">' + esc(T("rd.chg")) + "</h3>" +
       (c.count ? '<span class="rd-chg-sum"><span class="pill plain sm">' + esc(T("diff.files_n", { n: num(c.count) })) + '</span><span class="add">+' + esc(num(c.add)) + '</span><span class="del">−' + esc(num(c.del)) + "</span>" +
-        (undone ? '<span class="pill warn sm" data-tip="' + esc(T("rd.chg_undone_tip", { t: when(r.changes_undone_at) })) + '">' + esc(T("rd.chg_undone")) + "</span>" : "") + "</span>" +
-        '<span class="rd-acts">' + chgUndoBtn(r, c, undone) + '<button type="button" class="icon-btn sm" data-chg-copy aria-label="' + esc(T("rd.chg_copy")) + '" data-tip="' + esc(T("rd.chg_copy")) + '">' + ic("copy", "sm") + "</button>" +
+        (undone ? '<span class="pill warn sm" data-tip="' + esc(T("rd.chg_undone_tip", { t: when(r.changes_undone_at) })) + '">' + esc(T("rd.chg_undone")) + "</span>" : "") +
+        (partly ? '<span class="pill warn sm" data-tip="' + esc(T("rd.chg_partly_tip")) + '">' + esc(T("rd.chg_partly", { n: num(nGone), m: num(c.count) })) + "</span>" : "") + "</span>" +
+        '<span class="rd-acts">' + chgUndoBtn(r, c, undone, partly) + '<button type="button" class="icon-btn sm" data-chg-copy aria-label="' + esc(T("rd.chg_copy")) + '" data-tip="' + esc(T("rd.chg_copy")) + '">' + ic("copy", "sm") + "</button>" +
         '<button type="button" class="icon-btn sm" data-chg-dl aria-label="' + esc(T("rd.chg_dl")) + '" data-tip="' + esc(T(c.patch_cut ? "rd.chg_dl_cut" : "rd.chg_dl")) + '">' + ic("download", "sm") + "</button></span>"
         : '<span class="pill plain sm">' + ic("check", "sm") + esc(T("rd.chg_none")) + "</span>") + "</div>";
     if (!c.count) return '<section class="card rd-chg" id="rd-chg">' + head + "</section>";
     var undoneCls = undone ? " undone" : "";
+    var one = chgFileUndoOK(r, c);
     var rows = files.map(function (f, i) {
       var s2 = st[f.status] || st.M, n = f.binary ? '<span class="muted">' + esc(T("rd.chg_bin")) + "</span>" :
         (f.add ? '<span class="add">+' + esc(num(f.add)) + "</span>" : "") + (f.del ? '<span class="del">−' + esc(num(f.del)) + "</span>" : "");
-      return '<details class="diff-file" data-chg="' + i + '"><summary><span class="pill sm ' + s2[1] + '">' + esc(T("diff.st_" + s2[0])) + '</span><code class="ell" data-tip="' + esc(f.path) + '">' + esc(f.path) + '</code><span class="grow"></span><span class="rd-chg-n">' + n + "</span></summary>" +
+      var out = undone || gone[f.path];
+      // one file's own undo / put back: on hover or focus (always on touch and on undone rows)
+      var fb = one ? '<button type="button" class="icon-btn sm rd-chg-fx' + (out ? " on" : "") + '" data-chg-file="' + (out ? "redo" : "undo") + '" aria-label="' + esc(T(out ? "rd.chg_f_redo" : "rd.chg_f_undo")) +
+        '" data-tip="' + esc(T(out ? "rd.chg_f_redo" : "rd.chg_f_undo")) + '">' + ic(out ? "redo" : "undo", "sm") + "</button>" : "";
+      return '<details class="diff-file' + (gone[f.path] ? " gone" : "") + '" data-chg="' + i + '"><summary><span class="pill sm ' + s2[1] + '">' + esc(T("diff.st_" + s2[0])) + '</span><code class="ell" data-tip="' + esc(f.path) + '">' + esc(f.path) + '</code>' +
+        (gone[f.path] ? '<span class="pill warn sm rd-chg-gone">' + esc(T("rd.chg_undone")) + "</span>" : "") + '<span class="grow"></span><span class="rd-chg-n">' + n + "</span>" + fb + "</summary>" +
         '<div class="rd-chg-body"></div></details>';
     }).join("");
     var more = c.count > files.length ? '<p class="muted rd-chg-more">' + esc(T("rd.chg_more", { n: num(c.count - files.length) })) + "</p>" : "";
@@ -5760,10 +5770,15 @@
   // cut at 512 KB. Idea: cline/cline sdk/packages/core/src/session/checkpoint-restore.ts
   // (restore the workspace to before the agent's step) — tidebot reverses only the run's
   // hunks instead of resetting the whole tree, so your other edits stay.
-  function chgUndoBtn(r, c, undone) {
-    var live = r.status === "running" || r.status === "queued" || r.status === "pending";
-    var off = live ? T("rd.undo_off_live") : c.patch_cut ? T("rd.undo_off_cut") : "";
-    var k = undone ? "rd.chg_redo" : "rd.chg_undo";
+  function chgLive(r) { return r.status === "running" || r.status === "queued" || r.status === "pending"; }
+  // One file at a time (idea: siteboon/claudecodeui src/modules/git-panel/changes/FileChangeItem.tsx,
+  // a discard button on each changed file's row — theirs restores the file from HEAD, which also
+  // drops edits made before the agent; tidebot takes back only this run's part of that file).
+  // Not offered while running, for a cut patch, or when more files changed than are listed.
+  function chgFileUndoOK(r, c) { return !chgLive(r) && !c.patch_cut && (c.files || []).length === c.count; }
+  function chgUndoBtn(r, c, undone, partly) {
+    var off = chgLive(r) ? T("rd.undo_off_live") : c.patch_cut ? T("rd.undo_off_cut") : "";
+    var k = undone ? "rd.chg_redo" : partly ? "rd.chg_undo_rest" : "rd.chg_undo";
     return '<button type="button" class="btn sm" data-chg-undo="' + (undone ? "redo" : "undo") + '"' + (off ? " disabled" : "") +
       ' data-tip="' + esc(off || T(k + "_tip")) + '">' + ic(undone ? "redo" : "undo", "sm") + esc(T(k)) + "</button>";
   }
@@ -5785,7 +5800,9 @@
     return code && state.dict["rd.undo_err_" + code] ? T("rd.undo_err_" + code) : e.message;
   }
   function runUndoChanges(r, redo, btn) {
-    var n = (r.file_changes || {}).count || 0;
+    var c = r.file_changes || {}, n = c.count || 0;
+    var gone = r.changes_undone_at ? [] : r.changes_undone_files || [];
+    if (gone.length) n = redo ? gone.length : Math.max(0, n - gone.length);
     var go = function () {
       if (btn) btn.disabled = true;
       return api("/api/runs/" + enc(r.id) + "/undo-changes", { method: "POST", body: { redo: redo } }).then(function () {
@@ -5800,6 +5817,24 @@
     };
     if (redo) return go();
     return confirmDialog({ title: T("rd.undo_title", { n: num(n) }), body: T("rd.undo_body", { dir: r.workspace || "" }), ok: T("rd.chg_undo"), danger: true, icon: "undo" })
+      .then(function (y) { if (y) return go(); });
+  }
+  // one file of the run: confirm names the file; put back goes straight away
+  function runUndoFile(r, path, redo, btn) {
+    var go = function () {
+      if (btn) btn.disabled = true;
+      return api("/api/runs/" + enc(r.id) + "/undo-changes", { method: "POST", body: { redo: redo, path: path } }).then(function () {
+        if (location.hash === "#/runs/" + r.id) refresh();
+        if (redo) toast(T("rd.chg_f_redone", { f: path }));
+        else toast(T("rd.chg_f_undone", { f: path }), false, function () { runUndoFile(r, path, true); }, T("rd.chg_redo"));
+      }).catch(function (e) {
+        if (btn && document.contains(btn)) btn.disabled = false;
+        if (e.auth) return;
+        toast(undoErrText(e), true);
+      });
+    };
+    if (redo) return go();
+    return confirmDialog({ title: T("rd.undo_f_title", { f: path }), body: T("rd.undo_f_body", { dir: r.workspace || "" }), ok: T("rd.chg_undo"), danger: true, icon: "undo" })
       .then(function (y) { if (y) return go(); });
   }
   function chgDiffHtml(d) {
@@ -5828,6 +5863,14 @@
           if (document.contains(body)) body.innerHTML = chgDiffHtml((x.diffs || [])[+d.getAttribute("data-chg")]);
         }).catch(function (e) { if (document.contains(body)) body.innerHTML = errorState(e.message); });
       });
+    });
+    $$("[data-chg-file]", card).forEach(function (b) {
+      b.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation(); // inside <summary>: don't open / close the diff
+        var d = b.closest("details[data-chg]"), f = d && (r.file_changes.files || [])[+d.getAttribute("data-chg")];
+        if (f) runUndoFile(r, f.path, b.getAttribute("data-chg-file") === "redo", b);
+      });
+      b.addEventListener("keydown", function (e) { if (e.key === " " || e.key === "Enter") e.stopPropagation(); });
     });
     var ub = $("[data-chg-undo]", card);
     if (ub) ub.addEventListener("click", function () { runUndoChanges(r, ub.getAttribute("data-chg-undo") === "redo", ub); });

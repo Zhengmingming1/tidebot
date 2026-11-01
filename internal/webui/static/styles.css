@@ -3075,3 +3075,12 @@ input.tgl:disabled { opacity: .5; cursor: default; }
 .rd-chg.undone .rd-chg-list:hover, .rd-chg.undone .rd-chg-list:focus-within { opacity: 1; }
 .chg-badge.undone { border-style: dashed; color: var(--text-3); }
 .chg-badge.undone .n, .chg-badge.undone .add, .chg-badge.undone .del { text-decoration: line-through; color: var(--text-3); }
+.chg-badge.partly { border-style: dashed; }
+/* one file of an edit run undone on its own: row dimmed, its button stays visible */
+.rd-chg-list .diff-file.gone summary code, .rd-chg-list .diff-file.gone .rd-chg-n { opacity: .55; text-decoration: line-through; }
+.rd-chg-list .diff-file .rd-chg-gone { min-width: 0; }
+html[lang="en"] .rd-chg-list .diff-file .rd-chg-gone { min-width: 0; }
+.rd-chg-fx { flex: none; margin: -4px -8px -4px 0; opacity: 0; transition: opacity var(--dur-fast); }
+.diff-file summary:hover .rd-chg-fx, .diff-file summary:focus-within .rd-chg-fx, .rd-chg-fx:focus-visible, .rd-chg-fx.on { opacity: 1; }
+@media (hover: none) { .rd-chg-fx { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .rd-chg-fx { transition: none; } }

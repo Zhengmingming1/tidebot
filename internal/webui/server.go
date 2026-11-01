@@ -65,7 +65,7 @@ type Deps struct {
 	// UndoRunChanges takes an edit run's changes back out of its folder (redo: puts
 	// them back) and returns the new changes_undone_at ('' after redo). Refusals are
 	// *UndoError. Optional.
-	UndoRunChanges func(ctx context.Context, runID string, redo bool) (string, error)
+	UndoRunChanges func(ctx context.Context, runID string, redo bool, path string) (UndoResult, error)
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
 	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
 	Providers     ProviderAdmin

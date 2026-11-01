@@ -4712,3 +4712,52 @@ without special cases; the cron-based Home list is the only place that has to re
 1. Skip from the task list row (j/k cursor `s` key) and the command palette ("跳过下一次：Daily Report").
 2. Skip a whole date range (holiday) — Uptime Kuma recurring maintenance windows.
 3. Show skipped runs in the runs history as "跳过（手动）" rows so the gap is explained later.
+
+## 2026-11-01 (08:00): undo one file of an edit run — the rest stays as the run left it
+
+Category: UX / features (recent rounds: features / UX, UI polish, features / correctness, UX).
+Idea 1 of the 2026-10-31 (20:00) entry: "Undo changes" was all or nothing — when a run got three
+files right and one wrong, keeping the good ones meant undoing everything and redoing by hand.
+
+**Done**
+
+- `gitsnap.FilePatch(patch, paths)` / `PatchWithout(patch, paths)`: pick a run's patch sections by
+  the exact header git writes for the path (`diff --git a/P b/P`, or C-quoted like git's
+  `quote_c_style` when P has a quote, backslash or control char) — never parsed, so "a" can't match
+  "a b"; a type change (two sections for one path) goes together; CRLF-tolerant.
+- Migration 026 `runs.changes_undone_files` (JSON array of paths taken back one by one).
+  `undoRunChanges(ctx, id, redo, path)`: with a path only that file's sections are applied
+  (refused: `file` not one of the run's files, `state` already in that state, `many` when more files
+  changed than are listed, plus the old codes). Without a path, "Undo" takes back what's still in
+  place, "Put back" puts back every undone file. Once every file is out the run counts as undone
+  (`changes_undone_at`); a single file can be put back from a wholly undone run (the others stay
+  undone). git apply still checks first and writes nothing on a conflict; folder re-checked and held.
+- API: `POST /api/runs/{id}/undo-changes {"redo", "path"?}` (CSRF, 8 KB body, path ≤ 4096 bytes,
+  no NUL) → `changes_undone_at` + `changes_undone_files`; run detail returns
+  `changes_undone_files`; list rows `changes.undone_n` (counted in SQL with `json_array_length`).
+- Run page: each file row gets an undo icon (hover / focus, always on touch and on undone rows;
+  clicking doesn't open the diff), in-app danger confirm naming the file and folder; an undone row is
+  struck through with an "已撤销" pill and a put-back icon; header shows "已撤销 1/4" and the main
+  button becomes "撤销其余"; toast with "恢复改动". Not offered while running, for a cut patch, or
+  over the 300-file list cap. Runs list badge is dashed with "已单独撤销 N 个文件" in its tooltip.
+  zh-CN + en, all three themes.
+- Tests: `gitsnap/sections_test.go` (headers incl. quoted, type change, prefix paths, CRLF; real
+  repo: one file out with a quote / CJK name, rest out without it, one file back), `app/undofile_test.go`
+  (one out / twice / back, unknown file, one + rest → whole, one back from whole, put back all,
+  one by one → whole, over cap), `webui/undo_file_test.go` (API path, answer, detail, `undone_n`,
+  long / NUL path 400 before the app; UI under node: row buttons, partial state, hidden cases,
+  escaping, badge).
+- Shots: `/workspace/tidebot-shots/2026-11-01-0800-undo-one-file-1024x655.png` (+ `-confirm`,
+  `-midnight-dark`).
+
+**Learned** — siteboon/claudecodeui `server/modules/git/git.routes.ts` (`POST /discard`: per file,
+`git restore` for M/D, delete for untracked, from HEAD) and
+`src/modules/git-panel/changes/FileChangeItem.tsx` (a discard icon on each changed file's row).
+Restoring from HEAD also drops edits made before the agent ran; filtering the run's own patch to one
+file keeps them, and git apply's all-or-nothing check still guards against later edits.
+
+**Ideas for later**
+
+1. Undo a single hunk from the open diff (split the file section at `@@` headers).
+2. Dry-run `git apply --check -R` when the card opens and mark rows that can no longer be undone.
+3. Keyboard: `u` on a focused file row to undo / put back it.

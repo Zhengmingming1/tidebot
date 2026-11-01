@@ -244,6 +244,8 @@ type runChangeSum struct {
 	Del   int `json:"del"`
 	// Undone: the changes were taken back out of the folder ("Undo changes").
 	Undone bool `json:"undone,omitempty"`
+	// UndoneN: files taken back one by one so far (the run not wholly undone).
+	UndoneN int `json:"undone_n,omitempty"`
 }
 
 // runChangeCols reads runChangeSum from runs.file_changes in SQL, so lists never load the
@@ -251,7 +253,8 @@ type runChangeSum struct {
 const runChangeCols = `CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.count'),0) ELSE -1 END,
  CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.add'),0) ELSE 0 END,
  CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.del'),0) ELSE 0 END,
- r.changes_undone_at<>''`
+ r.changes_undone_at<>'',
+ CASE WHEN r.changes_undone_files<>'' AND json_valid(r.changes_undone_files) THEN json_array_length(r.changes_undone_files) ELSE 0 END`
 
 func (s *Server) runSelect() string {
 	return `SELECT r.id, COALESCE(r.task_id,''), COALESCE(t.name,''), r.status, r.trigger_kind,
@@ -307,13 +310,14 @@ func scanRun(rows *sql.Rows) (runDTO, error) {
 	var d runDTO
 	var files, add, del int
 	var undone bool
+	var undoneN int
 	err := rows.Scan(&d.ID, &d.TaskID, &d.TaskName, &d.Status, &d.Trigger, &d.Provider, &d.Model,
 		&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
 		&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
 		&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests,
-		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode, &files, &add, &del, &undone)
+		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode, &files, &add, &del, &undone, &undoneN)
 	if err == nil && files >= 0 {
-		d.Changes = &runChangeSum{Files: files, Add: add, Del: del, Undone: undone}
+		d.Changes = &runChangeSum{Files: files, Add: add, Del: del, Undone: undone, UndoneN: undoneN}
 	}
 	return d, err
 }
@@ -1284,20 +1288,25 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		// answer_same: the earlier run of the task that gave the same answer (whitespace ignored)
 		// file_changes: files an edit run changed in its folder (git work trees only)
 		// changes_undone_at: when "Undo changes" took them back out of the folder ('' = in place)
-		var detail, result, sameID, changes, undoneAt string
+		// changes_undone_files: files taken back one by one (while the run isn't wholly undone)
+		var detail, result, sameID, changes, undoneAt, undoneFiles string
 		var cut int
-		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes, changes_undone_at FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes, &undoneAt)
+		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes, changes_undone_at, changes_undone_files FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes, &undoneAt, &undoneFiles)
 		out := struct {
 			runDTO
-			CostDetail      json.RawMessage `json:"cost_detail"`
-			Currency        string          `json:"currency"`
-			Result          string          `json:"result"`
-			ResultTruncated bool            `json:"result_truncated,omitempty"`
-			AnswerSame      *answerSameDTO  `json:"answer_same,omitempty"`
-			AnswerPrev      *answerSameDTO  `json:"answer_prev,omitempty"`
-			FileChanges     json.RawMessage `json:"file_changes,omitempty"`
-			ChangesUndoneAt string          `json:"changes_undone_at,omitempty"`
-		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil, nil, undoneAt}
+			CostDetail         json.RawMessage `json:"cost_detail"`
+			Currency           string          `json:"currency"`
+			Result             string          `json:"result"`
+			ResultTruncated    bool            `json:"result_truncated,omitempty"`
+			AnswerSame         *answerSameDTO  `json:"answer_same,omitempty"`
+			AnswerPrev         *answerSameDTO  `json:"answer_prev,omitempty"`
+			FileChanges        json.RawMessage `json:"file_changes,omitempty"`
+			ChangesUndoneAt    string          `json:"changes_undone_at,omitempty"`
+			ChangesUndoneFiles []string        `json:"changes_undone_files,omitempty"`
+		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil, nil, undoneAt, nil}
+		if undoneAt == "" && undoneFiles != "" {
+			_ = json.Unmarshal([]byte(undoneFiles), &out.ChangesUndoneFiles)
+		}
 		if changes != "" && json.Valid([]byte(changes)) {
 			out.FileChanges = json.RawMessage(changes)
 		}

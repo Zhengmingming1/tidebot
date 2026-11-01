@@ -42,10 +42,11 @@ func TestUndoRunChanges(t *testing.T) {
 		return false
 	})
 	ctx := context.Background()
-	if _, err := a.undoRunChanges(ctx, runID, true); undoCode(err) != "state" {
+	if _, err := a.undoRunChanges(ctx, runID, true, ""); undoCode(err) != "state" {
 		t.Fatalf("redo before undo: %v", err)
 	}
-	at, err := a.undoRunChanges(ctx, runID, false)
+	res, err := a.undoRunChanges(ctx, runID, false, "")
+	at := res.UndoneAt
 	if err != nil || at == "" {
 		t.Fatalf("undo: %q %v", at, err)
 	}
@@ -57,17 +58,17 @@ func TestUndoRunChanges(t *testing.T) {
 	if saved != at {
 		t.Fatalf("saved %q want %q", saved, at)
 	}
-	if _, err := a.undoRunChanges(ctx, runID, false); undoCode(err) != "state" {
+	if _, err := a.undoRunChanges(ctx, runID, false, ""); undoCode(err) != "state" {
 		t.Fatalf("second undo: %v", err)
 	}
-	if at, err := a.undoRunChanges(ctx, runID, true); err != nil || at != "" {
-		t.Fatalf("redo: %q %v", at, err)
+	if res, err := a.undoRunChanges(ctx, runID, true, ""); err != nil || res.UndoneAt != "" {
+		t.Fatalf("redo: %+v %v", res, err)
 	}
 	if b, _ := os.ReadFile(made); len(b) == 0 {
 		t.Fatal("redo didn't bring the file back")
 	}
 	_ = os.WriteFile(made, []byte("edited by hand\n"), 0o644)
-	if _, err := a.undoRunChanges(ctx, runID, false); undoCode(err) != "conflict" {
+	if _, err := a.undoRunChanges(ctx, runID, false, ""); undoCode(err) != "conflict" {
 		t.Fatalf("undo after a hand edit: %v", err)
 	}
 	if b, _ := os.ReadFile(made); string(b) != "edited by hand\n" {
@@ -76,12 +77,12 @@ func TestUndoRunChanges(t *testing.T) {
 	if !lockEditDir(real) {
 		t.Fatal("undo left the folder held")
 	}
-	_, err = a.undoRunChanges(ctx, runID, false)
+	_, err = a.undoRunChanges(ctx, runID, false, "")
 	unlockEditDir(real)
 	if undoCode(err) != "busy" {
 		t.Fatalf("undo while an edit run holds the folder: %v", err)
 	}
-	if _, err := a.undoRunChanges(ctx, "nope", false); !errors.Is(err, webui.ErrRunNotFound) {
+	if _, err := a.undoRunChanges(ctx, "nope", false, ""); !errors.Is(err, webui.ErrRunNotFound) {
 		t.Fatalf("unknown run: %v", err)
 	}
 }
@@ -106,7 +107,7 @@ VALUES(?,?,?,?,?,?,?,?,datetime('now'))`, id, status, "quick", "p", ws, mode, fc
 	ins("r-cut", "edit", "succeeded", `{"count":1,"patch_cut":true}`, p)
 	ins("r-bin", "edit", "succeeded", `{"count":1}`, p+"Binary files a/x and b/x differ\n")
 	for id, want := range map[string]string{"r-read": "none", "r-zero": "none", "r-live": "running", "r-cut": "cut", "r-bin": "binary"} {
-		if _, err := a.undoRunChanges(context.Background(), id, false); undoCode(err) != want {
+		if _, err := a.undoRunChanges(context.Background(), id, false, ""); undoCode(err) != want {
 			t.Fatalf("%s: %v, want %s", id, err, want)
 		}
 	}

@@ -50,7 +50,8 @@ func (s *Server) handleRunChanges(w http.ResponseWriter, r *http.Request, id str
 // none (nothing recorded) | running | cut (patch over the size cap) | binary (an
 // older run's patch without binary data) | state (already undone / not undone) |
 // dir (folder gone or not allowed) | busy (an edit run is going there) | conflict
-// (a file was changed since; Detail is git's reason).
+// (a file was changed since; Detail is git's reason) | file (path not one of the
+// run's files) | many (more files than listed: one-by-one undo not offered).
 type UndoError struct{ Code, Detail string }
 
 func (e *UndoError) Error() string {
@@ -60,11 +61,19 @@ func (e *UndoError) Error() string {
 	return "cannot undo the run's changes (" + e.Code + ")"
 }
 
+// UndoResult is the state after an undo / put back: UndoneAt is set once the whole
+// run is back out; otherwise UndoneFiles lists the files taken back one by one.
+type UndoResult struct {
+	UndoneAt    string
+	UndoneFiles []string
+}
+
 // ErrRunNotFound: no run with that id.
 var ErrRunNotFound = errors.New("run not found")
 
-// undoRunChanges: POST /api/runs/{id}/undo-changes {"redo": bool} → {"changes_undone_at": t}.
-// Takes the run's patch back out of its folder (redo: applies it again); every file
+// undoRunChanges: POST /api/runs/{id}/undo-changes {"redo": bool, "path"?: file} →
+// {"changes_undone_at": t, "changes_undone_files": [...]}. Takes the run's patch (or
+// one file's part of it) back out of its folder (redo: applies it again); every file
 // is checked first and nothing is written unless all of them still match.
 func (s *Server) undoRunChanges(w http.ResponseWriter, r *http.Request, id string) {
 	if s.deps.UndoRunChanges == nil {
@@ -72,14 +81,19 @@ func (s *Server) undoRunChanges(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	var body struct {
-		Redo bool `json:"redo"`
+		Redo bool   `json:"redo"`
+		Path string `json:"path"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, 400, "bad request")
 		return
 	}
-	at, err := s.deps.UndoRunChanges(r.Context(), id, body.Redo)
+	if len(body.Path) > 4096 || strings.ContainsRune(body.Path, 0) {
+		writeErr(w, 400, "bad request")
+		return
+	}
+	res, err := s.deps.UndoRunChanges(r.Context(), id, body.Redo, body.Path)
 	var ue *UndoError
 	switch {
 	case errors.As(err, &ue):
@@ -89,7 +103,11 @@ func (s *Server) undoRunChanges(w http.ResponseWriter, r *http.Request, id strin
 	case err != nil:
 		writeErr(w, 500, err.Error())
 	default:
-		writeJSON(w, 200, map[string]any{"ok": true, "changes_undone_at": at})
+		files := res.UndoneFiles
+		if files == nil {
+			files = []string{}
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "changes_undone_at": res.UndoneAt, "changes_undone_files": files})
 	}
 }
 
