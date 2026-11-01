@@ -18,7 +18,26 @@ func TestSchedulerPreviewDSTNote(t *testing.T) {
 	}
 	c.s.deps.LocFn = func() *time.Location { return ny }
 	c.s.deps.Tasks.Sched.SetLocation(ny)
+	// The preview looks a year ahead. In the days right after New York's fall-back night
+	// (first Sunday of November) the next one is more than 366 days away: no fold to show.
+	now := time.Now().In(ny)
+	fold := func(y int) time.Time {
+		d := time.Date(y, 11, 1, 12, 0, 0, 0, ny)
+		for d.Weekday() != time.Sunday {
+			d = d.AddDate(0, 0, 1)
+		}
+		return d
+	}
+	nextFold := fold(now.Year())
+	if !now.Before(nextFold.Add(-10 * time.Hour)) { // that day's 01:00 has passed
+		nextFold = fold(now.Year() + 1)
+	}
+	foldInReach := nextFold.Sub(now) < 365*24*time.Hour
 	for _, tc := range []struct{ cron, kind, wall string }{{"30 2 * * *", "gap", "02:30"}, {"0 1 * * *", "fold", "01:00"}} {
+		if tc.kind == "fold" && !foldInReach {
+			t.Logf("next fall-back night %s is more than a year away", nextFold.Format("2006-01-02"))
+			continue
+		}
 		code, out := c.json(http.MethodGet, "/api/scheduler/preview?cron="+strings.ReplaceAll(tc.cron, " ", "+"), nil)
 		if code != 200 {
 			t.Fatalf("%s: %d %v", tc.cron, code, out)

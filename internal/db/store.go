@@ -419,21 +419,29 @@ func (s *Store) RecentQuickPrompts(ctx context.Context, limit int) ([]string, er
 	if limit <= 0 || limit > 20 {
 		limit = 6
 	}
+	// Walk runs without a task newest first on idx_runs_notask_created (named, so an empty
+	// table's plan can't pick an OR of two task_id lookups plus a sort; the WHERE must say
+	// exactly what the partial index says) and stop at the limit-th distinct prompt. The
+	// GROUP BY prompt this replaces read and grouped every such run's whole prompt first.
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT prompt FROM runs
+SELECT prompt FROM runs INDEXED BY idx_runs_notask_created
 WHERE (task_id IS NULL OR task_id = '') AND TRIM(prompt) <> ''
-GROUP BY prompt ORDER BY MAX(created_at) DESC LIMIT ?`, limit)
+ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []string{}
-	for rows.Next() {
+	seen := map[string]bool{}
+	for len(out) < limit && rows.Next() {
 		var p string
 		if err := rows.Scan(&p); err != nil {
 			return nil, err
 		}
-		out = append(out, p)
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
 	}
 	return out, rows.Err()
 }

@@ -4814,3 +4814,60 @@ rule is "slots of one window count as one, timed at its end".
 3. Notification quiet hours (`notify.quiet`, today agentctl only) in the same card, sharing the
    time-range control.
 4. Task list "下次" hint when the next run falls in quiet hours.
+
+## 2026-11-01 (16:00): runs list opens instantly with a long history — page first, then join
+
+Category: performance (recent rounds: features / resource usage, UX / features, features / UX,
+UI polish; the last performance round was 10-29 00:05). Measured on the demo server with 50 000
+runs (prompts ~1.2 KB, answers ~1.4 KB, 8 % failed): the runs page — the most opened list — took
+170 ms unfiltered, 370 ms for "成功", 290 ms for page 41, 40 ms for "失败"; the Run dialog's
+`/api/runs/defaults` 116 ms and `/api/runs/recent-prompts` 51 ms. The time-range filter and the
+task list were already ~2 ms, which pointed at the plan rather than the data size.
+
+**Done**
+
+- Cause: the list's order is `created_at DESC, id DESC` but the index was `runs(created_at)`
+  alone, so with the tasks / versions / skills joins SQLite picked another index and sorted every
+  run, prompt included, to keep 50.
+- Migration 027: `idx_runs_created_id (created_at, id)` and `idx_runs_status_created (status,
+  created_at, id)` replace their prefixes `idx_runs_created` / `idx_runs_status`; partial indexes
+  `idx_runs_quick_created … WHERE trigger_kind = 'quick'` (Run dialog's last folder / recent
+  folders) and `idx_runs_notask_created … WHERE task_id IS NULL OR task_id = ''` (recent prompts).
+  50 000 runs: +3.4 MB, built in well under a second at start-up.
+- `handleRuns` pages first (`runsPageWhere`): `WHERE r.rowid IN (SELECT r.rowid FROM runs r
+  <filter> ORDER BY … LIMIT ? OFFSET ?) ORDER BY …`; the inner query joins tasks only when search
+  text needs the task name, so status / time / task filters page from an index alone ("失败" =
+  two statuses, sorted from the covering index without touching the table).
+- `RecentQuickPrompts` walks the no-task runs newest first (`INDEXED BY` the partial index — an
+  empty table's plan otherwise picks an OR of two lookups plus a sort) and stops at the 6th
+  distinct prompt instead of `GROUP BY prompt` over all of them; equal times: later id is newer.
+- After: unfiltered / 成功 / 失败 / 已停止 / page 41 ≈ 2 ms each, sort by cost or duration
+  200 → 75 ms, `/api/runs/defaults` 116 → 18 ms, recent prompts 51 → 17 ms.
+- Tests: `webui/runs_page_test.go` (`TestRunsPageSameRows`: 24 combinations of filter, sort,
+  search, offset and cursor give exactly the rows of the one-pass query, in order;
+  `TestRunsPagePlan`: inner plans use the new indexes with no temp B-tree, the page is fetched by
+  rowid; `TestRunDefaultsUseQuickIndex`), `db/recentprompts_test.go` (indexes present / old ones
+  gone, plan, ties, many repeats of one prompt).
+- Also fixed `TestSchedulerPreviewDSTNote`: in the days right after New York's fall-back night
+  the next one is more than the preview's year away, so the test failed from 2026-11-01 on; it now
+  checks the fold only when the next one is within reach.
+- No UI change, no new strings.
+
+**Learned** — n8n-io/n8n `packages/@n8n/db/src/repositories/execution.repository.ts`
+(`toQueryBuilderWithAnnotations`: the page of executions is a subquery with its LIMIT, the
+annotation / tag joins go onto that page, and the result is sorted again because a join doesn't
+keep the order). In SQLite an index that holds the whole ORDER BY key (tie-breaker included) is
+what lets `LIMIT` stop early; one that matches only the first term turns into "sort everything"
+as soon as joins make another index look cheaper. A partial index is only used when the query's
+WHERE repeats its condition word for word.
+
+**Ideas for later**
+
+1. Sort by cost / duration still reads every row (75 ms at 50 000): an expression index on
+   `COALESCE(duration_ms,0)` or a stored `cost_display` column would make them index reads too.
+2. Search (`q=`, ~180 ms with no hits) still scans prompts — FTS5 trigram (idea 1 of 10-29 00:05),
+   weighed against index size since scheduled prompts repeat on every run.
+3. Keep `result_text` / `file_patch` in a side table (like n8n's `execution_data`) so the runs
+   table stays narrow and full scans (export, retention) touch fewer pages.
+4. A `scripts/bench-history.sh` that seeds the demo server and prints these timings (carried
+   over), so a regression shows before the weekly release.

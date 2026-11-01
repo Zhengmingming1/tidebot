@@ -1184,10 +1184,10 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		where += " AND (r.created_at " + cmp + " ? OR (r.created_at = ? AND r.id " + cmp + " ?))"
 		args = append(args, created, created, before)
 	}
-	where += " ORDER BY " + order + " LIMIT ?"
+	page := " LIMIT ?"
 	args = append(args, limitParam(r, 50, 1000))
 	if off, err := strconv.Atoi(q.Get("offset")); err == nil && off > 0 {
-		where += " OFFSET ?"
+		page += " OFFSET ?"
 		args = append(args, off)
 	}
 	// With search text, read whole prompts so a hit past the 300-byte preview still shows
@@ -1197,7 +1197,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	if qs != "" {
 		promptMax = 0
 	}
-	runs, err := s.queryRunsOpt(r.Context(), promptMax, where, args...)
+	runs, err := s.queryRunsOpt(r.Context(), promptMax, runsPageWhere(qs != "", where, order, page), args...)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -1209,6 +1209,21 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, runs)
+}
+
+// runsPageWhere picks the page's rows first and joins the rest onto them (idea: n8n
+// execution.repository.ts toQueryBuilderWithAnnotations — the page is a subquery, the
+// joins go on the page and it is sorted again). The inner query reads only runs and, for
+// the time and status filters, only an index (idx_runs_created_id, idx_runs_status_created):
+// the tasks join is there only when search text needs the task name. Before, SQLite joined
+// tasks / versions / skills for every run and sorted them all with their prompts to keep 50
+// (≈200 ms at 50 000 runs for the unfiltered list, ≈50 ms for "failed").
+func runsPageWhere(search bool, where, order, limit string) string {
+	join := ""
+	if search {
+		join = "LEFT JOIN tasks t ON t.id = r.task_id "
+	}
+	return "WHERE r.rowid IN (SELECT r.rowid FROM runs r " + join + where + " ORDER BY " + order + limit + ") ORDER BY " + order
 }
 
 // runsOrder is the ORDER BY for the runs list's sort (new, old, cost, tokens, duration);
@@ -1232,7 +1247,7 @@ func (s *Server) handleRunCounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// tasks are only needed to match the search text against the task name; without it
-	// the count is read from idx_runs_status alone (44 ms -> 2 ms at 50 000 runs).
+	// the count is read from a status index alone (44 ms -> 2 ms at 50 000 runs).
 	join := ""
 	if strings.TrimSpace(r.URL.Query().Get("q")) != "" {
 		join = "LEFT JOIN tasks t ON t.id = r.task_id "
