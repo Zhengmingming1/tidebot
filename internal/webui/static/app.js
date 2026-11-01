@@ -1630,6 +1630,7 @@
   setInterval(function () {
     if (!state.csrf || ($("#shell") && $("#shell").classList.contains("hidden"))) return;
     if (document.hidden && !docTitle.running) return;
+    if (evsLive()) return; // the change stream refreshes the bell as soon as it changes
     // status first: a run that just failed has written its notification by then
     (document.hidden ? loadCC(false) : Promise.resolve()).then(function () { return api("/api/notifications/center"); }).then(noteNotifs).catch(function () {});
   }, 60000);
@@ -1704,18 +1705,106 @@
     });
     $$("a", pop).forEach(function (a) { if (a.getAttribute("href").indexOf("#/runs/") === 0) a.addEventListener("click", function () { pop.remove(); }); });
   }
-  setInterval(function () { if (state.csrf && !document.hidden) loadCC(false); }, 30000);
+  // With the change stream up, runs starting / ending refresh this at once; the slow timer
+  // only keeps uptime and provider health current.
+  setInterval(function () { if (state.csrf && !document.hidden && (!evsLive() || Date.now() - cc.at > 120000)) loadCC(false); }, 30000);
 
   // ---------- idle / SSE ----------
   function stopStream() { if (state.es) { state.es.close(); state.es = null; } }
   function bumpIdle() { state.lastInput = Date.now(); clearTimeout(state.idleTimer); state.idleTimer = setTimeout(stopStream, IDLE_MS); }
   ["mousemove", "click", "scroll", "keydown"].forEach(function (ev) { document.addEventListener(ev, bumpIdle, { passive: true }); });
 
+  // ---------- change stream (/api/events) ----------
+  // One small SSE stream says when something changed: {rev, notif, busy}. While it is up,
+  // live pages read rev from it instead of asking /api/rev, the bell / tab icon refresh when
+  // notif moves and the sidebar status when busy moves (both within about a second instead of
+  // the 60 s / 30 s polls). Tabs of one browser share it: the tab holding the "tb-events" lock
+  // opens the stream and passes each message on over a BroadcastChannel, so ten tabs still
+  // use one connection. Without locks or BroadcastChannel each tab opens its own. Whenever
+  // it isn't up (refused, server gone, machine asleep) the polls work exactly as before.
+  var evs = { st: null, at: 0, es: null, bc: null, leader: false, on: false, release: null, retry: 0, rt: null, seq: 0 };
+  var EVS_STALE_MS = 60000; // the server repeats the state every 25 s
+  function evsLive() { return !!(evs.on && evs.st && Date.now() - evs.at < EVS_STALE_MS); }
+  function evsApply(st) {
+    if (!st || typeof st.rev !== "string") return;
+    var prev = evs.st;
+    evs.st = st; evs.at = Date.now();
+    if (!prev || !state.csrf) return; // the page loaded these itself just now
+    if (st.notif !== prev.notif) api("/api/notifications/center", { fresh: true }).then(noteNotifs).catch(function () {});
+    if (st.busy !== prev.busy) { cc.at = 0; loadCC(false); }
+  }
+  function evsDown() { evs.st = null; evs.at = 0; }
+  function evsOpen() {
+    if (evs.es || !evs.on) return;
+    clearTimeout(evs.rt); evs.rt = null;
+    var es = new EventSource("/api/events");
+    evs.es = es;
+    es.onopen = function () { evs.retry = 0; };
+    es.onmessage = function (m) {
+      var st; try { st = JSON.parse(m.data); } catch (e) { return; }
+      evsApply(st);
+      if (evs.bc) evs.bc.postMessage({ t: "st", st: st });
+    };
+    es.onerror = function () {
+      evsDown();
+      if (evs.bc) evs.bc.postMessage({ t: "down" });
+      // The browser retries a dropped stream by itself; a refused one (401, 429, server
+      // stopped) is closed for good, so back off like n8n's reconnect timer: 1 s doubling to 60 s.
+      if (es.readyState === 2) { evs.es = null; evsLater(); }
+    };
+  }
+  function evsLater() {
+    if (!evs.on || evs.rt) return;
+    var ms = Math.min(1000 * Math.pow(2, evs.retry++), 60000);
+    evs.rt = setTimeout(function () { evs.rt = null; evsOpen(); }, ms);
+  }
+  function evsClose() { if (evs.es) { evs.es.close(); evs.es = null; } evsDown(); }
+  function evsStart() {
+    if (evs.on || !window.EventSource || !state.csrf) return;
+    evs.on = true;
+    var my = ++evs.seq;
+    if (window.BroadcastChannel && !evs.bc) {
+      evs.bc = new BroadcastChannel("tb-events");
+      evs.bc.onmessage = function (m) {
+        var d = m.data || {};
+        if (d.t === "hello" && evs.leader && evs.st) evs.bc.postMessage({ t: "st", st: evs.st });
+        if (evs.leader) return;
+        if (d.t === "st") evsApply(d.st);
+        if (d.t === "down") evsDown();
+      };
+    }
+    if (evs.bc && navigator.locks && navigator.locks.request) {
+      navigator.locks.request("tb-events", function () {
+        if (!evs.on || my !== evs.seq) return; // signed out while waiting: let the next tab have it
+        evs.leader = true; evsOpen();
+        return new Promise(function (res) { evs.release = res; });
+      }).catch(function () {});
+      evs.bc.postMessage({ t: "hello" });
+    } else { evs.leader = true; evsOpen(); }
+  }
+  // Signed out (or the session ended): close the stream and hand the lock on.
+  function evsStop() {
+    evs.on = false; evs.leader = false; evs.retry = 0;
+    clearTimeout(evs.rt); evs.rt = null;
+    evsClose();
+    if (evs.release) { evs.release(); evs.release = null; }
+  }
+  // A laptop that slept can leave a dead connection with no error: no message for a minute
+  // means reconnect (and the polls take over meanwhile). Also checked when the window returns.
+  function evsCheck() {
+    if (!evs.on || !evs.leader || evsLive()) return;
+    if (evs.es && evs.es.readyState === 0) return; // the browser is already reconnecting
+    evsClose(); evs.retry = 0; evsOpen();
+  }
+  setInterval(evsCheck, 30000);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) evsCheck(); });
+
   // ---------- login ----------
   function dropBoot() { var b = document.getElementById("boot"); if (b) b.remove(); }
   function showLogin(totp) {
     dropBoot();
     stopStream();
+    evsStop();
     setDocTitle({ page: T("login.submit"), running: 0, alert: false });
     $("#shell").classList.add("hidden");
     var l = $("#login");
@@ -2032,7 +2121,8 @@
     var seen = null;
     return function (load) {
       if (net.down) return Promise.resolve(); // the reconnect probe is already asking
-      return apiRaw("/api/rev").then(function (r) {
+      // the change stream already knows the token: no request at all
+      return (evsLive() ? Promise.resolve({ rev: evs.st.rev }) : apiRaw("/api/rev")).then(function (r) {
         var rev = r && r.rev;
         if (rev && rev === seen) return;
         return Promise.resolve(load()).then(function () { seen = rev; });
@@ -2041,7 +2131,9 @@
   }
   // Seconds between change checks: 2 while something runs, 5 while you're using the page,
   // 15 once there's been no input for 2 minutes (the desktop window often sits open all day).
-  function liveEvery(busy) { return busy ? 2 : Date.now() - (state.lastInput || 0) < 120000 ? 5 : 15; }
+  // With the change stream up a check costs nothing, so it is 2 s throughout: the page
+  // follows changes within 2 s and still reloads only when something changed.
+  function liveEvery(busy) { return busy || evsLive() ? 2 : Date.now() - (state.lastInput || 0) < 120000 ? 5 : 15; }
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) state.lastInput = Date.now(); // coming back counts as activity
     if (!document.hidden && poller.fn && !poller.t) poller.tick();
@@ -5385,7 +5477,13 @@
         return Promise.all([api(url()), api(curl()).catch(noCounts)]).then(function (r) { if (my === v.seq && $("#rtable")) { paintCounts(r[1]); paint(r[0]); live(r[0]); } });
       };
       var gate = revGate();
-      var live = function (list) { if (list.some(function (r) { return r.status === "running" || r.status === "queued"; })) livePoll(function () { return gate(reload); }, 2000); else stopPoll(); };
+      // While something runs: check every 2 s. With the change stream up it also keeps
+      // checking when nothing runs (a check is free then), so a scheduled run that starts
+      // shows up here within 2 s instead of on the next visit.
+      var live = function (list) {
+        var busy = list.some(function (r) { return r.status === "running" || r.status === "queued"; });
+        if (busy || evs.on) livePoll(function () { return busy || evsLive() ? gate(reload) : null; }, 2000); else stopPoll();
+      };
       paint(runs); live(runs);
       imeInput($("#rq"), 250, function (val) { if (val.trim() === v.q) return; v.q = val.trim(); v.key = [st, task, v.sort, v.q, rangeQuery(rg)].join("|"); v.n = RUNS_PAGE; reload().catch(fail); });
       $("#rsort").addEventListener("change", function (e) { v.sort = e.target.value; v.key = [st, task, v.sort, v.q, rangeQuery(rg)].join("|"); v.n = RUNS_PAGE; reload().catch(fail); });
@@ -7603,6 +7701,7 @@
       dropBoot();
       renderShell();
       route();
+      evsStart();
     }).catch(function (e) {
       // Unreachable at start: keep the splash, the connection bar retries and boots again.
       if (e && e.offline) return;

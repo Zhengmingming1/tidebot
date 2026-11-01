@@ -4923,3 +4923,67 @@ the group fails. CSS `opacity` on a disabled button also fades its `::after` too
 1. Undo a single hunk from the open diff (carried over); the check could then mark hunks.
 2. Show "已改动" on the runs list badge too (needs a cheap batch check, maybe only for the page).
 3. Offer "download this file's patch" right in the off button's place for a stale file.
+
+## 2026-11-02 (00:00): one change stream instead of polls — bell and status follow within a second, an idle window asks nothing
+
+Category: resource usage (network, server + browser) / cross-platform (recent rounds: correctness /
+UX, performance, features, features, UI polish). Idea 1 of the 2026-10-31 (08:00) entry and idea 3
+of the 10-22 change-gate entry: every open page asked `/api/rev` every 5–15 s, the sidebar status
+every 30 s and the bell every 60 s, so a failed run showed its red dot up to a minute late and a
+runs list with nothing running never showed a newly started run. Measured on the demo server,
+three tabs (Home, Runs, Tasks), 60 s idle: 25 requests before (12 × `/api/rev`, 6 × status,
+3 × bell, 4 × Home reload), 4 after (the minute turnover reloading Home and Runs). A run that
+fails: the bell dot came 57 s later before, 0.9 s now; the run appeared in the open runs list
+never before (until you navigated), 1.1 s now.
+
+**Done**
+
+- `GET /api/events` (`webui/events.go`): an SSE stream whose every message is the whole state as
+  three tokens — `rev` (the `/api/rev` token), `notif` (hash of shown notifications, pending
+  confirmations, failing channels and the read mark) and `busy` (queued + running runs). It is a
+  doorbell, never data a GET couldn't return. Signed-in only, GET only (no CSRF needed),
+  `no-store`, not gzipped.
+- One shared watcher per server, running only while a stream is open: `total_changes()` once a
+  second (in-memory counter), the four small counts only when it moved (index-backed: shown
+  notifications, `idx_runs_status_created`), a broadcast only when a token changed.
+- Heartbeat every 25 s repeats the state (the page can't see SSE comments and must notice a dead
+  connection after sleep); it also re-checks the session read-only (`GetSession` would write
+  `last_seen_at` and move rev), so a device signed out in Settings › Security loses its stream.
+  A failed write ends the stream (in-process webview bridges may not cancel the request). Max 16
+  streams, the 17th gets 429 and that page keeps polling. `RegisterOnShutdown` ends all streams, so
+  turning the WebUI off doesn't wait out the 3 s shutdown timeout.
+- Page: tabs of one browser share one stream — the tab holding the Web Lock `tb-events` opens it
+  and relays messages over `BroadcastChannel("tb-events")`; a late tab asks "hello" and gets the
+  state; closing the holder hands the lock (and the stream) to the next tab. No locks /
+  BroadcastChannel → each tab opens its own. Refused stream (401 / 429 / server off) backs off
+  1 s doubling to 60 s; no message for 60 s (laptop slept) → reconnect, checked every 30 s and on
+  window return. Sign-out closes it and releases the lock.
+- While the stream is live: `revGate` takes rev from it (no `/api/rev` request), `liveEvery` is 2 s
+  (a check is free, a reload still only happens when rev moved), the 60 s bell poll is skipped
+  (a moved `notif` refetches the bell at once — the read mark from another window too), the 30 s
+  status poll stretches to 2 min (a moved `busy` refreshes it at once), and the runs list keeps
+  checking when nothing runs. Whenever it isn't live everything polls exactly as before.
+- Desktop: macOS / Linux in-process handler streams like the browser (test), Windows already uses
+  the loopback bridge for SSE. No UI change, no new strings.
+- Tests: `webui/events_test.go` — reads send nothing, a notification moves notif + rev, a run
+  moves busy only, the read mark moves notif, the watcher stops with the last stream; 401 anon,
+  429 over the cap, heartbeat, stream ends after the session is deleted; Stop ends streams in
+  well under its timeout; desktop handler; the client under node with two tabs (one stream, relay,
+  bell / status refresh only on their own token, bad JSON ignored, backoff 1 s → 2 s, stale →
+  reconnect, sign-out hands the lock on). `rev_test.go` follows the new runs-list poll.
+
+**Learned** — n8n-io/n8n `packages/cli/src/push/sse.push.ts` + `abstract.push.ts` (one push
+connection per browser session, a newer one replaces the old, `closeAllConnections` on shutdown,
+pings on a timer) and `packages/frontend/editor-ui/src/app/push-connection/useEventSourceClient.ts`
++ `useReconnectTimer.ts` (let the browser retry transient drops itself; only a terminal
+`readyState === CLOSED` needs an own exponential timer, 1 s doubling to a cap). HTTP/1.1 allows
+about six connections per origin, so a stream per tab would starve fetches with a few tabs open —
+a Web Lock elects one tab to hold it and BroadcastChannel fans it out. `http.Server.Shutdown`
+waits for open streams unless a `RegisterOnShutdown` hook ends them.
+
+**Ideas for later**
+
+1. Carry the run-log "new output" bell on the same stream (one connection on a run page too).
+2. Let the tasks page and a task's page follow rev as well (today only Home and Runs are live).
+3. Tray menu: unread failures from the same `notif` watcher, without the WebUI open.
+4. Push the run detail's live stats (5 s poll) from the stream's `busy` / rev instead.

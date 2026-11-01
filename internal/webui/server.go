@@ -99,6 +99,8 @@ type Server struct {
 	// and the minimum gap between reads in a burst of output.
 	logPoll time.Duration
 	logGap  time.Duration
+	// events: the shared change stream behind /api/events.
+	events evHub
 
 	// OSLanguage is set by the desktop shell; see DesktopHandler.
 	OSLanguage string
@@ -160,6 +162,7 @@ func (s *Server) Start(ctx context.Context) error {
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      0, // SSE
 	}
+	srv.RegisterOnShutdown(s.events.shutdown)
 	useTLS := s.deps.Cfg.WebUITLSCert != "" && s.deps.Cfg.WebUITLSKey != ""
 	s.ln = ln
 	s.srv = srv

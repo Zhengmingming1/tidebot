@@ -41,6 +41,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/me", s.withAuthCSRF(s.handleMe))
 	mux.HandleFunc("/api/overview", s.withAuthCSRF(s.handleOverview))
 	mux.HandleFunc("/api/rev", s.withAuthCSRF(s.handleRev))
+	mux.HandleFunc("/api/events", s.withAuthCSRF(s.handleEvents))
 	mux.HandleFunc("/api/tasks", s.withAuthCSRF(s.handleTasks))
 	mux.HandleFunc("/api/tasks/", s.withAuthCSRF(s.handleTaskSub))
 	mux.HandleFunc("/api/amendments/", s.withAuthCSRF(s.handleAmendAction))

@@ -61,7 +61,7 @@ func TestRevGate(t *testing.T) {
 	for _, want := range []string{
 		`if (ticks % liveEvery(!!$("#running .spin")) === 0) {`,
 		`return gate(function () { return Promise.all([api("/api/overview"), api("/api/dashboard")])`,
-		`livePoll(function () { return gate(reload); }, 2000)`,
+		`livePoll(function () { return busy || evsLive() ? gate(reload) : null; }, 2000)`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lost %q", want)
@@ -76,7 +76,8 @@ func TestRevGate(t *testing.T) {
 	if err != nil {
 		t.Skip("node not installed; static checks only")
 	}
-	script := `var rev="1.100", calls=0, fail=false, state={lastInput:Date.now()};
+	script := `var rev="1.100", calls=0, fail=false, state={lastInput:Date.now()}, net={down:false};
+function evsLive(){ return false; }
 function apiRaw(p){ if(p!=="/api/rev") throw new Error(p); return Promise.resolve({rev:rev}); }
 ` + gate + every + `
 var g=revGate(), bad=[];

@@ -2,7 +2,6 @@ package webui
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -24,5 +23,5 @@ func (s *Server) handleRev(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]string{"rev": strconv.FormatInt(n, 10) + "." + strconv.FormatInt(time.Now().Unix()/60, 10)})
+	writeJSON(w, 200, map[string]string{"rev": revToken(n, time.Now())})
 }
