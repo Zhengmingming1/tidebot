@@ -4987,3 +4987,60 @@ waits for open streams unless a `RegisterOnShutdown` hook ends them.
 2. Let the tasks page and a task's page follow rev as well (today only Home and Runs are live).
 3. Tray menu: unread failures from the same `notif` watcher, without the WebUI open.
 4. Push the run detail's live stats (5 s poll) from the stream's `busy` / rev instead.
+
+## 2026-11-02 (04:00): task list and task page follow changes — without stepping on what you're doing
+
+Category: UX / correctness (recent rounds: resource usage, correctness / UX, performance,
+features, features). Idea 2 of the 2026-11-02 (00:00) entry: only Home and the runs list were
+live. The task list and a task's page showed what they had when opened — a run that started or
+finished, a task paused by its failure streak, a pause / edit / delete from another window or the
+desktop app only appeared after navigating away and back.
+
+**Done**
+
+- `liveFollow(load, shown, apply, quiet)`: a check for `livePoll` built on `revGate` — when rev
+  moved it loads the page's data, compares it with what is on screen (JSON) and repaints only if
+  it differs. While the user is busy (`quiet()` false) the new data is held and painted at the
+  first quiet check, without another request; a newer change is fetched after that.
+- `liveQuiet(box)`: no dialog, drawer or menu open, no focus in a field / inline edit inside the
+  page, no text selected there. `keepFocus(box, paint)` puts the focus back on the same row,
+  checkbox or ▶ after a repaint (matched by `data-href` / `data-pick` / `data-runnow`), so j / k,
+  x and Tab carry on.
+- Task list: only `#tbody` repaints — search text (even while typing in it), status chip, skill /
+  tag menus, sort, ticked rows (vanished ones dropped) and scroll stay; the count in the head and
+  the Export button follow. A new skill or tag redraws the page (menus) only when no rows are ticked
+  and the toolbar isn't in use. `livePoll` takes an optional "still this page" test so the list's
+  own filter `replaceState` no longer ends its poll.
+- Task page: redraws in place from the data just fetched (`swrPut` then `refresh()`, no second
+  request, scroll kept) but not while amendments are ticked, the composer holds text, the thread is
+  scrolled up, or the user is typing / editing inline. The schedule's "next run" line is shown
+  again at once (`ovKeep`) instead of blinking empty until its preview returns. A task deleted
+  elsewhere (reads back as archived) → toast "这个任务已在别处删除。" and the list; deleting it here
+  stops the follow first so there is no double toast.
+- Cadence: every 2 s with the change stream up (a check is free, rev comes from the stream);
+  without the stream only while a task's newest run is queued / running — an idle list without
+  the stream sends nothing, as before.
+- New strings: `td.gone` (zh-CN + en). Tests: `webui/live_follow_test.go` — two reads with nothing
+  changed are byte-identical for all five endpoints (no clock-derived fields that would repaint
+  every minute), a pause changes list and task, a deleted task reads archived and leaves the list;
+  wiring; under node: same data no repaint, unchanged rev no fetch, held while busy and painted
+  once without refetch, retry after a failed load, `liveQuiet` cases, focus restored.
+- Checked in Chrome at 1024×655 against the demo server: list followed a pause in 0.5 s with the
+  search text and the tick kept (one `/api/tasks` request), the running beat appeared, the task
+  page showed two new runs, kept a typed composer draft and painted the pause once it was emptied
+  and blurred, and a delete from another client went back to the list with the toast.
+  Shots: `/workspace/tidebot-shots/2026-11-02-0400-tasks-live-1024x655.png`, `…-task-live-…`.
+
+**Learned** — louislam/uptime-kuma `src/mixins/socket.js` (`updateMonitorIntoList` /
+`deleteMonitorFromList` patch the list in place) with `src/components/MonitorList.vue` (search
+text and `selectedMonitors` live in the component, so updates never touch them): keep view state
+outside the data and repaint only the data part. Our `/api/tasks` and task endpoints were already
+stable between reads, so comparing JSON is enough to avoid needless repaints; GET of a deleted task
+answers 200 with `archived`, not 404.
+
+**Ideas for later**
+
+1. Skills list / skill page and Spend could use the same `liveFollow` (a new version from the
+   optimizer, today's cost while a run goes).
+2. A subtle "updated" flash on the rows that changed (Linear-style), honouring reduced motion.
+3. When a repaint is held for long (draft in the composer), a small "有更新" hint in the tab bar.

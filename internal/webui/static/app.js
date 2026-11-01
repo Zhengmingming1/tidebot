@@ -2101,12 +2101,15 @@
   }
   // ---------- live polling: pauses while the tab is hidden, catches up when it returns ----------
   var poller = { t: null, fn: null, ms: 0, hash: "" };
-  function livePoll(fn, ms) {
+  // same(hash): optional test for "still this page" — the task list rewrites its address when a
+  // filter changes (replaceState), which must not end its poll; default is the exact address.
+  function livePoll(fn, ms, same) {
     stopPoll();
     poller.fn = fn; poller.ms = ms; poller.hash = location.hash || "#/";
+    var here = same || function (h) { return h === poller.hash; };
     var tick = function () {
       poller.t = null;
-      if ((location.hash || "#/") !== poller.hash || !poller.fn) { stopPoll(); return; }
+      if (!here(location.hash || "#/") || !poller.fn) { stopPoll(); return; }
       if (document.hidden) return; // resumed by visibilitychange
       Promise.resolve(poller.fn()).catch(function () {}).then(function () { if (poller.fn && !poller.t && !document.hidden) poller.t = setTimeout(tick, poller.ms); });
     };
@@ -2134,6 +2137,50 @@
   // With the change stream up a check costs nothing, so it is 2 s throughout: the page
   // follows changes within 2 s and still reloads only when something changed.
   function liveEvery(busy) { return busy || evsLive() ? 2 : Date.now() - (state.lastInput || 0) < 120000 ? 5 : 15; }
+  // ---------- quiet follow: pages that aren't built for live updates follow changes too ----------
+  // The task list and a task's page used to show what they had when opened: a run that finished,
+  // a task paused by its failure streak or edited in another window only appeared after a
+  // reload. When rev moves they refetch their data and repaint only if it differs from what is
+  // on screen — and only while you aren't in the middle of something there (typing, an inline
+  // edit, a ticked amendment, an open dialog, drawer or menu, selected text). Otherwise the new
+  // data is held and painted at the first quiet check, with no second request.
+  // (idea: uptime-kuma src/mixins/socket.js "updateMonitorIntoList" patches the list in place
+  // while src/components/MonitorList.vue keeps its search text and selection.)
+  function liveQuiet(box) {
+    if ($("#modal-root").innerHTML || $("#drawer") || $(".popover[role=menu]")) return false;
+    if (!box || !document.contains(box)) return false;
+    var a = document.activeElement;
+    if (a && box.contains(a) && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return false;
+    if ($(".editing", box)) return false;
+    var s = window.getSelection ? window.getSelection() : null;
+    if (s && !s.isCollapsed && s.anchorNode && box.contains(s.anchorNode)) return false;
+    return true;
+  }
+  // keepFocus(box, paint): a repaint of box puts the focus back on the same row or row control
+  // (matched by its data-href / data-pick / data-runnow), so j / k, x and Tab carry on.
+  function keepFocus(box, paint) {
+    var a = document.activeElement, key = null;
+    if (a && box.contains(a)) ["data-pick", "data-runnow", "data-href"].some(function (n) { var v = a.getAttribute(n); if (v != null) key = [n, v]; return key; });
+    paint();
+    if (!key) return;
+    var el = $$("[" + key[0] + "]", box).filter(function (x) { return x.getAttribute(key[0]) === key[1]; })[0];
+    if (el && el.focus) el.focus({ preventScroll: true });
+  }
+  // liveFollow(load, shown, apply, quiet) → a check for livePoll. shown = the data on screen.
+  function liveFollow(load, shown, apply, quiet) {
+    var gate = revGate(), sig = JSON.stringify(shown), held = null;
+    return function () {
+      if (held) { if (quiet()) { var d = held; held = null; apply(d); } return; }
+      return gate(function () {
+        return load().then(function (d) {
+          var s = JSON.stringify(d);
+          if (s === sig) return;
+          sig = s;
+          if (quiet()) apply(d); else held = d;
+        });
+      });
+    };
+  }
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) state.lastInput = Date.now(); // coming back counts as activity
     if (!document.hidden && poller.fn && !poller.t) poller.tick();
@@ -2662,6 +2709,34 @@
       $("#t-export").addEventListener("click", function (e) { exportTasks([], e.currentTarget); });
       $("#tb-export").addEventListener("click", function (e) { exportTasks(Object.keys(v.sel), e.currentTarget); });
       rows();
+      // Follow changes: only the rows repaint (search text, filters, sort, ticks and scroll stay);
+      // a new skill or tag for the menus redraws the page, unless you're using the toolbar or
+      // have rows ticked. Checks every 2 s with the change stream up (free); without it only
+      // while a task's newest run is going, like the runs list.
+      var menus = function (ts) {
+        var sk = {}, tg = {};
+        ts.forEach(function (t) { (t.skills || []).forEach(function (k) { sk[k] = 1; }); (t.tags || []).forEach(function (g) { tg[g] = (tg[g] || 0) + 1; }); });
+        return JSON.stringify([Object.keys(sk).sort(), tg]);
+      };
+      var going = function (ts) { return ts.some(function (t) { var b = t.beats || [], l = b[b.length - 1]; return !!l && (l.status === "running" || l.status === "queued"); }); };
+      var check = liveFollow(function () { return apiRaw("/api/tasks"); }, tasks, function (d) {
+        if (!$("#tbody")) return;
+        var pg = page();
+        if (menus(d) !== menus(tasks) && !Object.keys(v.sel).length && liveQuiet(pg)) { swrPut("/api/tasks", d); refresh(); return; }
+        var ids = {};
+        d.forEach(function (t) { ids[t.id] = 1; });
+        Object.keys(v.sel).forEach(function (k) { if (!ids[k]) delete v.sel[k]; });
+        tasks = d;
+        var p = $(".page-head p", pg); if (p) p.textContent = plural(tasks.length, "tasks.count_one", "tasks.count_many");
+        keepFocus(body, rows);
+        $("#t-export").disabled = !tasks.length;
+      }, function () {
+        // The rows hold no text you type: only dialogs, menus and selected text hold a repaint back.
+        if ($("#modal-root").innerHTML || $("#drawer") || $(".popover[role=menu]") || !document.contains(body)) return false;
+        var sl = window.getSelection ? window.getSelection() : null;
+        return !(sl && !sl.isCollapsed && sl.anchorNode && body.contains(sl.anchorNode));
+      });
+      livePoll(function () { return evsLive() || going(tasks) ? check() : null; }, 2000, function (h) { return /^#\/tasks(\?|$)/.test(h); });
     });
   }
   // ---------- task export / import ----------
@@ -2893,10 +2968,14 @@
     var base = "/api/tasks/" + enc(id);
     return [base, base + "/amendments", base + "/versions", base + "/runs?limit=" + (tab === "runs" ? 50 : 6)];
   }
+  // The schedule's "next run" line a live repaint is about to replace: shown again at once (the
+  // preview behind it is fetched after the page is drawn), so the line doesn't blink.
+  var ovKeep = null;
   function renderTaskDetail(id, tab) {
     tab = tab || "overview";
     var base = "/api/tasks/" + enc(id);
     return Promise.all(taskDetailPaths(id, tab).map(function (u) { return api(u); })).then(function (r) {
+      var shown = JSON.parse(JSON.stringify(r));
       var t = r[0], items = r[1] || [], vers = r[2], runs = r[3] || [];
       var mini = runs.length ? '<ul class="mini-runs">' + runs.map(function (x) {
         var d = x.status === "succeeded" ? "" : (x.status === "running" || x.status === "queued") ? "run" : "bad";
@@ -2920,6 +2999,8 @@
           return api(base + "/form").then(function (d) { var f = d.form; f[field] = val; return api(base, { method: "PUT", body: f }); }).then(function () { toast(T("ie.saved")); reload(); });
         };
       };
+      var keep = ovKeep; ovKeep = null;
+      if (keep && $("#ov-next") && keep.k === [id, t.cron, t.status, t.pause_detail || ""].join("|")) $("#ov-next").innerHTML = keep.h;
       inlineEdit($("#ie-name"), false, patch("name"));
       if ($("#ie-prompt")) inlineEdit($("#ie-prompt"), true, patch("prompt"));
       // Schedule: the next run inline; the cron expression, time zone and the runs after it in the tooltip.
@@ -2958,7 +3039,8 @@
           toastUndo(T("td.dup_done", { n: c.name }), function () { api("/api/tasks/" + enc(c.id), { method: "DELETE" }).then(function () { location.hash = "#/tasks/" + enc(id); }).catch(fail); });
         }).catch(function (e) { b.disabled = false; fail(e); });
       });
-      $("#t-del").addEventListener("click", function () { confirmDialog({ title: T("td.del_title"), body: T("td.confirm_del", { n: t.name }), ok: T("td.delete"), danger: true, typeName: t.name }).then(function (y) { if (y) api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); }); });
+      var deleting = false;
+      $("#t-del").addEventListener("click", function () { confirmDialog({ title: T("td.del_title"), body: T("td.confirm_del", { n: t.name }), ok: T("td.delete"), danger: true, typeName: t.name }).then(function (y) { if (y) { deleting = true; stopPoll(); } if (y) api(base, { method: "DELETE" }).then(function () { toast(T("td.deleted")); location.hash = "#/tasks"; }).catch(fail); }); });
       var tg = $("#t-toggle");
       tg.addEventListener("click", function (e) {
         var act = tg.getAttribute("data-act"), k = pauseKind(t);
@@ -3031,6 +3113,33 @@
         comp.querySelector("button").disabled = true;
         api(base + "/amendments", { method: "POST", body: { utterance: v } }).then(reload).catch(function (err) { fail(err); comp.querySelector("button").disabled = false; });
       });
+      // Follow changes (see liveFollow): a run that starts or ends, a pause by the failure
+      // streak, an edit or new version from another window. The page redraws in place from the
+      // data just fetched (no second request, scroll kept) — but not while you type, edit inline,
+      // have amendments ticked or something typed in the composer, read further up the thread,
+      // or have a dialog or menu open. A task deleted elsewhere turns into the "not found" page.
+      var paths = taskDetailPaths(id, tab), going = runs.some(function (x) { return x.status === "running" || x.status === "queued"; });
+      var check = liveFollow(function () {
+        return Promise.all(paths.map(function (u) { return apiRaw(u); })).catch(function (e) { if (e && e.status === 404) return { gone: true }; throw e; });
+      }, shown, function (d) {
+        if (deleting) return;
+        // Deleted in another window (kept as archived): say so and go to the list, as a delete here does.
+        if (Array.isArray(d) && d[0] && d[0].status === "archived" && t.status !== "archived") { stopPoll(); toast(T("td.gone")); location.hash = "#/tasks"; return; }
+        if (Array.isArray(d)) d.forEach(function (x, i) { swrPut(paths[i], x); });
+        else paths.forEach(function (k) { delete swr.cache[k]; }); // gone: no stale copy to redraw from
+        var nx = $("#ov-next");
+        if (nx && nx.innerHTML) ovKeep = { k: [id, t.cron, t.status, t.pause_detail || ""].join("|"), h: nx.innerHTML };
+        refresh();
+      }, function () {
+        var pg = page();
+        if (!liveQuiet(pg)) return false;
+        if ($$(".req-sel", pg).some(function (c) { return c.checked; })) return false;
+        var cm = $("#composer", pg);
+        if (cm && cm.u && cm.u.value.trim()) return false;
+        var th = $("#thread", pg);
+        return !(th && th.scrollHeight - th.scrollTop - th.clientHeight > 8);
+      });
+      livePoll(function () { return evsLive() || going ? check() : null; }, 2000);
     });
   }
 

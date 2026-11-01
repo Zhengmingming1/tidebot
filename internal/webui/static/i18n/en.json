@@ -944,6 +944,7 @@
   "td.del_title": "Delete task?",
   "td.delete": "Delete",
   "td.deleted": "Task deleted.",
+  "td.gone": "This task was deleted elsewhere.",
   "td.dup": "Duplicate",
   "td.dup_tip": "Duplicate · the copy starts paused, without runs or triggers",
   "td.dup_name": "{n} (copy)",
