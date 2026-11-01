@@ -4871,3 +4871,55 @@ WHERE repeats its condition word for word.
    table stays narrow and full scans (export, retention) touch fewer pages.
 4. A `scripts/bench-history.sh` that seeds the demo server and prints these timings (carried
    over), so a regression shows before the weekly release.
+
+## 2026-11-01 (20:00): undo buttons know beforehand — a file edited since the run is marked, its button off
+
+Category: correctness / UX (recent rounds: performance, features / resource usage, features,
+features / UX). Idea 2 of the 2026-11-01 (08:00) entry: "Undo changes" and each file's undo only
+found out on click that a file had been edited after the run — the confirm dialog came up, then a
+red toast "已取消，没有改动任何文件". Nothing said beforehand which file was the problem or that
+the other files could still go one by one.
+
+**Done**
+
+- `gitsnap.Check(ctx, dir, patch, reverse)`: the same `git apply` as `Apply` (work-tree top +
+  `--directory`, hooks / fsmonitor / filter programs off) with `--check`, so nothing is written.
+- `app/undocheck.go` `checkRunUndo`: reads the run like the undo does (`loadUndo`, shared with
+  `undoRunChanges` now), checks the folder again (sensitive / gone → `dir`), reports `busy` while
+  an edit run holds the folder (peeks the lock, never holds it), old binary stubs → `binary`.
+  Two groups — files whose own action is "undo" (reverse) and those already taken back ("put
+  back", forward) — are each checked in one go; only a failing group is checked file by file to
+  name the files (≤ 200 single checks, 8 s budget; files left out stay "unknown" and their button
+  on, the real undo still checks everything). Whole = the main button's action (undo the rest, or
+  put all back for a wholly undone run). Over the 300-file list cap no per-file answers.
+- API: `GET /api/runs/{id}/undo-check` → `{code?, whole, whole_files, files: {path: {ok,
+  detail}}}`, `Cache-Control: no-store`, signed-in only, read-only (no CSRF needed, nothing changes).
+- Run page › 改动的文件: asked when the card is drawn and again when the window comes back to the
+  front (focus / visibilitychange, at most every 2 s, listener dropped once the card is gone; SWR
+  cache bypassed with `fresh`). A file edited since gets a "已改动" pill (git's reason in its
+  tooltip), its undo / put-back button is turned off with `aria-disabled` (still focusable, so the
+  reason's tooltip shows on keyboard focus too) and the main button says which files block it and
+  that the others can go one by one. A later clean answer restores the original tooltips. Off
+  buttons are greyed by colour, not opacity, so their tooltip stays readable. Card-head tooltips
+  open downwards (no clash with the top bar); a list that doesn't scroll lets row tooltips out of
+  its box (`.fits`), a scrolling one opens its first row's downwards. zh-CN + en, tokens only.
+- Tests: `gitsnap/check_test.go` (fits / conflict both ways, CJK path, one file alone, folder and
+  .git untouched), `app/undocheck_test.go` (clean, hand edit names the file and keeps the others,
+  partly undone checks put back, put back over a new file, wholly undone, busy, running / read-only
+  / unknown, over the cap), `webui/undo_check_test.go` (API shape, no-store, 404, 401; UI under node
+  with a tiny DOM: marks, off / back on, no doubled mark, busy, codes the page handles itself).
+- Shots: `/workspace/tidebot-shots/2026-11-01-2000-undo-check-1024x655.png` (+ `-main-tip`).
+
+**Learned** — cline/cline `apps/vscode/webview-ui/src/components/chat/UserMessage.tsx` with
+`apps/vscode/src/core/controller/checkpoints/checkpointExistsForMessage.ts`: whether "Restore" can
+work is asked when the user gets to it (pending → available / unavailable, the reason in the
+tooltip), not trusted from when the turn ended. `git apply --check` is cheap (≈ 20 ms for the
+demo run's four files incl. the per-file pass), so asking on every window focus is fine; a
+subset of a patch that passes as a whole always passes, so the per-file pass is only needed when
+the group fails. CSS `opacity` on a disabled button also fades its `::after` tooltip.
+
+**Ideas for later**
+
+1. Undo a single hunk from the open diff (carried over); the check could then mark hunks.
+2. Show "已改动" on the runs list badge too (needs a cheap batch check, maybe only for the page).
+3. Offer "download this file's patch" right in the off button's place for a stale file.

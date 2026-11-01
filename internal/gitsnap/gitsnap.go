@@ -163,6 +163,16 @@ func (e *ErrConflict) Error() string { return "patch does not apply: " + e.Messa
 // paths outside dir refused (git's default). dir need not be a repo root: the
 // patch's paths are relative to it (diff-tree --relative).
 func Apply(ctx context.Context, dir, patch string, reverse bool) error {
+	return apply(ctx, dir, patch, reverse, false)
+}
+
+// Check tells whether Apply would succeed now, without writing anything (git apply
+// --check): nil, or *ErrConflict with git's reason. Same paths and filters as Apply.
+func Check(ctx context.Context, dir, patch string, reverse bool) error {
+	return apply(ctx, dir, patch, reverse, true)
+}
+
+func apply(ctx context.Context, dir, patch string, reverse, check bool) error {
 	bin, err := exec.LookPath("git")
 	if err != nil {
 		return ErrNotRepo
@@ -197,6 +207,9 @@ func Apply(ctx context.Context, dir, patch string, reverse bool) error {
 	}
 	if reverse {
 		args = append(args, "-R")
+	}
+	if check {
+		args = append(args, "--check")
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

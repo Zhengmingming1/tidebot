@@ -31,48 +31,11 @@ import (
 // every file is back out the run counts as undone (changes_undone_at).
 func (a *App) undoRunChanges(ctx context.Context, runID string, redo bool, path string) (webui.UndoResult, error) {
 	var res webui.UndoResult
-	var mode, status, dir, fc, patch, undoneAt, undoneFiles string
-	err := a.DB.QueryRowContext(ctx, `SELECT run_mode, status, workspace_dir, file_changes, file_patch, changes_undone_at, changes_undone_files FROM runs WHERE id=?`, runID).
-		Scan(&mode, &status, &dir, &fc, &patch, &undoneAt, &undoneFiles)
-	if errors.Is(err, sql.ErrNoRows) {
-		return res, webui.ErrRunNotFound
-	}
+	st, err := a.loadUndo(ctx, runID)
 	if err != nil {
 		return res, err
 	}
-	var c struct {
-		Files    []gitsnap.File `json:"files"`
-		Count    int            `json:"count"`
-		PatchCut bool           `json:"patch_cut"`
-	}
-	if mode != "edit" || fc == "" || json.Unmarshal([]byte(fc), &c) != nil || c.Count == 0 || patch == "" {
-		return res, &webui.UndoError{Code: "none"}
-	}
-	switch status {
-	case "succeeded", "failed", "canceled", "timeout", "skipped":
-	default:
-		return res, &webui.UndoError{Code: "running"}
-	}
-	if c.PatchCut {
-		return res, &webui.UndoError{Code: "cut"}
-	}
-	all := make([]string, 0, len(c.Files))
-	listed := map[string]bool{}
-	for _, f := range c.Files {
-		all = append(all, f.Path)
-		listed[f.Path] = true
-	}
-	// files taken back so far: all of them once the whole run is undone
-	done := map[string]bool{}
-	var doneList []string
-	if undoneAt != "" {
-		doneList = append(doneList, all...)
-	} else if undoneFiles != "" {
-		_ = json.Unmarshal([]byte(undoneFiles), &doneList)
-	}
-	for _, p := range doneList {
-		done[p] = true
-	}
+	c, patch, dir, undoneAt, all, listed, done, doneList := st.c, st.patch, st.dir, st.undoneAt, st.all, st.listed, st.done, st.doneList
 	var part string // the sections to apply
 	switch {
 	case path != "":
@@ -108,7 +71,7 @@ func (a *App) undoRunChanges(ctx context.Context, runID string, redo bool, path 
 		}
 	}
 	// runs before patches carried binary data say only "Binary files … differ"
-	if strings.HasPrefix(part, "Binary files ") || strings.Contains(part, "\nBinary files ") {
+	if hasBinaryStub(part) {
 		return res, &webui.UndoError{Code: "binary"}
 	}
 	home, _ := os.UserHomeDir()
@@ -175,4 +138,61 @@ func (a *App) undoRunChanges(ctx context.Context, runID string, redo bool, path 
 	}
 	a.Log.Info("run changes", "run_id", runID, "undone", !redo, "one_file", path != "", "files_undone", len(done))
 	return res, nil
+}
+
+// undoState is what undo (and its check) read from the run row.
+type undoState struct {
+	c struct {
+		Files    []gitsnap.File `json:"files"`
+		Count    int            `json:"count"`
+		PatchCut bool           `json:"patch_cut"`
+	}
+	patch, dir, undoneAt string
+	all                  []string        // the run's listed files, in order
+	listed, done         map[string]bool // done: taken back so far
+	doneList             []string
+}
+
+// loadUndo reads the run and refuses what can never be undone (not an edit run,
+// nothing recorded, still running, patch cut).
+func (a *App) loadUndo(ctx context.Context, runID string) (*undoState, error) {
+	st := &undoState{listed: map[string]bool{}, done: map[string]bool{}}
+	var mode, status, fc, undoneFiles string
+	err := a.DB.QueryRowContext(ctx, `SELECT run_mode, status, workspace_dir, file_changes, file_patch, changes_undone_at, changes_undone_files FROM runs WHERE id=?`, runID).
+		Scan(&mode, &status, &st.dir, &fc, &st.patch, &st.undoneAt, &undoneFiles)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, webui.ErrRunNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if mode != "edit" || fc == "" || json.Unmarshal([]byte(fc), &st.c) != nil || st.c.Count == 0 || st.patch == "" {
+		return nil, &webui.UndoError{Code: "none"}
+	}
+	switch status {
+	case "succeeded", "failed", "canceled", "timeout", "skipped":
+	default:
+		return nil, &webui.UndoError{Code: "running"}
+	}
+	if st.c.PatchCut {
+		return nil, &webui.UndoError{Code: "cut"}
+	}
+	for _, f := range st.c.Files {
+		st.all = append(st.all, f.Path)
+		st.listed[f.Path] = true
+	}
+	// files taken back so far: all of them once the whole run is undone
+	if st.undoneAt != "" {
+		st.doneList = append(st.doneList, st.all...)
+	} else if undoneFiles != "" {
+		_ = json.Unmarshal([]byte(undoneFiles), &st.doneList)
+	}
+	for _, p := range st.doneList {
+		st.done[p] = true
+	}
+	return st, nil
+}
+
+func hasBinaryStub(part string) bool {
+	return strings.HasPrefix(part, "Binary files ") || strings.Contains(part, "\nBinary files ")
 }

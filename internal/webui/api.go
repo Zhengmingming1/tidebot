@@ -1363,6 +1363,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.undoRunChanges(w, r, id) })).ServeHTTP(w, r)
 		return
 	}
+	if parts[1] == "undo-check" && r.Method == http.MethodGet {
+		s.undoCheck(w, r, id)
+		return
+	}
 	if parts[1] == "changes" && r.Method == http.MethodGet {
 		s.handleRunChanges(w, r, id)
 		return

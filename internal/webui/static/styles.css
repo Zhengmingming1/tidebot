@@ -3084,6 +3084,17 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-gone { min-width: 0; }
 .diff-file summary:hover .rd-chg-fx, .diff-file summary:focus-within .rd-chg-fx, .rd-chg-fx:focus-visible, .rd-chg-fx.on { opacity: 1; }
 @media (hover: none) { .rd-chg-fx { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .rd-chg-fx { transition: none; } }
+/* undo check: a file edited since the run (git apply --check fails) — marked, its button off */
+.rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
+html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
+/* turned off by colour, not opacity, so the reason's tooltip stays fully readable */
+.btn.ck-off, .btn.ck-off:hover { color: var(--text-3); background: var(--bg-sunk); border-color: var(--border); cursor: not-allowed; }
+.rd-chg-fx.ck-off, .rd-chg-fx.ck-off:hover { color: var(--text-3); background: transparent; cursor: not-allowed; }
+/* tooltips in the card: head buttons open downwards (no clash with the top bar); a list that
+   doesn't scroll lets them out (.fits), a scrolling one opens its first row's downwards */
+.rd-chg .card-head .rd-acts [data-tip]:hover::after, .rd-chg .card-head .rd-acts [data-tip]:focus-visible::after { top: calc(100% + 6px); bottom: auto; left: auto; right: 0; transform: none; }
+.rd-chg-list.fits { overflow: visible; }
+.rd-chg-list:not(.fits) .diff-file:first-child summary [data-tip]:hover::after, .rd-chg-list:not(.fits) .diff-file:first-child summary [data-tip]:focus-visible::after { top: calc(100% + 6px); bottom: auto; }
 
 /* Settings › General › Quiet hours: switch in the head, time range and weekday chips */
 .qh-card .card-head .info-tip { margin-left: 4px; }

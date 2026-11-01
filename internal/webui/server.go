@@ -66,6 +66,8 @@ type Deps struct {
 	// them back) and returns the new changes_undone_at ('' after redo). Refusals are
 	// *UndoError. Optional.
 	UndoRunChanges func(ctx context.Context, runID string, redo bool, path string) (UndoResult, error)
+	// CheckRunUndo says which of a run's undo buttons would work now (read-only).
+	CheckRunUndo func(ctx context.Context, runID string) (UndoCheck, error)
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
 	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
 	Providers     ProviderAdmin

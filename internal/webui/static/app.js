@@ -5845,6 +5845,59 @@
     return confirmDialog({ title: T("rd.undo_f_title", { f: path }), body: T("rd.undo_f_body", { dir: r.workspace || "" }), ok: T("rd.chg_undo"), danger: true, icon: "undo" })
       .then(function (y) { if (y) return go(); });
   }
+  // Before anyone clicks: ask the core (git apply --check, nothing written) which undo
+  // buttons would work with the folder as it is now. A file edited since the run gets an
+  // "已改动" mark and its button is turned off with the reason in the tooltip; the main
+  // button too when its action would be refused. Asked when the card is drawn and again
+  // when the window comes back to the front (you may have been editing those files).
+  // Idea: cline/cline apps/vscode/webview-ui/src/components/chat/UserMessage.tsx — "Restore"
+  // availability looked up when the user gets to it (pending → available / unavailable +
+  // reason tooltip), not trusted from when the turn ended.
+  function watchUndoCheck(card, r) {
+    if (!$("[data-chg-undo]:not(:disabled), [data-chg-file]", card)) return;
+    var last = 0, busy = false;
+    var ask = function () {
+      if (!document.contains(card)) { window.removeEventListener("focus", ask); document.removeEventListener("visibilitychange", ask); return; }
+      if (document.hidden || busy || Date.now() - last < 2000) return;
+      busy = true; last = Date.now();
+      api("/api/runs/" + enc(r.id) + "/undo-check", { fresh: true }).then(function (x) {
+        if (document.contains(card)) applyUndoCheck(card, r, x || {});
+      }).catch(function () {}).then(function () { busy = false; });
+    };
+    window.addEventListener("focus", ask);
+    document.addEventListener("visibilitychange", ask);
+    ask();
+  }
+  var UNDO_CK_CODES = { dir: 1, busy: 1, binary: 1 };
+  function undoCkSet(b, off, tip) {
+    if (!b.hasAttribute("data-tip0")) b.setAttribute("data-tip0", b.getAttribute("data-tip") || "");
+    if (off) { b.setAttribute("aria-disabled", "true"); b.setAttribute("data-tip", tip); b.classList.add("ck-off"); }
+    else { b.removeAttribute("aria-disabled"); b.setAttribute("data-tip", b.getAttribute("data-tip0")); b.classList.remove("ck-off"); }
+  }
+  function applyUndoCheck(card, r, x) {
+    var files = (r.file_changes || {}).files || [], fc = x.files || {}, code = UNDO_CK_CODES[x.code] ? x.code : "";
+    var ub = $("[data-chg-undo]", card);
+    if (ub && !ub.disabled) {
+      var wf = (x.whole_files || []).slice(0, 3);
+      undoCkSet(ub, !!code || x.whole === "conflict", code ? T("rd.undo_err_" + code) :
+        T(ub.getAttribute("data-chg-undo") === "redo" ? (wf.length ? "rd.undo_ck_redo_f" : "rd.undo_ck_redo") : (wf.length ? "rd.undo_ck_whole_f" : "rd.undo_ck_whole"), { f: wf.join(", ") }));
+    }
+    $$("details[data-chg]", card).forEach(function (d) {
+      var f = files[+d.getAttribute("data-chg")], b = $("[data-chg-file]", d), sm = $("summary", d);
+      if (!f || !b) return;
+      var ck = fc[f.path], bad = !!code || (ck && !ck.ok), stale = !code && ck && !ck.ok;
+      undoCkSet(b, bad, code ? T("rd.undo_err_" + code) : T(b.getAttribute("data-chg-file") === "redo" ? "rd.undo_ck_f_redo" : "rd.undo_ck_f"));
+      var mark = $(".rd-chg-stale", sm);
+      if (stale && !mark) {
+        mark = document.createElement("span");
+        mark.className = "pill warn sm rd-chg-stale";
+        mark.textContent = T("rd.chg_stale");
+        sm.insertBefore(mark, $(".grow", sm));
+      }
+      if (mark && !stale) mark.remove();
+      if (mark && stale) mark.setAttribute("data-tip", T("rd.chg_stale_tip") + (ck.detail ? "\n" + ck.detail : ""));
+    });
+  }
   function chgDiffHtml(d) {
     if (!d) return '<p class="muted pad">' + esc(T("rd.chg_cut")) + "</p>";
     if (d.binary && !d.lines.length) return '<p class="muted pad">' + esc(T("diff.st_binary")) + "</p>";
@@ -5862,8 +5915,13 @@
       if (!got) got = api("/api/runs/" + enc(r.id) + "/changes").catch(function (e) { got = null; throw e; });
       return got;
     };
+    // a list that doesn't scroll lets the row tooltips out of its box
+    var list = $(".rd-chg-list", card);
+    var fits = function () { if (list) list.classList.toggle("fits", list.scrollHeight <= list.clientHeight + 1 && !$("details[open]", list)); };
+    fits();
     $$("details[data-chg]", card).forEach(function (d) {
       d.addEventListener("toggle", function () {
+        fits();
         var body = $(".rd-chg-body", d);
         if (!d.open || body.firstChild) return;
         body.innerHTML = skeleton("list");
@@ -5875,13 +5933,15 @@
     $$("[data-chg-file]", card).forEach(function (b) {
       b.addEventListener("click", function (e) {
         e.preventDefault(); e.stopPropagation(); // inside <summary>: don't open / close the diff
+        if (b.getAttribute("aria-disabled") === "true") return; // the check says it would not apply now
         var d = b.closest("details[data-chg]"), f = d && (r.file_changes.files || [])[+d.getAttribute("data-chg")];
         if (f) runUndoFile(r, f.path, b.getAttribute("data-chg-file") === "redo", b);
       });
       b.addEventListener("keydown", function (e) { if (e.key === " " || e.key === "Enter") e.stopPropagation(); });
     });
     var ub = $("[data-chg-undo]", card);
-    if (ub) ub.addEventListener("click", function () { runUndoChanges(r, ub.getAttribute("data-chg-undo") === "redo", ub); });
+    if (ub) ub.addEventListener("click", function () { if (ub.getAttribute("aria-disabled") !== "true") runUndoChanges(r, ub.getAttribute("data-chg-undo") === "redo", ub); });
+    watchUndoCheck(card, r);
     var cp = $("[data-chg-copy]", card), dl = $("[data-chg-dl]", card);
     if (cp) cp.addEventListener("click", function () { load().then(function (x) { return copyText(x.patch || ""); }).catch(fail); });
     if (dl) dl.addEventListener("click", function () {

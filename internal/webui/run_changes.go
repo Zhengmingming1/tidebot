@@ -68,6 +68,45 @@ type UndoResult struct {
 	UndoneFiles []string
 }
 
+// UndoCheck says which undo buttons of a run would work now (nothing written). Code
+// set: undo isn't possible at all (none | running | cut | binary | dir | busy).
+// Whole: the main button's action — "ok" | "conflict"; WholeFiles names the files
+// edited since. Files: each listed file's own action (undo it, or put it back when
+// taken back); a file left out wasn't checked.
+type UndoCheck struct {
+	Code       string                   `json:"code,omitempty"`
+	Whole      string                   `json:"whole,omitempty"`
+	WholeFiles []string                 `json:"whole_files,omitempty"`
+	Files      map[string]UndoFileCheck `json:"files"`
+}
+
+// UndoFileCheck: one file's answer; Detail is git's reason when it would not apply.
+type UndoFileCheck struct {
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// undoCheck: GET /api/runs/{id}/undo-check → UndoCheck. Read-only (git apply --check).
+func (s *Server) undoCheck(w http.ResponseWriter, r *http.Request, id string) {
+	if s.deps.CheckRunUndo == nil {
+		writeErr(w, 503, "not available")
+		return
+	}
+	res, err := s.deps.CheckRunUndo(r.Context(), id)
+	switch {
+	case errors.Is(err, ErrRunNotFound):
+		writeErr(w, 404, "run not found")
+	case err != nil:
+		writeErr(w, 500, err.Error())
+	default:
+		if res.Files == nil {
+			res.Files = map[string]UndoFileCheck{}
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, res)
+	}
+}
+
 // ErrRunNotFound: no run with that id.
 var ErrRunNotFound = errors.New("run not found")
 

@@ -100,7 +100,7 @@ func TestUndoChangesUI(t *testing.T) {
 		`api("/api/runs/" + enc(r.id) + "/undo-changes", { method: "POST", body: { redo: redo } })`,
 		`return confirmDialog({ title: T("rd.undo_title"`,
 		`toast(T("rd.chg_undone_t", { n: num(n) }), false, function () { runUndoChanges(r, true); }, T("rd.chg_redo"));`,
-		`if (ub) ub.addEventListener("click", function () { runUndoChanges(r, ub.getAttribute("data-chg-undo") === "redo", ub); });`,
+		`if (ub) ub.addEventListener("click", function () { if (ub.getAttribute("aria-disabled") !== "true") runUndoChanges(r, ub.getAttribute("data-chg-undo") === "redo", ub); });`,
 	} {
 		if !strings.Contains(src, s) {
 			t.Errorf("app.js lacks %s", s)
