@@ -2472,5 +2472,8 @@
   "ev.status_failed": "执行失败",
   "ev.status_canceled": "已取消",
   "ev.status_interrupted": "已中断",
-  "ev.options": "试跑设置"
+  "ev.options": "试跑设置",
+  "wf.retry_max": "临时错误重试次数（0–5）",
+  "wf.retry_backoff": "首次重试等待时间（毫秒）",
+  "wf.retry_hint": "默认关闭。仅对可安全重复执行的技能开启；只重试临时错误，等待时间逐次翻倍、最长一分钟。已完成节点不会重放。"
 }

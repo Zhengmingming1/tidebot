@@ -24,7 +24,7 @@ func TestWorkflowAPIAndOptimisticUpdate(t *testing.T) {
 		defer cancel()
 		_ = c.s.deps.Workflows.Wait(ctx)
 	})
-	d := workflow.Definition{Name: "API graph", Nodes: []workflow.Node{{ID: "a", Kind: "skill", Prompt: "{{input}}", SkillBindings: []tasksvc.SkillBinding{{SkillID: "fixture", Mode: "follow"}}}}}
+	d := workflow.Definition{Name: "API graph", Nodes: []workflow.Node{{ID: "a", Kind: "skill", Prompt: "{{input}}", RetryMax: 2, RetryBackoffMS: 10, SkillBindings: []tasksvc.SkillBinding{{SkillID: "fixture", Mode: "follow"}}}}}
 	code, out := c.json(http.MethodPost, "/api/workflows", d)
 	if code != 201 {
 		t.Fatalf("create %d %v", code, out)

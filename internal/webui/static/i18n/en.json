@@ -2472,5 +2472,8 @@
   "ev.status_failed": "Failed",
   "ev.status_canceled": "Canceled",
   "ev.status_interrupted": "Interrupted",
-  "ev.options": "Comparison settings"
+  "ev.options": "Comparison settings",
+  "wf.retry_max": "Retries after a temporary failure (0–5)",
+  "wf.retry_backoff": "Initial retry delay (milliseconds)",
+  "wf.retry_hint": "Off by default. Enable only for skills that can safely repeat an action. Only temporary errors retry; the delay doubles up to one minute. Completed nodes are never replayed."
 }
