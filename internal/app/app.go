@@ -74,6 +74,8 @@ type App struct {
 	power powerWatch
 	loc   atomic.Pointer[time.Location] // scheduling timezone (see timezone.go)
 
+	skillEvals skillEvalState
+
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
 	HookExe string
@@ -136,6 +138,10 @@ func Open(cfg config.Config) (*App, error) {
 	}
 	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
 	a.initWorkflows()
+	if err := a.initSkillSetEvals(); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
 	a.Optimize = optimize.New(sqlDB, a.Skills, ver)
 	a.Optimize.OnEvent = func(kind, skillID, detail string) {
 		a.Events.Emit(Event{Kind: kind, Detail: detail, TaskName: a.skillName(skillID)})
@@ -172,6 +178,8 @@ func Open(cfg config.Config) (*App, error) {
 		a.Cfg.WebUIEnabled = v == "true" || v == "1"
 	}
 	a.WebUI = webui.New(webui.Deps{
+		DependencyPreflight: a.dependencyPreflight,
+		StartSkillSetEval:   a.startSkillSetEval, GetSkillSetEval: a.getSkillSetEval, ListSkillSetEvals: a.listSkillSetEvals, CancelSkillSetEval: a.cancelSkillSetEval,
 		StartDependencyCheck: a.startDependencyCheck, DependencyCheckStatus: a.dependencyCheckStatus,
 		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Workflows: a.Workflows, Ver: ver, Reg: reg, Log: log,
@@ -200,9 +208,11 @@ func (a *App) Close() error {
 	if a.Sched != nil {
 		a.Sched.Stop()
 	}
+	a.stopSkillSetEvals()
 	a.stopWorkflows()
 	a.drainRuns()
 	a.waitWorkflows()
+	a.waitSkillSetEvals()
 	if a.WebUI != nil {
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = a.WebUI.Stop(sctx)
@@ -366,7 +376,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
 		done()
 	}
-	if opts.TriggerKind == "workflow" {
+	if opts.TriggerKind == "workflow" || opts.TriggerKind == "skill_set_eval" {
 		// The workflow owns the outcome; node answers must not trigger task notices.
 		return res, err
 	}
@@ -510,14 +520,17 @@ func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket 
 func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucket string, onStart func(string)) error {
 	providerName := a.Cfg.DefaultProvider
 	view, err := a.Tasks.Get(ctx, task.ID)
-	if err == nil && view.Spec != nil && view.Spec.Provider != "" {
+	if err != nil {
+		return err
+	}
+	if view.Spec != nil && view.Spec.Provider != "" {
 		providerName = view.Spec.Provider
 	} else if task.ProviderID.Valid && task.ProviderID.String != "" {
 		if prow, err := a.Store.GetProviderByID(ctx, task.ProviderID.String); err == nil {
 			providerName = prow.Name
 		}
 	}
-	prompt, versionID, nextIDs, err := a.Tasks.CompilePrompt(ctx, task.ID)
+	prompt, versionID, nextIDs, err := a.Tasks.CompilePromptView(ctx, view)
 	if err != nil {
 		return err
 	}
@@ -537,6 +550,14 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	var skillArgs []string
 	var staged *skillStage
 	displayPrompt := prompt
+	var setSource *tasksvc.SkillSetSource
+	var declared []tasksvc.SkillBinding
+	if view.Spec != nil {
+		setSource, declared = view.Spec.SkillSetSource, view.Spec.SkillBindings
+		if err := a.Skills.ValidateSetSource(ctx, setSource); err != nil {
+			return err
+		}
+	}
 	if view.Spec != nil && len(view.Spec.SkillBindings) > 0 {
 		var bindings []tasksvc.SkillBinding
 		if len(view.Spec.SkillBindings) == 1 {
@@ -576,7 +597,7 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	res, err := a.RunPromptEx(ctx, runner.Options{
 		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
 		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket,
-		OnStart: a.skillStart(staged, onStart), ContextArgs: skillArgs,
+		OnStart: a.skillStart(staged, a.sourceStart(setSource, declared, onStart)), ContextArgs: skillArgs,
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)

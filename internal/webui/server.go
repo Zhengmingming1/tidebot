@@ -32,6 +32,11 @@ import (
 
 // Deps are services the HTTP layer needs.
 type Deps struct {
+	StartSkillSetEval     func(SkillSetEvalRequest) (SkillSetEvaluation, error)
+	GetSkillSetEval       func(context.Context, string) (SkillSetEvaluation, error)
+	ListSkillSetEvals     func(context.Context, string) ([]SkillSetEvaluation, error)
+	CancelSkillSetEval    func(string) error
+	DependencyPreflight   func(context.Context, DependencyCheckRequest) (DependencyPreflightReport, error)
 	StartDependencyCheck  func(DependencyCheckRequest) (string, error)
 	DependencyCheckStatus func(context.Context, string) (DependencyCheckStatus, error)
 	Cfg                   *config.Config

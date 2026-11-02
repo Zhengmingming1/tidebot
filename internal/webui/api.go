@@ -27,6 +27,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/scheduler"
+	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/version"
@@ -36,6 +37,9 @@ import (
 var Version = buildinfo.Version
 
 func (s *Server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("/api/dependencies/preflight", s.withAuthCSRF(s.handleDependencyPreflight))
+	mux.HandleFunc("/api/skill-sets/preview", s.withAuthCSRF(s.handleSkillSetPreview))
+	mux.HandleFunc("/api/skill-manifests/", s.withAuthCSRF(s.handleSkillManifest))
 	mux.HandleFunc("/api/workflows", s.withAuthCSRF(s.handleWorkflows))
 	mux.HandleFunc("/api/workflows/", s.withAuthCSRF(s.handleWorkflowSub))
 	mux.HandleFunc("/api/workflow-runs", s.withAuthCSRF(s.handleWorkflowRuns))
@@ -51,6 +55,10 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tasks", s.withAuthCSRF(s.handleTasks))
 	mux.HandleFunc("/api/tasks/", s.withAuthCSRF(s.handleTaskSub))
 	mux.HandleFunc("/api/amendments/", s.withAuthCSRF(s.handleAmendAction))
+	mux.HandleFunc("/api/skill-set-usage", s.withAuthCSRF(s.handleSkillSetUsage))
+	mux.HandleFunc("/api/skill-set-usage/apply", s.withAuthCSRF(s.handleSkillSetUsageApply))
+	mux.HandleFunc("/api/skill-set-evals", s.withAuthCSRF(s.handleSkillSetEvals))
+	mux.HandleFunc("/api/skill-set-evals/", s.withAuthCSRF(s.handleSkillSetEvalSub))
 	mux.HandleFunc("/api/skill-sets", s.withAuthCSRF(s.handleSkillSets))
 	mux.HandleFunc("/api/skill-sets/import", s.withAuthCSRF(s.handleSkillSetImport))
 	mux.HandleFunc("/api/skill-sets/", s.withAuthCSRF(s.handleSkillSetSub))
@@ -474,6 +482,14 @@ func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg := body.validate(); msg != "" {
 		writeErr(w, 400, msg)
+		return
+	}
+	if err := s.deps.Skills.ValidateSetSource(r.Context(), body.SkillSetSource); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if body.SkillSetSource != nil && body.SkillID == "" && len(body.SkillBindings) == 0 {
+		writeErr(w, 400, "composition source requires skill bindings")
 		return
 	}
 	var runID string
@@ -1331,18 +1347,22 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes, changes_undone_at, changes_undone_files FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes, &undoneAt, &undoneFiles)
 		out := struct {
 			runDTO
-			SkillBindings      []tasksvc.SkillBinding `json:"skill_bindings"`
-			CostDetail         json.RawMessage        `json:"cost_detail"`
-			Currency           string                 `json:"currency"`
-			Result             string                 `json:"result"`
-			ResultTruncated    bool                   `json:"result_truncated,omitempty"`
-			AnswerSame         *answerSameDTO         `json:"answer_same,omitempty"`
-			AnswerPrev         *answerSameDTO         `json:"answer_prev,omitempty"`
-			FileChanges        json.RawMessage        `json:"file_changes,omitempty"`
-			ChangesUndoneAt    string                 `json:"changes_undone_at,omitempty"`
-			ChangesUndoneFiles []string               `json:"changes_undone_files,omitempty"`
-		}{runs[0], nil, nil, s.fx().Display, result, cut != 0, nil, nil, nil, undoneAt, nil}
+			SkillBindings      []tasksvc.SkillBinding   `json:"skill_bindings"`
+			SkillSetSource     *skillstore.RunSetSource `json:"skill_set_source,omitempty"`
+			SkillEvidence      []skillEvidence          `json:"skill_evidence"`
+			CostDetail         json.RawMessage          `json:"cost_detail"`
+			Currency           string                   `json:"currency"`
+			Result             string                   `json:"result"`
+			ResultTruncated    bool                     `json:"result_truncated,omitempty"`
+			AnswerSame         *answerSameDTO           `json:"answer_same,omitempty"`
+			AnswerPrev         *answerSameDTO           `json:"answer_prev,omitempty"`
+			FileChanges        json.RawMessage          `json:"file_changes,omitempty"`
+			ChangesUndoneAt    string                   `json:"changes_undone_at,omitempty"`
+			ChangesUndoneFiles []string                 `json:"changes_undone_files,omitempty"`
+		}{runDTO: runs[0], Currency: s.fx().Display, Result: result, ResultTruncated: cut != 0, ChangesUndoneAt: undoneAt}
 		out.SkillBindings, _ = s.deps.Skills.RunBindings(r.Context(), id)
+		out.SkillSetSource, _ = s.deps.Skills.RunSource(r.Context(), id)
+		out.SkillEvidence = loadedSkillEvidence(out.SkillBindings)
 		if len(out.SkillBindings) == 0 && runs[0].SkillID != "" {
 			mode := "follow"
 			if runs[0].SkillVerID != "" {

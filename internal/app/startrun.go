@@ -87,6 +87,12 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		}
 		bindings = []tasksvc.SkillBinding{{SkillID: req.SkillID, Mode: mode, VersionID: req.VersionID}}
 	}
+	if err := a.Skills.ValidateSetSource(ctx, req.SkillSetSource); err != nil {
+		return "", err
+	}
+	if req.SkillSetSource != nil && len(bindings) == 0 {
+		return "", errors.New("composition source requires skill bindings")
+	}
 	if len(bindings) == 0 && dir == "" {
 		return a.startQuickRunAsync(req.Prompt, req.Provider)
 	}
@@ -131,7 +137,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		defer st.Close()
 		opts := runner.Options{
 			Prompt: st.Invoke(modern, req.Prompt), DisplayPrompt: req.Prompt, WorkspaceDir: dir,
-			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, onStart), ContextArgs: args,
+			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, a.sourceStart(req.SkillSetSource, bindings, onStart)), ContextArgs: args,
 			SkillID: req.SkillID, SkillVersionID: versionID, RunMode: mode,
 		}
 		if mode == "edit" {
@@ -139,7 +145,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 			// what the run changed in the folder (git work trees), for the run page
 			tr := &changeTracker{a: a, dir: dir}
 			defer tr.close()
-			opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(a.skillStart(st, onStart)), tr.atStart, tr.afterExit
+			opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(a.skillStart(st, a.sourceStart(req.SkillSetSource, bindings, onStart))), tr.atStart, tr.afterExit
 		}
 		_, err := a.RunPromptEx(ctx, opts, req.Provider, 0)
 		return err

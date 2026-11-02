@@ -84,7 +84,9 @@ The UI speaks English and Simplified Chinese. It follows your browser by default
 
 Scheduled tasks you can keep talking to. Tasks have a cron schedule or run on demand. You change requirements in plain language; tidebot splits them into add / modify / delete items and marks each as permanent or next-run-only. "Keep backups for 10 days this time" only affects the next run and leaves the task itself alone. If something conflicts with an existing requirement, it asks whether to replace or keep both.
 
-Skill sets and visual workflows. Combine one primary skill with supporting skills, drag them onto a canvas, connect conditional and parallel steps, and inspect each step's output and logs. Tasks, quick runs, buttons and workflows can request an AI static dependency check. See the [design and usage guide](docs/skills-workflows.md).
+Skill sets and visual workflows. Combine one primary skill with supporting skills, drag them onto a canvas, connect conditional and parallel steps, and inspect each step's output and logs. See the [design and usage guide](docs/skills-workflows.md).
+
+Skill package maintenance (unreleased). Declare required or optional skill dependencies in `tidebot.json`, preview additions before adopting them, and run a local preflight without model calls. Optional AI analysis and primary-versus-composition text evaluations incur model usage. Package versions retain documentation and examples; explicit upgrade previews protect locally edited task and node bindings. Loaded skill material is not proof of model execution. See the [dependency, upgrade and evaluation guide (Chinese)](docs/skill-manifests.md).
 
 Skills with versions and rollback. Import a Claude Code skill directory; every re-import is a new version. A task can pin a specific skill version, and you can roll back when a new one misbehaves.
 

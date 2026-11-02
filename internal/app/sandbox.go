@@ -16,6 +16,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
 // DryRunBudgetUSD caps a sandbox run.
@@ -52,7 +53,7 @@ func (a *App) StartDryRun(taskID string) (*DryRun, error) {
 	if err != nil {
 		return nil, errors.New("task not found")
 	}
-	prompt, versionID, _, err := a.Tasks.CompilePrompt(ctx, taskID)
+	prompt, versionID, _, err := a.Tasks.CompilePromptView(ctx, v)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +72,11 @@ func (a *App) StartDryRun(taskID string) (*DryRun, error) {
 	if err != nil {
 		os.RemoveAll(box)
 		return nil, err
+	}
+	var source *tasksvc.SkillSetSource
+	var declared []tasksvc.SkillBinding
+	if v.Spec != nil {
+		source, declared = v.Spec.SkillSetSource, v.Spec.SkillBindings
 	}
 	var st *skillStage
 	if v.Spec != nil && len(v.Spec.SkillBindings) > 0 {
@@ -98,7 +104,7 @@ func (a *App) StartDryRun(taskID string) (*DryRun, error) {
 		defer os.RemoveAll(box)
 		defer st.Close()
 		res, err := a.RunPromptEx(ctx, runner.Options{Prompt: prompt, WorkspaceDir: box, TriggerKind: "dry_run", TaskID: taskID,
-			TaskVersionID: versionID, CostBucket: cost.BucketDryRun, ContextArgs: args, OnStart: a.skillStart(st, nil)}, "", 15*time.Minute)
+			TaskVersionID: versionID, CostBucket: cost.BucketDryRun, ContextArgs: args, OnStart: a.skillStart(st, a.sourceStart(source, declared, nil))}, "", 15*time.Minute)
 		after := hashTree(box)
 		dryRuns.Lock()
 		defer dryRuns.Unlock()

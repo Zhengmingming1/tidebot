@@ -20,13 +20,14 @@ import (
 // working folder. Without a folder the run works in a scratch folder of tidebot's;
 // with one it is read-only unless Mode is "edit".
 type RunRequest struct {
-	SkillBindings []tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
-	Prompt        string                 `json:"prompt"`
-	Provider      string                 `json:"provider"`
-	SkillID       string                 `json:"skill_id"`
-	VersionID     string                 `json:"version_id"`
-	Workspace     string                 `json:"workspace"`
-	Mode          string                 `json:"mode"` // "read" (default) | "edit"
+	SkillSetSource *tasksvc.SkillSetSource `json:"skill_set_source,omitempty"`
+	SkillBindings  []tasksvc.SkillBinding  `json:"skill_bindings,omitempty"`
+	Prompt         string                  `json:"prompt"`
+	Provider       string                  `json:"provider"`
+	SkillID        string                  `json:"skill_id"`
+	VersionID      string                  `json:"version_id"`
+	Workspace      string                  `json:"workspace"`
+	Mode           string                  `json:"mode"` // "read" (default) | "edit"
 }
 
 // ErrUnknownSkill: the skill (or version) asked for doesn't exist.
@@ -37,6 +38,9 @@ var idRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
 const runPromptMax = 8000
 
 func (b *RunRequest) validate() string {
+	if err := tasksvc.ValidateSkillSetSource(b.SkillSetSource); err != nil {
+		return err.Error()
+	}
 	b.Prompt = strings.TrimSpace(b.Prompt)
 	if b.SkillBindings != nil {
 		normalized, err := tasksvc.NormalizeBindings(b.SkillBindings)

@@ -3575,3 +3575,19 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 }
 .wf-page-head .row-actions { flex-wrap: wrap; }
 .wf-page-head { gap: 12px; }
+
+/* Skill package documentation, dependency checks and comparisons. */
+.ss-source { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; }
+.ss-source code,.ss-details code,.dep-finding code { overflow-wrap:anywhere; }
+.ss-details { margin:16px 0; padding:14px 0; border-top:1px solid var(--border); }
+.ss-details > summary { cursor:pointer; font-weight:600; }
+.ss-case { min-width:0; border:1px solid var(--border); border-radius:12px; margin:12px 0; padding:14px; }
+.ss-case legend { font-weight:600; padding:0 6px; }
+.ss-case input:not([type=checkbox]),.ss-case textarea,.ss-case select { width:100%; }
+.ss-description { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted); }
+.ss-eval-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.ss-eval-outcome { min-width:0; border:1px solid var(--border); padding:12px; border-radius:12px; }
+.ss-eval-outcome .wf-output { max-height:320px; }
+#ev-result { margin-top:16px; }
+#sm-form .row-actions select { flex:1; min-width:0; }
+@media (max-width:620px) { .ss-eval-pair { grid-template-columns:1fr; } }

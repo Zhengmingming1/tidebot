@@ -28,15 +28,18 @@ type Definition struct {
 	Nodes          []Node `json:"nodes"`
 }
 type Node struct {
-	Position      *Position              `json:"position,omitempty"`
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name,omitempty"`
-	Kind          string                 `json:"kind"`
-	Prompt        string                 `json:"prompt,omitempty"`
-	SkillBindings []tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
-	Needs         []Dependency           `json:"needs,omitempty"`
-	Join          string                 `json:"join"`
-	Condition     *Condition             `json:"condition,omitempty"`
+	// SkillSetState is derived before freezing bindings in a run snapshot.
+	SkillSetState  string                  `json:"skill_set_state,omitempty"`
+	SkillSetSource *tasksvc.SkillSetSource `json:"skill_set_source,omitempty"`
+	Position       *Position               `json:"position,omitempty"`
+	ID             string                  `json:"id"`
+	Name           string                  `json:"name,omitempty"`
+	Kind           string                  `json:"kind"`
+	Prompt         string                  `json:"prompt,omitempty"`
+	SkillBindings  []tasksvc.SkillBinding  `json:"skill_bindings,omitempty"`
+	Needs          []Dependency            `json:"needs,omitempty"`
+	Join           string                  `json:"join"`
+	Condition      *Condition              `json:"condition,omitempty"`
 }
 
 // Position is presentation metadata; it never determines dependency order.

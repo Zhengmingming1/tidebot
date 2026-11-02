@@ -20,16 +20,18 @@ import (
 
 // taskForm is the WebUI create/edit payload.
 type taskForm struct {
-	SkillBindings  *[]tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
-	Name           string                  `json:"name"`
-	Prompt         string                  `json:"prompt"`
-	SkillID        string                  `json:"skill_id"`
-	SkillVersionID string                  `json:"skill_version_id"`
-	Provider       string                  `json:"provider"`
-	Cron           string                  `json:"cron"`
-	BudgetUSD      float64                 `json:"budget_usd"`
-	Enabled        bool                    `json:"enabled"`
-	TimeoutMinutes int                     `json:"timeout_minutes"`
+	SkillSetSource    json.RawMessage         `json:"skill_set_source,omitempty"`
+	ExpectedVersionID string                  `json:"expected_version_id,omitempty"`
+	SkillBindings     *[]tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
+	Name              string                  `json:"name"`
+	Prompt            string                  `json:"prompt"`
+	SkillID           string                  `json:"skill_id"`
+	SkillVersionID    string                  `json:"skill_version_id"`
+	Provider          string                  `json:"provider"`
+	Cron              string                  `json:"cron"`
+	BudgetUSD         float64                 `json:"budget_usd"`
+	Enabled           bool                    `json:"enabled"`
+	TimeoutMinutes    int                     `json:"timeout_minutes"`
 	// Workspace: the task's own working folder, "" = the per-task default. nil (field
 	// left out, e.g. an older page) keeps the folder the task has.
 	Workspace *string `json:"workspace,omitempty"`
@@ -81,6 +83,15 @@ func policyFormOf(p policy.Policy) taskPolicyForm {
 }
 
 func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID string) error {
+	if len(f.SkillSetSource) > 0 {
+		var source *tasksvc.SkillSetSource
+		if err := json.Unmarshal(f.SkillSetSource, &source); err != nil {
+			return errors.New("invalid skill set source")
+		}
+		if err := s.deps.Skills.ValidateSetSource(ctx, source); err != nil {
+			return err
+		}
+	}
 	if f.Workspace != nil {
 		ws, err := s.normalizeWorkspace(*f.Workspace, taskID)
 		if err != nil {
@@ -210,6 +221,11 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 }
 
 func specFromForm(spec tasksvc.Spec, f taskForm) tasksvc.Spec {
+	if len(f.SkillSetSource) > 0 {
+		var source *tasksvc.SkillSetSource
+		_ = json.Unmarshal(f.SkillSetSource, &source)
+		spec.SkillSetSource = source
+	}
 	spec.Prompt = f.Prompt
 	spec.Provider = f.Provider
 	if f.Workspace != nil {
@@ -262,7 +278,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if f.SkillID != "" || f.SkillBindings != nil {
+	if f.SkillID != "" || f.SkillBindings != nil || len(f.SkillSetSource) > 0 {
 		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, specFromForm(*tv.Spec, f), "user", "bind skill"); err != nil {
 			writeErr(w, 500, err.Error())
 			return
@@ -295,8 +311,12 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request, id string) {
 	next := specFromForm(*cur.Spec, f)
 	a, _ := json.Marshal(cur.Spec)
 	b, _ := json.Marshal(next)
-	if string(a) != string(b) {
-		if _, err := s.deps.Tasks.UpdateSpec(ctx, id, next, "user", "edited in WebUI"); err != nil {
+	if string(a) != string(b) || f.ExpectedVersionID != "" {
+		if _, err := s.deps.Tasks.UpdateSpecExpected(ctx, id, next, "user", "edited in WebUI", f.ExpectedVersionID); err != nil {
+			if errors.Is(err, tasksvc.ErrConflict) {
+				writeErr(w, 409, err.Error())
+				return
+			}
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -333,6 +353,10 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 	f.Workspace = &ws
 	bindings, _ := tasksvc.NormalizeBindings(v.Spec.SkillBindings)
 	f.SkillBindings = &bindings
+	f.SkillSetSource, _ = json.Marshal(v.Spec.SkillSetSource)
+	if v.CurrentVersion != nil {
+		f.ExpectedVersionID = v.CurrentVersion.ID
+	}
 	if len(bindings) > 0 {
 		f.SkillID = bindings[0].SkillID
 		if bindings[0].Mode == "pinned" {
@@ -348,7 +372,7 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 		tags = m[id]
 	}
 	f.Tags = &tags
-	return map[string]any{"form": f, "fail_streak": p.ConsecutiveFailures, "breaker_at": policy.BreakerThreshold}, nil
+	return map[string]any{"skill_set_state": s.deps.Skills.SourceState(ctx, v.Spec.SkillSetSource, bindings), "form": f, "fail_streak": p.ConsecutiveFailures, "breaker_at": policy.BreakerThreshold}, nil
 }
 
 // handleCronPreview: GET /api/scheduler/preview?cron=...&tz=...&n=5 → next run times.

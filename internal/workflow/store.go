@@ -31,6 +31,17 @@ func (s *Service) check(ctx context.Context, d *Definition) error {
 	if err := Validate(d); err != nil {
 		return err
 	}
+	for _, n := range d.Nodes {
+		if source := n.SkillSetSource; source != nil {
+			var count int
+			if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM versions WHERE id=? AND entity_type='skill_set' AND entity_id=?`, source.VersionID, source.SetID).Scan(&count); err != nil {
+				return err
+			}
+			if count != 1 {
+				return fmt.Errorf("node %s: skill set source version does not belong to set", n.ID)
+			}
+		}
+	}
 	if s.Prepare != nil {
 		_, err := s.Prepare(ctx, *d)
 		return err
@@ -38,6 +49,10 @@ func (s *Service) check(ctx context.Context, d *Definition) error {
 	return nil
 }
 func (s *Service) Save(ctx context.Context, wid string, expected int, d Definition) (Workflow, error) {
+	d.Nodes = append([]Node(nil), d.Nodes...)
+	for i := range d.Nodes {
+		d.Nodes[i].SkillSetState = ""
+	}
 	if err := s.check(ctx, &d); err != nil {
 		return Workflow{}, err
 	}

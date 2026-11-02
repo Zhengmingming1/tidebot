@@ -21,6 +21,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	run := runs[0]
 	var bindings []tasksvc.SkillBinding
+	var source *tasksvc.SkillSetSource
 	if run.TaskID == "" && s.deps.Skills != nil {
 		bindings, err = s.deps.Skills.RunBindings(r.Context(), id)
 		if err != nil {
@@ -29,6 +30,12 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		if len(bindings) == 0 {
 			bindings = nil
+		}
+		if snapshot, e := s.deps.Skills.RunSource(r.Context(), id); e != nil {
+			writeErr(w, 500, e.Error())
+			return
+		} else if snapshot != nil {
+			source = snapshot.SkillSetSource
 		}
 	}
 	var newID string
@@ -51,7 +58,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			ws = "" // skill run in a scratch folder
 		}
 		if newID, err = s.deps.StartRun(RunRequest{Prompt: run.Prompt, Provider: run.Provider, SkillID: run.SkillID,
-			VersionID: run.SkillVerID, SkillBindings: bindings, Workspace: ws, Mode: run.RunMode}); err != nil {
+			VersionID: run.SkillVerID, SkillBindings: bindings, SkillSetSource: source, Workspace: ws, Mode: run.RunMode}); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}

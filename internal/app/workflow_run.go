@@ -28,6 +28,13 @@ func (a *App) prepareWorkflow(ctx context.Context, d workflow.Definition) (workf
 		if n.Kind != "skill" {
 			continue
 		}
+		if err := a.Skills.ValidateSetSource(ctx, n.SkillSetSource); err != nil {
+			return d, fmt.Errorf("node %s: %w", n.ID, err)
+		}
+		n.SkillSetState = ""
+		if n.SkillSetSource != nil {
+			n.SkillSetState = a.Skills.SourceState(ctx, n.SkillSetSource, n.SkillBindings)
+		}
 		bs, err := tasksvc.NormalizeBindings(n.SkillBindings)
 		if err != nil {
 			return d, err
@@ -81,6 +88,13 @@ func (a *App) executeWorkflowNode(ctx context.Context, n workflow.Node, prompt, 
 			// The public callback records the child link before the run can wait for a slot.
 			onChild(id)
 			recordErr = a.Skills.RecordRunBindings(context.WithoutCancel(ctx), id, n.SkillBindings)
+			if recordErr == nil {
+				state := n.SkillSetState
+				if state == "" {
+					state = a.Skills.SourceState(ctx, n.SkillSetSource, n.SkillBindings)
+				}
+				recordErr = a.Skills.RecordRunSourceState(context.WithoutCancel(ctx), id, n.SkillSetSource, state)
+			}
 			if recordErr != nil {
 				cancel()
 			}

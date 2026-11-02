@@ -42,6 +42,15 @@ func (a *App) stageSkills(ctx context.Context, bindings []tasksvc.SkillBinding) 
 	if a.Skills == nil {
 		return nil, fmt.Errorf("skills unavailable")
 	}
+	// Resolve follow bindings once so dependency validation and staging inspect
+	// the same immutable versions even if a skill is updated concurrently.
+	bindings, err := a.Skills.ResolveBindings(ctx, bindings)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.Skills.ValidateDependencyBindings(ctx, bindings); err != nil {
+		return nil, err
+	}
 	root := a.skillStageRoot()
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
@@ -253,12 +262,19 @@ func (st *skillStage) CheckedArgs(modern, explicit bool) ([]string, error) {
 	if st == nil || len(st.Skills) == 0 {
 		return nil, nil
 	}
+	var instructionBytes int
+	for _, skill := range st.Skills {
+		instructionBytes += len(skill.SkillMD)
+	}
+	if instructionBytes > skillContextMaxBytes {
+		return nil, fmt.Errorf("skill instructions exceed the %d KiB context budget (%d bytes); shorten SKILL.md or split the workflow; instructions were not truncated", skillContextMaxBytes>>10, instructionBytes)
+	}
 	text := st.systemPrompt()
 	if explicit && modern {
 		text = st.supportPrompt()
 	}
-	if !modern && len(st.Skills) > 1 && len(text) > 16<<10 {
-		return nil, fmt.Errorf("combined skill instructions exceed the legacy Claude limit; update Claude Code")
+	if !modern && len(text) > 16<<10 {
+		return nil, fmt.Errorf("skill instructions exceed the legacy Claude limit; update Claude Code; instructions were not truncated")
 	}
 	args := st.Args(modern, explicit)
 	if modern && (!explicit || len(st.Skills) > 1) {

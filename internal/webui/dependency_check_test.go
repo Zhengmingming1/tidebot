@@ -57,3 +57,35 @@ func TestDependencyCheckUnavailable(t *testing.T) {
 		t.Fatalf("unavailable: %d", code)
 	}
 }
+
+func TestDependencyPreflightAPIAndRuntimeInput(t *testing.T) {
+	c := login(t)
+	var seen DependencyCheckRequest
+	calls := 0
+	c.s.deps.DependencyPreflight = func(ctx context.Context, req DependencyCheckRequest) (DependencyPreflightReport, error) {
+		seen = req
+		calls++
+		return DependencyPreflightReport{RuntimeProfile: DependencyRuntimeProfile{Mode: req.Mode}, ContextUsage: []DependencyContextUsage{}}, nil
+	}
+	code, out := c.json(http.MethodPost, "/api/dependencies/preflight", map[string]string{"kind": "draft", "prompt": "test", "mode": "read", "workspace": "/tmp/example", "python_environment": "/tmp/venv"})
+	if code != 200 || out["runtime_profile"] == nil || seen.Workspace != "/tmp/example" || seen.PythonEnvironment != "/tmp/venv" || calls != 1 {
+		t.Fatalf("preflight %d %v %+v calls=%d", code, out, seen, calls)
+	}
+	code, _ = c.json(http.MethodGet, "/api/dependencies/preflight?kind=skill&id=skill_example", nil)
+	if code != 200 || seen.ID != "skill_example" {
+		t.Fatalf("GET preflight %d %+v", code, seen)
+	}
+	for _, raw := range []string{`{"kind":"draft","prompt":"x","mode":"shell"}`, `{"kind":"draft","prompt":"x","python_environment":"relative"}`, `{"kind":"draft","prompt":"x","execute":true}`, `{"kind":"draft","prompt":"x"} {}`} {
+		rr := c.do(http.MethodPost, "/api/dependencies/preflight", "application/json", []byte(raw))
+		if rr.Code != 400 {
+			t.Fatalf("invalid input accepted %s: %d", raw, rr.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/dependencies/preflight", strings.NewReader(`{"kind":"draft","prompt":"x"}`))
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: c.sid})
+	rr := httptest.NewRecorder()
+	c.s.routes().ServeHTTP(rr, req)
+	if rr.Code != 403 {
+		t.Fatalf("preflight CSRF not enforced: %d", rr.Code)
+	}
+}

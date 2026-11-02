@@ -103,6 +103,27 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 
 // UpdateSpec commits a new task version from an edited spec (pointer move).
 func (s *Service) UpdateSpec(ctx context.Context, taskID string, spec Spec, actor, reason string) (TaskView, error) {
+	return s.UpdateSpecExpected(ctx, taskID, spec, actor, reason, "")
+}
+
+// UpdateSpecExpected commits only while the expected task version is current.
+// Empty expected keeps compatibility with existing callers.
+func (s *Service) UpdateSpecExpected(ctx context.Context, taskID string, spec Spec, actor, reason, expected string) (TaskView, error) {
+	specWrites.Lock()
+	defer specWrites.Unlock()
+	if expected != "" {
+		current, err := s.Ver.CurrentVersion(ctx, version.EntityTask, taskID)
+		if err != nil {
+			return TaskView{}, err
+		}
+		if current.ID != expected {
+			return TaskView{}, ErrConflict
+		}
+	}
+	if err := s.validateSource(ctx, spec.SkillSetSource); err != nil {
+		return TaskView{}, err
+	}
+
 	bindings, err := NormalizeBindings(spec.SkillBindings)
 	if err != nil {
 		return TaskView{}, err
@@ -379,6 +400,8 @@ func (s *Service) WakeSnoozed(ctx context.Context, now time.Time) ([]string, err
 
 // Rollback moves current pointer to versionID (no new version).
 func (s *Service) Rollback(ctx context.Context, taskID, versionID, actor, reason string) error {
+	specWrites.Lock()
+	defer specWrites.Unlock()
 	ver, err := s.Ver.GetVersion(ctx, versionID)
 	if err != nil {
 		return err
@@ -416,6 +439,12 @@ func (s *Service) CompilePrompt(ctx context.Context, taskID string) (prompt stri
 	if err != nil {
 		return "", "", nil, err
 	}
+	return s.CompilePromptView(ctx, view)
+}
+
+// CompilePromptView uses the same immutable spec as the caller's skill snapshot.
+func (s *Service) CompilePromptView(ctx context.Context, view TaskView) (prompt string, versionID string, nextRunItemIDs []string, err error) {
+	taskID := view.Task.ID
 	if view.CurrentVersion == nil || view.Spec == nil {
 		return view.Task.Prompt, "", nil, nil
 	}

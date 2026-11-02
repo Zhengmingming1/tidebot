@@ -2417,15 +2417,15 @@
         function (root, close) {
           var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root), ws = form.workspace;
           var initial = pre.skill_bindings || (pre.skill_id ? [{skill_id:pre.skill_id,mode:pre.version_id?"pinned":"follow",version_id:pre.version_id||"",role:"primary"}] : []);
-          var editor = skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs){form.skill_id.value=bs.length?bs[0].skill_id:"";form.skill_id.dispatchEvent(new Event("change",{bubbles:true}));});
+          var editor = skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs){form.skill_id.value=bs.length?bs[0].skill_id:"";form.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:pre.skill_set_source,checkRequest:function(){return {kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:modeVal()};}});
           form.skill_id.value=editor.value().length?editor.value()[0].skill_id:"";
-          $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value()});});
+          $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:ws.value.trim()?modeVal():"edit"});});
           var pill = $("#rn-ws-st", root), pick = $("#rn-ws-pick", root), clear = $("#rn-ws-clear", root), dirsBox = $("#rn-dirs", root), hint = $("#rn-hint", root), err = $("#rn-err", root), argEl = $("#rn-arg", root);
           var wsState = { problem: "", git: null }, seq = 0, timer = 0, wsTouched = false, recentDirs = [];
           var modeVal = function () { var c = form.querySelector('input[name="mode"]:checked'); return c ? c.value : "read"; };
           var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" ? "edit" : "read"); }); };
-          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), workspace: ws.value.trim(), mode: ws.value.trim() ? modeVal() : "" }; };
-          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : "" } : null;
+          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: ws.value.trim() ? modeVal() : "" }; };
+          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : "" } : null;
           // the hint under the form says what the run may do; a dirty git folder warns before "Can edit"
           var paintHint = function () {
             var dir = ws.value.trim(), m = modeVal(), g = wsState.git, warn = false, txt;
@@ -2505,7 +2505,7 @@
           $$('input[name="mode"]', form).forEach(function (i) { i.addEventListener("change", function () { paintHint(); syncEdit(); }); });
           clear.addEventListener("click", function () { wsTouched = true; setWs(""); drawDirs(); ws.focus(); });
           dirsBox.addEventListener("click", function (e) { var b = e.target.closest(".rn-dir"); if (!b) return; wsTouched = true; setWs(b.getAttribute("data-dir")); drawDirs(); });
-          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; editor.set(orig.skill_bindings); form.skill_id.value = orig.skill_id; setWs(orig.workspace); setMode(orig.mode); paintSkill(); sync(); ta.focus(); });
+          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; editor.set(orig.skill_bindings, orig.skill_set_source); form.skill_id.value = orig.skill_id; setWs(orig.workspace); setMode(orig.mode); paintSkill(); sync(); ta.focus(); });
           box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); sync(); ta.focus(); });
           folderPickable().then(function (ok) {
             if (!ok || !root.contains(pick)) return;
@@ -2541,7 +2541,7 @@
   // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).
   function rnEdited(orig, c) {
     if (!orig) return false;
-    var bindingsChanged=JSON.stringify(c.skill_bindings||[])!==JSON.stringify(orig.skill_bindings||[]);
+    var bindingsChanged=JSON.stringify(c.skill_bindings||[])!==JSON.stringify(orig.skill_bindings||[]) || JSON.stringify(c.skill_set_source)!==JSON.stringify(orig.skill_set_source);
     return bindingsChanged || qrEdited(orig, c.prompt, c.provider) || (c.skill_id || "") !== (orig.skill_id || "") || (c.workspace || "") !== (orig.workspace || "") || (c.workspace ? c.mode : "") !== (orig.workspace ? orig.mode : "");
   }
   // qrEdited: has the edit-&-rerun form moved away from the original run? Trailing
@@ -3330,7 +3330,8 @@
   function skillTabs(active) {
     return '<nav class="ss-tabs" aria-label="' + esc(T("ss.tabs")) + '">' + [["skills", "nav.skills"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) { return '<a class="btn sm ' + (active === x[0] ? "primary" : "ghost") + '" href="#/' + x[0] + '"' + (active === x[0] ? ' aria-current="page"' : "") + '>' + esc(T(x[1])) + '</a>'; }).join("") + '</nav>';
   }
-  function skillBindingEditor(box, skills, initial, onChange) {
+  function skillBindingEditor(box, skills, initial, onChange, options) {
+    options = options || {}; var source = cleanSetSource(options.source);
     var uid = "ss-role-" + (++skillEditorSeq), bindings = [], versions = {}, loading = {}, sets = [];
     function normalize(bs) {
       var out = (bs || []).map(function (b) { return { skill_id: b.skill_id, skill_name: b.skill_name || "", role: b.role || "", mode: b.mode || (b.version_id ? "pinned" : "follow"), version_id: b.version_id || "" }; });
@@ -3339,20 +3340,24 @@
       return out.filter(function (b) { return b.role === "primary"; }).concat(out.filter(function (b) { return b.role !== "primary"; }));
     }
     function value() { return bindings.map(function (b) { return Object.assign({}, b); }); }
-    function changed() { bindings = normalize(bindings); paint(); if (onChange) onChange(value()); box.dispatchEvent(new Event("input", { bubbles: true })); }
+    function changed() { bindings = normalize(bindings); paint(); if (onChange) onChange(value(), cleanSetSource(source)); box.dispatchEvent(new Event("input", { bubbles: true })); }
     function paint() {
       var available = skills.filter(function (s) { return !bindings.some(function (b) { return b.skill_id === s.id; }); });
       box.innerHTML = '<div class="ss-editor"><p class="hint">' + esc(T("ss.editor_hint")) + '</p>' +
+        (source ? '<p class="notice ss-source">' + esc(T("ss.source_fixed")) + ' <code>' + esc(source.version_id) + '</code><button type="button" class="btn sm" data-detach>' + esc(T("ss.detach")) + '</button></p>' : "") +
         (bindings.length ? '<div class="ss-members">' + bindings.map(function (b, i) {
           var skill = skills.filter(function (s) { return s.id === b.skill_id; })[0], vs = versions[b.skill_id] || [], missingVersion = b.version_id && !vs.some(function (v) { return v.id === b.version_id; });
-          var opts = opt("", T("bt.latest"), b.mode !== "pinned");
+          var opts = opt("", T(options.freeze ? "ss.freeze_current" : "bt.latest"), b.mode !== "pinned");
           if (missingVersion) opts += opt(b.version_id, T("ss.pinned") + " · " + b.version_id, true);
           opts += vs.map(function (v) { return opt(v.id, T("bt.pin_v", { n: v.no }), b.mode === "pinned" && b.version_id === v.id); }).join("");
           return '<div class="ss-member" data-member="' + i + '"><label class="ss-role"><input type="radio" name="' + uid + '" data-role="' + i + '"' + (b.role === "primary" ? " checked" : "") + '><span>' + esc(T(b.role === "primary" ? "ss.primary" : "ss.auxiliary")) + '</span></label><div class="ss-member-name"><strong>' + esc(skill ? skill.name : b.skill_name || b.skill_id) + '</strong>' + (!skill ? '<small class="field-err">' + esc(T("ss.missing")) + '</small>' : "") + '</div><select data-version="' + i + '" aria-label="' + esc(T("bt.skill_ver") + " " + (skill ? skill.name : b.skill_id)) + '">' + opts + '</select><button type="button" class="icon-btn sm" data-remove="' + i + '" aria-label="' + esc(T("ss.remove")) + '">' + ic("x", "sm") + '</button></div>';
         }).join("") + '</div>' : '<p class="muted">' + esc(T("ss.no_members")) + '</p>') +
-        '<div class="ss-add"><select data-add aria-label="' + esc(T("ss.add")) + '"' + (bindings.length >= 16 ? " disabled" : "") + '>' + opt("", T("ss.add"), true) + available.map(function (s) { return opt(s.id, s.name, false); }).join("") + '</select><select data-set aria-label="' + esc(T("ss.use_set")) + '">' + opt("", T("ss.use_set"), true) + sets.map(function (s) { return opt(s.id, s.name + " · v" + s.version_no, false); }).join("") + '</select></div></div>';
+        '<div class="ss-add"><select data-add aria-label="' + esc(T("ss.add")) + '"' + (bindings.length >= 16 ? " disabled" : "") + '>' + opt("", T("ss.add"), true) + available.map(function (s) { return opt(s.id, s.name, false); }).join("") + '</select><select data-set aria-label="' + esc(T("ss.use_set")) + '">' + opt("", T("ss.use_set"), true) + sets.map(function (s) { return opt(s.id, s.name + " · v" + s.version_no, false); }).join("") + '</select></div><button type="button" class="btn sm" data-resolve>' + esc(T("ss.resolve")) + '</button> <button type="button" class="btn sm" data-context>' + esc(T("dep.local")) + '</button></div>';
+      $('[data-context]', box).onclick = function () { dependencyCheck(options.checkRequest ? options.checkRequest() : {kind:"draft",skill_bindings:value(),mode:"read"}, true); };
+      $('[data-resolve]', box).onclick = function () { previewSkillDependencies(value(), function (bs) { bindings = normalize(bs); changed(); }, value); };
+      var detach = $('[data-detach]', box); if (detach) detach.onclick = function () { source = null; changed(); };
       $('[data-add]', box).addEventListener("change", function (e) { var sk = skills.filter(function (s) { return s.id === e.target.value; })[0]; if (!sk || bindings.length >= 16) return; bindings.push({ skill_id: sk.id, skill_name: sk.name, role: bindings.length ? "auxiliary" : "primary", mode: "follow", version_id: "" }); changed(); });
-      $('[data-set]', box).addEventListener("change", function (e) { var set = sets.filter(function (s) { return s.id === e.target.value; })[0]; if (set) { bindings = normalize(set.skill_bindings); changed(); } });
+      $('[data-set]', box).addEventListener("change", function (e) { var set = sets.filter(function (s) { return s.id === e.target.value; })[0]; if (set) { bindings = normalize(set.skill_bindings); source = { set_id: set.id, version_id: set.version_id }; changed(); } });
       $$('[data-role]', box).forEach(function (r) { r.addEventListener("change", function () { var n = +r.getAttribute("data-role"); bindings.forEach(function (b, i) { b.role = i === n ? "primary" : "auxiliary"; }); changed(); }); });
       $$('[data-remove]', box).forEach(function (b) { b.addEventListener("click", function () { bindings.splice(+b.getAttribute("data-remove"), 1); changed(); }); });
       $$('[data-version]', box).forEach(function (v) { v.addEventListener("change", function () { var b = bindings[+v.getAttribute("data-version")]; b.mode = v.value ? "pinned" : "follow"; b.version_id = v.value; changed(); }); });
@@ -3364,27 +3369,173 @@
     }
     bindings = normalize(initial); paint();
     api("/api/skill-sets").then(function (v) { sets = v || []; if (document.contains(box)) paint(); }).catch(function () {});
-    return { value: value, set: function (bs) { bindings = normalize(bs); changed(); } };
+    return { value: value, source: function () { return cleanSetSource(source); }, set: function (bs, src) { bindings = normalize(bs); source = cleanSetSource(src); changed(); } };
+  }
+  function cleanSetSource(source) {
+    return source && source.set_id && source.version_id ? {set_id:source.set_id,version_id:source.version_id} : null;
+  }
+  function dependencyPreviewHtml(p) {
+    return '<p class="notice '+(p.ready?'ok':p.resolvable?'':'bad')+'">'+esc(T(p.ready?'ss.deps_ready':p.resolvable?'ss.deps_add':'ss.deps_blocked'))+'</p>'+
+      (p.additions||[]).map(function(b){return '<p>＋ '+esc(b.skill_name||b.skill_id)+' <code>'+esc(b.version_id)+'</code></p>';}).join('')+
+      (p.issues||[]).map(function(i){return '<p class="notice '+(i.optional?'':'bad')+'"><strong>'+esc(i.skill_name)+'</strong> · '+esc(T(i.optional?'ss.optional':'ss.required'))+'<br>'+esc(i.message)+'</p>';}).join('');
+  }
+  function previewSkillDependencies(bindings, apply, current) {
+    var snapshot=JSON.stringify(bindings), panel=openDrawer(function(dw){
+      dw.innerHTML='<div class="drawer-head"><h2>'+esc(T('ss.resolve'))+'</h2><button class="icon-btn" data-dismiss aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="hint">'+esc(T('ss.resolve_hint'))+'</p><div data-preview>'+esc(T('dep.starting'))+'</div></div>';
+      $('[data-dismiss]',dw).onclick=closeDrawer;
+    });
+    api('/api/skill-sets/preview',{method:'POST',body:{skill_bindings:bindings}}).then(function(p){
+      if(!document.contains(panel))return;var box=$('[data-preview]',panel);
+      box.innerHTML=dependencyPreviewHtml(p)+(p.resolvable&&p.additions.length?'<button class="btn primary" data-adopt>'+esc(T('ss.adopt'))+'</button>':'');
+      var b=$('[data-adopt]',box);if(b)b.onclick=function(){if(current&&JSON.stringify(current())!==snapshot){toast(T('ss.preview_stale'),true);return;}apply(p.bindings);closeDrawer();};
+    }).catch(function(e){if(document.contains(panel))$('[data-preview]',panel).textContent=e.message;});
   }
   function skillSetModal(set, skills) {
-    set = set || { name: "", skill_bindings: [] };
-    modal('<div class="card-head"><span class="ico">' + ic("skills") + '</span><h2>' + esc(T(set.id ? "ss.edit" : "ss.new")) + '</h2></div><form id="ss-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(set.name) + '">') + '<div id="ss-members"></div><p class="hint">' + esc(T("ss.freeze_hint")) + '</p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn" id="ss-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="submit" class="btn primary">' + esc(T("btn.save")) + '</button></div></form>', function (root, close) {
-      var f = $('#ss-form', root), editor = skillBindingEditor($('#ss-members', root), skills, set.skill_bindings);
-      $('#ss-dependencies', root).addEventListener("click", function () { dependencyCheck({ kind: "draft", skill_bindings: editor.value(), prompt: "", provider: "" }); });
-      f.addEventListener("submit", function (e) { e.preventDefault(); var bs = editor.value(); if (bs.length < 2) { toast(T("ss.need_two"), true); return; } var btn = $('button[type=submit]', f); btn.disabled = true;
-        api("/api/skill-sets" + (set.id ? "/" + enc(set.id) : ""), { method: set.id ? "PUT" : "POST", body: { name: f.name.value.trim(), skill_bindings: bs, expected_version_id: set.version_id || "" } }).then(function () { close(); toast(T("ss.saved")); renderSkillSets(); }).catch(function (err) { btn.disabled = false; fail(err); });
+    set=set||{name:'',skill_bindings:[]};var details=set.details||{},cases=JSON.parse(JSON.stringify(details.test_cases||[]));
+    function textField(name,key,rows){return fieldHtml(T(key),'<textarea name="'+name+'" rows="'+rows+'">'+esc(details[name]||'')+'</textarea>');}
+    modal('<div class="card-head"><h2>'+esc(T(set.id?'ss.edit':'ss.new'))+'</h2></div><form id="ss-form">'+fieldHtml(T('tf.name'),'<input name="name" required maxlength="80" value="'+esc(set.name)+'">')+
+      textField('description','ss.description',2)+'<div id="ss-members"></div><p class="hint">'+esc(T('ss.freeze_hint'))+'</p>'+
+      '<details class="ss-details"><summary>'+esc(T('ss.docs'))+'</summary><p class="hint">'+esc(T('ss.docs_hint'))+'</p>'+textField('instructions','ss.instructions',3)+textField('input_hint','ss.input_hint',2)+textField('output_hint','ss.output_hint',2)+'</details>'+
+      '<details class="ss-details"'+(cases.length?' open':'')+'><summary>'+esc(T('ss.test_cases'))+'</summary><p class="hint">'+esc(T('ss.test_hint'))+'</p><div id="ss-cases"></div><button type="button" class="btn sm" id="ss-add-case">'+ic('plus','sm')+esc(T('ss.add_case'))+'</button></details>'+
+      '<p id="ss-error" class="field-err" role="alert"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="button" class="btn" id="ss-dependencies">'+esc(T('ss.dependencies'))+'</button><button type="submit" class="btn primary">'+esc(T('btn.save'))+'</button></div></form>',
+      function(root,close){
+        var f=$('#ss-form',root),editor=skillBindingEditor($('#ss-members',root),skills,set.skill_bindings,null,{freeze:true});
+        function paintCases(){
+          $('#ss-cases',root).innerHTML=cases.map(function(c,i){
+            return '<fieldset class="ss-case" data-case="'+i+'"><legend>'+esc(T('ss.case_n',{n:i+1}))+'</legend>'+fieldHtml(T('tf.name'),'<input data-case-field="name" required maxlength="80" value="'+esc(c.name||'')+'">')+
+              fieldHtml(T('wf.input'),'<textarea data-case-field="input" required rows="3">'+esc(c.input||'')+'</textarea>')+
+              fieldHtml(T('ss.must_contain'),'<textarea data-case-field="must_contain" rows="2">'+esc((c.must_contain||[]).join('\n'))+'</textarea>')+
+              fieldHtml(T('ss.must_not_contain'),'<textarea data-case-field="must_not_contain" rows="2">'+esc((c.must_not_contain||[]).join('\n'))+'</textarea>')+
+              '<button type="button" class="btn sm ghost" data-delete-case>'+esc(T('ss.remove'))+'</button></fieldset>';
+          }).join('');
+          $$('[data-case]',root).forEach(function(row){var i=+row.dataset.case;
+            $$('[data-case-field]',row).forEach(function(el){el.oninput=function(){var k=el.dataset.caseField;cases[i][k]=k==='name'||k==='input'?el.value:el.value.split('\n').map(function(x){return x.trim();}).filter(Boolean);};});
+            $('[data-delete-case]',row).onclick=function(){cases.splice(i,1);paintCases();};
+          });
+          $('#ss-add-case',root).disabled=cases.length>=5;
+        }
+        paintCases();$('#ss-add-case',root).onclick=function(){if(cases.length<5){cases.push({name:'',input:'',must_contain:[],must_not_contain:[]});paintCases();}};
+        $('#ss-dependencies',root).onclick=function(){dependencyCheck({kind:'draft',skill_bindings:editor.value(),prompt:'',provider:''});};
+        f.onsubmit=function(e){e.preventDefault();var bs=editor.value(),err=$('#ss-error',root);err.textContent='';
+          if(bs.length<2){err.textContent=T('ss.need_two');return;}
+          var btn=$('button[type=submit]',f);btn.disabled=true;
+          var body={name:f.elements.name.value.trim(),skill_bindings:bs,expected_version_id:set.version_id||'',details:{description:f.description.value,instructions:f.instructions.value,input_hint:f.input_hint.value,output_hint:f.output_hint.value,test_cases:cases}};
+          api('/api/skill-sets'+(set.id?'/'+enc(set.id):''),{method:set.id?'PUT':'POST',body:body}).then(function(){close();toast(T('ss.saved'));renderSkillSets();})
+            .catch(function(e){btn.disabled=false;err.textContent=e.message;if(e.data&&e.data.dependency_preview)previewSkillDependencies(bs,function(full){editor.set(full);},editor.value);});
+        };
       });
+  }
+  function skillSetUsage(set) {
+    var generation=0,panel=openDrawer(function(dw){
+      dw.innerHTML='<div class="drawer-head"><h2>'+esc(T('ss.usage'))+'</h2><button class="icon-btn" data-dismiss aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="hint">'+esc(T('ss.upgrade_hint'))+'</p><div data-usage>'+esc(T('dep.starting'))+'</div></div>';
+      $('[data-dismiss]',dw).onclick=closeDrawer;
     });
+    function load(version){
+      var gen=++generation;
+      $$('[data-target],[data-apply]',panel).forEach(function(el){el.disabled=true;});
+      api('/api/skill-set-usage?set_id='+enc(set.id)+(version?'&target_version_id='+enc(version):'')).then(function(r){
+        if(!document.contains(panel)||gen!==generation)return;var host=$('[data-usage]',panel);
+        host.innerHTML=fieldHtml(T('ss.target_version'),'<select data-target>'+r.versions.slice().reverse().map(function(v){return opt(v.version_id,'v'+v.version_no+(v.current?' · '+T('col.current'):''),v.version_id===r.target_version_id);}).join('')+'</select>')+
+          (!r.usages.length?'<p>'+esc(T('ss.no_usage'))+'</p>':r.usages.map(function(u,i){
+            return '<article class="dep-finding" data-usage-id="'+esc(u.id)+'" data-usage-node="'+esc(u.node_id||'')+'"><div class="row-actions"><strong>'+esc(u.name)+'</strong><span class="pill">'+esc(T('ss.state_'+u.state))+'</span></div><p class="hint">'+esc(T(u.kind==='task'?'col.task':'wf.skill_step'))+' · <code>'+esc(u.source.version_id)+'</code></p>'+
+              (u.changes||[]).map(function(c){var b=c.before||{},a=c.after||{};return '<p>'+esc(T('ss.change_'+c.kind))+' · '+esc(a.skill_name||b.skill_name||c.skill_id)+'<br><code>'+esc(b.skill_id?T(b.role==='primary'?'ss.primary':'ss.auxiliary')+' · '+T(b.mode==='follow'?'bt.latest':'ss.pinned')+' · '+(b.version_id||'—'):'—')+' → '+esc(a.skill_id?T(a.role==='primary'?'ss.primary':'ss.auxiliary')+' · '+T(a.mode==='follow'?'bt.latest':'ss.pinned')+' · '+(a.version_id||'—'):'—')+'</code></p>';}).join('')+
+              (u.can_apply?'<button class="btn sm" data-apply="'+i+'">'+esc(T('ss.apply_version'))+'</button>':'<p class="hint">'+esc(T(u.state==='linked'?'ss.already_version':'ss.keep_local'))+'</p>')+'</article>';
+          }).join(''));
+        $('[data-target]',host).onchange=function(){load(this.value);};
+        $$('[data-apply]',host).forEach(function(b){b.onclick=function(){
+          var u=r.usages[+b.dataset.apply];$$('[data-target],[data-apply]',panel).forEach(function(el){el.disabled=true;});
+          api('/api/skill-set-usage/apply',{method:'POST',body:{target:u.kind,id:u.id,node_id:u.node_id,expected_version_id:u.expected_version_id,expected_version:u.expected_version,target_set_version_id:r.target_version_id}})
+            .then(function(){toast(T('ss.applied'));load(r.target_version_id);}).catch(function(e){$$('[data-target],[data-apply]',panel).forEach(function(el){el.disabled=false;});fail(e);});
+        };});
+      }).catch(function(e){if(document.contains(panel)&&gen===generation)$('[data-usage]',panel).textContent=e.message;});
+    }
+    load();
+  }
+  function skillManifestModal(id) {
+    Promise.all([api('/api/skill-manifests/'+enc(id)),api('/api/skills')]).then(function(r){
+      var data=r[0],library=r[1],manifest=JSON.parse(JSON.stringify(data.manifest||{}));manifest.format='tidebot-skill/1';manifest.dependencies=manifest.dependencies||[];manifest.environment=manifest.environment||[];
+      modal('<div class="card-head"><h2>'+esc(T('sm.title'))+'</h2></div><form id="sm-form"><p class="hint">'+esc(T('sm.hint'))+'</p><p>'+esc(T('sm.canonical'))+' <code>'+esc(data.canonical_name||id)+'</code></p><h3>'+esc(T('sm.skill_deps'))+'</h3><div id="sm-deps"></div><div class="row-actions"><select id="sm-library" aria-label="'+esc(T('ss.add'))+'">'+opt('',T('ss.add'),true)+library.filter(function(s){return s.id!==id;}).map(function(s){return opt(s.id,s.name,false);}).join('')+'</select><button type="button" class="btn sm" id="sm-manual">'+esc(T('sm.manual'))+'</button></div><h3>'+esc(T('sm.environment'))+'</h3><p class="hint">'+esc(T('sm.env_hint'))+'</p><div id="sm-env"></div><button type="button" class="btn sm" id="sm-add-env">'+esc(T('sm.add_env'))+'</button><p class="field-err" id="sm-error" role="alert"></p><div class="actions"><button class="btn ghost" type="button" data-close>'+esc(T('btn.cancel'))+'</button><button class="btn primary" type="submit">'+esc(T('sm.save'))+'</button></div></form>',function(root,close){
+        function paint(){
+          $('#sm-deps',root).innerHTML=manifest.dependencies.map(function(d,i){
+            return '<fieldset class="ss-case" data-dep-row="'+i+'">'+fieldHtml(T('sm.skill_name'),'<input data-key="skill_name" required value="'+esc(d.skill_name||'')+'">')+
+              fieldHtml(T('sm.hash'),'<input data-key="content_sha256" class="mono" maxlength="64" value="'+esc(d.content_sha256||'')+'">')+
+              '<div class="row-actions"><label><input type="checkbox" data-key="optional"'+(d.optional?' checked':'')+'> '+esc(T('ss.optional'))+'</label><button type="button" class="btn sm ghost" data-remove-row>'+esc(T('ss.remove'))+'</button></div></fieldset>';
+          }).join('');
+          $('#sm-env',root).innerHTML=manifest.environment.map(function(d,i){
+            return '<fieldset class="ss-case" data-env-row="'+i+'">'+fieldHtml(T('sm.kind'),'<select data-key="kind">'+['command','python_package','env','tool','mcp','file'].map(function(k){return opt(k,T('sm.kind_'+k),k===d.kind);}).join('')+'</select>')+
+              fieldHtml(T('sm.requirement'),'<input data-key="name" required value="'+esc(d.name||'')+'">')+fieldHtml(T('sm.version'),'<input data-key="version" value="'+esc(d.version||'')+'">')+
+              '<div class="row-actions"><label><input type="checkbox" data-key="optional"'+(d.optional?' checked':'')+'> '+esc(T('ss.optional'))+'</label><button type="button" class="btn sm ghost" data-remove-row>'+esc(T('ss.remove'))+'</button></div></fieldset>';
+          }).join('');
+          [['dep','dependencies'],['env','environment']].forEach(function(pair){$$('[data-'+pair[0]+'-row]',root).forEach(function(row){var i=+row.getAttribute('data-'+pair[0]+'-row'),list=manifest[pair[1]];
+            $$('[data-key]',row).forEach(function(el){el.oninput=function(){list[i][el.dataset.key]=el.type==='checkbox'?el.checked:el.value;};});
+            $('[data-remove-row]',row).onclick=function(){list.splice(i,1);paint();};
+          });});
+          $('#sm-add-env',root).disabled=manifest.environment.length>=32;$('#sm-manual',root).disabled=manifest.dependencies.length>=16;
+        }
+        paint();
+        $('#sm-library',root).onchange=function(){var pick=this,skill=pick.value;if(!skill||manifest.dependencies.length>=16)return;pick.disabled=true;
+          api('/api/skill-manifests/'+enc(skill)).then(function(m){if(!document.contains(root))return;manifest.dependencies.push({skill_name:m.canonical_name,content_sha256:m.content_sha256,optional:false});paint();}).catch(fail).finally(function(){pick.disabled=false;pick.value='';});
+        };
+        $('#sm-manual',root).onclick=function(){if(manifest.dependencies.length<16){manifest.dependencies.push({skill_name:'',optional:false});paint();}};
+        $('#sm-add-env',root).onclick=function(){if(manifest.environment.length<32){manifest.environment.push({kind:'command',name:'',version:'',optional:false});paint();}};
+        $('#sm-form',root).onsubmit=function(e){e.preventDefault();var btn=$('button[type=submit]',root);btn.disabled=true;
+          api('/api/skill-manifests/'+enc(id),{method:'PUT',body:{expected_version_id:data.version_id,manifest:manifest}}).then(function(){close();toast(T('sm.saved'));refresh();}).catch(function(e){btn.disabled=false;$('#sm-error',root).textContent=e.message;});
+        };
+      });
+    }).catch(fail);
+  }
+  function skillSetEvaluation(set) {
+    api('/api/settings').then(function(settings){
+      var selected='',generation=0,count=((set.details||{}).test_cases||[]).length;
+      var panel=openDrawer(function(dw){
+        dw.innerHTML='<div class="drawer-head"><h2>'+esc(T('ss.evaluate'))+' · '+esc(set.name)+'</h2><button class="icon-btn" data-dismiss aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="notice">'+esc(T('ev.scope'))+'</p><p>'+esc(T('ev.calls',{n:count*2}))+' · v'+esc(set.version_no)+'</p>'+
+          '<details id="ev-config" open><summary>'+esc(T('ev.options'))+'</summary><form id="ev-start">'+fieldHtml(T('f.provider'),'<select name="provider">'+settings.providers.map(function(p){return opt(p.name,p.name,p.name===settings.default_provider);}).join('')+'</select>')+
+          fieldHtml(T('ev.budget'),'<input name="budget" type="number" min="0.02" max="5" step="0.01" value="1" required>')+
+          '<button type="submit" class="btn primary"'+(!count?' disabled':'')+'>'+esc(T('ev.start'))+'</button>'+(!count?'<p class="hint">'+esc(T('ev.no_cases'))+'</p>':'')+'</form></details><p class="field-err" id="ev-error" role="alert"></p>'+
+          '<h3>'+esc(T('ev.history'))+'</h3><select id="ev-history" aria-label="'+esc(T('ev.history'))+'"></select><div id="ev-result" aria-live="polite"></div></div>';
+        $('[data-dismiss]',dw).onclick=closeDrawer;
+        $('#ev-history',dw).onchange=function(){selected=this.value;++generation;if(selected){$('#ev-config',panel).open=false;poll(generation);}else $('#ev-result',panel).innerHTML='';};
+        $('#ev-start',dw).onsubmit=function(e){e.preventDefault();var f=this,btn=$('button',f);btn.disabled=true;$('#ev-error',dw).textContent='';
+          api('/api/skill-set-evals',{method:'POST',body:{set_id:set.id,version_id:set.version_id,provider:f.provider.value,budget_usd:Number(f.budget.value)}}).then(function(r){selected=r.id;$('#ev-config',panel).open=false;history();poll(++generation);}).catch(function(e){$('#ev-error',dw).textContent=e.message;}).finally(function(){btn.disabled=!count;});
+        };
+      });
+      function history(){return api('/api/skill-set-evals?set_id='+enc(set.id)).then(function(items){
+        if(!document.contains(panel))return;$('#ev-history',panel).innerHTML=opt('',T('ev.select'),!selected)+items.map(function(r){return opt(r.id,when(r.created_at)+' · '+T('ev.status_'+r.status),r.id===selected);}).join('');
+      }).catch(function(e){if(document.contains(panel))$('#ev-error',panel).textContent=e.message;});}
+      function outcome(x,key){
+        if(!x)return '<section class="ss-eval-outcome"><h4>'+esc(T(key))+'</h4><p>'+esc(T('ev.pending'))+'</p></section>';
+        return '<section class="ss-eval-outcome"><h4>'+esc(T(key))+'</h4><p><span class="pill '+(x.status==='succeeded'?(x.passed?'ok':'warn'):'')+'">'+esc(x.status==='succeeded'?T(x.passed?'ev.passed':'ev.not_passed'):T('wf.status_'+x.status))+'</span></p>'+
+          '<p class="hint">'+esc(dur(x.duration_ms||0))+' · '+esc(money(x.cost_usd||0,'USD',4))+' · '+esc((x.input_tokens||0)+' / '+(x.output_tokens||0))+' tokens</p>'+
+          (x.error?'<p class="notice bad">'+esc(x.error)+'</p>':'')+
+          (x.assertions||[]).map(function(a){return '<p>'+ic(a.passed?'check':'x','sm')+' '+esc(T(a.kind==='must_not_contain'?'ss.must_not_contain_short':'ss.must_contain_short'))+' <code>'+esc(a.text)+'</code></p>';}).join('')+
+          (x.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(x.output)+'</pre></details>':'')+
+          (x.output_truncated?'<p class="hint">'+esc(T('ev.truncated'))+'</p>':'')+
+          (x.run_id?'<a class="btn sm" data-run-log href="#/runs/'+enc(x.run_id)+'">'+esc(T('wf.open_log'))+'</a>':'')+'</section>';
+      }
+      function poll(gen){if(!selected||gen!==generation||!document.contains(panel))return;
+        api('/api/skill-set-evals/'+enc(selected)).then(function(r){
+          if(gen!==generation||!document.contains(panel))return;var box=$('#ev-result',panel),active=r.status==='running';
+          box.innerHTML='<div class="row-actions"><span class="pill">'+esc(T('ev.status_'+r.status))+'</span><span>'+esc(money(r.cost_usd||0,'USD',4))+' / '+esc(money(r.budget_usd,'USD',2))+'</span>'+(active?'<button class="btn sm" data-cancel>'+esc(T('btn.stop'))+'</button>':'')+'</div><p class="hint"><code>'+esc(r.version_id)+'</code> · '+esc(r.provider)+(r.model?' / '+esc(r.model):'')+'</p>'+
+            (r.error?'<p class="notice bad">'+esc(r.error)+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
+          var cancel=$('[data-cancel]',box);if(cancel)cancel.onclick=function(){cancel.disabled=true;api('/api/skill-set-evals/'+enc(r.id)+'/cancel',{method:'POST',body:{}}).then(function(){poll(++generation);}).catch(function(e){cancel.disabled=false;fail(e);});};
+          $$('[data-run-log]',box).forEach(function(a){a.onclick=closeDrawer;});
+          if(active)setTimeout(function(){poll(gen);},1500);else history();
+        }).catch(function(e){if(document.contains(panel))$('#ev-error',panel).textContent=e.message;});
+      }
+      history();
+    }).catch(fail);
   }
   function renderSkillSets() {
     return Promise.all([api("/api/skill-sets"), api("/api/skills")]).then(function (r) {
       var sets = r[0], skills = r[1];
       mount('<div class="page-head"><div><h1>' + esc(T("ss.title")) + '</h1><p>' + esc(T("ss.subtitle")) + '</p></div><div class="actions"><label class="btn">' + ic("upload", "sm") + esc(T("ss.import")) + '<input type="file" id="ss-import" class="hidden" accept=".zip"></label><button class="btn primary" id="ss-new">' + ic("plus", "sm") + esc(T("ss.new")) + '</button></div></div>' + skillTabs("skill-sets") +
-        (sets.length ? '<div class="ss-grid">' + sets.map(function (set) { return '<section class="card" data-set-card="' + esc(set.id) + '"><div class="card-head"><span class="ico">' + ic("skills") + '</span><h2>' + esc(set.name) + '</h2><span class="tag perm">v' + esc(set.version_no) + '</span></div><ul class="list-plain">' + set.skill_bindings.map(function (b) { return '<li><strong>' + esc(T(b.role === "primary" ? "ss.primary" : "ss.auxiliary")) + '</strong> · ' + esc(b.skill_name || b.skill_id) + '</li>'; }).join("") + '</ul><div class="row-actions ss-card-actions"><button class="btn primary sm" data-set-run>' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="btn sm" data-set-edit>' + esc(T("ss.edit")) + '</button><button class="btn sm" data-set-check>' + esc(T("ss.dependencies")) + '</button><button class="icon-btn sm" data-set-export aria-label="' + esc(T("ss.export")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" data-set-delete aria-label="' + esc(T("ss.delete")) + '">' + ic("trash", "sm") + '</button></div></section>'; }).join("") + '</div>' : emptyState("skills", T("ss.empty"), T("ss.subtitle"))), "skills", [[T("ss.title")]]);
+        (sets.length ? '<div class="ss-grid">' + sets.map(function (set) { return '<section class="card" data-set-card="' + esc(set.id) + '"><div class="card-head"><span class="ico">' + ic("skills") + '</span><h2>' + esc(set.name) + '</h2><span class="tag perm">v' + esc(set.version_no) + '</span></div>' + (set.details && set.details.description ? '<p class="ss-description">' + esc(set.details.description) + '</p>' : '') + '<ul class="list-plain">' + set.skill_bindings.map(function (b) { return '<li><strong>' + esc(T(b.role === "primary" ? "ss.primary" : "ss.auxiliary")) + '</strong> · ' + esc(b.skill_name || b.skill_id) + '</li>'; }).join("") + '</ul><div class="row-actions ss-card-actions"><button class="btn primary sm" data-set-run>' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="btn sm" data-set-edit>' + esc(T("ss.edit")) + '</button><button class="btn sm" data-set-usage>' + esc(T("ss.usage")) + '</button><button class="btn sm" data-set-eval>' + esc(T("ss.evaluate")) + '</button><button class="btn sm" data-set-check>' + esc(T("ss.dependencies")) + '</button><button class="icon-btn sm" data-set-export aria-label="' + esc(T("ss.export")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" data-set-delete aria-label="' + esc(T("ss.delete")) + '">' + ic("trash", "sm") + '</button></div></section>'; }).join("") + '</div>' : emptyState("skills", T("ss.empty"), T("ss.subtitle"))), "skills", [[T("ss.title")]]);
       $('#ss-new').addEventListener("click", function () { skillSetModal(null, skills); });
       $('#ss-import').addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var fd = new FormData(); fd.append("file", f); e.target.disabled = true; upload("/api/skill-sets/import", fd).then(function () { toast(T("ss.imported")); renderSkillSets(); }).catch(function (err) { e.target.disabled = false; e.target.value = ""; if(err.data&&err.data.partial)toast(T("ss.import_partial",{n:(err.data.imported_skill_ids||[]).length})+" "+err.message,true);else fail(err); }); });
       $$('[data-set-card]').forEach(function (card) { var set = sets.filter(function (s) { return s.id === card.getAttribute("data-set-card"); })[0];
-        $('[data-set-run]', card).addEventListener("click", function () { quickRunModal({ skill_bindings: set.skill_bindings }); });
+        $('[data-set-run]', card).addEventListener("click", function () { quickRunModal({ skill_bindings: set.skill_bindings, skill_set_source: {set_id:set.id,version_id:set.version_id} }); });
+        $('[data-set-usage]', card).onclick=function(){skillSetUsage(set);};
+        $('[data-set-eval]', card).onclick=function(){skillSetEvaluation(set);};
         $('[data-set-edit]', card).addEventListener("click", function () { skillSetModal(set, skills); });
         $('[data-set-check]', card).addEventListener("click", function () { dependencyCheck({ kind: "skill_set", id: set.id }); });
         $('[data-set-export]', card).addEventListener("click", function (e) { downloadFile("/api/skill-sets/" + enc(set.id) + "/export", "tidebot-skill-set.zip", e.currentTarget); });
@@ -3464,7 +3615,7 @@
         $('#wf-remove').onclick=function(){if(link&&link.from===n.id)link=null;if(drag&&drag.id===n.id)drag=null;def.nodes=def.nodes.filter(function(p){return p.id!==n.id;});def.nodes.forEach(function(p){p.needs=(p.needs||[]).filter(function(d){return d.node_id!==n.id;});});selected='';canvas();inspect();};
         $$('[data-wf-need]',inspector).forEach(function(el){el.onchange=function(){if(el.value)connect(el.dataset.wfNeed,n.id,el.value==='success'?'':el.value);else{n.needs=(n.needs||[]).filter(function(d){return d.node_id!==el.dataset.wfNeed;});canvas();}};});
         if(n.kind==='skill'){
-          skillBindingEditor($('#wf-bindings'),skills,n.skill_bindings||[],function(bs){n.skill_bindings=bs;});
+          skillBindingEditor($('#wf-bindings'),skills,n.skill_bindings||[],function(bs,source){n.skill_bindings=bs;n.skill_set_source=source;},{source:n.skill_set_source});
           var ta=$('#wf-node-prompt');ta.oninput=function(){n.prompt=ta.value;};
           $('#wf-insert-output').onchange=function(){if(!this.value)return;ta.setRangeText(this.value,ta.selectionStart,ta.selectionEnd,'end');n.prompt=ta.value;ta.focus();this.value='';};
         }else ['source','operator','value'].forEach(function(k){$('#wf-condition-'+k).oninput=function(){n.condition[k]=this.value;};});
@@ -3472,7 +3623,7 @@
       function add(kind,index,position){
         if(def.nodes.length>=32){error(T('wf.limit'));return;}var i=1;while(def.nodes.some(function(n){return n.id==='step_'+i;}))i++;
         var item=kind==='set'?sets[index]:kind==='skill'?skills[index]:null,n={id:'step_'+i,name:item?item.name:T('wf.condition'),kind:kind==='condition'?'condition':'skill',needs:[],join:'all',position:position||{x:40+(def.nodes.length%3)*290,y:50+Math.floor(def.nodes.length/3)*150}};
-        if(n.kind==='condition')n.condition={source:'{{input}}',operator:'contains',value:''};else {n.prompt='{{input}}';n.skill_bindings=kind==='set'?JSON.parse(JSON.stringify(item.skill_bindings)):[{skill_id:item.id,role:'primary',mode:'follow'}];}
+        if(n.kind==='condition')n.condition={source:'{{input}}',operator:'contains',value:''};else {n.prompt='{{input}}';n.skill_bindings=kind==='set'?JSON.parse(JSON.stringify(item.skill_bindings)):[{skill_id:item.id,role:'primary',mode:'follow'}];n.skill_set_source=kind==='set'?{set_id:item.id,version_id:item.version_id}:null;}
         def.nodes.push(n);selected=n.id;canvas();inspect();
       }
       $$('[data-palette]').forEach(function(el){el.ondragstart=function(e){e.dataTransfer.setData('application/x-tidebot-step',JSON.stringify({kind:el.dataset.palette,index:+el.dataset.paletteIndex||0}));e.dataTransfer.effectAllowed='copy';};el.onclick=function(){add(el.dataset.palette,+el.dataset.paletteIndex||0);};});
@@ -3511,26 +3662,53 @@
       if(active){$('#wf-stop').onclick=function(){var b=this;b.disabled=true;api('/api/workflow-runs/'+enc(id)+'/stop',{method:'POST',body:{}}).then(function(){return renderWorkflowRun(id);}).catch(function(e){b.disabled=false;fail(e);});};livePoll(function(){return api('/api/workflow-runs/'+enc(id)).then(function(next){if(JSON.stringify(next)!==JSON.stringify(r))return renderWorkflowRun(id);});},2000);}
     });
   }
-  // The drawer keeps an unsaved task/skill editor intact while the check runs.
-  function dependencyCheck(request) {
+  function dependencyFindingHTML(items) {
+    return (items||[]).map(function(f){var level=['missing','uncertain','available','blocked'].indexOf(f.level)>=0?f.level:'uncertain';
+      return '<article class="dep-finding"><div class="row-actions"><strong>'+esc(f.dependency)+'</strong><span class="grow"></span><span class="pill '+(level==='missing'||level==='blocked'?'bad':level==='available'?'ok':'warn')+'">'+esc(T('dep.'+level))+'</span></div><p>'+esc(f.reason)+'</p>'+(f.evidence?'<details><summary>'+esc(T('dep.evidence'))+'</summary><pre class="wf-output">'+esc(f.evidence)+'</pre></details>':'')+(f.suggestion?'<p class="notice">'+esc(f.suggestion)+'</p>':'')+'</article>';
+    }).join('');
+  }
+  function preflightHTML(r) {
+    var p=r.runtime_profile||{};
+    return '<h3>'+esc(T('dep.runtime'))+'</h3><dl class="kv"><dt>'+esc(T('rn.mode'))+'</dt><dd>'+esc(T('dep.mode_'+p.mode))+'</dd><dt>'+esc(T('rn.folder'))+'</dt><dd>'+esc(p.workspace||T('dep.workspace_'+p.workspace_kind))+'</dd></dl>'+
+      (p.denied_tools&&p.denied_tools.length?'<p>'+esc(T('dep.denied'))+' <code>'+esc(p.denied_tools.join(', '))+'</code></p>':'')+
+      '<p class="hint">'+esc(p.notes||'')+'</p>'+
+      (r.context_usage||[]).map(function(u){return '<details class="ss-details" open><summary>'+esc(T('dep.context'))+' · '+esc(u.origin)+'</summary><p class="notice '+(u.exceeded?'bad':'')+'">'+esc(T('dep.context_size',{kb:(u.total_bytes/1024).toFixed(1),limit:Math.round(u.limit_bytes/1024),tokens:u.estimated_tokens}))+'</p><ul class="list-plain">'+(u.members||[]).map(function(m){return '<li>'+esc(m.name)+' · '+esc(T(m.role==='primary'?'ss.primary':'ss.auxiliary'))+' · '+esc((m.bytes/1024).toFixed(1))+' KiB · ≈ '+esc(m.estimated_tokens)+' tokens</li>';}).join('')+'</ul><p class="hint">'+esc(u.estimate_method)+'</p></details>';}).join('')+
+      (r.requirements&&r.requirements.length?'<h3>'+esc(T('sm.environment'))+'</h3>'+r.requirements.map(function(x){return '<p><span class="pill '+(x.status==='missing'||x.status==='blocked'?'bad':x.status==='present'?'ok':'warn')+'">'+esc(T('dep.req_'+x.status))+'</span> '+esc(x.requirement.kind)+' · '+esc(x.requirement.name)+'<br><small>'+esc(x.evidence)+'</small></p>';}).join(''):'')+
+      (r.truncated?'<p class="notice warn">'+esc(T('dep.truncated'))+'</p>':'')+dependencyFindingHTML(r.findings);
+  }
+  // A drawer preserves unsaved forms; free deterministic checks never invoke AI.
+  function dependencyCheck(request, localOnly) {
     var current='',generation=0;
-    function findingHTML(items){return (items||[]).map(function(f){var level=['missing','uncertain','available'].indexOf(f.level)>=0?f.level:'uncertain';return '<article class="dep-finding"><div class="row-actions"><strong>'+esc(f.dependency)+'</strong><span class="grow"></span><span class="pill '+(level==='missing'?'bad':level==='available'?'ok':'warn')+'">'+esc(T('dep.'+level))+'</span></div><p>'+esc(f.reason)+'</p>'+(f.evidence?'<details><summary>'+esc(T('dep.evidence'))+'</summary><pre class="wf-output">'+esc(f.evidence)+'</pre></details>':'')+(f.suggestion?'<p class="notice">'+esc(f.suggestion)+'</p>':'')+'</article>';}).join('');}
     var panel=openDrawer(function(dw){
-      dw.innerHTML='<div class="drawer-head"><h2>'+ic('shield','sm')+esc(T('dep.check'))+'</h2><button class="icon-btn" id="dep-close" aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="notice">'+esc(T('dep.scope'))+'</p><div id="dep-result" role="status" aria-live="polite">'+esc(T('dep.starting'))+'</div><div class="row-actions"><button class="btn hidden" id="dep-stop">'+esc(T('btn.stop'))+'</button><button class="btn hidden" id="dep-retry">'+esc(T('dep.retry'))+'</button><a class="btn hidden" id="dep-log">'+esc(T('wf.open_log'))+'</a></div></div>';
+      dw.innerHTML='<div class="drawer-head"><h2>'+ic('shield','sm')+esc(T('dep.check'))+'</h2><button class="icon-btn" id="dep-close" aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="notice">'+esc(T('dep.scope'))+'</p>'+
+        fieldHtml(T('dep.python'),'<input id="dep-python" class="mono" value="'+esc(request.python_environment||'')+'" placeholder="/path/to/.venv">')+
+        '<div class="row-actions"><button class="btn" id="dep-local">'+esc(T('dep.local'))+'</button><button class="btn primary" id="dep-ai">'+esc(T('dep.ai'))+'</button></div><div id="dep-preflight" role="status"></div><h3>'+esc(T('dep.ai_result'))+'</h3><div id="dep-result" role="status" aria-live="polite">'+esc(T('dep.local_only'))+'</div>'+
+        '<div class="row-actions"><button class="btn hidden" id="dep-stop">'+esc(T('btn.stop'))+'</button><a class="btn hidden" id="dep-log">'+esc(T('wf.open_log'))+'</a></div></div>';
       $('#dep-close',dw).onclick=closeDrawer;
-      $('#dep-retry',dw).onclick=function(){start();};
+      $('#dep-local',dw).onclick=function(){start(false);};
+      $('#dep-ai',dw).onclick=function(){start(true);};
       $('#dep-stop',dw).onclick=function(){var b=this;b.disabled=true;api('/api/runs/'+enc(current)+'/stop',{method:'POST',body:{}}).catch(fail).finally(function(){b.disabled=false;});};
     });
+    function busy(on){['dep-local','dep-ai','dep-python'].forEach(function(id){$('#'+id,panel).disabled=on;});}
     function present(r){
-      var box=$('#dep-result',panel),active=r.status==='queued'||r.status==='running';
-      $('#dep-stop',panel).classList.toggle('hidden',!active);$('#dep-retry',panel).classList.toggle('hidden',active);
+      var active=r.status==='queued'||r.status==='running',box=$('#dep-result',panel);
+      $('#dep-stop',panel).classList.toggle('hidden',!active);
       var log=$('#dep-log',panel);log.classList.remove('hidden');log.href='#/runs/'+enc(r.child_run_id||current);log.onclick=closeDrawer;
-      box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>'+findingHTML(r.static_findings):r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+findingHTML(r.report.findings):'<p class="notice bad">'+esc(r.error||T('wf.status_'+r.status))+'</p>'+findingHTML(r.static_findings);
-      return active;
+      if(r.preflight)$('#dep-preflight',panel).innerHTML=preflightHTML(r.preflight);
+      box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>':r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+dependencyFindingHTML(r.report.findings):'<p class="notice bad">'+esc(r.error||T('wf.status_'+r.status))+'</p>';
+      if(!active)busy(false);return active;
     }
-    function poll(gen){if(gen!==generation||!document.contains(panel))return;api('/api/dependencies/check/'+enc(current)).then(function(r){if(gen!==generation||!document.contains(panel))return;if(present(r))setTimeout(function(){poll(gen);},1500);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;$('#dep-retry',panel).classList.remove('hidden');}});}
-    function start(){var gen=++generation;$('#dep-result',panel).textContent=T('dep.starting');$('#dep-retry',panel).classList.add('hidden');api('/api/dependencies/check',{method:'POST',body:request}).then(function(r){current=r.run_id;poll(gen);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;$('#dep-retry',panel).classList.remove('hidden');}});}
-    start();
+    function poll(gen){if(gen!==generation||!document.contains(panel))return;api('/api/dependencies/check/'+enc(current)).then(function(r){if(gen!==generation||!document.contains(panel))return;if(present(r))setTimeout(function(){poll(gen);},1500);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;busy(false);}});}
+    function start(ai){
+      var gen=++generation,req=Object.assign({},request,{python_environment:$('#dep-python',panel).value.trim()});busy(true);
+      $('#dep-preflight',panel).textContent=T('dep.starting');$('#dep-result',panel).textContent=T(ai?'dep.starting':'dep.local_only');
+      api('/api/dependencies/preflight',{method:'POST',body:req}).then(function(r){
+        if(gen!==generation||!document.contains(panel))return;$('#dep-preflight',panel).innerHTML=preflightHTML(r);
+        if(!ai){busy(false);return;}
+        return api('/api/dependencies/check',{method:'POST',body:req}).then(function(v){current=v.run_id;poll(gen);});
+      }).catch(function(e){if(document.contains(panel)&&gen===generation){$('#dep-result',panel).textContent=e.message;busy(false);}});
+    }
+    start(!localOnly);
   }
 
   // ---------- SKILLS ----------
@@ -3603,7 +3781,7 @@
           (live ? (p.status === "pending" ? '<button class="btn sm" data-canary="' + esc(p.id) + '">' + esc(T("opt.start_canary")) + "</button>" : "") + '<button class="btn sm danger" data-discard="' + esc(p.id) + '">' + esc(T("opt.discard")) + '</button><button class="btn sm primary" data-promote="' + esc(p.id) + '" data-no="' + esc(v ? v.no : "") + '">' + esc(T("opt.promote")) + "</button>" : "") + "</div></div>";
       }).join("") : '<p class="muted">' + esc(T("opt.none")) + "</p>";
       mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
+        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm" id="sk-manifest">' + esc(T("sm.title")) + '</button><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
         '<nav class="tabs sk-tabs" role="tablist" aria-label="' + esc(sk.name) + '">' + [["diff", T("sk.tab_diff")], ["files", T("sk.tab_files")]].map(function (x) { var on = x[0] === tab; return '<button type="button" role="tab" data-sktab="' + x[0] + '" class="' + (on ? "active" : "") + '" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' + esc(x[1]) + "</button>"; }).join("") + "</nav>" +
         '<div id="pane-diff" class="sk-pane' + (tab === "diff" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></div>" +
         '<div id="pane-files" class="sk-pane' + (tab === "files" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar fb-bar"><label>' + esc(T("fb.version")) + ' <select id="fb-v">' + vopt(fv) + '</select></label><small class="muted" id="fb-sum"></small></div><div class="fb"><div class="fb-tree" id="fb-tree" role="tree" aria-label="' + esc(T("fb.tree")) + '">' + skeleton("list") + '</div><div class="fb-view" id="fb-view"></div></div></div></section>' +
@@ -3611,6 +3789,7 @@
         '<section class="card"><div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("opt.title")) + '</h3></div><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
         '<h4 class="mt">' + esc(T("opt.proposals")) + "</h4>" + propHtml + "</section></div></div>",
         "skills", [[T("nav.skills"), "#/skills"], [sk.name]]);
+      $("#sk-manifest").onclick=function(){skillManifestModal(id);};
       var diffLoaded = false, filesLoaded = false, fgen = 0, tcache = {}, fcache = {}, fkeys = [];
       // The address keeps the tab, the browsed version and file, so a reload or a shared link opens the same view.
       var syncHash = function () {
@@ -5116,7 +5295,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_version_id: "", workspace: pre.workspace || "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -5135,9 +5314,9 @@
         '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
         var initial=tf.skill_bindings||(tf.skill_id?[{skill_id:tf.skill_id,mode:tf.skill_version_id?"pinned":"follow",version_id:tf.skill_version_id||"",role:"primary"}]:[]);
-        var editor=skillBindingEditor($("#tf-bindings",root),skills,initial,function(bs){f.skill_id.value=bs.length?bs[0].skill_id:"";f.skill_version_id.value=bs.length?bs[0].version_id:"";f.skill_id.dispatchEvent(new Event("change",{bubbles:true}));});
+        var editor=skillBindingEditor($("#tf-bindings",root),skills,initial,function(bs){f.skill_id.value=bs.length?bs[0].skill_id:"";f.skill_version_id.value=bs.length?bs[0].version_id:"";f.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:tf.skill_set_source,checkRequest:function(){return {kind:"draft",execution:"task",id:taskId||"",workspace:f.workspace.value.trim(),prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value()};}});
         var first=editor.value()[0];f.skill_id.value=first?first.skill_id:"";f.skill_version_id.value=first?first.version_id:"";
-        $("#tf-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value()});});
+        $("#tf-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",execution:"task",id:taskId||"",prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value(),workspace:f.workspace.value.trim()});});
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
         if (drafty) wireDraft(root, f.prompt, "task");
@@ -5148,7 +5327,7 @@
           e.preventDefault();
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
-          var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), provider: f.provider.value, cron: se.value(),
+          var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
@@ -6201,6 +6380,8 @@
   // Run dialog runs: which skill (and version) ran, in which folder, read-only or not.
   function runSkillKv(r) {
     var out = "";
+    if(r.skill_set_source)out += '<dt>'+esc(T("ss.source"))+'</dt><dd><a href="#/skill-sets">'+esc(r.skill_set_source.set_id)+'</a><br><code>'+esc(r.skill_set_source.version_id)+'</code> · '+esc(T("ss.state_"+r.skill_set_source.state))+'</dd>';
+    if((r.skill_evidence||[]).length)out += '<dt>'+esc(T("ss.evidence"))+'</dt><dd><p class="hint">'+esc(T("ss.evidence_hint"))+'</p><ul class="list-plain">'+r.skill_evidence.map(function(e){var b=(r.skill_bindings||[]).filter(function(x){return x.skill_id===e.skill_id;})[0]||{};return '<li>'+esc(b.skill_name||e.skill_id)+' · '+esc(T(e.role==="primary"?"ss.primary":"ss.auxiliary"))+' · '+esc(T("ss.loaded"))+'<br><code>'+esc(e.version_id)+'</code></li>';}).join('')+'</ul></dd>';
     if (r.skill_id) out += "<dt>" + esc(T("rn.skill")) + '</dt><dd><a href="#/skills/' + enc(r.skill_id) + '">' + esc(r.skill_name || r.skill_id) + "</a>" + (r.skill_version ? ' <span class="tag perm">v' + esc(r.skill_version) + "</span>" : "") + "</dd>";
     if (r.workspace) out += "<dt>" + esc(T("rn.folder")) + '</dt><dd class="rn-kv-ws"><code class="mono" data-tip="' + esc(r.workspace) + '">' + esc(r.workspace) + "</code>" +
       '<span class="tag ' + (r.run_mode === "edit" ? "warn" : "perm") + '" data-tip="' + esc(T(r.run_mode === "edit" ? "rn.edit_tip" : "rn.read_tip")) + '">' + ic(r.run_mode === "edit" ? "edit" : "eye", "sm") + esc(T(r.run_mode === "edit" ? "rn.edit" : "rn.read")) + "</span></dd>";
@@ -6315,8 +6496,8 @@
       if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });
       state.chgJump = null;
       bindRunPrompt(r);
-      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, workspace: r.workspace, mode: r.run_mode }); });
-      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, workspace: r.workspace }); });
+      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, mode: r.run_mode }); });
+      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace }); });
       logView($("#lv"), id, live, function (why) {
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);

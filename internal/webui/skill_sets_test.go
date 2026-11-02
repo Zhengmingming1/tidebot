@@ -140,15 +140,35 @@ func TestCompositionRerunKeepsExactSnapshot(t *testing.T) {
 	if err := c.s.deps.Skills.RecordRunBindings(ctx, "combined_run", bs); err != nil {
 		t.Fatal(err)
 	}
+	set, err := c.s.deps.Skills.SaveSet(ctx, "", "rerun composition", "", bs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &tasksvc.SkillSetSource{SetID: set.ID, VersionID: set.VersionID}
+	if err = c.s.deps.Skills.RecordRunSource(ctx, "combined_run", source, bs); err != nil {
+		t.Fatal(err)
+	}
 	var got RunRequest
 	c.s.deps.StartRun = func(req RunRequest) (string, error) { got = req; return "new_run", nil }
 	if code, out := c.json(http.MethodPost, "/api/runs/combined_run/rerun", nil); code != 202 {
 		t.Fatalf("rerun %d %v", code, out)
 	}
+	if got.SkillSetSource == nil || got.SkillSetSource.VersionID != set.VersionID {
+		t.Fatal("rerun lost composition source")
+	}
 	if len(got.SkillBindings) != 2 || got.SkillBindings[1].VersionID != bs[1].VersionID || got.SkillBindings[0].Role != "primary" {
 		t.Fatalf("rerun lost exact members: %+v", got)
 	}
 	_, detail := c.json(http.MethodGet, "/api/runs/combined_run", nil)
+	if detail["skill_set_source"].(map[string]any)["version_id"] != set.VersionID {
+		t.Fatal("detail lost source")
+	}
+	for _, raw := range detail["skill_evidence"].([]any) {
+		ev := raw.(map[string]any)
+		if ev["level"] != "loaded" || ev["execution_observed"] != false {
+			t.Fatal("overclaimed skill use", ev)
+		}
+	}
 	if len(detail["skill_bindings"].([]any)) != 2 {
 		t.Fatal("detail lost snapshot")
 	}
@@ -156,6 +176,9 @@ func TestCompositionRerunKeepsExactSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, detail = c.json(http.MethodGet, "/api/runs/combined_run", nil)
+	if len(detail["skill_evidence"].([]any)) != 0 {
+		t.Fatal("legacy metadata became execution evidence")
+	}
 	if len(detail["skill_bindings"].([]any)) != 1 {
 		t.Fatal("legacy primary was not reconstructed")
 	}

@@ -8,6 +8,7 @@ import (
 
 // Spec is the immutable task content stored in versions.content_json.
 type Spec struct {
+	SkillSetSource *SkillSetSource  `json:"skill_set_source,omitempty"`
 	Goal           string           `json:"goal"`
 	Prompt         string           `json:"prompt"`
 	Constraints    []SpecConstraint `json:"constraints,omitempty"`

@@ -56,6 +56,9 @@ func Validate(d *Definition) error {
 		if n.Join != "all" && n.Join != "any" {
 			return fmt.Errorf("node %s: join must be all or any", n.ID)
 		}
+		if err := tasksvc.ValidateSkillSetSource(n.SkillSetSource); err != nil {
+			return fmt.Errorf("node %s: %w", n.ID, err)
+		}
 		switch n.Kind {
 		case "skill":
 			if strings.TrimSpace(n.Prompt) == "" || len(n.Prompt) > 32<<10 {
@@ -76,7 +79,7 @@ func Validate(d *Definition) error {
 			if n.Condition == nil || len(n.Condition.Source) > 32<<10 || len(n.Condition.Value) > 4096 {
 				return fmt.Errorf("node %s needs a bounded condition", n.ID)
 			}
-			if len(n.SkillBindings) > 0 {
+			if len(n.SkillBindings) > 0 || n.SkillSetSource != nil {
 				return fmt.Errorf("condition node %s cannot run skills", n.ID)
 			}
 			switch n.Condition.Operator {

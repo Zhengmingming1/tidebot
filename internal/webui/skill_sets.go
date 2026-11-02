@@ -2,7 +2,6 @@ package webui
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
@@ -13,31 +12,41 @@ import (
 )
 
 func (s *Server) setError(w http.ResponseWriter, err error) {
+	var deps *skillstore.DependencyResolutionError
 	var partial *skillstore.PartialSetImportError
 	if errors.As(err, &partial) {
-		writeJSON(w, 400, map[string]any{"error": err.Error(), "partial": true, "imported_skill_ids": partial.ImportedSkillIDs})
+		payload := map[string]any{"error": err.Error(), "partial": true, "imported_skill_ids": partial.ImportedSkillIDs}
+		if errors.As(err, &deps) {
+			payload["dependency_preview"] = deps.Preview
+		}
+		writeJSON(w, 400, payload)
+		return
+	}
+	if errors.As(err, &deps) {
+		writeJSON(w, 400, map[string]any{"error": err.Error(), "dependency_preview": deps.Preview})
 		return
 	}
 	code := 400
 	if errors.Is(err, sql.ErrNoRows) {
 		code = 404
 	}
-	if errors.Is(err, skillstore.ErrSetConflict) {
+	if errors.Is(err, skillstore.ErrSetConflict) || errors.Is(err, skillstore.ErrManifestConflict) {
 		code = 409
 	}
 	writeErr(w, code, err.Error())
 }
 func (s *Server) saveSkillSet(w http.ResponseWriter, r *http.Request, id string) {
 	var in struct {
-		Name     string                 `json:"name"`
-		Bindings []tasksvc.SkillBinding `json:"skill_bindings"`
-		Expected string                 `json:"expected_version_id"`
+		Name     string                      `json:"name"`
+		Bindings []tasksvc.SkillBinding      `json:"skill_bindings"`
+		Expected string                      `json:"expected_version_id"`
+		Details  *skillstore.SkillSetDetails `json:"details"`
 	}
-	if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+	if decodeManifestRequest(w, r, &in) != nil {
 		writeErr(w, 400, "bad json")
 		return
 	}
-	out, err := s.deps.Skills.SaveSet(r.Context(), id, in.Name, in.Expected, in.Bindings)
+	out, err := s.deps.Skills.SaveSetWithDetails(r.Context(), id, in.Name, in.Expected, in.Bindings, in.Details)
 	if err != nil {
 		s.setError(w, err)
 		return

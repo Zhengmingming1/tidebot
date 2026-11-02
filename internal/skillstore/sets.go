@@ -45,11 +45,13 @@ type SkillSet struct {
 	VersionID     string                 `json:"version_id"`
 	VersionNo     int                    `json:"version_no"`
 	SkillBindings []tasksvc.SkillBinding `json:"skill_bindings"`
+	Details       SkillSetDetails        `json:"details"`
 }
 
 type setContent struct {
 	Name          string                 `json:"name"`
 	SkillBindings []tasksvc.SkillBinding `json:"skill_bindings"`
+	Details       SkillSetDetails        `json:"details"`
 }
 
 func (s *Service) GetSet(ctx context.Context, setID string) (SkillSet, error) {
@@ -67,6 +69,7 @@ func (s *Service) GetSet(ctx context.Context, setID string) (SkillSet, error) {
 	}
 	out.Name = c.Name
 	out.SkillBindings = c.SkillBindings
+	out.Details = c.Details
 	out.VersionID = v.ID
 	out.VersionNo = v.VersionNo
 	return out, nil
@@ -103,6 +106,15 @@ func (s *Service) ListSets(ctx context.Context) ([]SkillSet, error) {
 }
 
 func (s *Service) SaveSet(ctx context.Context, setID, name, expected string, bindings []tasksvc.SkillBinding) (SkillSet, error) {
+	return s.SaveSetWithDetails(ctx, setID, name, expected, bindings, nil)
+}
+
+func (s *Service) SaveSetWithDetails(ctx context.Context, setID, name, expected string, bindings []tasksvc.SkillBinding, details *SkillSetDetails) (SkillSet, error) {
+	if details != nil {
+		if err := ValidateSkillSetDetails(*details); err != nil {
+			return SkillSet{}, err
+		}
+	}
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > 80 {
 		return SkillSet{}, errors.New("skill set name is required (max 80 characters)")
@@ -112,6 +124,9 @@ func (s *Service) SaveSet(ctx context.Context, setID, name, expected string, bin
 	}
 	resolved, err := s.ResolveBindings(ctx, bindings)
 	if err != nil {
+		return SkillSet{}, err
+	}
+	if err := s.ValidateDependencyBindings(ctx, resolved); err != nil {
 		return SkillSet{}, err
 	}
 	// Check command collisions before accepting a composition, without writing a stage.
@@ -135,11 +150,18 @@ func (s *Service) SaveSet(ctx context.Context, setID, name, expected string, bin
 	}
 	setWrites.Lock()
 	defer setWrites.Unlock()
+	metadata := SkillSetDetails{}
+	if details != nil {
+		metadata = *details
+	}
 	fresh := setID == ""
 	if !fresh {
 		cur, err := s.GetSet(ctx, setID)
 		if err != nil {
 			return SkillSet{}, err
+		}
+		if details == nil {
+			metadata = cur.Details
 		}
 		if expected == "" || cur.VersionID != expected {
 			return SkillSet{}, ErrSetConflict
@@ -151,7 +173,7 @@ func (s *Service) SaveSet(ctx context.Context, setID, name, expected string, bin
 			return SkillSet{}, err
 		}
 	}
-	_, err = s.Ver.Commit(ctx, version.CommitInput{EntityType: SkillSetEntity, EntityID: setID, Content: setContent{Name: name, SkillBindings: resolved}, Source: "user_edit", Actor: "user", Reason: "save skill set"})
+	_, err = s.Ver.Commit(ctx, version.CommitInput{EntityType: SkillSetEntity, EntityID: setID, Content: setContent{Name: name, SkillBindings: resolved, Details: metadata}, Source: "user_edit", Actor: "user", Reason: "save skill set"})
 	if err != nil {
 		if fresh {
 			_, _ = s.DB.ExecContext(ctx, `DELETE FROM skill_sets WHERE id=?`, setID)
@@ -182,6 +204,7 @@ type setArchive struct {
 	Format  string                 `json:"format"`
 	Name    string                 `json:"name"`
 	Members []tasksvc.SkillBinding `json:"members"`
+	Details SkillSetDetails        `json:"details"`
 }
 
 func (s *Service) ExportSet(ctx context.Context, setID string) ([]byte, error) {
@@ -191,7 +214,7 @@ func (s *Service) ExportSet(ctx context.Context, setID string) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	manifest := setArchive{Format: skillSetFormat, Name: set.Name, Members: set.SkillBindings}
+	manifest := setArchive{Format: skillSetFormat, Name: set.Name, Members: set.SkillBindings, Details: set.Details}
 	raw, _ := json.MarshalIndent(manifest, "", "  ")
 	w, err := zw.Create("skill-set.json")
 	if err != nil {
@@ -261,6 +284,9 @@ func (s *Service) ImportSet(ctx context.Context, data []byte) (SkillSet, error) 
 	if strings.TrimSpace(man.Name) == "" || utf8.RuneCountInString(man.Name) > 80 {
 		return SkillSet{}, errors.New("invalid skill set name")
 	}
+	if err := ValidateSkillSetDetails(man.Details); err != nil {
+		return SkillSet{}, err
+	}
 	// Validate every member before touching the store.
 	trees := make([]map[string][]byte, len(members))
 	commandNames := map[string]bool{}
@@ -268,6 +294,11 @@ func (s *Service) ImportSet(ctx context.Context, data []byte) (SkillSet, error) 
 		tree, err := readTree(filepath.Join(dir, "skills", b.SkillID))
 		if err != nil {
 			return SkillSet{}, err
+		}
+		if raw, ok := tree["tidebot.json"]; ok {
+			if _, err := ValidateSkillManifest(raw); err != nil {
+				return SkillSet{}, err
+			}
 		}
 		md, ok := tree["SKILL.md"]
 		if !ok {
@@ -345,7 +376,7 @@ func (s *Service) ImportSet(ctx context.Context, data []byte) (SkillSet, error) 
 		b.Mode = "pinned"
 		all = append(all, sv)
 	}
-	set, err := s.SaveSet(ctx, "", man.Name, "", members)
+	set, err := s.SaveSetWithDetails(ctx, "", man.Name, "", members, &man.Details)
 	if err != nil {
 		return partial(err)
 	}
