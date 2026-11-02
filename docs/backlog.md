@@ -5094,3 +5094,51 @@ a bulk edit makes undo exact without a history table.
 1. Show each tag's spend this week beside its count (from the spend "by tag" query).
 2. Multi-select in Settings › Tags to merge several tags into one in a single step.
 3. `agentctl tags list|rename|delete` on the same endpoints for scripting.
+
+## 2026-11 改造后性能与 BUG
+
+本周（11-03 至 11-08）每轮只做 11-02 大改造（技能组合、可视化 DAG 工作流、依赖检查、上下文规划、前端拆分）之后的性能优化和 BUG 修复。
+
+### 基线（2026-11-03 04:00，`8737c7f`）
+
+环境：Linux amd64，8 核，Go 1.27.3。服务端用 `scripts/demo-webui.sh` 起的演示实例（mock Claude，5 个任务，1 个技能）。数字都是本机实测。
+
+| 指标 | 数值 | 方法 |
+| --- | ---: | --- |
+| agentd 体积（`-trimpath -s -w`，CGO=0） | 20.03 MB（agentctl 4.26 MB） | `go build` 后 `ls -l` |
+| 冷启动到 WebUI 首个应答 | 121–134 ms（5 次，中位 125 ms） | 每次新建 home，启动到 `curl /` 成功 |
+| 空闲 RSS | 33.5 MB（重启后 20 s）；种完演示数据约 1 分钟时 40.6 MB | `/proc/<pid>/status` VmRSS，没有浏览器连着 |
+| 空闲 CPU | 60 s 内 0.01 s（约 0.02%），13 个线程 | `/proc/<pid>/stat` utime+stime 差值 |
+| WebUI 包 | app.js 743 KB / gzip 206 KB；styles.css 260 KB / 49 KB；i18n 各 124 KB / 40–42 KB | 仓库内文件，`gzip -9` |
+| Docker 镜像（GHCR 0.2.0 linux/amd64） | 压缩后 117.6 MB（agentd 层 8.9 MB，其余是 node:22-slim 和 apt） | 读 registry manifest 的层大小；本机没有 docker，没法本地构建 |
+| API 延迟（gzip，30 次） | overview p50 1.07 / p95 2.15 ms；tasks 0.84 / 1.08；runs 0.84 / 1.19；dashboard 1.08 / 1.38；settings 1.23 / 1.99；spend 1.01 / 1.26；skills 0.58 / 0.78；workflows 0.13 / 0.24；rev 0.10 / 0.22 ms | 本机 keep-alive 连接，Python `http.client` |
+| `go test -race ./...` | 38 个包全部通过（webui 214 s，app 200 s） | `go test -race -count=1 -timeout 20m ./...` |
+| 静态检查 | `go vet` 干净；staticcheck 只有测试辅助函数里一处没用到的 err（`version/service.go:344`） | staticcheck（关掉风格类规则） |
+
+工作流实测：两步 DAG 跑完 7 s，状态顺序正确；中途停止后，父运行记为 canceled，子运行记为 canceled，还没开始的步骤记为「workflow stopped before this node started」。
+
+### 发现（按优先级）
+
+1. **P0 已修 · 打不开的页面一直显示骨架屏**：失败很快的请求（运行、任务、工作流、工作流执行被删掉或 id 不对时返回 404/400）会先显示错误，200 ms 后骨架屏定时器又把它盖掉。页面就一直停在骨架屏，`aria-busy=true`，也没有重试按钮。从通知或历史链接打开已删的工作流执行必然遇到。在 10/10 个场景（5 个路由 × 中英文）里复现。另外，已经离开的页面如果后来才失败，会把错误画到新页面上。
+2. **P1 · 工作流和技能组合的服务端报错没有翻译**：校验和执行时的错误文案都是 Go 里写死的英文，中文界面也直接显示原文，比如「workflow needs 1-32 nodes」「workflow stopped before this node started」，用户停止时正在跑的步骤显示「context canceled」。需要错误码加 i18n 映射。
+3. **P1 · 1024×655 下工作流编辑器的「步骤设置」在画布下面**：选中一个节点后要往下滚大约 700 px 才能编辑，画布和设置看不到同一屏。可以考虑窄屏下改成右侧抽屉或者跟画布并排（要先确认宽屏的样子，不改设计方向）。
+4. **P1 · `#/skills/<不存在的 id>` 返回 400 而不是 404**：页面显示的是服务端原文，不是「找不到」。
+5. **P2 · WebUI 是单个 743 KB 的包**：工作流画布、依赖检查这些新代码每个页面都会加载，注释也一起发出去。可以在 `build-webui.py` 里去掉注释、压缩空白，对比 gzip 前后的大小，并确认 CSP 和测试不受影响。
+6. **P2 · `workflow_runs` 和 `workflow_run_nodes` 不会清理**：每个节点的输出最多 128 KB，单次执行最多 32 个节点。工作流删除只是软删除，历史执行一直保留。要评估数据目录增长，看是否纳入「设置 › 数据」的清理统计。
+7. **P2 · Docker 镜像的大头是 node 基础镜像**：agentd 只占 8.9 MB，镜像压缩后 117.6 MB。这是为了跑 claude CLI 的取舍，先记录，不改。
+
+### 本轮修复：页面加载失败时显示错误和重试，不再被骨架屏盖住
+
+- `route()` 每次调用拿一个序号，失败统一交给 `routeFailed()` 处理：先 `mountSeq++`，让还没触发的骨架屏定时器失效；再去掉 `aria-busy`，画出错误和「重试」。只有最新的那次路由能画错误，已经离开的页面晚到的失败直接忽略。登录失效照旧交给登录页。
+- 404 显示新增的 `err.not_found`（「找不到这项内容，可能已被删除。」/「Not found. It may have been deleted.」），其他错误照旧显示服务端原文。顶栏标题跟侧栏当前选中的分区一致，不再显示上一个页面（原来显示「首页」）。
+- 测试：`webui/route_error_test.go` 检查 route() 的接线，并在 node 下跑：快速 404 后骨架屏定时器失效、aria-busy 去掉、重试已接好、顶栏分区正确；500 保留原文；离开后晚到的失败不覆盖新页面；登录错误不画。用改动前的 app.js 跑这个测试会失败。
+
+| 指标 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 5 个不存在的路由 × 中英文，3 s 后仍是骨架屏（aria-busy） | 10/10 | 0/10 |
+| 同上，3 s 后能看到错误和「重试」 | 0/10（错误只出现约 100 ms 就被盖掉） | 10/10 |
+| app.js | 743 KB / gzip 206.0 KB | 743.6 KB / gzip 206.4 KB（+0.4 KB） |
+
+方法：headless Chrome，1024×655，每 100 ms 采样一次 `#page`，持续 3 s。修复前用 `8737c7f` 的构建跑在同一份演示数据的副本上。截图：`/workspace/tidebot-shots/2026-11-03-0400-route-error-{zh-CN,en}.png`。
+
+**参考**：TanStack/query `packages/query-core/src/query.ts` 的 reducer 在 `error` 分支里把 `fetchStatus` 同时设回 `idle`，失败本身就结束加载态，不会出现「失败了但还在加载」的组合。tidebot 照这个思路做：失败时取消骨架屏定时器并去掉 aria-busy。

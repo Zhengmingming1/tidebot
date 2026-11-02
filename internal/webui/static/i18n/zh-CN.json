@@ -204,6 +204,7 @@
   "diff.to": "到",
   "err.generic": "出了点问题",
   "err.retry": "重试",
+  "err.not_found": "找不到这项内容，可能已被删除。",
   "err.sign_in": "请先登录",
   "f.model": "模型",
   "f.prompt": "提示词",

@@ -204,6 +204,7 @@
   "diff.to": "to",
   "err.generic": "Something went wrong",
   "err.retry": "Try again",
+  "err.not_found": "Not found. It may have been deleted.",
   "err.sign_in": "Please sign in",
   "f.model": "Model",
   "f.prompt": "Prompt",

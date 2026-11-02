@@ -8461,6 +8461,8 @@
   var lastHash = null;
   // refresh(): re-render the current page in place (keeps scroll and open modals closed state).
   function refresh() { return route(true); }
+  // Each route() call gets a number; only the newest one may paint its failure.
+  var routeSeq = 0;
   function route(soft) {
     soft = soft === true;
     if (soft && workflowDraftGuard && workflowDraftGuard.dirty()) return Promise.resolve();
@@ -8477,6 +8479,7 @@
       setTimeout(function () { if (mountSeq === seq && page()) { page().innerHTML = skeleton(kind); page().setAttribute("aria-busy", "true"); } }, 200);
     }
     lastHash = location.hash;
+    var rs = ++routeSeq;
     var nav0 = (location.hash.replace(/^#\/?/, "").split(/[/?]/)[0]) || "home";
     if (!soft) setNav(nav0);
     var h = location.hash.replace(/^#\/?/, "");
@@ -8501,10 +8504,26 @@
     }
     } finally { swr.on = false; }
     p = Promise.resolve(p).then(function () { if (soft) { window.scrollTo(0, y); if (page()) page().scrollTop = sy; } }, function (e) {
-      if (!e.auth) { renderTopbar([]); page().innerHTML = errorState(e.message); $("#err-retry").addEventListener("click", function () { lastHash = null; route(); }); }
+      routeFailed(e, rs);
     });
     loadCC(false);
     return p;
+  }
+  // A page that could not load shows the error with a retry, not a skeleton forever: a fast
+  // refusal (404 for a deleted run, task or workflow) used to land before the 200 ms skeleton
+  // timer, which then covered it with aria-busy. Bumping mountSeq cancels that timer, and a
+  // failure from a route the user already left never paints over the page they went to.
+  function routeFailed(e, rs) {
+    var pg = page();
+    if (e.auth || rs !== routeSeq || !pg) return;
+    mountSeq++;
+    // The top bar names the section the sidebar shows (route() already set it), not the last page.
+    var nav = $("#nav a.active");
+    renderTopbar.nav = nav ? nav.getAttribute("data-nav") : "";
+    renderTopbar([]);
+    pg.removeAttribute("aria-busy");
+    pg.innerHTML = errorState(e.status === 404 ? T("err.not_found") : e.message);
+    $("#err-retry").addEventListener("click", function () { lastHash = null; route(); });
   }
   // Back/forward while a dialog holds edits: stay put and ask; "Discard" then goes on.
   window.addEventListener("hashchange", function () {
