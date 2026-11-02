@@ -259,6 +259,8 @@ shutdown_grace: 5s           # how long quitting waits for running runs before s
 
 Tasks, skills, buttons, plugins and triggers can all be created in the WebUI now. Drop a skill zip or folder on the import dialog; schedules come with presets (daily, weekdays, weekly) and show the next few runs in your timezone. When you create a task, the name and schedule get filled in from what you wrote and a daily budget is suggested; the add-provider form also understands a pasted Base URL or a block of env vars. If a dialog has unsaved changes, Esc or a click outside asks before throwing them away. The CLI below still works.
 
+Skill import accepts `.zip`, `.skill`, `.tar.gz` / `.tgz` and folders. It recognizes a skill directory containing `SKILL.md`, a plugin package containing `skills/<name>/SKILL.md`, and either layout inside one download wrapper directory. The preview shows the detected directory. Only that skill and its supporting files are imported; plugin hooks and other plugin configuration are not activated. If a package contains multiple skills, the dialog lists their paths so you can select each skill folder separately. Import does not install script dependencies or configure external service credentials.
+
 ## CLI examples
 
 ```bash

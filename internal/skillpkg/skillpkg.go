@@ -28,8 +28,17 @@ const (
 	MaxEntries      = 2000
 )
 
-// ErrNoSkillMD is returned when no SKILL.md is found at the root or in a single top folder.
-var ErrNoSkillMD = errors.New("no SKILL.md found: put SKILL.md at the top of the archive or inside a single top-level folder")
+// ErrNoSkillMD is returned when none of the supported skill package layouts matches.
+var ErrNoSkillMD = errors.New("no SKILL.md found: use a skill folder or a package containing skills/<name>/SKILL.md")
+
+// MultipleSkillsError makes an ambiguous bundle explicit instead of choosing a skill for the user.
+type MultipleSkillsError struct {
+	Candidates []string
+}
+
+func (e *MultipleSkillsError) Error() string {
+	return "multiple skills found: " + strings.Join(e.Candidates, ", ") + "; choose one skill folder"
+}
 
 // CleanRel validates an archive entry name and returns a safe relative slash path.
 func CleanRel(name string) (string, error) {
@@ -126,6 +135,10 @@ func Extract(filename string, data []byte, dest string) error {
 			}
 			switch h.Typeflag {
 			case tar.TypeDir:
+				// tar -czf package.tar.gz -C package . includes this harmless root directory.
+				if h.Name == "." || h.Name == "./" {
+					continue
+				}
 				if _, err := CleanRel(h.Name); err != nil {
 					return err
 				}
@@ -154,6 +167,9 @@ func Extract(filename string, data []byte, dest string) error {
 				return fmt.Errorf("links are not allowed (%s)", f.Name)
 			}
 			if f.FileInfo().IsDir() {
+				if f.Name == "." || f.Name == "./" {
+					continue
+				}
 				if _, err := CleanRel(f.Name); err != nil {
 					return err
 				}
@@ -195,30 +211,72 @@ func WriteFiles(files []FileEntry, dest string) error {
 	return nil
 }
 
-// FindRoot returns the directory holding SKILL.md: dest itself or its single top folder.
+// FindRoot accepts a skill, a single archive wrapper, or a standard skills/<name> bundle.
+// Plugin manifests are not activated or followed: only the selected skill directory is imported.
 func FindRoot(dest string) (string, error) {
-	if _, err := os.Stat(filepath.Join(dest, "SKILL.md")); err == nil {
+	if hasSkillMD(dest) {
 		return dest, nil
 	}
 	ents, err := os.ReadDir(dest)
 	if err != nil {
 		return "", err
 	}
-	var dirs []string
+	var meaningful []os.DirEntry
 	for _, e := range ents {
-		if e.IsDir() {
-			dirs = append(dirs, e.Name())
-		} else {
-			return "", ErrNoSkillMD
+		if e.Name() != ".DS_Store" && e.Name() != "__MACOSX" {
+			meaningful = append(meaningful, e)
 		}
 	}
-	if len(dirs) == 1 {
-		root := filepath.Join(dest, dirs[0])
-		if _, err := os.Stat(filepath.Join(root, "SKILL.md")); err == nil {
+	bases := []string{dest}
+	if len(meaningful) == 1 && meaningful[0].IsDir() {
+		root := filepath.Join(dest, meaningful[0].Name())
+		if hasSkillMD(root) {
 			return root, nil
 		}
+		bases = append(bases, root)
+	}
+	var roots, candidates []string
+	for _, base := range bases {
+		dir := filepath.Join(base, "skills")
+		info, err := os.Lstat(dir)
+		if os.IsNotExist(err) || err == nil && !info.IsDir() {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		children, err := os.ReadDir(dir)
+		if err != nil {
+			return "", err
+		}
+		for _, child := range children {
+			root := filepath.Join(dir, child.Name())
+			if child.IsDir() && hasSkillMD(root) {
+				rel, err := filepath.Rel(dest, root)
+				if err != nil {
+					return "", err
+				}
+				roots = append(roots, root)
+				candidates = append(candidates, filepath.ToSlash(rel))
+			}
+		}
+	}
+	if len(roots) == 1 {
+		return roots[0], nil
+	}
+	if len(roots) > 1 {
+		return "", &MultipleSkillsError{Candidates: candidates}
 	}
 	return "", ErrNoSkillMD
+}
+
+func hasSkillMD(dir string) bool {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	info, err = os.Lstat(filepath.Join(dir, "SKILL.md"))
+	return err == nil && info.Mode().IsRegular()
 }
 
 // Meta is the SKILL.md frontmatter we care about.

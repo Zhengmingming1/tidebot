@@ -3875,12 +3875,29 @@
   // ---------- skill import ----------
   function skillImportModal(done) {
     modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("sk.import")) + "</h2></div>" + dropZone("sk-drop", ".zip,.skill,.tar.gz,.tgz", true) + '<div id="sk-prev"></div><div class="actions" id="sk-foot"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
-      var prev = $("#sk-prev", root), foot = $("#sk-foot", root);
+      var prev = $("#sk-prev", root), foot = $("#sk-foot", root), uploadSeq = 0;
+      function cancelOnly() {
+        foot.innerHTML = '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button>";
+        $$("[data-close]", foot).forEach(function (b) { b.addEventListener("click", close); });
+      }
+      function uploadError(e) {
+        var data = e.data || {}, message = e.message, candidates = [];
+        if (data.code === "skill_root_missing") message = T("sk.root_missing");
+        if (data.code === "multiple_skills") {
+          message = T("sk.multiple_skills");
+          candidates = Array.isArray(data.candidates) ? data.candidates.filter(function (p) { return typeof p === "string"; }) : [];
+        }
+        return '<div class="notice bad" role="alert">' + ic("x", "sm") + '<div>' + esc(message) +
+          (candidates.length ? '<ul class="list-plain">' + candidates.map(function (p) { return '<li><code>' + esc(p) + '</code></li>'; }).join("") + '</ul>' : "") + '</div></div>';
+      }
       var doImport = function (p, name, mode, btn) {
+        var seq = uploadSeq;
         btn.disabled = true;
         api("/api/skills/import", { method: "POST", body: { stage_id: p.stage_id, name: name, mode: mode } }).then(function () {
+          if (seq !== uploadSeq || !document.contains(root)) return;
           close(); toast(T(mode === "version" ? "toast.skill_version" : "toast.skill_imported")); done();
         }).catch(function (e) {
+          if (seq !== uploadSeq || !document.contains(root)) return;
           btn.disabled = false;
           if (e.status === 409 && e.data && e.data.existing) { p.existing = e.data.existing; show(p, name); return; }
           fail(e);
@@ -3890,6 +3907,7 @@
         var ex = p.existing;
         prev.innerHTML = '<div class="preview"><form id="sk-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
           '<div class="field"><span>' + esc(T("sk.desc")) + '</span><p class="desc-box">' + esc(p.description || T("sk.no_desc")) + "</p></div>" +
+          (typeof p.source_root === "string" && p.source_root && p.source_root !== "." ? '<p class="notice">' + ic("folder", "sm") + '<span>' + esc(T("sk.source_root", { path: p.source_root })) + '</span></p>' : "") +
           '<ul class="checks">' + (p.checks || []).map(function (c) { return '<li class="' + (c.ok ? "ok" : "warn") + '">' + ic(c.ok ? "check" : "info", "sm") + esc(T("sk.chk_" + c.key)) + "</li>"; }).join("") + "</ul>" +
           '<details class="ftree" open><summary>' + esc(T("sk.files_n", { n: p.files })) + " · " + esc(fmtBytes(p.size || 0)) + "</summary>" + fileTree(p.tree || []) + "</details>" +
           (ex ? '<p class="notice">' + ic("info", "sm") + esc(T("sk.exists", { n: ex.version_no, next: ex.next_no || ex.version_no + 1 })) + "</p>" : "") + "</form></div>";
@@ -3905,8 +3923,14 @@
         if (ver) ver.addEventListener("click", function () { doImport(p, nm(), "version", ver); });
       }
       wireDrop(root, "sk-drop", function (fd) {
+        var seq = ++uploadSeq;
+        cancelOnly();
         prev.innerHTML = '<p class="muted">' + esc(T("up.reading")) + "</p>";
-        upload("/api/skills/upload", fd).then(function (p) { show(p, p.name); }).catch(function (e) { prev.innerHTML = '<p class="notice bad">' + ic("x", "sm") + esc(e.message) + "</p>"; });
+        upload("/api/skills/upload", fd).then(function (p) {
+          if (seq === uploadSeq && document.contains(root)) show(p, p.name);
+        }).catch(function (e) {
+          if (seq === uploadSeq && document.contains(root)) prev.innerHTML = uploadError(e);
+        });
       });
     });
   }

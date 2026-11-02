@@ -39,6 +39,7 @@ func (s *Server) cleanStaging() {
 
 type skillPreview struct {
 	StageID     string         `json:"stage_id"`
+	SourceRoot  string         `json:"source_root"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Files       int            `json:"files"`
@@ -138,16 +139,35 @@ func (s *Server) handleSkillUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	root, err := skillpkg.FindRoot(dest)
 	if err != nil {
-		fail(400, err.Error())
+		_ = os.RemoveAll(dest)
+		out := map[string]any{"error": err.Error()}
+		var multiple *skillpkg.MultipleSkillsError
+		switch {
+		case errors.Is(err, skillpkg.ErrNoSkillMD):
+			out["code"] = "skill_root_missing"
+		case errors.As(err, &multiple):
+			out["code"] = "multiple_skills"
+			out["candidates"] = multiple.Candidates
+		}
+		writeJSON(w, 400, out)
 		return
 	}
-	md, _ := os.ReadFile(filepath.Join(root, "SKILL.md"))
+	md, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
+	if err != nil {
+		fail(400, "cannot read SKILL.md")
+		return
+	}
 	meta, err := skillpkg.ParseFrontmatter(md)
 	if err != nil {
 		fail(400, err.Error())
 		return
 	}
-	p := skillPreview{StageID: sid, Name: meta.Name, Description: meta.Description}
+	rel, err := filepath.Rel(dest, root)
+	if err != nil {
+		fail(400, "invalid skill directory")
+		return
+	}
+	p := skillPreview{StageID: sid, SourceRoot: filepath.ToSlash(rel), Name: meta.Name, Description: meta.Description}
 	if p.Name == "" && root != dest {
 		p.Name = filepath.Base(root)
 	}
