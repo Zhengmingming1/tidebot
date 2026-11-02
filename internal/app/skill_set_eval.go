@@ -30,9 +30,14 @@ type skillEvalState struct {
 	wg      sync.WaitGroup
 }
 
-func (a *App) initSkillSetEvals() error {
+func (a *App) initSkillSetEvals() {
 	a.skillEvals.cancels = map[string]context.CancelFunc{}
-	_, err := a.DB.Exec(`UPDATE skill_set_evaluations SET status='interrupted',updated_at=? WHERE status='running'`, nowUTC())
+}
+
+// Recovery is only called after StartDaemon owns IPC; another App.Open may
+// belong to a second core that will be refused by the single-instance listener.
+func (a *App) recoverSkillSetEvals(ctx context.Context) error {
+	_, err := a.DB.ExecContext(ctx, `UPDATE skill_set_evaluations SET status='interrupted',updated_at=? WHERE status='running'`, nowUTC())
 	return err
 }
 func (a *App) stopSkillSetEvals() {

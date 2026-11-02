@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/ipc"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
@@ -136,10 +138,17 @@ func TestSkillSetEvaluationCancellation(t *testing.T) {
 	if got.Status != "canceled" || got.Cases[0].Composition != nil || got.FinishedAt == "" {
 		t.Fatalf("%+v", got)
 	}
+	a.waitSkillSetEvals()
+	var count int
+	_ = a.DB.QueryRow(`SELECT count(*) FROM runs WHERE trigger_kind='skill_set_eval'`).Scan(&count)
+	if count != 1 {
+		t.Fatal("cancel launched another comparison call", count)
+	}
 }
 
 func TestSkillSetEvaluationInterruptedRecoveryDoesNotRerun(t *testing.T) {
 	a := newTestApp(t)
+	evaluationTestIPC(t, a)
 	set := evaluationFixture(t, a, nil)
 	ev := webui.SkillSetEvaluation{ID: "eval_interrupted", SetID: set.ID, VersionID: set.VersionID, Status: "running", CreatedAt: nowUTC()}
 	raw, _ := json.Marshal(ev)
@@ -147,9 +156,14 @@ func TestSkillSetEvaluationInterruptedRecoveryDoesNotRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = a.initSkillSetEvals(); err != nil {
+	t.Setenv("TIDEBOT_NO_AUTO_BACKUP", "1")
+	daemonCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := a.StartDaemon(daemonCtx)
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer d.Stop()
 	got, err := a.getSkillSetEval(context.Background(), ev.ID)
 	if err != nil || got.Status != "interrupted" || got.FinishedAt == "" {
 		t.Fatal(got, err)
@@ -240,4 +254,133 @@ func TestSkillSetEvaluationPreflightUsesSelectedProvider(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSecondAppOpenCannotInterruptActiveEvaluation(t *testing.T) {
+	t.Setenv("TIDEBOT_NO_AUTO_BACKUP", "1")
+	t.Setenv("TIDEBOT_MOCK_STEPS", "40")
+	t.Setenv("TIDEBOT_MOCK_STEP_SLEEP", "0.1")
+	a := newTestApp(t)
+	evaluationTestIPC(t, a)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := a.StartDaemon(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+	set := evaluationFixture(t, a, nil)
+	ev, err := a.startSkillSetEval(webui.SkillSetEvalRequest{SetID: set.ID, VersionID: set.VersionID, BudgetUSD: 0.2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		got, _ := a.getSkillSetEval(ctx, ev.ID)
+		return got.Cases[0].Baseline != nil && got.Cases[0].Baseline.RunID != ""
+	})
+	second, err := Open(a.Cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	assertRunning := func() {
+		t.Helper()
+		got, err := a.getSkillSetEval(ctx, ev.ID)
+		if err != nil || got.Status != "running" {
+			t.Fatalf("second core interrupted live evaluation: %+v %v", got, err)
+		}
+	}
+	assertRunning()
+	if _, err = second.StartDaemon(ctx); !errors.Is(err, ipc.ErrInUse) {
+		t.Fatalf("second daemon was not refused: %v", err)
+	}
+	assertRunning()
+	if err = a.cancelSkillSetEval(ev.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.waitSkillSetEvals()
+}
+
+func TestEvaluationRecoveryFailureReleasesIPC(t *testing.T) {
+	a := newTestApp(t)
+	evaluationTestIPC(t, a)
+	set := evaluationFixture(t, a, nil)
+	ev := webui.SkillSetEvaluation{ID: "eval_recovery_failure", SetID: set.ID, VersionID: set.VersionID, Status: "running", CreatedAt: nowUTC()}
+	raw, _ := json.Marshal(ev)
+	if _, err := a.DB.Exec(`INSERT INTO skill_set_evaluations(id,set_id,version_id,status,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, ev.ID, set.ID, set.VersionID, ev.Status, string(raw), nowUTC(), nowUTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec(`CREATE TRIGGER reject_eval_recovery BEFORE UPDATE ON skill_set_evaluations BEGIN SELECT RAISE(ABORT,'fixture recovery failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := a.StartDaemon(context.Background()); err == nil {
+		d.Stop()
+		t.Fatal("daemon started after recovery failed")
+	}
+	ln, err := ipc.Listen(a.Cfg.IPCPath)
+	if err != nil {
+		t.Fatalf("failed recovery retained IPC ownership: %v", err)
+	}
+	_ = ln.Close()
+}
+
+func TestDaemonStopWaitsForEvaluationAndPreventsNextCall(t *testing.T) {
+	t.Setenv("TIDEBOT_NO_AUTO_BACKUP", "1")
+	t.Setenv("TIDEBOT_MOCK_STEPS", "40")
+	t.Setenv("TIDEBOT_MOCK_STEP_SLEEP", "0.1")
+	a := newTestApp(t)
+	evaluationTestIPC(t, a)
+	a.Cfg.ShutdownGrace = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := a.StartDaemon(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+	set := evaluationFixture(t, a, nil)
+	req := webui.SkillSetEvalRequest{SetID: set.ID, VersionID: set.VersionID, BudgetUSD: 0.2}
+	ev, err := a.startSkillSetEval(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		got, _ := a.getSkillSetEval(ctx, ev.ID)
+		return got.Cases[0].Baseline != nil && got.Cases[0].Baseline.RunID != ""
+	})
+	d.Stop()
+	got, err := a.getSkillSetEval(context.Background(), ev.ID)
+	if err != nil || got.Status != "interrupted" || got.Cases[0].Composition != nil || got.FinishedAt == "" {
+		t.Fatalf("Stop returned before evaluation stopped: %+v %v", got, err)
+	}
+	a.skillEvals.Lock()
+	active := len(a.skillEvals.cancels)
+	a.skillEvals.Unlock()
+	if active != 0 {
+		t.Fatal("evaluation worker remains after IPC shutdown", active)
+	}
+	if _, err = a.startSkillSetEval(req); !errors.Is(err, runner.ErrShuttingDown) {
+		t.Fatalf("post-shutdown evaluation accepted: %v", err)
+	}
+	var count int
+	_ = a.DB.QueryRow(`SELECT count(*) FROM runs WHERE trigger_kind='skill_set_eval'`).Scan(&count)
+	if count != 1 {
+		t.Fatal("shutdown launched another comparison call", count)
+	}
+	ln, err := ipc.Listen(a.Cfg.IPCPath)
+	if err != nil {
+		t.Fatalf("IPC was not released after evaluation stopped: %v", err)
+	}
+	_ = ln.Close()
+}
+
+// macOS Unix socket paths cannot include Go's long test-name temp prefix.
+func evaluationTestIPC(t *testing.T, a *App) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "tb-eval-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	a.Cfg.IPCPath = filepath.Join(dir, "a.sock")
 }

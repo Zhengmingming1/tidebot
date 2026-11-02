@@ -138,10 +138,7 @@ func Open(cfg config.Config) (*App, error) {
 	}
 	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
 	a.initWorkflows()
-	if err := a.initSkillSetEvals(); err != nil {
-		_ = sqlDB.Close()
-		return nil, err
-	}
+	a.initSkillSetEvals()
 	a.Optimize = optimize.New(sqlDB, a.Skills, ver)
 	a.Optimize.OnEvent = func(kind, skillID, detail string) {
 		a.Events.Emit(Event{Kind: kind, Detail: detail, TaskName: a.skillName(skillID)})

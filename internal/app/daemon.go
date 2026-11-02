@@ -29,6 +29,10 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 		return nil, err
 	}
 	// We own the instance now: close runs a crashed / force-quit core left behind.
+	if err := a.recoverSkillSetEvals(ctx); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
 	a.recoverInterruptedRuns(ctx)
 	a.recoverWorkflows(ctx)
 	a.purgeSkillStages()
@@ -84,9 +88,11 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 func (d *Daemon) Stop() {
 	d.once.Do(func() {
 		d.a.Sched.Stop()
+		d.a.stopSkillSetEvals()
 		d.a.stopWorkflows()
 		d.a.drainRuns()
 		d.a.waitWorkflows()
+		d.a.waitSkillSetEvals()
 		// Bounded: an open live-log stream (SSE) never goes idle on its own.
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = d.a.WebUI.Stop(sctx)
