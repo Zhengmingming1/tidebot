@@ -247,13 +247,14 @@ func TestMCPServer(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_text","arguments":{"content":"x"}}}`,
 	}, "\n") + "\n"
 	var out bytes.Buffer
+	writer := &syncW{w: &out}
 	tools := runtimes["wecom"].Tools(map[string]any{})
-	if err := ServeMCP(strings.NewReader(in), &syncW{w: &out}, "t", "1", tools); err != nil {
+	if err := ServeMCP(strings.NewReader(in), writer, "t", "1", tools); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(200 * time.Millisecond)
 	got := map[float64]map[string]any{}
-	for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+	for _, l := range strings.Split(strings.TrimSpace(writer.String()), "\n") {
 		var m map[string]any
 		_ = json.Unmarshal([]byte(l), &m)
 		if id, ok := m["id"].(float64); ok {
@@ -261,7 +262,7 @@ func TestMCPServer(t *testing.T) {
 		}
 	}
 	if got[1]["result"] == nil || !strings.Contains(toJSON(got[2]), "send_markdown") || !strings.Contains(toJSON(got[3]), `"isError":true`) {
-		t.Fatalf("%s", out.String())
+		t.Fatalf("%s", writer.String())
 	}
 }
 
@@ -271,3 +272,10 @@ type syncW struct {
 }
 
 func (s *syncW) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.w.Write(p) }
+
+func (s *syncW) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if b, ok := s.w.(*bytes.Buffer); ok { return b.String() }
+	return ""
+}
