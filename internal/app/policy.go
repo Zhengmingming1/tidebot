@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
@@ -17,8 +16,6 @@ import (
 // EventBreakerTripped: a task was paused after consecutive failures.
 const EventBreakerTripped = "breaker_tripped"
 
-var taskLocks sync.Map // task id → *sync.Mutex; serializes catch-up runs of one task
-
 // runTaskScheduled is the scheduler's RunnerFunc: it returns immediately and runs the task
 // in the background with retry + circuit breaker (final-plan §12).
 func (a *App) runTaskScheduled(ctx context.Context, task db.Task) error {
@@ -27,10 +24,18 @@ func (a *App) runTaskScheduled(ctx context.Context, task db.Task) error {
 }
 
 func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket string, attempt int) {
-	mu, _ := taskLocks.LoadOrStore(task.ID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
+	release, ok := a.enterPolicyRun(task)
+	if !ok {
+		return
+	}
+	defer release()
+	if a.policyRunsClosing() || ctx.Err() != nil {
+		return
+	}
 	err := a.runTaskTrigger(ctx, task, trigger, bucket)
-	mu.(*sync.Mutex).Unlock()
+	if a.policyRunsClosing() || ctx.Err() != nil {
+		return
+	}
 	if errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrStoppedByUser) || errors.Is(err, errTaskInactive) || errors.Is(err, errDiskFull) || errors.Is(err, errBudgetHeld) || errors.Is(err, errPowerSaving) {
 		// quitting, a user stop, a task paused while its run waited, a full disk, a
 		// budget held by runs already going or saving battery is not the task's fault: no retry, no breaker strike
@@ -48,7 +53,7 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 	if err != nil && retryable && attempt < p.RetryMax {
 		wait := policy.Backoff(attempt+1, rand.New(rand.NewSource(time.Now().UnixNano())))
 		a.Log.Info("retry scheduled", "task_id", task.ID, "class", class, "attempt", attempt+1, "in", wait.String())
-		time.AfterFunc(a.retryDelay(wait), func() { a.runWithPolicy(context.Background(), task, "retry", bucket, attempt+1) })
+		a.schedulePolicyRetry(ctx, a.retryDelay(wait), func() { a.runWithPolicy(ctx, task, "retry", bucket, attempt+1) })
 		return
 	}
 	_, tripped, _ := a.Policy.RecordOutcome(ctx, task.ID, err == nil)

@@ -12,10 +12,11 @@ import (
 // Daemon is a running core: IPC server, optional TCP WebUI and the scheduler.
 // Used by both agentd and the desktop shell (which embeds the core in-process).
 type Daemon struct {
-	a     *App
-	Errs  <-chan error
-	close func()
-	once  sync.Once
+	a              *App
+	Errs           <-chan error
+	close          func()
+	stopBackground context.CancelFunc
+	once           sync.Once
 }
 
 // StartDaemon seeds providers, starts IPC, the WebUI listener (if enabled) and the scheduler.
@@ -33,8 +34,21 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 		_ = ln.Close()
 		return nil, err
 	}
-	a.recoverInterruptedRuns(ctx)
-	a.recoverWorkflows(ctx)
+	if err := a.recoverInterruptedRuns(ctx); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	if err := a.recoverWorkflows(ctx); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	// Stop owns background-loop cancellation even if the caller keeps ctx alive.
+	ctx, stopBackground := context.WithCancel(ctx)
+	var background sync.WaitGroup
+	startBackground := func(fn func(context.Context)) {
+		background.Add(1)
+		go func() { defer background.Done(); fn(ctx) }()
+	}
 	a.purgeSkillStages()
 	a.purgeRunSnaps()
 	a.cleanLegacySkillCopies(ctx)
@@ -55,16 +69,16 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 		a.Log.Info("realigned schedules", "tasks", n)
 	}
 	a.Sched.Start(ctx)
-	go a.runNotifier(ctx)
-	go a.runOptimizer(ctx)
-	go a.PluginHost.Run(ctx)
-	go a.runFileWatcher(ctx, 0)
-	go a.runRetention(ctx)
-	go a.runDiskWatch(ctx)
-	go a.runUpdateChecker(ctx)
-	go a.runPriceCatalog(ctx)
+	startBackground(a.runNotifier)
+	startBackground(a.runOptimizer)
+	startBackground(a.PluginHost.Run)
+	startBackground(func(ctx context.Context) { a.runFileWatcher(ctx, 0) })
+	startBackground(a.runRetention)
+	startBackground(a.runDiskWatch)
+	startBackground(a.runUpdateChecker)
+	startBackground(a.runPriceCatalog)
 	if os.Getenv("TIDEBOT_NO_AUTO_BACKUP") != "1" {
-		go a.runAutoBackup(ctx)
+		startBackground(a.runAutoBackup)
 	}
 	if v := a.claudeVersion(); !ClaudeCompatible(v) {
 		a.Log.Warn("claude code is older than tested", "version", v, "min", MinClaudeVersion)
@@ -73,10 +87,20 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	// moment agentd gets SIGTERM: Stop drains runs first, then closes IPC.
 	serveCtx, stopServe := context.WithCancel(context.WithoutCancel(ctx))
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(serveCtx, ln) }()
-	return &Daemon{a: a, Errs: errCh, close: func() {
+	serveDone := make(chan struct{})
+	go func() { defer close(serveDone); errCh <- srv.Serve(serveCtx, ln) }()
+	return &Daemon{a: a, Errs: errCh, stopBackground: stopBackground, close: func() {
+		stopBackground()
 		stopServe()
 		_ = ln.Close()
+		<-serveDone
+		backgroundDone := make(chan struct{})
+		go func() { background.Wait(); close(backgroundDone) }()
+		select {
+		case <-backgroundDone:
+		case <-time.After(shutdownWriteWait):
+			a.Log.Warn("background shutdown timed out")
+		}
 		_ = os.Remove(a.Cfg.IPCPath)
 	}}, nil
 }
@@ -87,18 +111,20 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 // that are still writing. Safe to call more than once.
 func (d *Daemon) Stop() {
 	d.once.Do(func() {
+		d.stopBackground()
 		d.a.Sched.Stop()
+		d.a.stopPolicyRuns()
 		d.a.stopSkillSetEvals()
 		d.a.stopWorkflows()
 		d.a.drainRuns()
 		d.a.waitWorkflows()
 		d.a.waitSkillSetEvals()
+		d.a.waitPolicyRuns()
 		// Bounded: an open live-log stream (SSE) never goes idle on its own.
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = d.a.WebUI.Stop(sctx)
 		cancel()
 		d.close()
-		time.Sleep(100 * time.Millisecond)
 	})
 }
 

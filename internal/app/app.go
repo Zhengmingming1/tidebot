@@ -75,6 +75,7 @@ type App struct {
 	loc   atomic.Pointer[time.Location] // scheduling timezone (see timezone.go)
 
 	skillEvals skillEvalState
+	policyRuns policyRunState
 
 	retryScale float64
 	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
@@ -205,11 +206,13 @@ func (a *App) Close() error {
 	if a.Sched != nil {
 		a.Sched.Stop()
 	}
+	a.stopPolicyRuns()
 	a.stopSkillSetEvals()
 	a.stopWorkflows()
 	a.drainRuns()
 	a.waitWorkflows()
 	a.waitSkillSetEvals()
+	a.waitPolicyRuns()
 	if a.WebUI != nil {
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = a.WebUI.Stop(sctx)

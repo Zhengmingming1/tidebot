@@ -129,12 +129,14 @@ func (a *App) waitWorkflows() {
 
 // kept local to the workflow lifecycle: interrupted graphs are never replayed
 // automatically, because a completed node may have performed external actions.
-func (a *App) recoverWorkflows(ctx context.Context) {
+func (a *App) recoverWorkflows(ctx context.Context) error {
 	if a.Workflows != nil {
 		c, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 		if err := a.Workflows.Recover(c); err != nil {
 			a.Log.Error("workflow recovery", "error", err)
+			return err
 		}
 	}
+	return nil
 }

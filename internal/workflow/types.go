@@ -40,6 +40,10 @@ type Node struct {
 	Needs          []Dependency            `json:"needs,omitempty"`
 	Join           string                  `json:"join"`
 	Condition      *Condition              `json:"condition,omitempty"`
+	// Retries are opt-in and only apply to transient failures. Owners must use
+	// idempotent skills when enabling them; recovered runs are never replayed.
+	RetryMax       int `json:"retry_max,omitempty"`
+	RetryBackoffMS int `json:"retry_backoff_ms,omitempty"`
 }
 
 // Position is presentation metadata; it never determines dependency order.

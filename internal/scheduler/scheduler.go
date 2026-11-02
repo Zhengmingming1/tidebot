@@ -28,6 +28,7 @@ type Scheduler struct {
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
+	done    chan struct{}
 	pmu     sync.Mutex
 	paused  bool
 	// pausedUntil is when a timed pause ends (zero = until resumed by hand).
@@ -136,18 +137,23 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}
 	ctx, s.cancel = context.WithCancel(ctx)
 	s.running = true
+	done := make(chan struct{})
+	s.done = done
 	s.mu.Unlock()
 
 	go func() {
+		defer func() {
+			s.mu.Lock()
+			s.running = false
+			close(done)
+			s.mu.Unlock()
+		}()
 		t := time.NewTicker(s.tick)
 		defer t.Stop()
 		s.poll(ctx)
 		for {
 			select {
 			case <-ctx.Done():
-				s.mu.Lock()
-				s.running = false
-				s.mu.Unlock()
 				return
 			case <-t.C:
 				s.poll(ctx)
@@ -156,12 +162,17 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}()
 }
 
-// Stop cancels the poll loop.
+// Stop cancels and joins the poll loop so no dispatch can follow shutdown.
+// RunnerFunc and poll hooks must honor their context and must not call Stop.
 func (s *Scheduler) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.cancel != nil {
 		s.cancel()
+	}
+	done := s.done
+	s.mu.Unlock()
+	if done != nil {
+		<-done
 	}
 }
 
@@ -193,6 +204,9 @@ func (s *Scheduler) poll(ctx context.Context) {
 		return
 	}
 	for _, task := range due {
+		if ctx.Err() != nil {
+			return
+		}
 		if s.Gate != nil {
 			if d, why := s.Gate(task); d {
 				s.log.Info("defer due task", "task_id", task.ID, "reason", why)
@@ -222,7 +236,8 @@ func (s *Scheduler) handleDue(ctx context.Context, task db.Task) error {
 				return nil
 			}
 			s.log.Info("skip overlapping run", "task_id", task.ID)
-			return s.advanceSchedule(ctx, task, time.Now())
+			_, err := s.advanceSchedule(ctx, task, time.Now())
+			return err
 		}
 	}
 
@@ -234,13 +249,17 @@ func (s *Scheduler) handleDue(ctx context.Context, task db.Task) error {
 			s.log.Info("skip missed run(s)", "task_id", task.ID)
 		}
 	}
-	if err := s.advanceSchedule(ctx, task, now); err != nil {
+	claimed, err := s.advanceSchedule(ctx, task, now)
+	if err != nil {
 		return err
 	}
-	if s.run == nil {
+	if !claimed || s.run == nil {
 		return nil
 	}
 	for i := 0; i < n; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := s.run(ctx, task); err != nil {
 			return err
 		}
@@ -276,23 +295,23 @@ func (s *Scheduler) missedTimes(task db.Task, now time.Time) []time.Time {
 	return out
 }
 
-func (s *Scheduler) advanceSchedule(ctx context.Context, task db.Task, from time.Time) error {
+func (s *Scheduler) advanceSchedule(ctx context.Context, task db.Task, from time.Time) (bool, error) {
 	skips := ParseSkips(task.SkipRuns)
 	next, err := s.NextSkipping(task.CronExpr, from, skips)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := s.store.UpdateTaskSchedule(ctx, task.ID, &from, &next); err != nil {
-		return err
+	// Claim this exact fire time once. A stale poll or concurrent schedule edit
+	// must not dispatch it again or overwrite a newer schedule. No schema change.
+	res, err := s.store.DB.ExecContext(ctx, `UPDATE tasks SET last_fired_at=?,next_run_at=?,updated_at=?,skip_runs=?
+WHERE id=? AND status='active' AND next_run_at IS ? AND cron_expr=? AND skip_runs=?`,
+		from.UTC().Format(time.RFC3339), next.UTC().Format(time.RFC3339), from.UTC().Format(time.RFC3339),
+		FormatSkips(FutureSkips(skips, from)), task.ID, task.NextRunAt, task.CronExpr, task.SkipRuns)
+	if err != nil {
+		return false, err
 	}
-	if len(skips) == 0 {
-		return nil
-	}
-	// Skipped times now behind us are done with.
-	if left := FormatSkips(FutureSkips(skips, from)); left != task.SkipRuns {
-		_, err = s.store.DB.ExecContext(ctx, `UPDATE tasks SET skip_runs = ? WHERE id = ?`, left, task.ID)
-	}
-	return err
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // SetLocation sets the timezone cron expressions are read in (nil = time.Local).

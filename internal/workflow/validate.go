@@ -38,6 +38,12 @@ func Validate(d *Definition) error {
 	nodes := map[string]*Node{}
 	for i := range d.Nodes {
 		n := &d.Nodes[i]
+		if n.RetryMax < 0 || n.RetryMax > 5 || n.RetryBackoffMS < 0 || n.RetryBackoffMS > 60000 {
+			return fmt.Errorf("node %s: retry_max must be 0-5 and retry_backoff_ms 0-60000", n.ID)
+		}
+		if n.Kind == "condition" && (n.RetryMax != 0 || n.RetryBackoffMS != 0) {
+			return fmt.Errorf("condition node %s cannot retry", n.ID)
+		}
 		if p := n.Position; p != nil && (math.IsNaN(p.X) || math.IsNaN(p.Y) || math.IsInf(p.X, 0) || math.IsInf(p.Y, 0) || p.X < 0 || p.Y < 0 || p.X > 10000 || p.Y > 10000) {
 			return fmt.Errorf("node %s: canvas position must be within 0-10000", n.ID)
 		}
@@ -174,36 +180,68 @@ func stepRef(key string) (string, bool) {
 	return id, nodeID.MatchString(id)
 }
 func render(text, input string, states map[string]*NodeRun, join string) (string, error) {
-	var renderErr error
-	out := placeholder.ReplaceAllStringFunc(text, func(s string) string {
-		key := strings.TrimSpace(s[2 : len(s)-2])
-		if key == "input" {
-			return input
+	// Enforce the budget before each append. Expanding a small template with
+	// thousands of references must not allocate hundreds of MB before rejection.
+	var chunks []string
+	total := 0
+	appendText := func(s string) error {
+		if len(s) > MaxPromptBytes-total {
+			return fmt.Errorf("rendered prompt exceeds %d KB", MaxPromptBytes>>10)
 		}
-		id, ok := stepRef(key)
-		if !ok {
-			renderErr = fmt.Errorf("unknown template %s", key)
-			return ""
+		if s != "" {
+			chunks = append(chunks, s)
+			total += len(s)
 		}
-		n := states[id]
-		if n == nil {
-			renderErr = fmt.Errorf("missing output %s", id)
-			return ""
-		}
-		if n.Status == "skipped" && join == "any" {
-			return ""
-		}
-		if n.Status != "succeeded" {
-			renderErr = fmt.Errorf("output %s is unavailable (%s)", id, n.Status)
-			return ""
-		}
-		return n.Output
-	})
-	if len(out) > MaxPromptBytes {
-		return "", fmt.Errorf("rendered prompt exceeds %d KB", MaxPromptBytes>>10)
+		return nil
 	}
-	return out, renderErr
+	for {
+		match := placeholder.FindStringIndex(text)
+		if match == nil {
+			if err := appendText(text); err != nil {
+				return "", err
+			}
+			if len(chunks) == 0 {
+				return "", nil
+			}
+			if len(chunks) == 1 {
+				return chunks[0], nil
+			}
+			var out strings.Builder
+			out.Grow(total)
+			for _, chunk := range chunks {
+				out.WriteString(chunk)
+			}
+			return out.String(), nil
+		}
+		if err := appendText(text[:match[0]]); err != nil {
+			return "", err
+		}
+		key := strings.TrimSpace(text[match[0]+2 : match[1]-2])
+		value := input
+		if key != "input" {
+			id, ok := stepRef(key)
+			if !ok {
+				return "", fmt.Errorf("unknown template %s", key)
+			}
+			n := states[id]
+			if n == nil {
+				return "", fmt.Errorf("missing output %s", id)
+			}
+			if n.Status == "skipped" && join == "any" {
+				value = ""
+			} else if n.Status != "succeeded" {
+				return "", fmt.Errorf("output %s is unavailable (%s)", id, n.Status)
+			} else {
+				value = n.Output
+			}
+		}
+		if err := appendText(value); err != nil {
+			return "", err
+		}
+		text = text[match[1]:]
+	}
 }
+
 func testCondition(c Condition, value string) bool {
 	switch c.Operator {
 	case "equals":

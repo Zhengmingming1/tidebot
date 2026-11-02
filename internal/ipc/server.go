@@ -38,11 +38,13 @@ func (s *Server) Register(method string, h HandlerFunc) {
 
 // Serve starts accepting connections until ctx cancelled or listener closed.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.mu.Lock()
 	s.ln = ln
-	go func() {
-		<-ctx.Done()
-		_ = ln.Close()
-	}()
+	s.mu.Unlock()
+	stopClose := context.AfterFunc(ctx, func() { _ = ln.Close() })
+	defer stopClose()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -59,6 +61,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	// Idle clients must not keep a reader goroutine alive after daemon shutdown.
+	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopClose()
 	dec := json.NewDecoder(conn)
 	enc := json.NewEncoder(conn)
 	for {
@@ -76,8 +81,15 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	}
 }
 
-func (s *Server) dispatch(ctx context.Context, req Request) Response {
-	resp := Response{JSONRPC: JSONRPCVersion, ID: req.ID}
+func (s *Server) dispatch(ctx context.Context, req Request) (resp Response) {
+	resp = Response{JSONRPC: JSONRPCVersion, ID: req.ID}
+	defer func() {
+		if recover() != nil {
+			// A handler panic must neither kill the daemon nor expose its payload.
+			resp.Result = nil
+			resp.Error = &ErrorObj{Code: ErrInternal, Message: "internal handler failure"}
+		}
+	}()
 	if req.JSONRPC != "" && req.JSONRPC != JSONRPCVersion {
 		resp.Error = &ErrorObj{Code: ErrInvalidRequest, Message: "jsonrpc must be 2.0"}
 		return resp
@@ -105,8 +117,11 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 
 // Close closes the listener if set.
 func (s *Server) Close() error {
-	if s.ln != nil {
-		return s.ln.Close()
+	s.mu.RLock()
+	ln := s.ln
+	s.mu.RUnlock()
+	if ln != nil {
+		return ln.Close()
 	}
 	return nil
 }

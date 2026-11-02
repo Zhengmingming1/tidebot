@@ -99,17 +99,16 @@ ON CONFLICT(task_id) DO UPDATE SET catchup=excluded.catchup, catchup_grace_minut
 
 // RecordOutcome updates the consecutive-failure counter and reports whether the breaker tripped.
 func (s *Store) RecordOutcome(ctx context.Context, taskID string, ok bool) (failures int, tripped bool, err error) {
-	p := s.Get(ctx, taskID)
-	if ok {
-		p.ConsecutiveFailures = 0
-	} else {
-		p.ConsecutiveFailures++
+	// Update the counter in one SQLite statement: parallel completions cannot
+	// lose increments or overwrite an owner's concurrent policy edit.
+	initial := 0
+	if !ok {
+		initial = 1
 	}
-	if err := s.Put(ctx, p); err != nil {
-		return 0, false, err
-	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE task_policies SET consecutive_failures=? WHERE task_id=?`, p.ConsecutiveFailures, taskID)
-	return p.ConsecutiveFailures, !ok && p.ConsecutiveFailures >= BreakerThreshold, err
+	err = s.DB.QueryRowContext(ctx, `INSERT INTO task_policies(task_id,consecutive_failures,updated_at) VALUES(?,?,?)
+ON CONFLICT(task_id) DO UPDATE SET consecutive_failures=CASE WHEN ? THEN 0 ELSE task_policies.consecutive_failures+1 END,updated_at=excluded.updated_at
+RETURNING consecutive_failures`, taskID, initial, now(), ok).Scan(&failures)
+	return failures, !ok && failures >= BreakerThreshold, err
 }
 
 // Classify maps a run error to a class and whether a run-level retry makes sense.

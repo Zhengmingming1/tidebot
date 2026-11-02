@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/policy"
 )
 
 // readiness waits for every predecessor even for any-joins. This makes a merge
@@ -190,23 +192,32 @@ func (s *Service) run(parent context.Context, rid string, d Definition, input, p
 	s.report(s.putRun(rid, status, message, false))
 }
 func (s *Service) executeNode(ctx context.Context, rid string, n Node, state NodeRun, prompt, provider string, out chan<- NodeRun) {
-	nodeCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var mu sync.Mutex
-	var linkErr error
-	output, err := s.Execute(nodeCtx, n, prompt, provider, func(child string) {
-		mu.Lock()
-		defer mu.Unlock()
-		state.ChildRunID = child
-		if e := s.putNode(rid, state); e != nil {
-			linkErr = e
-			cancel()
+	var output string
+	var err error
+	for attempt := 0; ; attempt++ {
+		if err = ctx.Err(); err != nil {
+			break
 		}
-	})
-	mu.Lock()
-	defer mu.Unlock()
-	if linkErr != nil {
-		err = fmt.Errorf("cannot persist child run: %w", linkErr)
+		var persistentFailure bool
+		output, err, persistentFailure = s.nodeAttempt(ctx, rid, n, &state, prompt, provider)
+		if err == nil || persistentFailure || ctx.Err() != nil || attempt >= n.RetryMax {
+			break
+		}
+		if _, retryable := policy.Classify(err.Error()); !retryable || errors.Is(err, context.Canceled) || errors.Is(err, errExecutorPanic) {
+			break
+		}
+		s.retries.Add(1)
+		base := n.RetryBackoffMS
+		if base == 0 {
+			base = 1000
+		}
+		delay := min(time.Duration(base)*time.Millisecond<<attempt, time.Minute)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
 	state.FinishedAt = now()
 	if err == nil && len(output) > MaxOutputBytes {
@@ -226,4 +237,44 @@ func (s *Service) executeNode(ctx context.Context, rid string, n Node, state Nod
 		state.Output = output
 	}
 	out <- state
+}
+
+// nodeAttempt scopes child callbacks to one attempt. Late callbacks cannot
+// overwrite another attempt's link or race the final result.
+func (s *Service) nodeAttempt(ctx context.Context, rid string, n Node, state *NodeRun, prompt, provider string) (string, error, bool) {
+	nodeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var mu sync.Mutex
+	var linkErr error
+	closed := false
+	output, err := invokeExecutor(s.Execute, nodeCtx, n, prompt, provider, func(child string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if closed {
+			return
+		}
+		state.ChildRunID = child
+		if e := s.putNode(rid, *state); e != nil {
+			linkErr = e
+			cancel()
+		}
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	closed = true
+	if linkErr != nil {
+		return "", fmt.Errorf("cannot persist child run: %w", linkErr), true
+	}
+	return output, err, false
+}
+
+var errExecutorPanic = errors.New("workflow executor panicked")
+
+func invokeExecutor(exec Executor, ctx context.Context, n Node, prompt, provider string, child func(string)) (output string, err error) {
+	defer func() {
+		if recover() != nil {
+			output, err = "", errExecutorPanic
+		}
+	}()
+	return exec(ctx, n, prompt, provider, child)
 }

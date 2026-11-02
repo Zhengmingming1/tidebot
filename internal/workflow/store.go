@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,6 +22,7 @@ type Service struct {
 	active  map[string]context.CancelCauseFunc
 	closing bool
 	wg      sync.WaitGroup
+	retries atomic.Uint64
 }
 
 func New(db *sql.DB, execute Executor) *Service {
@@ -296,6 +298,12 @@ func (s *Service) Wait(ctx context.Context) error {
 	}
 }
 func (s *Service) Recover(ctx context.Context) error {
+	// Never interrupt executions owned by this live service.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.active) != 0 {
+		return errors.New("cannot recover workflows while executions are active")
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err

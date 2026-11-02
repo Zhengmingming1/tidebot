@@ -15,20 +15,21 @@ const maxInterruptedNotices = 5
 // left queued/running and tells the user which ones did not finish. The idea
 // follows n8n's startup recovery (unfinished executions marked "crashed" and
 // announced per execution); tidebot reuses its "canceled" status.
-func (a *App) recoverInterruptedRuns(ctx context.Context) {
+func (a *App) recoverInterruptedRuns(ctx context.Context) error {
 	if a.Store == nil {
-		return
+		return nil
 	}
 	runs, err := a.Store.RecoverInterruptedRuns(ctx, time.Now())
 	if err != nil {
 		a.Log.Error("recover interrupted runs", "error", err)
+		return err
 	}
 	if len(runs) == 0 {
-		return
+		return nil
 	}
 	a.Log.Warn("closed runs left over by the previous core", "count", len(runs))
 	if a.Notify == nil {
-		return
+		return nil
 	}
 	go func() {
 		quiet, _ := a.settingString(ctx, "notify.quiet")
@@ -44,4 +45,5 @@ func (a *App) recoverInterruptedRuns(ctx context.Context) {
 			}
 		}
 	}()
+	return nil
 }
