@@ -82,9 +82,9 @@ func withAppearance(index []byte, a Appearance) []byte {
 // windowBG is each theme's page background (--bg in styles.css), light and dark, for the
 // desktop window behind the webview, so it never flashes white before the page paints.
 var windowBG = map[string][2][3]uint8{
-	"graphite": {{0xff, 0xff, 0xff}, {0x11, 0x11, 0x13}},
-	"tide":     {{0xf4, 0xf7, 0xf8}, {0x0b, 0x17, 0x1e}},
-	"midnight": {{0xf7, 0xf7, 0xf8}, {0x0d, 0x0d, 0x10}},
+	"graphite": {{0xf9, 0xfa, 0xfb}, {0x17, 0x19, 0x1e}},
+	"tide":     {{0xf2, 0xf8, 0xfc}, {0x14, 0x21, 0x2b}},
+	"midnight": {{0xf5, 0xf6, 0xf8}, {0x18, 0x1b, 0x20}},
 }
 
 // WindowBackground is the colour the desktop app paints its window with before the page

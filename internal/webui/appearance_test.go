@@ -67,7 +67,7 @@ func TestAppearanceSavedAndInPage(t *testing.T) {
 	if !strings.Contains(index(), `<html lang="en" data-theme="midnight" data-mode="dark">`) {
 		t.Fatal("saved look not on <html>")
 	}
-	if r, g, b := s.WindowBackground(context.Background(), false); fmt.Sprintf("#%02x%02x%02x", r, g, b) != "#0d0d10" {
+	if r, g, b := s.WindowBackground(context.Background(), false); fmt.Sprintf("#%02x%02x%02x", r, g, b) != "#181b20" {
 		t.Fatalf("window bg %02x%02x%02x", r, g, b)
 	}
 }

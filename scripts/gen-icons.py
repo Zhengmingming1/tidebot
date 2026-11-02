@@ -3,6 +3,7 @@
 
 Needs Playwright (Chromium renders the SVG) and Pillow.
   python3 scripts/gen-icons.py
+Set ICON_CHROMIUM_PATH to reuse an already installed Chromium executable.
 Outputs:
   cmd/tidebot-desktop/assets/{icon.png, tray-*.png, tray-*-template.png}
   packaging/macos/tidebot.icns, packaging/windows/tidebot.ico, packaging/linux/icons/<n>x<n>/tidebot.png
@@ -34,7 +35,7 @@ def main():
     icon, mark = (B / "icon.svg").read_text(), (B / "mark.svg").read_text()
     tray = {s: (B / f"tray-{s}.svg").read_text() for s in ("normal", "running", "error")}
     with sync_playwright() as p:
-        br = p.chromium.launch(); pg = br.new_page(device_scale_factor=1)
+        br = p.chromium.launch(executable_path=os.environ.get("ICON_CHROMIUM_PATH") or None); pg = br.new_page(device_scale_factor=1)
         big = {n: render(pg, icon, n) for n in (16, 32, 48, 64, 128, 256, 512, 1024)}
         small = {n: render(pg, mark, n) for n in (16, 32, 48, 64, 180, 256)}
         trayt = {s: render(pg, svg, 44) for s, svg in tray.items()}  # 22pt @2x

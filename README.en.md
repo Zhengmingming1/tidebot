@@ -62,7 +62,7 @@ Ctrl+K (⌘K on a Mac) opens a command palette. It searches tasks, skills and ru
 
 ![Command palette](docs/images/palette.png)
 
-Appearance. 0.1.9 redid the UI. The default is Graphite: white surfaces, near-black primary buttons, an indigo accent, and cards split by hairlines instead of boxes inside boxes. The icons keep their colours, so you can still find things at a glance. There are two more themes: Tide (the old blue-green, toned down) and Midnight (amber accent, dark first). Each comes in light and dark, or follows your system. Pick one in Settings → General → Appearance. The choice is saved in tidebot, so another browser or the desktop app gets the same look, and the page opens in your colours without a white flash first.
+Appearance. The three themes share the redesigned workspaces: Graphite uses native silver surfaces and blue accents, Tide adds an ice-blue background and lightly frosted navigation, and Midnight uses layered graphite surfaces with restrained blue accents. Each supports light, dark, and system modes, with existing preferences preserved. The logo now uses a blue rounded tile and a simple curled wave; run-aware acceleration, hidden-window pause, and reduced-motion support remain. Navigation and auxiliary panes adapt as the window resizes, with wide tables scrolling inside their own regions. Change the look in Settings → General → Appearance; it is shared by the browser and desktop app. See [Three-theme workspaces](docs/ui-apple.md) for the new home composer, task split view, run inspector, and screenshots.
 
 ![Appearance settings](docs/images/appearance.png)
 

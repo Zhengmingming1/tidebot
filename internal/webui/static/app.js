@@ -146,6 +146,7 @@
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
     redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
     chev: '<path d="m9 18 6-6-6-6"/>',
+    sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
     info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
     folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
     doc: '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
@@ -218,19 +219,21 @@
   function btnIcon(b) { return P[b.icon] ? b.icon : "bolt"; }
 
   var markN = 0;
-  // Animated "flowing tide" brand mark (sidebar, login, boot splash). Pure SVG + CSS:
-  // the two wave strokes are drawn wider than the tile with a 24-unit period and slide
-  // left by exactly one period, so the loop is seamless. No JS timers; styles.css pauses
-  // it when the window is hidden (html.tb-hidden) and drops it for prefers-reduced-motion.
+  // The curled-wave brand mark shares its geometry with branding/mark.svg. CSS gives
+  // the crest and foreground a gentle swell, faster while tasks run, paused when hidden
+  // and disabled for prefers-reduced-motion. No animation timers are needed.
   // The favicon / app icon (branding/mark.svg) stays static.
-  function wavePath(y) { var d = "M-24 " + y; for (var i = 0; i < 5; i++) d += (i ? "s" : "c4-3 8-3 12 0s") + "8 3 12 0" + (i < 4 ? " 8-3 12 0" : ""); return d; }
+  function wavePath(layer) {
+    return ["M-4 45C10 33 21 35 31 43S55 49 68 39V68H-4Z", "M4 40C12 38 14 23 25 20C33 18 41 22 43 28C37 24 31 26 31 32C31 40 44 44 59 35C57 46 48 51 37 49C23 47 23 35 13 37C9 38 6 40 4 43Z", "M-3 55C9 45 20 46 31 51S53 58 67 47V68H-3Z"][layer];
+  }
   function waveMark() {
-    var g = "tbg" + (markN++), c = "tbc" + markN;
-    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".35" y2="1"><stop class="mk-a" offset="0"/><stop class="mk-b" offset="1"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
-      '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/><circle class="mk-sun" cx="45" cy="18" r="6"/>' +
-      '<g class="tw-swell s1"><path class="tw tw1" d="' + wavePath(29) + '" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="4" stroke-linecap="round"/></g>' +
-      '<g class="tw-swell s2"><path class="tw tw2" d="' + wavePath(38) + '" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/></g>' +
-      '<path class="tw-sand" d="M0 48c8-3.6 16-4 24-2 8 2 16 2.4 40-1.6V64H0z"/></g></svg>';
+    var g = "tbg" + (markN++), c = "tbc" + markN, w = "tbw" + markN;
+    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".3" y2="1"><stop class="mk-a" offset="0"/><stop class="mk-b" offset="1"/></linearGradient><linearGradient id="' + w + '" x1="0" y1="0" x2=".8" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#b9efff"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
+      '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/>' +
+      '<path d="' + wavePath(0) + '" fill="#0756bf" opacity=".55"/>' +
+      '<path class="tw tw1" d="' + wavePath(1) + '" fill="url(#' + w + ')"/>' +
+      '<path class="tw tw2" d="' + wavePath(2) + '" fill="#169aee" opacity=".85"/>' +
+      '<rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="#fff" stroke-opacity=".2"/></g></svg>';
   }
   document.addEventListener("visibilitychange", function () { document.documentElement.classList.toggle("tb-hidden", document.hidden); });
   function waveArt() {
@@ -607,6 +610,17 @@
   function applySizes(root) {
     $$("[data-w]", root).forEach(function (el) { el.style.width = Math.max(0, Math.min(100, Number(el.getAttribute("data-w")))) + "%"; });
     $$("[data-h]", root).forEach(function (el) { el.style.height = Math.max(1, Math.min(100, Number(el.getAttribute("data-h")))) + "%"; });
+    fitTables(root);
+  }
+  // Keep real table semantics and all columns. Only the table region scrolls on narrow windows.
+  function fitTables(root) {
+    $$("table.table", root).forEach(function (table) {
+      if (table.parentElement.classList.contains("table-scroll")) return;
+      var wrap = document.createElement("div");
+      wrap.className = "table-scroll"; wrap.tabIndex = 0;
+      wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", T("layout.table"));
+      table.parentNode.insertBefore(wrap, table); wrap.appendChild(table);
+    });
   }
 
   // ---------- status helpers ----------
@@ -718,10 +732,30 @@
   function emptyState(icon, title, sub) { return '<div class="empty">' + ic(icon) + "<strong>" + esc(title) + "</strong>" + esc(sub || "") + "</div>"; }
   // ---------- shell ----------
   var NAV = [["home", "#/"], ["tasks", "#/tasks"], ["skills", "#/skills"], ["buttons", "#/buttons"], ["plugins", "#/plugins"], ["runs", "#/runs"], ["spend", "#/spend"], ["settings", "#/settings"]];
+  var shellNavChoice = null, shellNavOff = null;
+  function syncShellNav() {
+    var shell = $("#shell"), toggle = $("#nav-toggle");
+    if (!shell) return;
+    var compact = shellNavChoice == null ? window.innerWidth <= 960 : shellNavChoice;
+    shell.setAttribute("data-nav-size", compact ? "compact" : "expanded");
+    if (toggle) { toggle.setAttribute("aria-expanded", String(!compact)); toggle.setAttribute("aria-label", T(compact ? "layout.expand_nav" : "layout.collapse_nav")); }
+  }
+  function wireShellNav() {
+    if (shellNavOff) shellNavOff();
+    var side = $("#shell .sidebar"), media = window.matchMedia("(max-width: 960px)");
+    side.id = "app-sidebar";
+    var resize = function () { shellNavChoice = null; syncShellNav(); };
+    var choose = function (e) { if (window.innerWidth <= 640 && e.target.closest("a")) { shellNavChoice = true; syncShellNav(); } };
+    var key = function (e) { if (e.key === "Escape") { shellNavChoice = true; syncShellNav(); var b = $("#nav-toggle"); if (b) b.focus(); } };
+    media.addEventListener("change", resize); side.addEventListener("click", choose); side.addEventListener("keydown", key);
+    shellNavOff = function () { media.removeEventListener("change", resize); side.removeEventListener("click", choose); side.removeEventListener("keydown", key); };
+    syncShellNav();
+  }
 
   function renderShell() {
     $("#brand-mark").innerHTML = waveMark();
-    $("#nav").innerHTML = NAV.map(function (n) { return '<a href="' + n[1] + '" data-nav="' + n[0] + '">' + ic(n[0]) + "<span>" + esc(T("nav." + n[0])) + "</span></a>"; }).join("");
+    $("#nav").innerHTML = NAV.map(function (n) { return '<a href="' + n[1] + '" data-nav="' + n[0] + '" aria-label="' + esc(T("nav." + n[0])) + '">' + ic(n[0]) + "<span>" + esc(T("nav." + n[0])) + "</span></a>"; }).join("");
+    wireShellNav();
     paintChannelDot();
     var tag = document.querySelector("#shell .brand-text small"); if (tag) tag.textContent = T("brand.tagline");
   }
@@ -734,7 +768,7 @@
     var c = crumbs && crumbs.length ? '<div class="crumbs">' + crumbs.map(function (x, i) {
       return (i ? '<span class="sep">' + ic("chev", "sm") + "</span>" : "") + (x[1] ? '<a href="' + esc(x[1]) + '">' + esc(x[0]) + "</a>" : "<span>" + esc(x[0]) + "</span>");
     }).join("") + "</div>" : "";
-    $("#topbar").innerHTML = c + '<div class="spacer"></div>' +
+    $("#topbar").innerHTML = '<button type="button" class="icon-btn" id="nav-toggle" aria-controls="app-sidebar" aria-expanded="false" aria-label="' + esc(T("layout.expand_nav")) + '">' + ic("sidebar") + '</button>' + c + '<div class="spacer"></div>' +
       '<button class="search pal-open" id="q-open" aria-label="' + esc(T("top.search_label")) + '">' + ic("search") + '<span class="ph">' + esc(T("pal.placeholder")) + "</span>" + kbdHtml("Mod+K") + "</button>" +
       '<button class="lang-btn" id="btn-lang" title="' + esc(T("top.language")) + '" aria-label="' + esc(T("top.language")) + '">' + (state.lang === "zh-CN" ? "中" : "EN") + "</button>" +
       '<button class="icon-btn" id="btn-refresh" title="' + esc(T("top.refresh")) + '" aria-label="' + esc(T("top.refresh")) + '">' + ic("refresh") + "</button>" +
@@ -893,6 +927,8 @@
   }
 
   function wireTopbar() {
+    $("#nav-toggle").addEventListener("click", function () { shellNavChoice = $("#shell").getAttribute("data-nav-size") !== "compact"; syncShellNav(); });
+    syncShellNav();
     $("#q-open").addEventListener("click", function () { openPalette(); });
     $("#btn-refresh").addEventListener("click", function () { refresh(); });
     $("#btn-lang").addEventListener("click", function () {
@@ -1944,7 +1980,7 @@
   // Modal: role=dialog, Esc closes, Tab stays inside, focus returns to the opener.
   // Esc, the backdrop, × / Cancel and the browser Back button ask before dropping edits;
   // the close() handed to onMount (used after a successful save) never asks.
-  function modal(html, onMount) {
+  function modal(html, onMount, onClose) {
     var root = $("#modal-root"), opener = document.activeElement;
     root.innerHTML = '<div class="modal-bg"><div class="card modal" role="dialog" aria-modal="true" tabindex="-1">' + html + "</div></div>";
     var box = $(".modal", root), h = $("h2", box);
@@ -1954,6 +1990,7 @@
       draftFlush();
       root.innerHTML = ""; document.removeEventListener("keydown", onKey, true);
       if (modalGuard && modalGuard.box === box) modalGuard = null;
+      if (onClose) onClose();
       if (opener && opener.focus && document.contains(opener)) opener.focus();
     };
     var bar = null, footer = null, back = null;
@@ -2213,25 +2250,85 @@
     return '<div class="tl-beats" role="group" aria-label="' + esc(T("tl.beats_aria", { n: bs.length, ok: ok, total: done.length, status: T("st." + last.status) })) + '">' + beatsBar(bs, "sm") +
       "<small>" + agoHtml(t.last_run_at || last.at) + (rate ? ' · <a class="' + (ok < done.length ? "tl-rate bad" : "tl-rate") + '" href="#/runs?task=' + enc(t.id) + '" data-tip="' + esc((t.fail_streak ? T("tl.streak_tip", { n: t.fail_streak }) + "\n" : "") + T("tl.ok_tip") + "\n" + T("tl.rate_open")) + '">' + esc(rate) + "</a>" : "") + "</small></div>";
   }
+  function homePendingHtml(data) {
+    if (!data) return '<p class="hc-empty">' + ic("info", "sm") + esc(T("home.pending_unavailable")) + "</p>";
+    return (data.pending || []).slice(0, 4).map(function (p) {
+      return '<a class="home-pending" href="#/tasks/' + enc(p.task_id) + '/thread">' + ic("sparkle", "sm") + '<span>' + esc(T("nc.pending_amend", { name: p.task_name || shortId(p.task_id), n: p.count })) + '</span>' + ic("chev", "sm") + '</a>';
+    }).join("");
+  }
+  function homeQuickHtml() {
+    return '<section class="home-composer"><form id="home-quick"><div class="home-compose-head"><label for="home-prompt">' + esc(T("home.compose_title")) + '</label>' + draftTagHtml() + '</div>' +
+      '<textarea id="home-prompt" name="prompt" rows="2" maxlength="8000" required placeholder="' + esc(T("qr.placeholder")) + '"></textarea>' +
+      '<div class="home-compose-actions"><label class="home-provider"><span class="sr-only">' + esc(T("f.provider")) + '</span><select name="provider" aria-label="' + esc(T("f.provider")) + '" disabled><option>' + esc(T("home.loading_provider")) + '</option></select></label>' +
+      '<button class="btn ghost sm" type="button" id="home-advanced">' + ic("settings", "sm") + esc(T("home.run_options")) + '</button><span class="spacer"></span><button class="btn primary" id="home-submit" type="submit" disabled>' + ic("play", "sm") + esc(T("btn.run")) + '</button></div>' +
+      '<p class="hint home-compose-hint">' + esc(T("qr.hint")) + ' <span>' + esc(T("qr.run_key", { k: keyLabel("Mod+Enter") })) + '</span></p><p class="field-err" id="home-run-error" role="alert"></p>' +
+      '<div id="home-recent-prompts" class="home-recent-prompts"></div></form></section>';
+  }
+  function syncHomeQuickDraft() {
+    var form = $("#home-quick");
+    if (!form) return;
+    draftFlush();
+    var ta = $("#home-prompt", form), d = draftLoad("qr");
+    ta.value = d ? d.text : "";
+    try { var p = localStorage.getItem("tb_qr_provider"); if (p && Array.from(form.provider.options).some(function (o) { return o.value === p; })) form.provider.value = p; } catch (e) {}
+  }
+  function bindHomeQuick() {
+    var form = $("#home-quick"), ta = $("#home-prompt"), submit = $("#home-submit"), advanced = $("#home-advanced"), err = $("#home-run-error");
+    if (!form) return;
+    wireDraft(form, ta, "qr");
+    api("/api/settings").then(function (st) {
+      if (!document.contains(form)) return;
+      var last = "";
+      try { last = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
+      var chosen = st.providers.some(function (p) { return p.name === last; }) ? last : st.default_provider;
+      form.provider.innerHTML = st.providers.map(function (p) {
+        return '<option value="' + esc(p.name) + '"' + (p.name === chosen ? " selected" : "") + '>' + esc(p.name) + (p.key_set ? "" : ' ' + esc(T("qr.no_key"))) + '</option>';
+      }).join("");
+      form.provider.disabled = !st.providers.length; submit.disabled = !st.providers.length;
+      if (!st.providers.length) err.textContent = T("cc.no_provider");
+    }).catch(function () { if (document.contains(form)) err.textContent = T("home.provider_unavailable"); });
+    api("/api/runs/recent-prompts").then(function (d) {
+      if (!document.contains(form)) return;
+      var prompts = (d && d.prompts || []).slice(0, 3), box = $("#home-recent-prompts", form);
+      box.innerHTML = prompts.length ? '<span class="muted">' + esc(T("qr.recent")) + '</span>' + prompts.map(function (p, i) { return '<button type="button" class="chip" data-home-prompt="' + i + '" title="' + esc(p) + '">' + esc(p.length > 30 ? p.slice(0, 30) + "…" : p) + '</button>'; }).join("") : "";
+      box.addEventListener("click", function (e) { var b = e.target.closest("[data-home-prompt]"); if (!b) return; ta.value = prompts[+b.dataset.homePrompt]; draftFlush(); draftSave("qr", ta.value); ta.dispatchEvent(new Event("input", { bubbles: true })); ta.focus(); });
+    }).catch(function () { /* recent prompts are optional; the form remains usable */ });
+    advanced.addEventListener("click", function () {
+      draftFlush(); draftSave("qr", ta.value);
+      if (!form.provider.disabled) try { localStorage.setItem("tb_qr_provider", form.provider.value); } catch (e) {}
+      quickRunModal();
+    });
+    ta.addEventListener("keydown", function (e) { if (submitKey(e) && !e.repeat) { e.preventDefault(); if (!submit.disabled) form.requestSubmit(); } });
+    form.addEventListener("submit", function (e) {
+      e.preventDefault(); if (submit.disabled || !ta.value.trim()) return;
+      var body = { prompt: ta.value, provider: form.provider.value };
+      submit.disabled = true; advanced.disabled = true; err.textContent = "";
+      draftFlush(); draftSave("qr", ta.value);
+      try { localStorage.setItem("tb_qr_provider", body.provider); } catch (ex) {}
+      api("/api/runs/quick", { method: "POST", body: body }).then(function (r) {
+        draftClear("qr"); openStarted(r, "toast.quick_started");
+      }).catch(function (ex) { submit.disabled = false; advanced.disabled = false; err.textContent = ex.message || String(ex); });
+    });
+  }
   function renderHome() {
+    draftFlush();
     var askedH = Date.now();
     return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r) {
       var o = r[0], d = r[1];
       renderStatus(o);
-      // Quick actions: one compact row of buttons, each with its colour tile (the button's own
-      // colour, else a hue picked from its icon), "new quick run" as the primary on the right.
+      // Presets retain their own colours and actions; the separate composer owns quick runs.
       var qa = (o.buttons || []).slice(0, 5).map(function (b) {
-        return '<button class="qb" data-color="' + esc(b.color || "") + '" data-hue="' + esc(iconHue(btnIcon(b))) + '" data-btn="' + esc(b.id) + '" data-tip="' + esc(b.description || b.label) + '"><span class="qb-ico">' + ic(btnIcon(b), "sm") + '</span><span class="qb-txt">' + esc(b.label) + "</span></button>";
+        return '<button class="qb" data-color="' + esc(b.color || "") + '" data-hue="' + esc(iconHue(btnIcon(b))) + '" data-btn="' + esc(b.id) + '" data-tip="' + esc(b.description || b.label) + '"><span class="qb-ico">' + ic(btnIcon(b), "sm") + '</span><span class="qb-copy"><strong class="qb-txt">' + esc(b.label) + '</strong><small>' + esc(b.description || T("home.quick_label")) + '</small></span><span class="qb-play">' + ic("play", "sm") + "</span></button>";
       });
-      qa.push('<a class="qb add" href="#/buttons" data-tip="' + esc(T("home.add_button")) + '" aria-label="' + esc(T("home.add_button")) + '">' + ic("plus", "sm") + "</a>");
       var noTasks = !d.tasks.length;
-      mount('<div class="home"><div class="kstrip" id="kpis"></div>' +
-        '<div class="qbar"><span class="qbar-lab">' + esc(T("home.quick_label")) + "</span>" + qa.join("") + '<span class="spacer"></span><button class="btn primary" id="qa-new" data-tip="' + esc(T("home.quick_sub")) + '">' + ic("sparkle", "sm") + esc(T("home.quick")) + "</button></div>" +
+      mount('<div class="home home-workspace"><header class="home-heading"><div><span class="home-eyebrow">' + esc(fmtTime(new Date().toISOString(), { month: "long", day: "numeric", weekday: "long" })) + '</span><h1>' + esc(T("home.welcome")) + '</h1></div><a class="btn sm" href="#/tasks">' + ic("tasks", "sm") + esc(T("home.view_tasks")) + '</a></header><div class="kstrip" id="kpis"></div>' +
+        homeQuickHtml() + '<section class="home-shortcuts"><div class="card-head"><h2>' + esc(T("home.shortcuts")) + '</h2><a class="link" href="#/buttons">' + ic("plus", "sm") + esc(T("home.add_button")) + '</a></div><div class="qbar">' + (qa.length ? qa.join("") : '<a class="home-shortcut-empty" href="#/buttons">' + esc(T("home.add_button_sub")) + '</a>') + '</div></section>' +
         (noTasks ? '<section class="card">' + '<div class="empty">' + ic("tasks") + "<strong>" + esc(T("home.empty_title")) + "</strong>" + esc(T("home.empty_sub")) + '<div class="mt"><button class="btn primary" id="home-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div></section>" : "") +
         '<div class="home-cols' + (noTasks ? " one" : "") + '">' +
-        (noTasks ? "" : '<section class="card flush hc"><div class="card-head"><h2>' + esc(T("nav.tasks")) + '</h2><span class="muted">' + esc(T("home.health")) + '</span><a class="link" href="#/tasks">' + esc(T("home.view_tasks")) + " " + ic("chev", "sm") + '</a></div><div id="beats"></div></section>') +
-        '<section class="card flush hc"><div class="card-head"><h2>' + esc(T("home.next24")) + '</h2><span class="muted run-n" id="run-n"></span><button type="button" class="icon-btn sm spz-home" id="spz-home" aria-haspopup="menu" aria-expanded="false"></button></div>' +
-        '<div id="running"></div><div id="spz-banner"></div><div id="next24"></div><div class="hc-foot" data-tip="' + esc(T("home.tz_tip")) + '">' + ic("info", "sm") + "<span>" + esc(tzLabel()) + "</span></div></section></div>" +
+        '<section class="card flush hc"><div class="card-head"><h2>' + esc(T("home.activity")) + '</h2><span class="muted run-n" id="run-n"></span><a class="link" href="#/runs">' + esc(T("home.view_runs")) + '</a></div><div id="running"></div><div id="home-pending"></div></section>' +
+        '<section class="card flush hc"><div class="card-head"><h2>' + esc(T("home.next24")) + '</h2><button type="button" class="icon-btn sm spz-home" id="spz-home" aria-haspopup="menu" aria-expanded="false"></button></div>' +
+        '<div id="spz-banner"></div><div id="next24"></div><div class="hc-foot" data-tip="' + esc(T("home.tz_tip")) + '">' + ic("info", "sm") + "<span>" + esc(tzLabel()) + "</span></div></section></div>" +
+        (noTasks ? "" : '<details class="home-health"><summary>' + ic("pulse", "sm") + esc(T("nav.tasks")) + '<span class="muted">' + esc(T("home.health")) + '</span></summary><div id="beats"></div></details>') +
         '<section class="card flush home-recent"><div class="card-head"><h2>' + esc(T("home.recent")) + '</h2><a class="link" href="#/runs">' + esc(T("home.view_runs")) + " " + ic("chev", "sm") + '</a></div><div id="recent"></div></section></div>', "home", []);
       applyColors(page());
       var paint = function (o, d, asked) {
@@ -2263,9 +2360,12 @@
         applySizes(page()); wireRows(page());
       };
       paint(o, d, askedH);
+      bindHomeQuick();
+      var pendingHost = $("#home-pending");
+      var loadPending = function () { return api("/api/notifications/center").then(function (n) { if (document.contains(pendingHost)) pendingHost.innerHTML = homePendingHtml(n); }).catch(function () { if (document.contains(pendingHost)) pendingHost.innerHTML = homePendingHtml(null); }); };
+      loadPending();
       var spb = $("#spz-home"); if (spb) spb.addEventListener("click", function (e) { e.stopPropagation(); spMenu(spb, "down"); });
       $$("[data-btn]").forEach(function (b) { b.addEventListener("click", function () { runButton(b.getAttribute("data-btn"), b); }); });
-      $("#qa-new").addEventListener("click", quickRunModal);
       if ($("#home-new")) $("#home-new").addEventListener("click", function () { taskFormModal(null); });
       var ticks = 0, gate = revGate();
       livePoll(function () {
@@ -2273,7 +2373,7 @@
         // elapsed counters tick locally every second; the data is refetched only when /api/rev moved
         $$("[data-since]").forEach(function (el) { var t = el.getAttribute("data-since"); if (t) el.textContent = dur(Date.now() - new Date(t).getTime()); });
         if (ticks % liveEvery(!!$("#running .spin")) === 0) {
-          return gate(function () { return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r2) { if ((location.hash || "#/") === "#/") paint(r2[0], r2[1]); }); });
+          return gate(function () { return Promise.all([api("/api/overview"), api("/api/dashboard")]).then(function (r2) { if ((location.hash || "#/") === "#/") { paint(r2[0], r2[1]); return loadPending(); } }); });
         }
       }, 1000);
     });
@@ -2430,7 +2530,7 @@
               fail(ex);
             });
           });
-        });
+        }, syncHomeQuickDraft);
     }).catch(fail);
   }
   // rnEdited: has the edit-&-rerun form moved away from the original run? Trailing
@@ -2914,7 +3014,7 @@
     if (tab === "thread") {
       return '<div class="thread scroll" id="thread">' + threadHtml(items, tk) + "</div>" +
         (items.some(function (i) { return i.status === "pending"; }) ? '<div class="req-bar" id="req-bar" role="region" aria-label="' + esc(T("req.bar")) + '"><span id="rb-n"></span><span class="grow"></span><button class="btn sm ghost" id="rb-prev">' + esc(T("req.preview_all")) + '</button><button class="btn sm danger" id="rb-rej">' + esc(T("req.reject_sel")) + '</button><button class="btn sm ok" id="rb-ok"></button></div>' : "") +
-        '<form class="composer" id="composer"><input name="u" placeholder="' + esc(T("thread.composer")) + '" autocomplete="off" maxlength="2000" aria-label="' + esc(T("thread.amendment")) + '"><button class="btn primary sm" type="submit" aria-label="' + esc(T("thread.send")) + '">' + ic("send", "sm") + "</button></form>";
+        '<div class="task-composer-wrap"><div class="task-draft-row">' + draftTagHtml() + '</div><form class="composer" id="composer"><input name="u" placeholder="' + esc(T("thread.composer")) + '" autocomplete="off" maxlength="2000" aria-label="' + esc(T("thread.amendment")) + '"><button class="btn primary sm" type="submit" aria-label="' + esc(T("thread.send")) + '">' + ic("send", "sm") + "</button></form></div>";
     }
     if (tab === "overview") {
       return '<div class="thread"><dl class="kv ov">' +
@@ -2971,7 +3071,79 @@
   // The schedule's "next run" line a live repaint is about to replace: shown again at once (the
   // preview behind it is fetched after the page is drawn), so the line doesn't blink.
   var ovKeep = null;
+  // The task rail changes only its own DOM. Collapsing or filtering it must never remount
+  // a requirement review, clear checked amendments, or interrupt the composer.
+  var taskRailView = { q: "", status: "", open: null, off: null };
+  function taskRailTasks(tasks, q, status) {
+    q = q.trim().toLowerCase();
+    return tasks.filter(function (t) {
+      return t.status !== "archived" && taskMatchesStatus(t, status) && (!q ||
+        [t.name, t.goal, t.prompt, (t.tags || []).join(" ")].join(" ").toLowerCase().indexOf(q) >= 0);
+    });
+  }
+  function taskWorkspaceHtml() {
+    return '<div class="task-workspace-tools"><button type="button" class="btn sm ghost" id="task-rail-toggle" aria-controls="task-rail" aria-expanded="false">' + ic("tasks", "sm") + '<span>' + esc(T("tw.list")) + '</span></button><a class="link" href="#/tasks">' + esc(T("tw.manage")) + " " + ic("chev", "sm") + '</a></div>' +
+      '<aside class="task-rail" id="task-rail" aria-label="' + esc(T("tw.list")) + '" hidden><div class="task-rail-head"><h2>' + esc(T("nav.tasks")) + '</h2><button type="button" class="icon-btn sm" id="task-rail-new" aria-label="' + esc(T("tf.new")) + '" data-tip="' + esc(T("tf.new")) + '">' + ic("plus", "sm") + '</button></div><label class="search-in">' + ic("search", "sm") + '<input type="search" id="task-rail-search" maxlength="100" aria-label="' + esc(T("tl.search")) + '" placeholder="' + esc(T("tl.search")) + '" value="' + esc(taskRailView.q) + '"></label><div class="task-rail-filter"><select id="task-rail-filter" aria-label="' + esc(T("tw.filter")) + '">' + TASK_FILTERS.map(function (f) { return opt(f[0], T(f[1]), f[0] === taskRailView.status); }).join("") + '</select><span class="muted" id="task-rail-count" aria-live="polite"></span></div><nav class="task-rail-list" id="task-rail-list" aria-label="' + esc(T("tw.list")) + '"></nav></aside>';
+  }
+  function wireTaskWorkspace(id, tab) {
+    var box = $(".task-workspace"), rail = $("#task-rail", box), toggle = $("#task-rail-toggle", box), search = $("#task-rail-search", box), list = $("#task-rail-list", box);
+    var media = window.matchMedia("(min-width: 1280px)"), tasks = null, loading = null, stale = false;
+    if (taskRailView.off) taskRailView.off();
+    var paint = function () {
+      if (!tasks || !document.contains(box)) return;
+      var shown = taskRailTasks(tasks, taskRailView.q, taskRailView.status);
+      $("#task-rail-count", box).textContent = shown.length + " / " + tasks.length;
+      keepFocus(list, function () {
+        list.innerHTML = shown.length ? shown.map(function (t) {
+          var href = "#/tasks/" + enc(t.id) + "/" + enc(tab);
+          return '<a class="task-rail-item' + (t.id === id ? " selected" : "") + '" href="' + href + '" data-href="' + href + '"' + (t.id === id ? ' aria-current="page"' : "") + '><span class="task-rail-icon" aria-hidden="true">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><span class="task-rail-copy"><strong>' + esc(t.name) + '</strong><small>' + esc(cronHuman(t.cron)) + '</small><span class="task-rail-status">' + taskPill(t.status, t, true) + '</span></span></a>';
+        }).join("") : '<p class="task-rail-empty">' + esc(T("tl.no_match")) + '</p>';
+      });
+    };
+    var load = function (force) {
+      if (loading) return force ? loading.then(function () { return load(true); }) : loading;
+      if (tasks && !force) return Promise.resolve();
+      if (!tasks) list.innerHTML = skeleton("list");
+      loading = (force ? apiRaw : api)("/api/tasks").then(function (data) {
+        var changed = JSON.stringify(tasks) !== JSON.stringify(data);
+        tasks = data; stale = false; if (changed) paint();
+      }).catch(function (e) {
+        if (!document.contains(box)) return;
+        stale = true;
+        if (!tasks) {
+          list.innerHTML = '<p class="task-rail-empty">' + esc(T("tw.load_error")) + '</p><button type="button" class="btn sm" id="task-rail-retry">' + esc(T("err.retry")) + '</button>';
+          $("#task-rail-retry", box).addEventListener("click", function () { load(false); });
+        }
+        if (force) throw e; // leave the revision gate open so a transient failure is retried
+      }).then(function () { loading = null; }, function (e) { loading = null; throw e; });
+      return loading;
+    };
+    var show = function (focus) {
+      var open = taskRailView.open == null ? media.matches : taskRailView.open;
+      if (!open && rail.contains(document.activeElement)) toggle.focus();
+      box.classList.toggle("rail-open", open); rail.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute("aria-label", T(open ? "tw.hide" : "tw.show"));
+      if (open) { load(stale).catch(function () {}); if (focus) search.focus(); }
+    };
+    toggle.addEventListener("click", function () { taskRailView.open = toggle.getAttribute("aria-expanded") !== "true"; show(true); });
+    imeInput(search, 120, function (q) { taskRailView.q = q; paint(); });
+    $("#task-rail-filter", box).addEventListener("change", function (e) { taskRailView.status = e.target.value; paint(); });
+    $("#task-rail-new", box).addEventListener("click", function () { taskFormModal(null); });
+    list.addEventListener("click", function (e) { if (e.target.closest("a") && !media.matches) { taskRailView.open = false; show(false); } });
+    var resize = function () { if (document.contains(box)) { taskRailView.open = null; show(false); } else taskRailView.off(); };
+    media.addEventListener("change", resize);
+    taskRailView.off = function () { media.removeEventListener("change", resize); taskRailView.off = null; };
+    show(false);
+    // Called by the detail page's existing revision gate, even when only another task changed.
+    return function () {
+      if (!document.contains(box)) return Promise.resolve();
+      if (rail.hidden) { stale = true; return Promise.resolve(); }
+      return load(true);
+    };
+  }
   function renderTaskDetail(id, tab) {
+    draftFlush();
     tab = tab || "overview";
     var base = "/api/tasks/" + enc(id);
     return Promise.all(taskDetailPaths(id, tab).map(function (u) { return api(u); })).then(function (r) {
@@ -2982,17 +3154,18 @@
         return '<li data-href="#/runs/' + enc(x.id) + '"><span class="d ' + d + '"></span><div><strong>' + (x.version_no ? "v" + esc(x.version_no) : "#" + esc(shortId(x.id))) + "</strong><small>" + esc(when(x.created_at)) + '</small></div><span class="muted">' + esc(dur(x.duration_ms)) + "</span><strong>" + esc(usd(x.cost_usd, 3)) + "</strong></li>";
       }).join("") + "</ul>" : emptyState("runs", T("runs.none"), "");
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
-      mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
+      mount('<div class="task-workspace">' + taskWorkspaceHtml() + '<div class="task-workspace-detail"><div class="grid g-detail">' +
+        '<section class="card task-main-card' + (tab === "thread" ? " task-thread-card" : "") + '"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
         '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span>" +
         ((t.tags || []).length ? '<span class="td-tags">' + ic("tag", "sm") + t.tags.map(function (g) { return '<a class="ttag h' + tagHue(g) + '" href="#/tasks?tag=' + enc(g) + '" data-tip="' + esc(T("tg.filter_tip", { t: g })) + '">' + esc(g) + "</a>"; }).join("") + "</span>" : "") + "</div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">' + ic("pause", "sm") + esc(T("td.pause")) + ic("chevDown", "sm") + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" + pauseNotice(t) +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
         taskTab(tab, t, items, vers, runs) + "</section>" +
-        '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("runs") + '</span><h3>' + esc(T("home.recent")) + '</h3><a class="link" href="#/runs?task=' + enc(t.id) + '">' + esc(T("td.view_all")) + "</a></div>" + mini + "</section></div></div>",
+        '<div class="stack task-secondary"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("runs") + '</span><h3>' + esc(T("home.recent")) + '</h3><a class="link" href="#/runs?task=' + enc(t.id) + '">' + esc(T("td.view_all")) + "</a></div>" + mini + "</section></div></div></div></div>",
         "tasks", [[T("nav.tasks"), "#/tasks"], [t.name]]);
+      var refreshTaskRail = wireTaskWorkspace(id, tab);
       var reload = function () { renderTaskDetail(id, tab); };
       var patch = function (field) {
         return function (val) {
@@ -3106,12 +3279,13 @@
       var th = $("#thread");
       if (th) th.scrollTop = th.scrollHeight;
       var comp = $("#composer");
+      if (comp) wireDraft($(".task-composer-wrap"), comp.u, "amendment_" + id);
       if (comp) comp.addEventListener("submit", function (e) {
         e.preventDefault();
         var v = comp.u.value.trim();
         if (!v) return;
         comp.querySelector("button").disabled = true;
-        api(base + "/amendments", { method: "POST", body: { utterance: v } }).then(reload).catch(function (err) { fail(err); comp.querySelector("button").disabled = false; });
+        api(base + "/amendments", { method: "POST", body: { utterance: v } }).then(function () { draftClear("amendment_" + id); reload(); }).catch(function (err) { fail(err); comp.querySelector("button").disabled = false; });
       });
       // Follow changes (see liveFollow): a run that starts or ends, a pause by the failure
       // streak, an edit or new version from another window. The page redraws in place from the
@@ -3120,7 +3294,8 @@
       // or have a dialog or menu open. A task deleted elsewhere turns into the "not found" page.
       var paths = taskDetailPaths(id, tab), going = runs.some(function (x) { return x.status === "running" || x.status === "queued"; });
       var check = liveFollow(function () {
-        return Promise.all(paths.map(function (u) { return apiRaw(u); })).catch(function (e) { if (e && e.status === 404) return { gone: true }; throw e; });
+        var detail = Promise.all(paths.map(function (u) { return apiRaw(u); })).catch(function (e) { if (e && e.status === 404) return { gone: true }; throw e; });
+        return Promise.all([detail, refreshTaskRail()]).then(function (data) { return data[0]; });
       }, shown, function (d) {
         if (deleting) return;
         // Deleted in another window (kept as archived): say so and go to the list, as a delete here does.
@@ -5661,7 +5836,10 @@
     tools.innerHTML = '<span class="lv-sep"></span>' + '<button class="icon-btn sm" id="lv-copy" aria-label="' + esc(T("lv.copy")) + '" data-tip="' + esc(T("lv.copy")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn sm" id="lv-dl" aria-label="' + esc(T("lv.download")) + '" data-tip="' + esc(T("lv.download")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" id="lv-full" aria-label="' + esc(T("lv.full")) + '" data-tip="' + esc(T("lv.full")) + '">' + ic("maximize", "sm") + "</button>";
     if (head) { $$(".lv-tools", head).forEach(function (el) { el.remove(); }); head.appendChild(tools); } else $(".lv-bar", host).appendChild(tools);
     var log = $("#log", host), rows = $("#lv-rows", host), more = $("#lv-more", host), newBtn = $("#lv-new", host);
-    var atBottom = function () { return log.scrollTop + log.clientHeight >= log.scrollHeight - 24; };
+    // Hidden panes have zero layout metrics. Buffer their output without resetting the
+    // reader's scroll position; resume following only if they were already at the end.
+    var followOnShow = true, savedTop = 0;
+    var atBottom = function () { return !host.closest("[hidden]") && log.scrollTop + log.clientHeight >= log.scrollHeight - 24; };
     // Rows read like a transcript: the "assistant:" / "user:" prefixes become the left
     // marker, a timestamp repeated from the line above is dimmed out, and a tool call shows
     // its tool as a chip plus a one-line preview of the input (click for the full input).
@@ -5726,6 +5904,11 @@
     flush.from = 0;
     var push = function (text) { lines.push(classifyLog(text)); if (!pending) { pending = true; requestAnimationFrame(flush); } };
     var toBottom = function () { unseen = 0; newBtn.classList.add("hidden"); start = Math.max(0, view.length - LOG_WINDOW); paint(false); };
+    host._logVisibility = function (visible) {
+      if (!visible) { followOnShow = atBottom(); savedTop = log.scrollTop; }
+      else if (followOnShow) toBottom();
+      else log.scrollTop = savedTop;
+    };
     newBtn.addEventListener("click", toBottom);
     log.addEventListener("scroll", function () { if (atBottom() && unseen) { unseen = 0; newBtn.classList.add("hidden"); if (start + rows.childElementCount < view.length) toBottom(); } });
     more.addEventListener("click", function () { var h = log.scrollHeight; start = Math.max(0, start - LOG_WINDOW); paint(true); log.scrollTop += log.scrollHeight - h; });
@@ -5783,25 +5966,96 @@
       '<span class="tag ' + (r.run_mode === "edit" ? "warn" : "perm") + '" data-tip="' + esc(T(r.run_mode === "edit" ? "rn.edit_tip" : "rn.read_tip")) + '">' + ic(r.run_mode === "edit" ? "edit" : "eye", "sm") + esc(T(r.run_mode === "edit" ? "rn.edit" : "rn.read")) + "</span></dd>";
     return out;
   }
+  // This section is explicitly current task configuration; run metadata above it is a snapshot.
+  function runTaskInspectorHtml(t, items, form) {
+    var pending = items && items.filter(function (i) { return i.status === "pending" || i.status === "needs_decision"; });
+    return '<h3>' + esc(T("rw.current_task")) + '</h3><dl class="kv"><dt>' + esc(T("rw.current_version")) + '</dt><dd><a href="#/tasks/' + enc(t.id) + '/history">v' + esc(t.version_no || "—") + '</a></dd>' +
+      '<dt>' + esc(T("col.schedule")) + '</dt><dd>' + esc(cronHuman(t.cron)) + '<small>' + esc(tzLabel()) + '</small></dd><dt>' + esc(T("rw.task_budget")) + '</dt><dd>' + (form ? esc(form.budget_usd ? usd(form.budget_usd, 2) : T("tf.no_cap")) : "—") + '</dd></dl>' +
+      (pending === null ? '<p class="muted">' + esc(T("rw.pending_unknown")) + '</p>' : pending.length ? '<div class="rw-pending"><strong>' + ic("sparkle", "sm") + esc(T("rw.pending_n", { n: pending.length })) + '</strong><ul>' + pending.slice(0, 3).map(function (i) {
+        var target = (t.constraints || [])[(t.constraint_ids || []).indexOf(i.target_spec_item)] || i.target_spec_item;
+        return '<li>' + esc(i.content || target) + '<small>' + esc(T(i.status === "needs_decision" ? "req.conflict" : i.scope === "next_run" ? "req.next_only" : "req.permanent")) + '</small></li>';
+      }).join("") + '</ul><a class="btn primary sm" href="#/tasks/' + enc(t.id) + '/thread">' + esc(T("rw.review")) + '</a></div>' : '') +
+      '<a class="rw-task-link" href="#/tasks/' + enc(t.id) + '">' + esc(T("rw.open_task")) + ic("chev", "sm") + '</a>';
+  }
+  var runWorkspaceResizeOff = null;
+  function bindRunWorkspace(r, live) {
+    var ws = $("#run-workspace"), layout = $("#rw-layout"), aside = $("#rd-inspector"), toggle = $("#rd-inspect-toggle");
+    var tabs = $$("[data-run-view]", ws), answer = $("#rw-answer"), log = $("#rw-log"), loaded = false;
+    // Keep both panels mounted: changing views must not discard the SSE stream or its scroll state.
+    function paintTabs(view) {
+      var lv = $("#lv", log), wasHidden = log.hidden;
+      if (view !== "log" && !wasHidden && lv && lv._logVisibility) lv._logVisibility(false);
+      answer.hidden = view === "log"; log.hidden = view !== "log";
+      if (view === "log" && wasHidden && lv && lv._logVisibility) lv._logVisibility(true);
+      answer.setAttribute("aria-labelledby", "rw-tab-" + (view === "diff" ? "diff" : "answer"));
+      tabs.forEach(function (b) { var on = b.getAttribute("data-run-view") === view; b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; b.classList.toggle("active", on); });
+    }
+    function select(view, focus) {
+      paintTabs(view);
+      if (view !== "log") {
+        var mode = $('[data-ans-mode="' + (view === "diff" ? "diff" : "preview") + '"]', answer);
+        if (mode && mode.getAttribute("aria-checked") !== "true") mode.click();
+      }
+      if (focus) $("#rw-tab-" + view).focus();
+    }
+    tabs.forEach(function (b) { b.addEventListener("click", function () { select(b.getAttribute("data-run-view"), true); }); });
+    $(".rw-tabs", ws).addEventListener("keydown", function (e) {
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].indexOf(e.key) < 0) return;
+      var enabled = tabs.filter(function (b) { return !b.disabled; }), i = enabled.indexOf(e.target);
+      if (i < 0) return;
+      e.preventDefault();
+      i = e.key === "Home" ? 0 : e.key === "End" ? enabled.length - 1 : (i + (e.key === "ArrowRight" ? 1 : enabled.length - 1)) % enabled.length;
+      select(enabled[i].getAttribute("data-run-view"), true);
+    });
+    // Answer radios redraw and focus the selected control for both mouse and arrow keys.
+    answer.addEventListener("focusin", function (e) { var b = e.target.closest("[data-ans-mode]"); if (b && b.getAttribute("aria-checked") === "true") paintTabs(b.getAttribute("data-ans-mode") === "diff" ? "diff" : "answer"); });
+    paintTabs(state.chgJump === r.id ? "answer" : live || !r.result ? "log" : ansMode(r) === "diff" ? "diff" : "answer");
+    if (!$("#rd-calc")) answer.insertAdjacentHTML("beforeend", '<section id="rd-calc" hidden></section>');
+    function inspect(open) {
+      if (!open && aside.contains(document.activeElement)) toggle.focus();
+      aside.hidden = !open; layout.classList.toggle("inspector-open", open); toggle.setAttribute("aria-expanded", String(open)); toggle.classList.toggle("active", open);
+      if (!open || !r.task_id || loaded) return;
+      loaded = true;
+      var host = $("#rw-current-task"), base = "/api/tasks/" + enc(r.task_id);
+      Promise.all([api(base), api(base + "/amendments").then(function (items) { return items || []; }).catch(function () { return null; }), api(base + "/form").catch(function () { return null; })]).then(function (d) {
+        if (document.contains(host)) host.innerHTML = runTaskInspectorHtml(d[0], d[1], d[2] && d[2].form);
+      }).catch(function (e) { if (document.contains(host)) { host.innerHTML = '<h3>' + esc(T("rw.current_task")) + '</h3>' + errorState(e.message); loaded = false; } });
+    }
+    toggle.addEventListener("click", function () { inspect(aside.hidden); });
+    aside.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); inspect(false); toggle.focus(); } });
+    if (runWorkspaceResizeOff) runWorkspaceResizeOff();
+    var media = window.matchMedia("(min-width: 1101px)");
+    var resize = function () { if (document.contains(ws)) inspect(media.matches); else { runWorkspaceResizeOff(); runWorkspaceResizeOff = null; } };
+    media.addEventListener("change", resize);
+    runWorkspaceResizeOff = function () { media.removeEventListener("change", resize); };
+    inspect(media.matches);
+  }
   function renderRunDetail(id) {
     return api("/api/runs/" + enc(id)).then(function (r) {
       var live = r.status === "running" || r.status === "queued", queued = r.status === "queued";
-      mount('<div class="grid g4">' +
+      mount('<div class="run-workspace" id="run-workspace"><header class="rw-head"><div class="rw-title"><h1>' + esc(runTitle(r)) + '</h1><div>' + statusPill(r.status, r.queue_pos, r.error) + '<span class="muted">' + esc(when(r.started_at || r.created_at)) + '</span></div></div><div class="rw-actions">' +
+        (live ? '<button type="button" class="btn sm danger rd-stop" id="rd-stop" data-tip="' + esc(T(queued ? "run.dequeue_tip" : "run.stop_tip")) + '">' + ic("stop", "sm") + esc(T(queued ? "run.dequeue" : "run.stop")) + "</button>" : "") +
+        (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
+        '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>" +
+        (r.task_id ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") +
+        '<button type="button" class="btn sm" id="rd-inspect-toggle" aria-expanded="false" aria-controls="rd-inspector">' + ic("info", "sm") + esc(T("rw.inspector")) + '</button></div></header><div class="grid g4 rw-stats">' +
         '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status, r.queue_pos, r.error) + "</strong><span class=\"ell\"" + (r.workspace ? ' data-tip="' + esc(r.workspace) + '"' : "") + ">" + esc(runCtxText(r, true)) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(queued ? T("rd.waiting") : live ? T("rd.running") : r.started_at ? dur(r.duration_ms) : "—") + "</strong><span>" + esc(r.started_at || !r.finished_at ? T(queued ? "rd.queued_at" : "rd.started", { t: when(r.started_at || r.created_at) }) : T("rd.never_started")) + "</span></div>" +
         '<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>" +
         '<div class="card stat" id="rd-tok">' + runTokStat(r, live) + "</div></div>" +
+        '<div class="rw-layout" id="rw-layout"><div class="rw-main"><div class="rw-tabs" role="tablist" aria-label="' + esc(T("rw.views")) + '">' +
+        '<button type="button" role="tab" id="rw-tab-answer" data-run-view="answer" aria-controls="rw-answer">' + esc(T("rd.answer")) + '</button>' +
+        '<button type="button" role="tab" id="rw-tab-log" data-run-view="log" aria-controls="rw-log">' + esc(T("rd.log")) + '</button>' +
+        '<button type="button" role="tab" id="rw-tab-diff" data-run-view="diff" aria-controls="rw-answer"' + (!r.result || !r.answer_prev ? ' disabled data-tip="' + esc(T("rw.no_previous")) + '"' : "") + '>' + esc(T("rd.ans_diff")) + '</button></div><div class="rw-panel" id="rw-answer" role="tabpanel" aria-labelledby="rw-tab-answer">' +
         runAnswerHtml(r, ansMode(r)) +
         runChangesHtml(r) +
         costCalcHtml(r) +
-        '<div class="grid g-side"><section class="card"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + "</span>" +
-        // Stop sits next to the live state, above the fold at 1024×655 (the details card is below the log there).
-        (live ? '<button type="button" class="btn sm danger rd-stop" id="rd-stop" data-tip="' + esc(T(queued ? "run.dequeue_tip" : "run.stop_tip")) + '">' + ic("stop", "sm") + esc(T(queued ? "run.dequeue" : "run.stop")) + "</button>" : "") + '</div><div id="lv"></div></section>' +
-        '<section class="card"><div class="card-head rd-head"><span class="ico">' + ic("info") + '</span><h3>' + esc(T("rd.details")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '<span class="rd-acts">' +
-          (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
-          '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>" +
-          (r.task_id ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") + '</span></div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" + (r.version_no ? " · v" + esc(r.version_no) : "") : esc(T("run.adhoc"))) +
-        "</dd>" + runSkillKv(r) + "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd>" + runPromptHtml(r) + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section></div>",
+        (!r.result ? '<div class="rw-no-answer">' + emptyState("chat", T("rw.no_answer"), T(live ? "rw.answer_running" : "rw.answer_missing")) + "</div>" : "") + '</div>' +
+        '<section class="rw-panel card" id="rw-log" role="tabpanel" aria-labelledby="rw-tab-log"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section></div>' +
+        '<aside class="rw-inspector" id="rd-inspector" aria-label="' + esc(T("rw.inspector")) + '" hidden><section><div class="card-head rd-head"><h3>' + esc(T("rw.run_snapshot")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '</div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" : esc(T("run.adhoc"))) + "</dd>" +
+        (r.version_no ? '<dt>' + esc(T("rw.run_version")) + '</dt><dd>v' + esc(r.version_no) + '</dd>' : '') +
+        runSkillKv(r) + "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd>" + runPromptHtml(r) + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section>" +
+        (r.task_id ? '<section id="rw-current-task"><h3>' + esc(T("rw.current_task")) + '</h3>' + skeleton("list") + '</section>' : '') + '</aside></div></div>',
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();
       $("#rd-rerun").addEventListener("click", function (e) {
@@ -5816,6 +6070,7 @@
       });
       if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
       if ($("#rd-chg")) bindRunChanges($("#rd-chg"), r);
+      bindRunWorkspace(r, live);
       // opened from a list row's change badge: bring the card into view
       if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });
       state.chgJump = null;

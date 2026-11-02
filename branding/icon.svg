@@ -1,38 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- tidebot app icon master. Apple grid: 824x824 body at (100,100), corner radius 185. -->
+  <!-- App tile uses the same scalable wave geometry as branding/mark.svg. -->
+  <defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#073376" flood-opacity=".22"/></filter></defs>
+  <rect x="100" y="100" width="824" height="824" rx="193" fill="#0865d6" filter="url(#shadow)"/>
+<svg x="100" y="100" width="824" height="824" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
-      <stop offset="0" stop-color="#4c8df2"/>
-      <stop offset="0.55" stop-color="#2563d9"/>
-      <stop offset="1" stop-color="#1640a3"/>
-    </linearGradient>
-    <linearGradient id="sand" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f6efe2"/>
-      <stop offset="1" stop-color="#e7d9bf"/>
-    </linearGradient>
-    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity=".22"/>
-      <stop offset=".5" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-    <clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
-    <filter id="sh" x="-10%" y="-10%" width="120%" height="125%">
-      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#0b1f4d" flood-opacity=".28"/>
-    </filter>
+    <linearGradient id="sea" x1="0" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="#8bd3ff"/><stop offset="1" stop-color="#0865d6"/></linearGradient>
+    <linearGradient id="crest" x1="0" y1="0" x2=".8" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#b9efff"/></linearGradient>
+    <clipPath id="tile"><rect width="64" height="64" rx="15"/></clipPath>
   </defs>
-  <g filter="url(#sh)">
-    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="url(#sea)"/>
+    <path d="M-4 45C10 33 21 35 31 43S55 49 68 39V68H-4Z" fill="#0756bf" opacity=".55"/>
+    <path d="M4 40C12 38 14 23 25 20C33 18 41 22 43 28C37 24 31 26 31 32C31 40 44 44 59 35C57 46 48 51 37 49C23 47 23 35 13 37C9 38 6 40 4 43Z" fill="url(#crest)"/>
+    <path d="M-3 55C9 45 20 46 31 51S53 58 67 47V68H-3Z" fill="#169aee" opacity=".85"/>
+    <rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="#fff" stroke-opacity=".2"/>
   </g>
-  <g clip-path="url(#body)">
-    <!-- sun / moon that pulls the tide -->
-    <circle cx="672" cy="318" r="74" fill="#ffd98a"/>
-    <circle cx="672" cy="318" r="74" fill="#fff" opacity=".18"/>
-    <!-- waves -->
-    <path d="M168 470c62-46 124-46 186 0s124 46 186 0 124-46 186 0 98 40 150 18" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="44" stroke-linecap="round"/>
-    <path d="M168 586c62-46 124-46 186 0s124 46 186 0 124-46 186 0 98 40 150 18" fill="none" stroke="#ffffff" stroke-width="48" stroke-linecap="round"/>
-    <!-- sand shore -->
-    <path d="M100 734c118-52 236-60 354-30 120 30 238 36 470-24v300H100z" fill="url(#sand)"/>
-    <path d="M100 734c118-52 236-60 354-30 120 30 238 36 470-24" fill="none" stroke="#ffffff" stroke-opacity=".7" stroke-width="10"/>
-    <rect x="100" y="100" width="824" height="420" fill="url(#gloss)"/>
-  </g>
-  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#0b1f4d" stroke-opacity=".12"/>
+</svg>
 </svg>

@@ -20,7 +20,33 @@ func fakeBin(t *testing.T, p string) {
 
 func opts(home string, env map[string]string) Options {
 	return Options{Home: home, GOOS: "darwin", Shell: "/nonexistent-shell",
-		Env: func(k string) string { return env[k] }}
+		Env: func(k string) string { return env[k] },
+		Version: func(ctx context.Context, bin, path string) (string, error) {
+			// KnownDirs also probes system-wide installs; tests must only execute their fixtures.
+			rel, err := filepath.Rel(home, bin)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return "", os.ErrNotExist
+			}
+			return runVersion(ctx, bin, path)
+		}}
+}
+
+func TestResolveFixtureIsolation(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	external := filepath.Join(root, "home-other", "claude")
+	fakeBin(t, external)
+	// A real executable outside the fixture home must not make a not-found test pass.
+	env := map[string]string{"PATH": filepath.Dir(external)}
+	if r := Resolve(context.Background(), opts(home, env)); r.Path != "" || r.Method != "not_found" {
+		t.Fatalf("external candidate leaked into fixture: %+v", r)
+	}
+	local := filepath.Join(home, "tools", "claude")
+	fakeBin(t, local)
+	env["PATH"] += ":" + filepath.Dir(local)
+	if r := Resolve(context.Background(), opts(home, env)); r.Path != local || r.Method != "path" || r.Version != "2.1.3" {
+		t.Fatalf("fixture must win over an external PATH candidate: %+v", r)
+	}
 }
 
 func TestResolveNVMNewestFirst(t *testing.T) {

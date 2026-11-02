@@ -96,7 +96,7 @@ func themeBlocks(t *testing.T) map[string]palette {
 			if i < 0 {
 				t.Fatalf("%s %s: block not found", th, mode)
 			}
-			body := css[i+len(sel):]
+			body := css[i:]
 			body = body[strings.Index(body, "{")+1:]
 			body = body[:strings.Index(body, "\n}")]
 			p := palette{col: map[string]rgb{}, alpha: map[string]float64{}}
@@ -207,6 +207,36 @@ func TestThemeContrast(t *testing.T) {
 		}
 		if fails == 0 {
 			t.Logf("%s: %d pairs pass", where, len(rules))
+		}
+	}
+}
+
+// Navigation can scroll over any content. Check the darkest and lightest possible
+// backdrop instead of treating its translucent material as an opaque colour.
+func TestNavigationMaterialContrast(t *testing.T) {
+	blocks := themeBlocks(t)
+	for _, name := range []string{"tide light", "tide dark"} {
+		p := blocks[name]
+		for _, under := range []rgb{{0, 0, 0}, {255, 255, 255}} {
+			check := func(material, fg string, minimum float64) {
+				t.Helper()
+				a, ok := p.alpha[material]
+				if !ok {
+					t.Fatalf("%s: no translucent --%s", name, material)
+				}
+				bg := over(p.col[material], a, under)
+				ink := p.resolve(t, name, fg)
+				if got := contrastRatio(ink, bg); got < minimum {
+					t.Errorf("%s: --%s over --%s on %s is %.2f:1, needs %.1f:1", name, fg, material, under.hex(), got, minimum)
+				}
+			}
+			check("nav-glass", "side-fg", 4.5)
+			for _, hue := range hueNames {
+				check("nav-glass", "hue-"+hue, 3)
+			}
+			for _, fg := range []string{"text", "text-2", "text-3", "accent"} {
+				check("bar-glass", fg, 4.5)
+			}
 		}
 	}
 }
