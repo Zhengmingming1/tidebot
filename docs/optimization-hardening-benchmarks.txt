@@ -1,0 +1,47 @@
+Baseline: b0b2dc7; Go 1.26.10; GOMAXPROCS=2; three sequential repetitions
+
+goos: linux
+goarch: amd64
+pkg: github.com/Zhengmingming1/tidebot/internal/skillstore
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkResolveBindings16-2   	     876	   1527235 ns/op	   92529 B/op	    2534 allocs/op
+BenchmarkResolveBindings16-2   	     984	   1493147 ns/op	   92528 B/op	    2534 allocs/op
+BenchmarkResolveBindings16-2   	     957	   1395207 ns/op	   92528 B/op	    2534 allocs/op
+PASS
+ok  	github.com/Zhengmingming1/tidebot/internal/skillstore	6.444s
+goos: linux
+goarch: amd64
+pkg: github.com/Zhengmingming1/tidebot/internal/workflow
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkRenderFanIn-2            	    3975	    714308 ns/op	  747865 B/op	       6 allocs/op
+BenchmarkRenderFanIn-2            	    2628	    443655 ns/op	  748057 B/op	       6 allocs/op
+BenchmarkRenderFanIn-2            	    4796	    211235 ns/op	  748171 B/op	       6 allocs/op
+BenchmarkRenderRejectOversize-2   	       1	2147356999 ns/op	847834784 B/op	     108 allocs/op
+BenchmarkRenderRejectOversize-2   	       2	 703170674 ns/op	847765304 B/op	     113 allocs/op
+BenchmarkRenderRejectOversize-2   	       2	 546862094 ns/op	847857324 B/op	     120 allocs/op
+PASS
+ok  	github.com/Zhengmingming1/tidebot/internal/workflow	11.507s
+
+Optimized: source tree 21c9105fbd61f8802fa724282d9efcececedfb97 (runner cancellation fix does not affect benchmarks)
+
+goos: linux
+goarch: amd64
+pkg: github.com/Zhengmingming1/tidebot/internal/skillstore
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkResolveBindings16-2   	    1414	    880563 ns/op	   14953 B/op	     406 allocs/op
+BenchmarkResolveBindings16-2   	    1888	    998054 ns/op	   14953 B/op	     406 allocs/op
+BenchmarkResolveBindings16-2   	    1874	    580014 ns/op	   14953 B/op	     406 allocs/op
+PASS
+ok  	github.com/Zhengmingming1/tidebot/internal/skillstore	6.561s
+goos: linux
+goarch: amd64
+pkg: github.com/Zhengmingming1/tidebot/internal/workflow
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkRenderFanIn-2            	   16604	     84563 ns/op	  205753 B/op	       8 allocs/op
+BenchmarkRenderFanIn-2            	    8644	    177608 ns/op	  205829 B/op	       8 allocs/op
+BenchmarkRenderFanIn-2            	    5902	    193700 ns/op	  205777 B/op	       8 allocs/op
+BenchmarkRenderRejectOversize-2   	  564297	      2445 ns/op	     144 B/op	       7 allocs/op
+BenchmarkRenderRejectOversize-2   	  969306	      3237 ns/op	     144 B/op	       7 allocs/op
+BenchmarkRenderRejectOversize-2   	  381447	      3025 ns/op	     144 B/op	       7 allocs/op
+PASS
+ok  	github.com/Zhengmingming1/tidebot/internal/workflow	13.280s

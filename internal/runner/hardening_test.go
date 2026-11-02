@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -100,6 +101,27 @@ func TestMetricsConcurrentSnapshots(t *testing.T) {
 	}
 	wg.Wait()
 	if m := r.Metrics(); m.Failed != 1600 || m.Finished != 1600 {
+		t.Fatal(m)
+	}
+}
+
+func TestCancelBetweenInsertAndStartKeepsUserReason(t *testing.T) {
+	r, d, _ := drainRunner(t, 1)
+	opts := helperOptions(t, "good")
+	opts.OnStart = func(id string) {
+		if !r.Cancel(id) {
+			t.Error("run not registered")
+		}
+	}
+	result, err := r.RunOnce(context.Background(), opts)
+	if result.Status != "canceled" || !errors.Is(err, ErrStoppedByUser) {
+		t.Fatalf("%+v %v", result, err)
+	}
+	var status string
+	if err := d.QueryRow(`SELECT status FROM runs WHERE id=?`, result.RunID).Scan(&status); err != nil || status != "canceled" {
+		t.Fatalf("%s %v", status, err)
+	}
+	if m := r.Metrics(); m.Started != 0 || m.Skipped != 0 || m.Canceled != 1 || m.PersistenceErrors != 0 {
 		t.Fatal(m)
 	}
 }

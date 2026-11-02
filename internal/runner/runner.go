@@ -350,6 +350,9 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 		return r.finishUnstarted(runID, opts, logW, err)
 	}
 	defer r.slots.release()
+	if runCtx.Err() != nil {
+		return r.finishUnstarted(runID, opts, logW, context.Cause(runCtx))
+	}
 
 	if opts.StartCheck != nil {
 		if why := opts.StartCheck(runCtx); why != nil {
@@ -375,6 +378,11 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 
 	started := time.Now().UTC()
 	if err := r.store.MarkRunRunning(runCtx, runID, started); err != nil {
+		// Cancellation can race this write. Preserve the user's stop/quit
+		// reason instead of reporting a database failure or a skipped run.
+		if runCtx.Err() != nil {
+			return r.finishUnstarted(runID, opts, logW, context.Cause(runCtx))
+		}
 		r.metrics.persistenceErrors.Add(1)
 		return r.finishSkipped(runID, opts, logW, fmt.Errorf("cannot persist run start: %w", err))
 	}
