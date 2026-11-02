@@ -5125,7 +5125,8 @@ a bulk edit makes undo exact without a history table.
 4. **P1 · `#/skills/<不存在的 id>` 返回 400 而不是 404**：页面显示的是服务端原文，不是「找不到」。
 5. **P2 · WebUI 是单个 743 KB 的包**：工作流画布、依赖检查这些新代码每个页面都会加载，注释也一起发出去。可以在 `build-webui.py` 里去掉注释、压缩空白，对比 gzip 前后的大小，并确认 CSP 和测试不受影响。
 6. **P2 · `workflow_runs` 和 `workflow_run_nodes` 不会清理**：每个节点的输出最多 128 KB，单次执行最多 32 个节点。工作流删除只是软删除，历史执行一直保留。要评估数据目录增长，看是否纳入「设置 › 数据」的清理统计。
-7. **P2 · Docker 镜像的大头是 node 基础镜像**：agentd 只占 8.9 MB，镜像压缩后 117.6 MB。这是为了跑 claude CLI 的取舍，先记录，不改。
+7. **P1 · Runner 的 `OnStart` 早于入队**：`startQuickRunAsync` 拿到 id 时，运行还没进等待队列，`QueuePos` 会短暂为 0。如果调度慢一拍，正好赶上空出来的槽位，就会跳过「排队后再检查」（`BeforeStart` 只在等过之后才执行）。CI 上 Go 1.27 两次偶发失败（`TestUserStopQueuedAndRunning` 报 queue pos 0，`TestQueuedRunSkippedWhenBudgetRanOut` 超时）都是这个原因。本轮先让两个测试等运行真正入队；产品上可以考虑在入队之后再调用 OnStart。
+8. **P2 · Docker 镜像的大头是 node 基础镜像**：agentd 只占 8.9 MB，镜像压缩后 117.6 MB。这是为了跑 claude CLI 的取舍，先记录，不改。
 
 ### 本轮修复：页面加载失败时显示错误和重试，不再被骨架屏盖住
 
