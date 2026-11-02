@@ -318,3 +318,22 @@ func TestSandboxDryRun(t *testing.T) {
 		t.Fatal("real workspace touched")
 	}
 }
+
+func TestExecutionMetricsIncludeQueueAndPersistenceDiagnostics(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.Secrets.Set("metrics.token", "fixture-metrics-token"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer fixture-metrics-token")
+	rec := httptest.NewRecorder()
+	a.MetricsHandler().ServeHTTP(rec, req)
+	for _, name := range []string{"tidebot_execution_queue_depth", "tidebot_execution_queue_wait_seconds_total", "tidebot_execution_persistence_errors_total", "tidebot_workflow_node_retries_total"} {
+		if !strings.Contains(rec.Body.String(), name+" 0") {
+			t.Fatalf("missing metric %s: %s", name, rec.Body.String())
+		}
+	}
+	if strings.Contains(rec.Body.String(), "fixture-metrics-token") {
+		t.Fatal("token leaked")
+	}
+}

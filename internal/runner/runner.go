@@ -123,6 +123,7 @@ type Runner struct {
 	active   int
 	idle     chan struct{}
 	bells    logBells
+	metrics  executionMetrics
 	// LogDir, when set, receives a human-readable log per run (<LogDir>/<run_id>.log)
 	// that the WebUI tails for live SSE output. Secrets are masked before writing.
 	LogDir string
@@ -251,11 +252,13 @@ func waitClosed(ch <-chan struct{}, d time.Duration) bool {
 // The run row is written first (status queued), so a run waiting for a slot is
 // visible, counts as active for its task's overlap policy, and can be stopped
 // (Cancel) before it starts. Its timeout only starts once it has a slot.
-func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
+func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, runErr error) {
 	if !r.enter() {
+		r.metrics.rejected.Add(1)
 		return Result{}, ErrShuttingDown
 	}
 	defer r.leave()
+	defer func() { r.metrics.record(outcome, runErr) }()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -325,11 +328,16 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	waited := false
+	queuedAt := time.Now()
 	err := r.slots.acquire(runCtx, r.quit, runID, func(ahead int) {
 		waited = true
 		fmt.Fprintf(logW, "[%s] queued: waiting for a free slot (%d ahead)\n", time.Now().Format("15:04:05"), ahead)
 		log.Info("run queued", "run_id", runID, "task_id", opts.TaskID, "ahead", ahead)
 	})
+	if waited {
+		r.metrics.queued.Add(1)
+		r.metrics.queueNS.Add(uint64(time.Since(queuedAt)))
+	}
 	if err == nil {
 		select { // a slot and quitting may have come together; quitting wins
 		case <-r.quit:
@@ -366,7 +374,11 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	started := time.Now().UTC()
-	_ = r.store.MarkRunRunning(ctx, runID, started)
+	if err := r.store.MarkRunRunning(runCtx, runID, started); err != nil {
+		r.metrics.persistenceErrors.Add(1)
+		return r.finishSkipped(runID, opts, logW, fmt.Errorf("cannot persist run start: %w", err))
+	}
+	r.metrics.started.Add(1)
 
 	log.Info("run started",
 		"run_id", runID,
@@ -398,6 +410,11 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 	res, err := execute(runCtx, opts, logW, r.usageEvery(), onUsage)
+	res.ErrorMessage = provider.MaskSecret(res.ErrorMessage, opts.APIKey)
+	res.ResultText = provider.MaskSecret(res.ResultText, opts.APIKey)
+	if err != nil && provider.MaskSecret(err.Error(), opts.APIKey) != err.Error() {
+		err = redactedError{message: provider.MaskSecret(err.Error(), opts.APIKey), cause: err}
+	}
 	res.RunID = runID
 	if opts.AfterExit != nil {
 		if msg := opts.AfterExit(context.WithoutCancel(ctx), runID); msg != "" {
@@ -437,18 +454,24 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (Result, error) {
 		finish.TaskID = sql.NullString{String: opts.TaskID, Valid: true}
 	}
 	if dbErr := r.store.UpdateRunFinish(context.Background(), finish); dbErr != nil {
+		r.metrics.persistenceErrors.Add(1)
 		log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
+		err = errors.Join(err, fmt.Errorf("persist run finish: %w", dbErr))
 	}
 	// The final answer, in full (the log line keeps 400 chars). An error result is already the
 	// run's error message, so it is not stored twice.
 	if txt := strings.TrimSpace(res.ResultText); txt != "" && res.ResultText != res.ErrorMessage {
 		if dbErr := r.store.SetRunResult(context.Background(), runID, provider.MaskSecret(txt, opts.APIKey)); dbErr != nil {
+			r.metrics.persistenceErrors.Add(1)
 			log.Error("persist run result failed", "error", dbErr, "run_id", runID)
+			err = errors.Join(err, fmt.Errorf("persist run result: %w", dbErr))
 		}
 	}
 	if opts.Cost != nil {
 		if dbErr := r.store.UpdateRunCost(context.Background(), runID, res.Cost); dbErr != nil {
+			r.metrics.persistenceErrors.Add(1)
 			log.Error("persist run cost failed", "error", dbErr, "run_id", runID)
+			err = errors.Join(err, fmt.Errorf("persist run cost: %w", dbErr))
 		}
 	}
 
@@ -524,6 +547,7 @@ var ErrSkipped = errors.New("skipped")
 // finishSkipped records a run that StartCheck / BeforeStart turned away. The stored
 // message is "skipped: <why>" so the WebUI can explain it in the viewer's language.
 func (r *Runner) finishSkipped(runID string, opts Options, logW io.Writer, why error) (Result, error) {
+	why = redactedError{message: provider.MaskSecret(why.Error(), opts.APIKey), cause: why}
 	msg := "skipped: " + why.Error()
 	res := Result{RunID: runID, Status: "skipped", ErrorMessage: msg}
 	fin := db.Run{
@@ -597,6 +621,7 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 	}
 	budgetMsg := ""
 	var resultEv *Event
+	var streamErr error // written by stdout reader, read only after wg.Wait
 
 	cmd := exec.CommandContext(ctx, bin, args...)
 	if opts.PromptStdin {
@@ -712,6 +737,10 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 			}
 			mu.Unlock()
 		}
+		if err := sc.Err(); err != nil {
+			streamErr = fmt.Errorf("read Claude output: %w", err)
+			budgetStop() // unblock the child if its output exceeded the scanner limit
+		}
 	}()
 
 	// Read everything before Wait: Wait closes the pipes and would drop the tail
@@ -737,6 +766,10 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 		result.ErrorMessage = budgetMsg
 		return result, errors.New(budgetMsg)
 	}
+	if streamErr != nil {
+		result.Status, result.ErrorMessage = "failed", streamErr.Error()
+		return result, streamErr
+	}
 
 	if ctx.Err() != nil {
 		return endedByContext(ctx, result, logW)
@@ -749,6 +782,11 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 			result.ErrorMessage = waitErr.Error()
 		}
 		return result, waitErr
+	}
+	if resultEv == nil {
+		err := errors.New("Claude exited without a result event")
+		result.Status, result.ErrorMessage = "failed", err.Error()
+		return result, err
 	}
 	if result.Status == "" {
 		result.Status = "succeeded"
@@ -787,12 +825,19 @@ func bytesTrimSpace(b []byte) []byte {
 }
 
 func drainMasked(r io.Reader, secret string) error {
-	sc := bufio.NewScanner(r)
-	for sc.Scan() {
-		_ = provider.MaskSecret(sc.Text(), secret) // discard; available for future log hooks
-	}
-	return sc.Err()
+	// Discard without a line-size limit. Stopping at Scanner's 64 KiB limit
+	// leaves the pipe full and can deadlock a verbose child before Wait.
+	_, err := io.Copy(io.Discard, r)
+	return err
 }
+
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e redactedError) Error() string { return e.message }
+func (e redactedError) Unwrap() error { return e.cause }
 
 // withProxyEnv adds tidebot's resolved proxy (Settings → 网络 or the OS proxy)
 // to Claude Code's environment, unless the variables are already set there.

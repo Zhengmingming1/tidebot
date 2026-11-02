@@ -17,6 +17,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
+	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
 
 // --- retention ---------------------------------------------------------------
@@ -196,21 +197,23 @@ func (a *App) runRetention(ctx context.Context) {
 
 // Dashboard is a compact health summary.
 type Dashboard struct {
-	Version          string         `json:"version"`
-	ClaudeVersion    string         `json:"claude_version"`
-	Runs24h          map[string]int `json:"runs_24h"`
-	Runs7d           map[string]int `json:"runs_7d"`
-	SuccessRate7d    float64        `json:"success_rate_7d"`
-	CostTodayUSD     float64        `json:"cost_today_usd"`
-	Cost7dUSD        float64        `json:"cost_7d_usd"`
-	DurationP50MS    int64          `json:"duration_p50_ms"`
-	DurationP95MS    int64          `json:"duration_p95_ms"`
-	TasksActive      int            `json:"tasks_active"`
-	TasksPaused      int            `json:"tasks_paused"`
-	PendingConfirms  int            `json:"pending_confirmations"`
-	PluginsInstalled int            `json:"plugins_installed"`
-	LastBackup       string         `json:"last_backup"`
-	DiskBytes        int64          `json:"disk_bytes"`
+	Execution        runner.Metrics   `json:"execution"`
+	Workflow         workflow.Metrics `json:"workflow"`
+	Version          string           `json:"version"`
+	ClaudeVersion    string           `json:"claude_version"`
+	Runs24h          map[string]int   `json:"runs_24h"`
+	Runs7d           map[string]int   `json:"runs_7d"`
+	SuccessRate7d    float64          `json:"success_rate_7d"`
+	CostTodayUSD     float64          `json:"cost_today_usd"`
+	Cost7dUSD        float64          `json:"cost_7d_usd"`
+	DurationP50MS    int64            `json:"duration_p50_ms"`
+	DurationP95MS    int64            `json:"duration_p95_ms"`
+	TasksActive      int              `json:"tasks_active"`
+	TasksPaused      int              `json:"tasks_paused"`
+	PendingConfirms  int              `json:"pending_confirmations"`
+	PluginsInstalled int              `json:"plugins_installed"`
+	LastBackup       string           `json:"last_backup"`
+	DiskBytes        int64            `json:"disk_bytes"`
 }
 
 func (a *App) countRuns(ctx context.Context, since time.Time) map[string]int {
@@ -233,6 +236,12 @@ func (a *App) countRuns(ctx context.Context, since time.Time) map[string]int {
 func (a *App) BuildDashboard(ctx context.Context) Dashboard {
 	now := time.Now()
 	d := Dashboard{Version: buildinfo.Version, ClaudeVersion: a.claudeVersion(), Runs24h: a.countRuns(ctx, now.Add(-24*time.Hour)), Runs7d: a.countRuns(ctx, now.Add(-7*24*time.Hour))}
+	if a.Runner != nil {
+		d.Execution = a.Runner.Metrics()
+	}
+	if a.Workflows != nil {
+		d.Workflow = a.Workflows.Metrics()
+	}
 	total, ok := 0, d.Runs7d["succeeded"]
 	for _, n := range d.Runs7d {
 		total += n
@@ -314,6 +323,7 @@ func (a *App) MetricsHandler() http.Handler {
 		for _, g := range gauges {
 			fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n%s %g\n", g.n, g.h, g.n, g.n, g.v)
 		}
+		writeExecutionMetrics(&b, d.Execution, d.Workflow)
 		_, _ = w.Write([]byte(b.String()))
 	})
 }
