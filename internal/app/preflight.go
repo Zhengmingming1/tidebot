@@ -28,12 +28,15 @@ const contextEstimateMethod = "仅 SKILL.md 正文粗估：ASCII 约 4 字符/to
 func estimateSkillTokens(data []byte) int {
 	ascii, other := 0, 0
 	for len(data) > 0 {
-		r, n := utf8.DecodeRune(data)
-		if r < 128 {
+		// Most instruction text is ASCII. Avoid decoding every ASCII byte;
+		// DecodeRune still handles multibyte and malformed UTF-8 consistently.
+		if data[0] < utf8.RuneSelf {
 			ascii++
-		} else {
-			other++
+			data = data[1:]
+			continue
 		}
+		_, n := utf8.DecodeRune(data)
+		other++
 		data = data[n:]
 	}
 	return (ascii+3)/4 + other

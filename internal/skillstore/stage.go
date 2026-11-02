@@ -72,23 +72,17 @@ func (s *Service) ResolveBindings(ctx context.Context, in []tasksvc.SkillBinding
 	}
 	for i := range out {
 		b := &out[i]
-		if err := s.DB.QueryRowContext(ctx, `SELECT name FROM skills WHERE id=?`, b.SkillID).Scan(&b.SkillName); err != nil {
-			return nil, fmt.Errorf("skill %s not found", b.SkillID)
+		// Read only the metadata required for binding, in one statement. The
+		// immutable content can be large and is loaded later, only when staging.
+		var vid string
+		err := s.DB.QueryRowContext(ctx, `SELECT s.name,v.id FROM skills s
+LEFT JOIN pointers p ON p.entity_type='skill' AND p.entity_id=s.id AND p.name='current'
+JOIN versions v ON v.id=CASE WHEN ?='follow' THEN p.version_id ELSE ? END
+ AND v.entity_type='skill' AND v.entity_id=s.id WHERE s.id=?`, b.Mode, b.VersionID, b.SkillID).Scan(&b.SkillName, &vid)
+		if err != nil {
+			return nil, fmt.Errorf("skill %s or its selected version is unavailable: %w", b.SkillID, err)
 		}
-		vid := b.VersionID
-		if b.Mode == "follow" {
-			v, err := s.Ver.CurrentVersion(ctx, version.EntitySkill, b.SkillID)
-			if err != nil {
-				return nil, fmt.Errorf("skill %s current: %w", b.SkillID, err)
-			}
-			vid = v.ID
-		}
-		v, err := s.Ver.GetVersion(ctx, vid)
-		if err != nil || v.EntityType != version.EntitySkill || v.EntityID != b.SkillID {
-			return nil, fmt.Errorf("version does not belong to skill %s", b.SkillID)
-		}
-		b.Mode = "pinned"
-		b.VersionID = vid
+		b.Mode, b.VersionID = "pinned", vid
 	}
 	return out, nil
 }
@@ -102,22 +96,27 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o700); err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, err
+	}
+	confined, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer confined.Close()
+	if err := confined.MkdirAll(".claude-plugin", 0o700); err != nil {
 		return nil, err
 	}
 	manifest, _ := json.Marshal(map[string]string{
 		"name": PluginName, "description": "Skills staged by tidebot for one run",
 	})
-	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "plugin.json"), manifest, 0o600); err != nil {
+	if err := confined.WriteFile(filepath.Join(".claude-plugin", "plugin.json"), manifest, 0o600); err != nil {
 		return nil, err
 	}
 	var out []StagedSkill
 	used := map[string]bool{}
 	for i, b := range bindings {
-		verID, err := s.ResolveVersion(ctx, b)
-		if err != nil {
-			return out, err
-		}
+		verID := b.VersionID // already frozen and ownership-checked above
 		files, man, err := s.versionFiles(ctx, verID)
 		if err != nil {
 			return out, err
@@ -136,7 +135,7 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 		}
 		files["SKILL.md"] = normalized
 		dir := filepath.Join(root, "skills", name)
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := confined.MkdirAll(filepath.Join("skills", name), 0o700); err != nil {
 			return out, err
 		}
 		paths := make([]string, 0, len(files))
@@ -145,15 +144,19 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 		}
 		sort.Strings(paths)
 		for _, p := range paths {
+			clean, err := skillpkg.CleanRel(p)
+			if err != nil || clean != p {
+				return out, fmt.Errorf("skill %s: unsafe file path %q", b.SkillID, p)
+			}
 			rel := filepath.FromSlash(p)
 			if !filepath.IsLocal(rel) {
 				return out, fmt.Errorf("skill %s: unsafe file path %q", b.SkillID, p)
 			}
-			dest := filepath.Join(dir, rel)
-			if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+			dest := filepath.Join("skills", name, rel)
+			if err := confined.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 				return out, err
 			}
-			if err := os.WriteFile(dest, files[p], 0o600); err != nil {
+			if err := confined.WriteFile(dest, files[p], 0o600); err != nil {
 				return out, err
 			}
 		}

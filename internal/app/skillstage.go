@@ -94,16 +94,23 @@ func (st *skillStage) Args(modern, explicit bool) []string {
 	if st == nil || len(st.Skills) == 0 {
 		return nil
 	}
+	return st.argsWithText(modern, explicit, st.contextText(modern, explicit))
+}
+
+func (st *skillStage) contextText(modern, explicit bool) string {
+	if modern && explicit {
+		return st.supportPrompt()
+	}
+	return st.systemPrompt()
+}
+
+func (st *skillStage) argsWithText(modern, explicit bool, text string) []string {
 	args := []string{"--add-dir", filepath.Join(st.Dir, "skills")}
 	if modern {
 		args = append(args, "--plugin-dir", st.Dir)
 	}
 	if explicit && modern && len(st.Skills) == 1 {
 		return args
-	}
-	text := st.systemPrompt()
-	if explicit && modern {
-		text = st.supportPrompt()
 	}
 	if modern {
 		p := filepath.Join(st.Dir, "skills-system-prompt.md")
@@ -269,14 +276,11 @@ func (st *skillStage) CheckedArgs(modern, explicit bool) ([]string, error) {
 	if instructionBytes > skillContextMaxBytes {
 		return nil, fmt.Errorf("skill instructions exceed the %d KiB context budget (%d bytes); shorten SKILL.md or split the workflow; instructions were not truncated", skillContextMaxBytes>>10, instructionBytes)
 	}
-	text := st.systemPrompt()
-	if explicit && modern {
-		text = st.supportPrompt()
-	}
+	text := st.contextText(modern, explicit)
 	if !modern && len(text) > 16<<10 {
 		return nil, fmt.Errorf("skill instructions exceed the legacy Claude limit; update Claude Code; instructions were not truncated")
 	}
-	args := st.Args(modern, explicit)
+	args := st.argsWithText(modern, explicit, text)
 	if modern && (!explicit || len(st.Skills) > 1) {
 		found := false
 		for _, arg := range args {

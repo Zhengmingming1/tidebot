@@ -60,10 +60,6 @@ func (s *Service) PreviewDependencies(ctx context.Context, bs []tasksvc.SkillBin
 		return p, err
 	}
 	p.Bindings = append(p.Bindings, resolved...)
-	all, err := s.List(ctx)
-	if err != nil {
-		return p, err
-	}
 	// Names from the exact selected version take precedence over a newer library version.
 	aliasCache := map[string][]string{}
 	aliases := func(b tasksvc.SkillBinding) []string {
@@ -80,13 +76,58 @@ func (s *Service) PreviewDependencies(ctx context.Context, bs []tasksvc.SkillBin
 		aliasCache[key] = names
 		return names
 	}
-	matches := func(b tasksvc.SkillBinding, name string) bool {
-		for _, a := range aliases(b) {
-			if a == name {
-				return true
-			}
+	// Index names once per preview; do not scan the entire library for every
+	// dependency edge or load unrelated version content on the common no-deps path.
+	boundNames := map[string][]tasksvc.SkillBinding{}
+	addNames := func(index map[string][]tasksvc.SkillBinding, b tasksvc.SkillBinding) {
+		for _, name := range aliases(b) {
+			index[name] = append(index[name], b)
 		}
-		return false
+	}
+	for _, b := range p.Bindings {
+		addNames(boundNames, b)
+	}
+	var libraryNames map[string][]tasksvc.SkillBinding
+	loadLibrary := func() error {
+		if libraryNames != nil {
+			return nil
+		}
+		rows, err := s.DB.QueryContext(ctx, `SELECT s.id,s.name,v.id FROM skills s
+JOIN pointers p ON p.entity_type='skill' AND p.entity_id=s.id AND p.name='current'
+JOIN versions v ON v.id=p.version_id AND v.entity_type='skill' AND v.entity_id=s.id ORDER BY s.name,s.id`)
+		if err != nil {
+			return err
+		}
+		var bs []tasksvc.SkillBinding
+		for rows.Next() {
+			b := tasksvc.SkillBinding{Mode: "pinned", Role: "auxiliary"}
+			if err := rows.Scan(&b.SkillID, &b.SkillName, &b.VersionID); err != nil {
+				rows.Close()
+				return err
+			}
+			bs = append(bs, b)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		libraryNames = map[string][]tasksvc.SkillBinding{}
+		for _, b := range bs {
+			addNames(libraryNames, b)
+		}
+		return nil
+	}
+	hashes := map[string]string{}
+	contentHash := func(vid string) (string, error) {
+		if hash, ok := hashes[vid]; ok {
+			return hash, nil
+		}
+		hash, err := s.SkillContentSHA256(ctx, vid)
+		if err == nil {
+			hashes[vid] = hash
+		}
+		return hash, err
 	}
 	issue := func(code, name, from string, optional bool, message string) {
 		p.Issues = append(p.Issues, DependencyIssue{Code: code, SkillName: name, From: from, Optional: optional, Message: message})
@@ -115,23 +156,13 @@ func (s *Service) PreviewDependencies(ctx context.Context, bs []tasksvc.SkillBin
 			p.Requirements = append(p.Requirements, ManifestRequirement{SkillName: b.SkillName, SkillID: b.SkillID, RuntimeRequirement: r})
 		}
 		for _, d := range m.Dependencies {
-			candidates := []tasksvc.SkillBinding{}
-			for _, candidate := range p.Bindings {
-				if matches(candidate, d.SkillName) {
-					candidates = append(candidates, candidate)
-				}
-			}
+			candidates := boundNames[d.SkillName]
 			bound := len(candidates) > 0
 			if !bound {
-				for _, sk := range all {
-					if sk.CurrentVersion == nil {
-						continue
-					}
-					candidate := tasksvc.SkillBinding{SkillID: sk.ID, SkillName: sk.Name, Mode: "pinned", VersionID: sk.CurrentVersion.ID, Role: "auxiliary"}
-					if matches(candidate, d.SkillName) {
-						candidates = append(candidates, candidate)
-					}
+				if err := loadLibrary(); err != nil {
+					return err
 				}
+				candidates = libraryNames[d.SkillName]
 			}
 			if len(candidates) == 0 {
 				issue("missing_skill", d.SkillName, b.SkillName, d.Optional, "skill is not imported: "+d.SkillName)
@@ -143,7 +174,7 @@ func (s *Service) PreviewDependencies(ctx context.Context, bs []tasksvc.SkillBin
 			}
 			candidate := candidates[0]
 			if d.ContentSHA256 != "" {
-				hash, err := s.SkillContentSHA256(ctx, candidate.VersionID)
+				hash, err := contentHash(candidate.VersionID)
 				if err != nil {
 					return err
 				}
@@ -158,7 +189,7 @@ func (s *Service) PreviewDependencies(ctx context.Context, bs []tasksvc.SkillBin
 					}
 					candidate.VersionID = ""
 					for _, v := range versions {
-						hash, err := s.SkillContentSHA256(ctx, v.ID)
+						hash, err := contentHash(v.ID)
 						if err != nil {
 							return err
 						}
@@ -183,6 +214,7 @@ func (s *Service) PreviewDependencies(ctx context.Context, bs []tasksvc.SkillBin
 					continue
 				}
 				p.Bindings = append(p.Bindings, candidate)
+				addNames(boundNames, candidate)
 				p.Additions = append(p.Additions, candidate)
 			}
 			if err := walk(candidate, append(path, b.SkillName)); err != nil {

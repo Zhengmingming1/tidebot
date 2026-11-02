@@ -4,9 +4,9 @@ import "testing"
 
 func TestEstimateSkillTokens(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want int
+		want  int
 	}{
 		{"empty", "", 0},
 		{"ascii rounding", "abcde", 2},
@@ -20,5 +20,20 @@ func TestEstimateSkillTokens(t *testing.T) {
 				t.Fatalf("estimateSkillTokens(%q) = %d, want %d", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEstimateSkillTokensMalformedAndNonBMP(t *testing.T) {
+	for _, tc := range []struct {
+		data []byte
+		want int
+	}{
+		{[]byte{0xff, 0xfe, 'a'}, 3},
+		{[]byte("abcd😀好"), 3},
+		{[]byte("a\x00\nb"), 1},
+	} {
+		if got := estimateSkillTokens(tc.data); got != tc.want {
+			t.Fatalf("%x: %d want %d", tc.data, got, tc.want)
+		}
 	}
 }
