@@ -3120,3 +3120,18 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 .tl-quiet { color: var(--text-2); }
 .timeline li.quiet .tl-dot { background: var(--surface); border: 1.5px solid var(--text-3); }
 .tl-quiet .i { width: 12px; height: 12px; margin-right: 2px; vertical-align: -2px; }
+
+/* Settings › Tags: one row per tag — chip, task count (opens the filtered list), rename, delete */
+#set-tags .tgm-row { padding: 8px 0; gap: 8px; }
+#set-tags .tgm-row .lbl { flex: 1 1 160px; }
+#set-tags .tgm-n { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#set-tags .tgm-n:hover { color: var(--accent); }
+#set-tags .tgm-tb { padding: 0 0 8px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+#set-tags .tgm-tb .search-in { max-width: 280px; }
+#set-tags .tgm-go { margin: 0 0 8px; text-align: center; }
+.tgm-from { display: flex; align-items: center; gap: 8px; }
+.tgm-hint { min-height: 20px; margin: 8px 0 0; font-size: 12px; display: flex; gap: 8px; align-items: flex-start; color: var(--text-3); }
+.tgm-hint.err { color: var(--danger); }
+.tgm-hint.warn { color: var(--warn); }
+.tgm-hint .ic { flex: none; margin-top: 2px; }
+.task-tb #tgm-link { flex: none; }

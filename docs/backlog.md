@@ -5044,3 +5044,53 @@ answers 200 with `archived`, not 404.
    optimizer, today's cost while a run goes).
 2. A subtle "updated" flash on the rows that changed (Linear-style), honouring reduced motion.
 3. When a repaint is held for long (draft in the composer), a small "有更新" hint in the tab bar.
+
+## 2026-11-02 (08:00): Settings › Tags — rename, merge or delete a tag on every task at once
+
+Category: settings UX / features (recent rounds: resource usage, UX / correctness on runs and
+tasks). Idea 3 of the 2026-10-29 (04:00) tags entry: a tag could only be changed task by task
+(edit form) or by ticking tasks and using the batch bar. A typo ("日服" on six tasks), two
+spellings of one group ("周报" / "日报") or a group that is no longer wanted meant opening every
+task. The spend page's "by tag" tab and the list filter followed whatever was left.
+
+**Done**
+
+- Settings › Tags (`#/settings/tags`, new nav entry and palette item): every tag in use as a chip
+  with "n 个任务" (links to the list filtered by it), rename ✎ and delete 🗑 per row; a filter box
+  appears with more than 8 tags; empty state points to Tasks. The task list's tag menu gets a
+  small ⚙ link to it ("管理标签").
+- Rename dialog (in-app modal, ⌘/Ctrl+Enter works): the new name is checked while typing like the
+  server does (trim, leading #, folded spaces, ≤24 characters, no commas); a name another tag
+  already uses (case-insensitive) turns the button into 「合并」 and says 「X」已有 n 个任务在用，
+  保存后「Y」会并入「X」, taking the existing spelling. Changing only the case is a rename.
+- Delete goes through the in-app confirm ("将从 n 个任务上移除这个标签，任务本身不受影响").
+- `POST /api/tasks/tags/rename {from,to}` / `delete {tag}`: one transaction over every task
+  (archived ones too, so a restored task matches; only live ones are counted), names compared in
+  Go with `strings.EqualFold` (SQLite `lower()` folds ASCII only); a task that had both names
+  keeps one, in the earlier position. Both answer `before` (the affected tasks' tag lists);
+  `restore {before}` writes exactly those back — the toast's 撤销 (10 s). Unknown tasks are
+  skipped, lists are validated again, at most 5000 per restore. 404 for a tag no live task has.
+  CSRF + session like every edit, parameterised SQL.
+- No change to how tags are stored; spend "by tag", list filter and suggestions follow at once
+  (the change stream sees the write).
+- New strings `setnav.tags`, `tgm.*` (zh-CN + en). Tests: `webui/tag_manage_test.go` — rename
+  (case-insensitive old name, archived task changed but not counted), merge (spelling, dedupe,
+  order), case-only rename, delete, exact restore of each, refusals (unknown / archived-only /
+  same / comma / too long / empty / bad restore / unknown op), unknown task skipped, GET and
+  CSRF-less POST change nothing; wiring and no native dialogs; `tagNameCheck` under node.
+- Checked in Chrome at 1024×655 against the demo server: six tags listed, merging 周报 into 日报
+  shows the hint and 「合并」, the toast's undo brings 周报 back, delete + undo the same.
+  Shots: `/workspace/tidebot-shots/2026-11-02-0800-tags-list-1024x655.png`, `…-tags-1024x655.png`.
+
+**Learned** — louislam/uptime-kuma `src/components/settings/Tags.vue` (one settings list, count of
+monitors per tag, edit / delete per row with a confirm) and `src/components/TagEditDialog.vue`
+(`validate()` checks the new name against `existingTags` and refuses a duplicate). For plain-word
+tags refusing is the wrong answer — the user typed the existing name because they mean the same
+group — so a duplicate becomes a merge, announced before saving. Returning the "before" state from
+a bulk edit makes undo exact without a history table.
+
+**Ideas for later**
+
+1. Show each tag's spend this week beside its count (from the spend "by tag" query).
+2. Multi-select in Settings › Tags to merge several tags into one in a single step.
+3. `agentctl tags list|rename|delete` on the same endpoints for scripting.

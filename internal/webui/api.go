@@ -681,6 +681,10 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		s.handleTagsInUse(w, r)
 		return
 	}
+	if id == "tags" && len(parts) == 2 && r.Method == http.MethodPost {
+		s.handleTagEdit(w, r, parts[1])
+		return
+	}
 	if id == "batch" && len(parts) == 1 && r.Method == http.MethodPost {
 		s.handleTaskBatch(w, r)
 		return

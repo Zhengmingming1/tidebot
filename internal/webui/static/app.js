@@ -2633,7 +2633,7 @@
         '<section class="card flush"><div class="toolbar task-tb"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters task-f" role="group">' + TASK_FILTERS.map(function (x) { return '<button data-st="' + x[0] + '" aria-pressed="' + (x[0] === v.status) + '" class="' + (x[0] === v.status ? "active" : "") + '"' + (x[2] ? ' data-tip="' + esc(T(x[2])) + '"' : "") + ">" + esc(T(x[1])) + ' <span class="cnt" data-c="' + x[0] + '"></span></button>'; }).join("") + "</div>" +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
-        (tagList.length ? '<select id="ttag" aria-label="' + esc(T("tg.label")) + '"><option value="">' + esc(T("tg.any")) + "</option>" + tagList.map(function (g) { return opt(g, g + " · " + tagN[g], g === v.tag); }).join("") + "</select>" : "") +
+        (tagList.length ? '<select id="ttag" aria-label="' + esc(T("tg.label")) + '"><option value="">' + esc(T("tg.any")) + "</option>" + tagList.map(function (g) { return opt(g, g + " · " + tagN[g], g === v.tag); }).join("") + '</select><a class="icon-btn sm" id="tgm-link" href="#/settings/tags" data-tip="' + esc(T("tgm.manage")) + '" aria-label="' + esc(T("tgm.manage")) + '">' + ic("settings", "sm") + "</a>" : "") +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
         '<div class="batchbar hidden" id="tbatch"><strong id="tbn"></strong><button class="btn sm" data-batch="pause">' + ic("pause", "sm") + esc(T("td.pause")) + '</button><button class="btn sm" data-batch="resume">' + ic("play", "sm") + esc(T("td.resume")) + '</button><button class="btn sm" id="tb-tag">' + ic("tag", "sm") + esc(T("tg.batch")) + '</button><button class="btn sm" id="tb-export" data-tip="' + esc(T("tx.export_tip")) + '">' + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn sm danger" data-batch="delete">' + ic("trash", "sm") + esc(T("td.delete")) + '</button><button class="btn sm ghost" id="tclear">' + esc(T("tl.clear")) + "</button></div>" +
         '<table class="table"><thead><tr><th class="ck"><input type="checkbox" id="tall" aria-label="' + esc(T("tl.select_all")) + '"></th>' + th("name", T("col.task")) + th("schedule", T("col.schedule")) + th("status", T("col.status")) + th("version", T("col.version")).replace("<th>", '<th class="c-opt">') + th("last", T("col.recent_runs")) + th("today", T("col.runs_today")).replace("<th>", '<th class="c-opt">') + '<th class="c-act"></th></tr></thead><tbody id="tbody"></tbody></table></section>', "tasks", [[T("nav.tasks")]]);
@@ -6479,12 +6479,98 @@
     });
   }
 
+  // ---- Settings › Tags ----
+  // Every tag in use with how many tasks carry it; rename, merge or delete it on all tasks at
+  // once. Idea from Uptime Kuma (src/components/settings/Tags.vue: one list, count per tag,
+  // edit / delete per row; TagEditDialog.vue: the new name is checked against the existing
+  // ones while typing). Uptime Kuma refuses a name in use — here it merges the two, and the
+  // dialog says so before saving. Every change can be undone from the toast (the server
+  // answers with the tags the tasks had before, and /restore puts exactly those back).
+  // tagNameCheck: what the dialog says about a new name — "" ok, "same", "bad", or "merge".
+  function tagNameCheck(from, raw, inUse) {
+    var t = String(raw || "").trim().replace(/^[#＃]+/, "").replace(/\s+/g, " ");
+    if (!t || t === from) return { k: "same", t: t };
+    if (/[,，\u0000-\u001f\u007f]/.test(t) || Array.from(t).length > TAG_LEN) return { k: "bad", t: t };
+    var hit = (inUse || []).filter(function (u) { return u.tag !== from && u.tag.toLowerCase() === t.toLowerCase() && t.toLowerCase() !== from.toLowerCase(); })[0];
+    return hit ? { k: "merge", t: hit.tag, n: hit.n } : { k: "", t: t };
+  }
+  function tagManager(box) {
+    var list = [], q = "";
+    var undoOf = function (before) {
+      return function () { api("/api/tasks/tags/restore", { method: "POST", body: { before: before } }).then(function () { toast(T("tgm.restored")); load(); }).catch(fail); };
+    };
+    var paint = function () {
+      if (!list.length) { box.innerHTML = emptyState("tag", T("tgm.none"), T("tgm.none_sub")) + '<p class="pad-x tgm-go"><a class="btn sm" href="#/tasks">' + ic("tasks", "sm") + esc(T("nav.tasks")) + "</a></p>"; return; }
+      var ql = q.trim().toLowerCase(), shown = list.filter(function (u) { return !ql || u.tag.toLowerCase().indexOf(ql) >= 0; });
+      var rows = shown.map(function (u) {
+        var i = list.indexOf(u);
+        return '<div class="set-row tgm-row" data-i="' + i + '"><div class="lbl">' + tagChip(u.tag) + "</div>" +
+          '<span class="row-gap"><a class="link tgm-n" href="#/tasks?tag=' + enc(u.tag) + '" data-tip="' + esc(T("tg.filter_tip", { t: u.tag })) + '">' + esc(plural(u.n, "tgm.tasks_one", "tgm.tasks_many")) + "</a>" +
+          '<button type="button" class="icon-btn sm" data-tgm="rename" data-tip="' + esc(T("tgm.rename")) + '" aria-label="' + esc(T("tgm.rename") + " · " + u.tag) + '">' + ic("edit", "sm") + "</button>" +
+          '<button type="button" class="icon-btn sm danger-text" data-tgm="delete" data-tip="' + esc(T("tgm.delete")) + '" aria-label="' + esc(T("tgm.delete") + " · " + u.tag) + '">' + ic("trash", "sm") + "</button></span></div>";
+      }).join("");
+      var body = rows || '<p class="muted pad-x">' + esc(T("tgm.no_match")) + "</p>";
+      if (list.length > 8) {
+        if (!$("#tgm-q", box)) {
+          box.innerHTML = '<div class="toolbar tgm-tb"><label class="search-in">' + ic("search", "sm") + '<input id="tgm-q" type="search" maxlength="' + TAG_LEN + '" placeholder="' + esc(T("tgm.filter")) + '" aria-label="' + esc(T("tgm.filter")) + '"></label><span class="grow"></span><span class="muted" id="tgm-count"></span></div><div id="tgm-rows"></div>';
+          imeInput($("#tgm-q", box), 120, function (v) { q = v; paint(); });
+        }
+        $("#tgm-count", box).textContent = T("tl.showing", { n: shown.length, total: list.length });
+        $("#tgm-rows", box).innerHTML = body;
+      } else box.innerHTML = '<div id="tgm-rows">' + body + "</div>";
+    };
+    var load = function () { return api("/api/tasks/tags", { fresh: true }).then(function (l) { list = l || []; paint(); }).catch(fail); };
+    box.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-tgm]");
+      if (!b) return;
+      var u = list[+b.closest("[data-i]").getAttribute("data-i")];
+      if (!u) return;
+      if (b.getAttribute("data-tgm") === "rename") tagRenameModal(u, list, function (r) {
+        toast(T(r.merged ? "tgm.merged" : "tgm.renamed", { f: u.tag, t: r.tag, n: r.tasks }), false, undoOf(r.before));
+        load();
+      });
+      else confirmDialog({ title: T("tgm.del_title", { t: u.tag }), body: T("tgm.del_body", { n: u.n }), ok: T("tgm.delete"), danger: true }).then(function (y) {
+        if (!y) return;
+        api("/api/tasks/tags/delete", { method: "POST", body: { tag: u.tag } }).then(function (r) {
+          toast(T("tgm.deleted", { t: u.tag, n: r.tasks }), false, undoOf(r.before));
+          load();
+        }).catch(fail);
+      });
+    });
+    return load();
+  }
+  function tagRenameModal(u, inUse, done) {
+    modal('<div class="card-head"><span class="ico">' + ic("tag") + "</span><h2>" + esc(T("tgm.rename_title")) + "</h2></div>" +
+      '<form id="tgm-f"><p class="confirm-body tgm-from">' + tagChip(u.tag) + " " + esc(plural(u.n, "tgm.tasks_one", "tgm.tasks_many")) + "</p>" +
+      '<label class="field"><span>' + esc(T("tgm.new_name")) + '</span><input name="to" maxlength="' + TAG_LEN + '" autocomplete="off" spellcheck="false" required value="' + esc(u.tag) + '"></label>' +
+      '<p class="tgm-hint" id="tgm-hint" aria-live="polite"></p>' +
+      '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" id="tgm-ok" disabled>' + esc(T("tgm.save")) + "</button></div></form>", function (root, close) {
+      var f = $("#tgm-f", root), ok = $("#tgm-ok", root), hint = $("#tgm-hint", root), c = { k: "same" };
+      var check = function () {
+        c = tagNameCheck(u.tag, f.to.value, inUse);
+        ok.disabled = c.k === "same" || c.k === "bad";
+        ok.textContent = T(c.k === "merge" ? "tgm.merge" : "tgm.save");
+        hint.className = "tgm-hint" + (c.k === "bad" ? " err" : c.k === "merge" ? " warn" : "");
+        hint.innerHTML = c.k === "bad" ? esc(T("tgm.bad")) : c.k === "merge" ? ic("info", "sm") + "<span>" + esc(T("tgm.merge_hint", { t: c.t, n: c.n, f: u.tag })) + "</span>" : "";
+      };
+      f.to.addEventListener("input", check);
+      f.addEventListener("submit", function (e) {
+        e.preventDefault();
+        check();
+        if (ok.disabled) return;
+        ok.disabled = true;
+        api("/api/tasks/tags/rename", { method: "POST", body: { from: u.tag, to: c.t } }).then(function (r) { close(); done(r); }).catch(function (err) { ok.disabled = false; fail(err); });
+      });
+      check();
+      setTimeout(function () { f.to.select(); }, 0);
+    });
+  }
   // ---------- SETTINGS ----------
   // Left nav + one section at a time. Every row has an id, so #/settings/<section>/<item>
   // scrolls to it. Autosaved fields show "Saved ✓" next to them. Dangerous actions
   // live in the danger zone at the bottom of General.
-  var SET_SECTIONS = ["general", "providers", "budgets", "pricing", "security", "notifications", "network", "data", "about"];
-  var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", pricing: "receipt", security: "shield", notifications: "bell", network: "globe", data: "folder", about: "info" };
+  var SET_SECTIONS = ["general", "providers", "budgets", "pricing", "tags", "security", "notifications", "network", "data", "about"];
+  var SET_ICONS = { general: "settings", providers: "key", budgets: "wallet", pricing: "receipt", tags: "tag", security: "shield", notifications: "bell", network: "globe", data: "folder", about: "info" };
   var RELEASES_PAGE = "https://github.com/Zhengmingming1/tidebot-releases/releases/latest";
   // AGPL-3.0-only: the WebUI links its own source (section 13, for people using it over a network).
   var SOURCE_REPO = "https://github.com/Zhengmingming1/tidebot";
@@ -7149,6 +7235,9 @@
             });
           });
         };
+      } else if (section === "tags") {
+        body = '<section class="card" id="set-tags">' + head.replace("</h2>", "</h2>" + tip(T("tgm.sub"))) + '<div id="tgm-box"><p class="muted pad-x">…</p></div></section>';
+        after = function () { tagManager($("#tgm-box")); };
       } else if (section === "security") {
         body = '<section class="card">' + head +
           row("password", T("login.password"), T("set.pw_sub"), '<span class="row-gap">' + (st.password_set === false ? '<span class="pill plain">' + esc(T("pw.unset")) + "</span>" : '<span class="pill ok">' + esc(T("set.set")) + "</span>") +

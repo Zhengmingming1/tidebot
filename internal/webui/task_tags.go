@@ -3,7 +3,9 @@ package webui
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"unicode"
@@ -188,4 +190,248 @@ func (s *Server) batchTagArg(ctx context.Context, raw string) (string, error) {
 		return "", errBadTag
 	}
 	return s.canonicalTags(ctx, t)[0], nil
+}
+
+// ---- Settings › Tags: rename, merge or delete a tag everywhere ----
+// Like Uptime Kuma's tag settings (src/components/settings/Tags.vue: every tag with how many
+// monitors carry it, edit or delete from one list; TagEditDialog.vue checks the new name
+// against the existing ones). Uptime Kuma refuses a name already in use; here that name
+// merges the two tags instead (Linear's labels do the same), since our tags are just words.
+// Every change answers with the affected tasks' tags from before, which /restore puts back
+// exactly (the toast's undo). Archived tasks change too, so a restored task matches.
+
+const maxTagRestore = 5000
+
+type taskTagsBefore struct {
+	ID   string   `json:"id"`
+	Tags []string `json:"tags"`
+}
+
+type tagEditResult struct {
+	Tag    string           `json:"tag,omitempty"` // the name it has now (rename)
+	Tasks  int              `json:"tasks"`         // live tasks that carried it
+	Merged bool             `json:"merged"`        // renamed onto a tag already in use
+	Before []taskTagsBefore `json:"before"`        // for undo
+}
+
+var errTagNotInUse = errors.New("tag not in use")
+
+func writeTaskTags(ctx context.Context, tx *sql.Tx, taskID string, tags []string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM task_tags WHERE task_id=?`, taskID); err != nil {
+		return err
+	}
+	for i, t := range tags {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO task_tags(task_id, tag, pos) VALUES (?,?,?)`, taskID, t, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// editTagEverywhere renames from → to on every task (to == "" deletes it). Names compare
+// without case (Unicode-aware, in Go: SQLite's lower() only folds ASCII). A task that already
+// has the new name keeps one copy, in the earlier position.
+func (s *Server) editTagEverywhere(ctx context.Context, from, to string) (tagEditResult, error) {
+	res := tagEditResult{Before: []taskTagsBefore{}}
+	tx, err := s.deps.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return res, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `SELECT g.task_id, g.tag, t.status <> 'archived' FROM task_tags g JOIN tasks t ON t.id = g.task_id
+ORDER BY g.task_id, g.pos, g.tag`)
+	if err != nil {
+		return res, err
+	}
+	type taskRow struct {
+		tags []string
+		live bool
+	}
+	all := map[string]*taskRow{}
+	order := []string{}
+	for rows.Next() {
+		var id, tag string
+		var live bool
+		if err := rows.Scan(&id, &tag, &live); err != nil {
+			rows.Close()
+			return res, err
+		}
+		r := all[id]
+		if r == nil {
+			r = &taskRow{live: live}
+			all[id] = r
+			order = append(order, id)
+		}
+		r.tags = append(r.tags, tag)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return res, err
+	}
+	// Merging onto a tag in use takes its spelling ("daily" → the existing "Daily").
+	if to != "" && !strings.EqualFold(from, to) {
+		for _, id := range order {
+			if !all[id].live {
+				continue
+			}
+			for _, t := range all[id].tags {
+				if strings.EqualFold(t, to) {
+					to, res.Merged = t, true
+					break
+				}
+			}
+			if res.Merged {
+				break
+			}
+		}
+	}
+	for _, id := range order {
+		r := all[id]
+		hit := false
+		for _, t := range r.tags {
+			if strings.EqualFold(t, from) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			continue
+		}
+		next := []string{}
+		for _, t := range r.tags {
+			if strings.EqualFold(t, from) {
+				if to == "" {
+					continue
+				}
+				t = to
+			}
+			dup := false
+			for _, n := range next {
+				if strings.EqualFold(n, t) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				next = append(next, t)
+			}
+		}
+		if err := writeTaskTags(ctx, tx, id, next); err != nil {
+			return res, err
+		}
+		res.Before = append(res.Before, taskTagsBefore{ID: id, Tags: r.tags})
+		if r.live {
+			res.Tasks++
+		}
+	}
+	if res.Tasks == 0 {
+		return res, errTagNotInUse
+	}
+	res.Tag = to
+	return res, tx.Commit()
+}
+
+// restoreTaskTags puts back the tags a rename / delete answered with. Unknown tasks are
+// skipped; each list must still be a valid set of tags.
+func (s *Server) restoreTaskTags(ctx context.Context, items []taskTagsBefore) (int, error) {
+	tx, err := s.deps.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	n := 0
+	for _, it := range items {
+		tags, err := normalizeTags(it.Tags)
+		if err != nil {
+			return 0, err
+		}
+		var one int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM tasks WHERE id=?`, it.ID).Scan(&one); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return 0, err
+		}
+		if err := writeTaskTags(ctx, tx, it.ID, tags); err != nil {
+			return 0, err
+		}
+		n++
+	}
+	return n, tx.Commit()
+}
+
+// handleTagEdit: POST /api/tasks/tags/{rename|delete|restore}.
+//
+//	rename  {from, to} → {tag, tasks, merged, before}
+//	delete  {tag}      → {tasks, before}
+//	restore {before}   → {tasks}
+func (s *Server) handleTagEdit(w http.ResponseWriter, r *http.Request, op string) {
+	var b struct {
+		From   string           `json:"from"`
+		To     string           `json:"to"`
+		Tag    string           `json:"tag"`
+		Before []taskTagsBefore `json:"before"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&b); err != nil {
+		writeErr(w, 400, "bad json")
+		return
+	}
+	ctx := r.Context()
+	one := func(raw string) (string, bool) {
+		t, err := normalizeTags([]string{raw})
+		if err != nil || len(t) != 1 {
+			return "", false
+		}
+		return t[0], true
+	}
+	switch op {
+	case "rename", "delete":
+		from, to := b.From, b.To
+		if op == "delete" {
+			from, to = b.Tag, ""
+		}
+		f, ok := one(from)
+		if !ok {
+			writeErr(w, 400, errBadTag.Error())
+			return
+		}
+		t := ""
+		if op == "rename" {
+			if t, ok = one(to); !ok {
+				writeErr(w, 400, errBadTag.Error())
+				return
+			}
+			if t == f {
+				writeErr(w, 400, "new name is the same")
+				return
+			}
+		}
+		res, err := s.editTagEverywhere(ctx, f, t)
+		if errors.Is(err, errTagNotInUse) {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, res)
+	case "restore":
+		if len(b.Before) == 0 || len(b.Before) > maxTagRestore {
+			writeErr(w, 400, "before (1-5000 tasks) required")
+			return
+		}
+		n, err := s.restoreTaskTags(ctx, b.Before)
+		if errors.Is(err, errBadTag) {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"tasks": n})
+	default:
+		writeErr(w, 404, "not found")
+	}
 }
