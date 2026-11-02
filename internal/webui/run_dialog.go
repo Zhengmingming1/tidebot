@@ -13,18 +13,20 @@ import (
 	"unicode/utf8"
 
 	"github.com/Zhengmingming1/tidebot/internal/guard"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
 // RunRequest is what the Run dialog starts: a prompt, optionally with a skill and a
 // working folder. Without a folder the run works in a scratch folder of tidebot's;
 // with one it is read-only unless Mode is "edit".
 type RunRequest struct {
-	Prompt    string `json:"prompt"`
-	Provider  string `json:"provider"`
-	SkillID   string `json:"skill_id"`
-	VersionID string `json:"version_id"`
-	Workspace string `json:"workspace"`
-	Mode      string `json:"mode"` // "read" (default) | "edit"
+	SkillBindings []tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
+	Prompt        string                 `json:"prompt"`
+	Provider      string                 `json:"provider"`
+	SkillID       string                 `json:"skill_id"`
+	VersionID     string                 `json:"version_id"`
+	Workspace     string                 `json:"workspace"`
+	Mode          string                 `json:"mode"` // "read" (default) | "edit"
 }
 
 // ErrUnknownSkill: the skill (or version) asked for doesn't exist.
@@ -36,6 +38,19 @@ const runPromptMax = 8000
 
 func (b *RunRequest) validate() string {
 	b.Prompt = strings.TrimSpace(b.Prompt)
+	if b.SkillBindings != nil {
+		normalized, err := tasksvc.NormalizeBindings(b.SkillBindings)
+		if err != nil {
+			return err.Error()
+		}
+		b.SkillBindings = normalized
+		b.SkillID = ""
+		b.VersionID = ""
+		if len(normalized) > 0 {
+			b.SkillID = normalized[0].SkillID
+			b.VersionID = normalized[0].VersionID
+		}
+	}
 	if utf8.RuneCountInString(b.Prompt) > runPromptMax {
 		return "prompt too long"
 	}

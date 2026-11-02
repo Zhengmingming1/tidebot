@@ -38,6 +38,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
+	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
 
 // App is the core runtime shared by daemon and CLI.
@@ -57,6 +58,7 @@ type App struct {
 	Tasks      *tasksvc.Service
 	Amend      *amend.Service
 	Skills     *skillstore.Service
+	Workflows  *workflow.Service
 	Cost       *cost.Service
 	Auth       *auth.Service
 	WebUI      *webui.Server
@@ -133,6 +135,7 @@ func Open(cfg config.Config) (*App, error) {
 		a.Events.Emit(Event{Kind: EventApprovalNeeded, TaskID: taskID, TaskName: a.taskName(taskID), Count: len(items)})
 	}
 	a.Skills = skillstore.New(sqlDB, ver, a.Tasks, "")
+	a.initWorkflows()
 	a.Optimize = optimize.New(sqlDB, a.Skills, ver)
 	a.Optimize.OnEvent = func(kind, skillID, detail string) {
 		a.Events.Emit(Event{Kind: kind, Detail: detail, TaskName: a.skillName(skillID)})
@@ -169,8 +172,9 @@ func Open(cfg config.Config) (*App, error) {
 		a.Cfg.WebUIEnabled = v == "true" || v == "1"
 	}
 	a.WebUI = webui.New(webui.Deps{
+		StartDependencyCheck: a.startDependencyCheck, DependencyCheckStatus: a.dependencyCheckStatus,
 		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
-		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Ver: ver, Reg: reg, Log: log,
+		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Workflows: a.Workflows, Ver: ver, Reg: reg, Log: log,
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
 		StopRun:  func(id string) (string, error) { return a.StopRun(context.Background(), id) },
 		QueuePos: a.Runner.QueuePos,
@@ -196,7 +200,9 @@ func (a *App) Close() error {
 	if a.Sched != nil {
 		a.Sched.Stop()
 	}
+	a.stopWorkflows()
 	a.drainRuns()
+	a.waitWorkflows()
 	if a.WebUI != nil {
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = a.WebUI.Stop(sctx)
@@ -359,6 +365,10 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		wctx, done := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
 		done()
+	}
+	if opts.TriggerKind == "workflow" {
+		// The workflow owns the outcome; node answers must not trigger task notices.
+		return res, err
 	}
 	if errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrStoppedByUser) || errors.Is(err, runner.ErrSkipped) {
 		// The user stopped it, or is quitting, or it was skipped at its slot (a budget
@@ -525,9 +535,15 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	}
 	var choices []skillChoice
 	var skillArgs []string
+	var staged *skillStage
+	displayPrompt := prompt
 	if view.Spec != nil && len(view.Spec.SkillBindings) > 0 {
 		var bindings []tasksvc.SkillBinding
-		bindings, choices = a.chooseSkillVersions(ctx, task.ID, bucket, view.Spec.SkillBindings)
+		if len(view.Spec.SkillBindings) == 1 {
+			bindings, choices = a.chooseSkillVersions(ctx, task.ID, bucket, view.Spec.SkillBindings)
+		} else {
+			bindings = view.Spec.SkillBindings
+		}
 		for _, c := range choices {
 			if c.Candidate {
 				bucket = cost.BucketCanary
@@ -536,10 +552,19 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		// Staged in tidebot's own directory, never in ws (see skillstage.go).
 		st, err := a.stageSkills(ctx, bindings)
 		if err != nil {
-			a.Log.Warn("stage skills", "task_id", task.ID, "error", err)
+			return fmt.Errorf("stage skills: %w", err)
 		}
 		defer st.Close()
-		skillArgs = st.Args(a.modernClaude(), false)
+		staged = st
+		modern := a.modernClaude()
+		explicit := len(st.Skills) > 1
+		skillArgs, err = st.CheckedArgs(modern, explicit)
+		if err != nil {
+			return err
+		}
+		if explicit {
+			prompt = st.Invoke(modern, prompt)
+		}
 	}
 	timeout := time.Duration(task.TimeoutMinutes) * time.Minute
 	if view.Spec != nil && view.Spec.TimeoutMinutes > 0 {
@@ -549,9 +574,9 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		timeout = a.Cfg.DefaultTimeout
 	}
 	res, err := a.RunPromptEx(ctx, runner.Options{
-		Prompt: prompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
+		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
 		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket,
-		OnStart: onStart, ContextArgs: skillArgs,
+		OnStart: a.skillStart(staged, onStart), ContextArgs: skillArgs,
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
@@ -707,10 +732,15 @@ func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string
 		return "", err
 	}
 	modern := a.modernClaude()
+	args, err := st.CheckedArgs(modern, true)
+	if err != nil {
+		st.Close()
+		return "", err
+	}
 	return launch(startWait, func(onStart func(string)) error {
 		defer st.Close()
 		_, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: st.Invoke(modern, prompt), WorkspaceDir: ws, TriggerKind: "quick",
-			CostBucket: cost.BucketProduction, OnStart: onStart, ContextArgs: st.Args(modern, true)}, providerName, 0)
+			CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, onStart), ContextArgs: args}, providerName, 0)
 		return err
 	}, func(err error) { a.Log.Warn("button run", "error", err) })
 }

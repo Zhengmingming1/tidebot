@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -80,30 +79,30 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 			mode = "edit"
 		}
 	}
-	if req.SkillID == "" && dir == "" {
+	bindings := req.SkillBindings
+	if bindings == nil && req.SkillID != "" {
+		mode := "follow"
+		if req.VersionID != "" {
+			mode = "pinned"
+		}
+		bindings = []tasksvc.SkillBinding{{SkillID: req.SkillID, Mode: mode, VersionID: req.VersionID}}
+	}
+	if len(bindings) == 0 && dir == "" {
 		return a.startQuickRunAsync(req.Prompt, req.Provider)
 	}
 	var st *skillStage
 	versionID := ""
-	if req.SkillID != "" {
-		var n int
-		if err := a.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM skills WHERE id=?`, req.SkillID).Scan(&n); err != nil || n == 0 {
-			return "", webui.ErrUnknownSkill
+	if len(bindings) > 0 {
+		frozen, err := a.Skills.ResolveBindings(ctx, bindings)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", webui.ErrUnknownSkill, err)
 		}
-		b := tasksvc.SkillBinding{SkillID: req.SkillID, Mode: "follow"}
-		if req.VersionID != "" {
-			var owner string
-			err := a.DB.QueryRowContext(ctx, `SELECT entity_id FROM versions WHERE id=? AND entity_type='skill'`, req.VersionID).Scan(&owner)
-			if errors.Is(err, sql.ErrNoRows) || owner != req.SkillID {
-				return "", webui.ErrUnknownSkill
-			}
-			b = tasksvc.SkillBinding{SkillID: req.SkillID, Mode: "pinned", VersionID: req.VersionID}
-		}
-		var err error
-		if st, err = a.stageSkills(ctx, []tasksvc.SkillBinding{b}); err != nil {
+		st, err = a.stageSkills(ctx, frozen)
+		if err != nil {
 			return "", fmt.Errorf("skill: %w", err)
 		}
-		versionID = st.Skills[0].VersionID
+		req.SkillID = frozen[0].SkillID
+		versionID = frozen[0].VersionID
 	}
 	if dir == "" { // a skill on its own: an empty scratch folder in the stage
 		dir = filepath.Join(st.Dir, "work")
@@ -117,7 +116,14 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		return "", guard.ErrDirBusy
 	}
 	modern := a.modernClaude()
-	args := st.Args(modern, true)
+	args, err := st.CheckedArgs(modern, true)
+	if err != nil {
+		if mode == "edit" {
+			unlockEditDir(dir)
+		}
+		st.Close()
+		return "", err
+	}
 	if mode != "edit" {
 		args = append(args, "--disallowedTools", strings.Join(readOnlyDeny, ","))
 	}
@@ -125,7 +131,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		defer st.Close()
 		opts := runner.Options{
 			Prompt: st.Invoke(modern, req.Prompt), DisplayPrompt: req.Prompt, WorkspaceDir: dir,
-			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: onStart, ContextArgs: args,
+			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, onStart), ContextArgs: args,
 			SkillID: req.SkillID, SkillVersionID: versionID, RunMode: mode,
 		}
 		if mode == "edit" {
@@ -133,7 +139,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 			// what the run changed in the folder (git work trees), for the run page
 			tr := &changeTracker{a: a, dir: dir}
 			defer tr.close()
-			opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(onStart), tr.atStart, tr.afterExit
+			opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(a.skillStart(st, onStart)), tr.atStart, tr.afterExit
 		}
 		_, err := a.RunPromptEx(ctx, opts, req.Provider, 0)
 		return err

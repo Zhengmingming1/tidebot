@@ -26,8 +26,10 @@ import (
 
 // Options configure a single Claude Code invocation.
 type Options struct {
-	ClaudeBin    string
-	Prompt       string
+	ClaudeBin string
+	Prompt    string
+	// PromptStdin keeps composed workflow inputs out of OS command-line size limits.
+	PromptStdin  bool
 	WorkspaceDir string
 	Timeout      time.Duration
 	Bare         bool
@@ -562,6 +564,20 @@ func nullStr(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
+func claudeArgs(opts Options) []string {
+	args := []string{"-p"}
+	if !opts.PromptStdin {
+		args = append(args, opts.Prompt)
+	}
+	args = append(args, "--output-format", "stream-json", "--verbose")
+	if opts.Bare {
+		args = append(args, "--bare")
+	}
+	args = append(args, opts.ExtraArgs...)
+	args = append(args, opts.ContextArgs...)
+	return args
+}
+
 func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.Duration, onUsage func(pricing.Cost)) (Result, error) {
 	if logW == nil {
 		logW = io.Discard
@@ -570,12 +586,7 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 	if bin == "" {
 		bin = "claude"
 	}
-	args := []string{"-p", opts.Prompt, "--output-format", "stream-json", "--verbose"}
-	if opts.Bare {
-		args = append(args, "--bare")
-	}
-	args = append(args, opts.ExtraArgs...)
-	args = append(args, opts.ContextArgs...)
+	args := claudeArgs(opts)
 
 	// budgetStop kills the run when CostControl says the caps are exceeded.
 	ctx, budgetStop := context.WithCancel(ctx)
@@ -588,6 +599,9 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 	var resultEv *Event
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	if opts.PromptStdin {
+		cmd.Stdin = strings.NewReader(opts.Prompt)
+	}
 	if opts.WorkspaceDir != "" {
 		cmd.Dir = opts.WorkspaceDir
 	}

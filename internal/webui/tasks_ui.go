@@ -20,15 +20,16 @@ import (
 
 // taskForm is the WebUI create/edit payload.
 type taskForm struct {
-	Name           string  `json:"name"`
-	Prompt         string  `json:"prompt"`
-	SkillID        string  `json:"skill_id"`
-	SkillVersionID string  `json:"skill_version_id"`
-	Provider       string  `json:"provider"`
-	Cron           string  `json:"cron"`
-	BudgetUSD      float64 `json:"budget_usd"`
-	Enabled        bool    `json:"enabled"`
-	TimeoutMinutes int     `json:"timeout_minutes"`
+	SkillBindings  *[]tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
+	Name           string                  `json:"name"`
+	Prompt         string                  `json:"prompt"`
+	SkillID        string                  `json:"skill_id"`
+	SkillVersionID string                  `json:"skill_version_id"`
+	Provider       string                  `json:"provider"`
+	Cron           string                  `json:"cron"`
+	BudgetUSD      float64                 `json:"budget_usd"`
+	Enabled        bool                    `json:"enabled"`
+	TimeoutMinutes int                     `json:"timeout_minutes"`
 	// Workspace: the task's own working folder, "" = the per-task default. nil (field
 	// left out, e.g. an older page) keeps the folder the task has.
 	Workspace *string `json:"workspace,omitempty"`
@@ -128,6 +129,22 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 	if f.TimeoutMinutes < 0 || f.TimeoutMinutes > 24*60 {
 		return errors.New("timeout must be at most 1440 minutes")
 	}
+	if f.SkillBindings != nil {
+		normalized, err := tasksvc.NormalizeBindings(*f.SkillBindings)
+		if err != nil {
+			return err
+		}
+		if _, err = s.deps.Skills.ResolveBindings(ctx, normalized); err != nil {
+			return err
+		}
+		f.SkillBindings = &normalized
+		f.SkillID = ""
+		f.SkillVersionID = ""
+		if len(normalized) > 0 {
+			f.SkillID = normalized[0].SkillID
+			f.SkillVersionID = normalized[0].VersionID
+		}
+	}
 	if f.SkillID != "" {
 		found := false
 		list, _ := s.deps.Skills.List(ctx)
@@ -201,14 +218,26 @@ func specFromForm(spec tasksvc.Spec, f taskForm) tasksvc.Spec {
 	if f.TimeoutMinutes > 0 {
 		spec.TimeoutMinutes = f.TimeoutMinutes
 	}
-	spec.SkillBindings = nil
-	if f.SkillID != "" {
-		b := tasksvc.SkillBinding{SkillID: f.SkillID, Mode: "follow"}
+	if f.SkillBindings != nil {
+		spec.SkillBindings = append([]tasksvc.SkillBinding(nil), (*f.SkillBindings)...)
+	} else if f.SkillID != "" {
+		b := tasksvc.SkillBinding{SkillID: f.SkillID, Mode: "follow", Role: "primary"}
 		if f.SkillVersionID != "" {
-			b.Mode, b.VersionID = "pinned", f.SkillVersionID
+			b.Mode = "pinned"
+			b.VersionID = f.SkillVersionID
 		}
+		old := spec.SkillBindings
 		spec.SkillBindings = []tasksvc.SkillBinding{b}
+		for i, aux := range old {
+			if i > 0 && aux.SkillID != b.SkillID {
+				aux.Role = "auxiliary"
+				spec.SkillBindings = append(spec.SkillBindings, aux)
+			}
+		}
+	} else if len(spec.SkillBindings) <= 1 {
+		spec.SkillBindings = nil
 	}
+
 	return spec
 }
 
@@ -233,7 +262,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if f.SkillID != "" {
+	if f.SkillID != "" || f.SkillBindings != nil {
 		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, specFromForm(*tv.Spec, f), "user", "bind skill"); err != nil {
 			writeErr(w, 500, err.Error())
 			return
@@ -302,10 +331,12 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 		ws = ""
 	}
 	f.Workspace = &ws
-	if len(v.Spec.SkillBindings) > 0 {
-		f.SkillID = v.Spec.SkillBindings[0].SkillID
-		if v.Spec.SkillBindings[0].Mode == "pinned" {
-			f.SkillVersionID = v.Spec.SkillBindings[0].VersionID
+	bindings, _ := tasksvc.NormalizeBindings(v.Spec.SkillBindings)
+	f.SkillBindings = &bindings
+	if len(bindings) > 0 {
+		f.SkillID = bindings[0].SkillID
+		if bindings[0].Mode == "pinned" {
+			f.SkillVersionID = bindings[0].VersionID
 		}
 	}
 	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(max_usd,0) FROM budgets WHERE scope='task' AND scope_id=? AND period='day' AND bucket=''`, id).Scan(&f.BudgetUSD)

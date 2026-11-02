@@ -103,6 +103,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 
 // UpdateSpec commits a new task version from an edited spec (pointer move).
 func (s *Service) UpdateSpec(ctx context.Context, taskID string, spec Spec, actor, reason string) (TaskView, error) {
+	bindings, err := NormalizeBindings(spec.SkillBindings)
+	if err != nil {
+		return TaskView{}, err
+	}
+	spec.SkillBindings = bindings
 	task, err := s.Store.GetTask(ctx, taskID)
 	if err != nil {
 		return TaskView{}, err

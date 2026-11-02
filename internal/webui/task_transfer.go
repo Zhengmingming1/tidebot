@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -28,7 +29,7 @@ import (
 
 const (
 	taskFileKind    = "tidebot.tasks"
-	taskFileVersion = 1
+	taskFileVersion = 2
 	maxImportTasks  = 200
 	maxImportBytes  = 4 << 20
 )
@@ -42,11 +43,16 @@ type taskFile struct {
 }
 
 type taskFileSkill struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
+	Role        string `json:"role,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	VersionID   string `json:"version_id,omitempty"`
+	VersionHash string `json:"version_hash,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
 }
 
 type taskFileEntry struct {
+	Skills         []taskFileSkill `json:"skills,omitempty"`
 	Name           string          `json:"name"`
 	Goal           string          `json:"goal,omitempty"`
 	Prompt         string          `json:"prompt"`
@@ -82,12 +88,18 @@ func (s *Server) exportTasks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	f := taskFile{Kind: taskFileKind, Version: taskFileVersion, ExportedAt: time.Now().UTC().Format(time.RFC3339), App: "tidebot " + buildinfo.Version, Tasks: []taskFileEntry{}}
+	f := taskFile{Kind: taskFileKind, Version: 1, ExportedAt: time.Now().UTC().Format(time.RFC3339), App: "tidebot " + buildinfo.Version, Tasks: []taskFileEntry{}}
 	for _, v := range list {
 		if v.Task.Status == "archived" || v.Spec == nil || (len(want) > 0 && !want[v.Task.ID]) {
 			continue
 		}
-		f.Tasks = append(f.Tasks, s.taskEntryOf(ctx, v))
+		entry := s.taskEntryOf(ctx, v)
+		if len(entry.Skills) > 1 || len(entry.Skills) == 1 && entry.Skills[0].Mode == "pinned" {
+			f.Version = taskFileVersion
+		} else {
+			entry.Skills = nil
+		}
+		f.Tasks = append(f.Tasks, entry)
 	}
 	if len(want) > 0 && len(f.Tasks) == 0 {
 		writeErr(w, 404, "task not found")
@@ -112,19 +124,23 @@ func (s *Server) taskEntryOf(ctx context.Context, v tasksvc.TaskView) taskFileEn
 	for _, c := range sp.Constraints {
 		e.Constraints = append(e.Constraints, c.Text)
 	}
-	if len(sp.SkillBindings) > 0 {
-		b := sp.SkillBindings[0]
-		e.Skill = &taskFileSkill{ID: b.SkillID, Name: b.SkillName}
-		if e.Skill.Name == "" && s.deps.Skills != nil {
-			if all, err := s.deps.Skills.List(ctx); err == nil {
-				for _, k := range all {
-					if k.ID == b.SkillID {
-						e.Skill.Name = k.Name
-					}
-				}
+	for _, b := range sp.SkillBindings {
+		k := taskFileSkill{ID: b.SkillID, Name: b.SkillName, Role: b.Role, Mode: b.Mode, VersionID: b.VersionID}
+		if k.Name == "" {
+			_ = s.deps.DB.QueryRowContext(ctx, `SELECT name FROM skills WHERE id=?`, b.SkillID).Scan(&k.Name)
+		}
+		if k.Mode == "pinned" && k.VersionID != "" {
+			if v, err := s.deps.Ver.GetVersion(ctx, k.VersionID); err == nil {
+				k.VersionHash = v.ContentHash
 			}
 		}
+		e.Skills = append(e.Skills, k)
 	}
+	if len(e.Skills) > 0 {
+		first := e.Skills[0]
+		e.Skill = &first
+	}
+
 	if s.deps.DB != nil {
 		_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(max_usd,0) FROM budgets WHERE scope='task' AND scope_id=? AND period='day' AND bucket=''`, v.Task.ID).Scan(&e.BudgetUSD)
 		pf := policyFormOf((&policy.Store{DB: s.deps.DB}).Get(ctx, v.Task.ID))
@@ -286,7 +302,14 @@ func (s *Server) checkImport(ctx context.Context, i int, e *taskFileEntry, taken
 			res.Notes = append(res.Notes, "provider_missing")
 		}
 	}
-	if e.Skill != nil && s.deps.Skills != nil {
+	if e.Skills != nil {
+		bindings, err := s.importTaskBindings(ctx, e.Skills)
+		if err != nil {
+			res.Error = err.Error()
+			return res, f, tasksvc.Spec{}
+		}
+		f.SkillBindings = &bindings
+	} else if e.Skill != nil && s.deps.Skills != nil {
 		if all, err := s.deps.Skills.List(ctx); err == nil {
 			for _, k := range all {
 				if k.ID == e.Skill.ID {
@@ -369,4 +392,53 @@ func (s *Server) createImported(ctx context.Context, f taskForm, extra tasksvc.S
 		return undo(err)
 	}
 	return tv.Task.ID, nil
+}
+
+// New task exports preserve the full composition. A missing pinned version must
+// be imported first, rather than silently replacing it with today's current one.
+func (s *Server) importTaskBindings(ctx context.Context, in []taskFileSkill) ([]tasksvc.SkillBinding, error) {
+	if len(in) > 16 {
+		return nil, errors.New("at most 16 skills may be attached")
+	}
+	all, err := s.deps.Skills.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tasksvc.SkillBinding, 0, len(in))
+	for _, k := range in {
+		skillID := ""
+		for _, sk := range all {
+			if sk.ID == k.ID {
+				skillID = sk.ID
+				break
+			}
+		}
+		if skillID == "" {
+			for _, sk := range all {
+				if sk.Name == k.Name {
+					skillID = sk.ID
+					break
+				}
+			}
+		}
+		if skillID == "" {
+			return nil, fmt.Errorf("skill %q is missing; import its skill package first", k.Name)
+		}
+		b := tasksvc.SkillBinding{SkillID: skillID, SkillName: k.Name, Role: k.Role, Mode: k.Mode, VersionID: k.VersionID}
+		if b.Mode == "pinned" {
+			v, e := s.deps.Ver.GetVersion(ctx, b.VersionID)
+			if e != nil || v.EntityType != "skill" || v.EntityID != skillID || k.VersionHash != "" && v.ContentHash != k.VersionHash {
+				if k.VersionHash == "" {
+					return nil, fmt.Errorf("pinned version for %q is missing", k.Name)
+				}
+				v, e = s.deps.Ver.FindByHash(ctx, "skill", skillID, k.VersionHash)
+				if e != nil {
+					return nil, fmt.Errorf("pinned version for %q is missing; import its skill package first", k.Name)
+				}
+			}
+			b.VersionID = v.ID
+		}
+		out = append(out, b)
+	}
+	return tasksvc.NormalizeBindings(out)
 }

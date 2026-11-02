@@ -27,22 +27,26 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
+	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
 
 // Deps are services the HTTP layer needs.
 type Deps struct {
-	Cfg      *config.Config
-	DB       *sql.DB
-	Store    *db.Store
-	Auth     *auth.Service
-	Cost     *cost.Service
-	Tasks    *tasksvc.Service
-	Amend    *amend.Service
-	Skills   *skillstore.Service
-	Ver      *version.Service
-	Reg      *provider.Registry
-	Log      *slog.Logger
-	OnToggle func(enabled bool) // optional: persist + apply
+	StartDependencyCheck  func(DependencyCheckRequest) (string, error)
+	DependencyCheckStatus func(context.Context, string) (DependencyCheckStatus, error)
+	Cfg                   *config.Config
+	DB                    *sql.DB
+	Store                 *db.Store
+	Auth                  *auth.Service
+	Cost                  *cost.Service
+	Tasks                 *tasksvc.Service
+	Amend                 *amend.Service
+	Skills                *skillstore.Service
+	Workflows             *workflow.Service
+	Ver                   *version.Service
+	Reg                   *provider.Registry
+	Log                   *slog.Logger
+	OnToggle              func(enabled bool) // optional: persist + apply
 
 	// Execution hooks provided by app; they start work asynchronously and return the new
 	// run's id once its row exists (written before the run waits for a free slot).

@@ -214,7 +214,7 @@
     offline: '<path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/>',
     tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1"/>'
   };
-  function ic(name, cls) { return '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[name] || P.circle) + "</svg>"; }
+  function ic(name, cls) { if (name === "workflows") name = "branch"; return '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[name] || P.circle) + "</svg>"; }
   var BUTTON_ICONS = ["doc", "sync", "pie", "trash", "bolt", "terminal", "calendar", "pulse", "shield", "globe", "mail", "database", "code", "rocket", "bug", "cloud", "camera", "book", "box", "git", "chat", "image", "link", "download", "star", "cpu", "server", "edit"];
   function btnIcon(b) { return P[b.icon] ? b.icon : "bolt"; }
 
@@ -731,7 +731,7 @@
   }
   function emptyState(icon, title, sub) { return '<div class="empty">' + ic(icon) + "<strong>" + esc(title) + "</strong>" + esc(sub || "") + "</div>"; }
   // ---------- shell ----------
-  var NAV = [["home", "#/"], ["tasks", "#/tasks"], ["skills", "#/skills"], ["buttons", "#/buttons"], ["plugins", "#/plugins"], ["runs", "#/runs"], ["spend", "#/spend"], ["settings", "#/settings"]];
+  var NAV = [["home", "#/"], ["tasks", "#/tasks"], ["skills", "#/skills"], ["workflows", "#/workflows"], ["buttons", "#/buttons"], ["plugins", "#/plugins"], ["runs", "#/runs"], ["spend", "#/spend"], ["settings", "#/settings"]];
   var shellNavChoice = null, shellNavOff = null;
   function syncShellNav() {
     var shell = $("#shell"), toggle = $("#nav-toggle");
@@ -2399,10 +2399,10 @@
       try { lastProv = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
       if (edit && edit.provider) lastProv = edit.provider;
       if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
-      var skOpts = '<option value="">' + esc(T("rn.no_skill")) + "</option>" + skills.map(function (k) { return '<option value="' + esc(k.id) + '"' + (k.id === pre.skill_id ? " selected" : "") + ">" + esc(k.name) + "</option>"; }).join("");
+
       modal('<div class="card-head"><span class="ico">' + ic(edit ? "edit" : "play") + "</span><h2>" + esc(T(edit ? "qr.edit_title" : "rn.title")) + "</h2></div>" +
         '<form id="qr" class="rn-form">' +
-        '<div class="rn-two"><label class="field"><span>' + esc(T("rn.skill")) + tip(T("rn.skill_tip")) + '</span><select name="skill_id" id="rn-skill">' + skOpts + "</select></label>" +
+        '<input type="hidden" name="skill_id" id="rn-skill"><div id="rn-bindings"></div><div class="rn-two">' +
         '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label></div>" +
         '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">' + esc(T("rn.folder")) + "</span>" + tip(T("rn.folder_tip")) + '<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>' +
           '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '"><label data-tip="' + esc(T("rn.read_tip")) + '"><input type="radio" name="mode" value="read" checked><span>' + ic("eye", "sm") + esc(T("rn.read")) + '</span></label><label data-tip="' + esc(T("rn.edit_tip")) + '"><input type="radio" name="mode" value="edit"><span>' + ic("edit", "sm") + esc(T("rn.edit")) + "</span></label></span></span>" +
@@ -2413,15 +2413,19 @@
         '<div class="field"><span class="qr-lbl"><span id="qr-lbl">' + esc(T("f.prompt")) + '</span><span class="muted rn-arg hidden" id="rn-arg"></span>' + (edit ? '<button type="button" class="linkish qr-reset hidden" id="qr-reset" data-tip="' + esc(T("qr.revert_tip")) + '">' + ic("rollback", "sm") + esc(T("qr.revert")) + "</button>" : draftTagHtml()) + '</span><textarea name="prompt" aria-labelledby="qr-lbl" required maxlength="8000" placeholder="' + esc(T("qr.placeholder")) + '"></textarea></div>' +
         '<div class="qr-recent hidden" id="qr-recent" role="group" aria-label="' + esc(T("qr.recent")) + '"><span class="muted">' + esc(T("qr.recent")) + "</span></div>" +
         '<p class="hint rn-hint" id="rn-hint"></p><p class="field-err" id="rn-err"></p>' +
-        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit" data-tip="' + esc(T("qr.run_key", { k: keyLabel("Mod+Enter") })) + '">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
+        '<div class="actions"><button type="button" class="btn" id="rn-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary" type="submit" data-tip="' + esc(T("qr.run_key", { k: keyLabel("Mod+Enter") })) + '">' + ic("play", "sm") + esc(T("btn.run")) + "</button></div></form>",
         function (root, close) {
           var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root), ws = form.workspace;
+          var initial = pre.skill_bindings || (pre.skill_id ? [{skill_id:pre.skill_id,mode:pre.version_id?"pinned":"follow",version_id:pre.version_id||"",role:"primary"}] : []);
+          var editor = skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs){form.skill_id.value=bs.length?bs[0].skill_id:"";form.skill_id.dispatchEvent(new Event("change",{bubbles:true}));});
+          form.skill_id.value=editor.value().length?editor.value()[0].skill_id:"";
+          $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value()});});
           var pill = $("#rn-ws-st", root), pick = $("#rn-ws-pick", root), clear = $("#rn-ws-clear", root), dirsBox = $("#rn-dirs", root), hint = $("#rn-hint", root), err = $("#rn-err", root), argEl = $("#rn-arg", root);
           var wsState = { problem: "", git: null }, seq = 0, timer = 0, wsTouched = false, recentDirs = [];
           var modeVal = function () { var c = form.querySelector('input[name="mode"]:checked'); return c ? c.value : "read"; };
           var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" ? "edit" : "read"); }); };
-          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, workspace: ws.value.trim(), mode: ws.value.trim() ? modeVal() : "" }; };
-          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: edit.skill_id || "", workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : "" } : null;
+          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), workspace: ws.value.trim(), mode: ws.value.trim() ? modeVal() : "" }; };
+          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : "" } : null;
           // the hint under the form says what the run may do; a dirty git folder warns before "Can edit"
           var paintHint = function () {
             var dir = ws.value.trim(), m = modeVal(), g = wsState.git, warn = false, txt;
@@ -2501,7 +2505,7 @@
           $$('input[name="mode"]', form).forEach(function (i) { i.addEventListener("change", function () { paintHint(); syncEdit(); }); });
           clear.addEventListener("click", function () { wsTouched = true; setWs(""); drawDirs(); ws.focus(); });
           dirsBox.addEventListener("click", function (e) { var b = e.target.closest(".rn-dir"); if (!b) return; wsTouched = true; setWs(b.getAttribute("data-dir")); drawDirs(); });
-          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; form.skill_id.value = orig.skill_id; setWs(orig.workspace); setMode(orig.mode); paintSkill(); sync(); ta.focus(); });
+          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; editor.set(orig.skill_bindings); form.skill_id.value = orig.skill_id; setWs(orig.workspace); setMode(orig.mode); paintSkill(); sync(); ta.focus(); });
           box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); sync(); ta.focus(); });
           folderPickable().then(function (ok) {
             if (!ok || !root.contains(pick)) return;
@@ -2537,7 +2541,8 @@
   // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).
   function rnEdited(orig, c) {
     if (!orig) return false;
-    return qrEdited(orig, c.prompt, c.provider) || (c.skill_id || "") !== (orig.skill_id || "") || (c.workspace || "") !== (orig.workspace || "") || (c.workspace ? c.mode : "") !== (orig.workspace ? orig.mode : "");
+    var bindingsChanged=JSON.stringify(c.skill_bindings||[])!==JSON.stringify(orig.skill_bindings||[]);
+    return bindingsChanged || qrEdited(orig, c.prompt, c.provider) || (c.skill_id || "") !== (orig.skill_id || "") || (c.workspace || "") !== (orig.workspace || "") || (c.workspace ? c.mode : "") !== (orig.workspace ? orig.mode : "");
   }
   // qrEdited: has the edit-&-rerun form moved away from the original run? Trailing
   // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).
@@ -3203,6 +3208,8 @@
       });
       wireRows();
       $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { var tb = b.getAttribute("data-tab"); history.replaceState(null, "", "#/tasks/" + enc(id) + "/" + tb); lastHash = location.hash; renderTaskDetail(id, tb); }); });
+      var depButton=document.createElement("button");depButton.className="btn";depButton.textContent=T("dep.check");depButton.id="t-dependencies";
+      $("#t-run").parentNode.insertBefore(depButton,$("#t-run"));depButton.onclick=function(){dependencyCheck({kind:"task",id:id});};
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(fail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
       $("#t-dup").addEventListener("click", function () {
@@ -3318,6 +3325,214 @@
     });
   }
 
+  // ---------- reusable skill compositions ----------
+  var skillEditorSeq = 0;
+  function skillTabs(active) {
+    return '<nav class="ss-tabs" aria-label="' + esc(T("ss.tabs")) + '">' + [["skills", "nav.skills"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) { return '<a class="btn sm ' + (active === x[0] ? "primary" : "ghost") + '" href="#/' + x[0] + '"' + (active === x[0] ? ' aria-current="page"' : "") + '>' + esc(T(x[1])) + '</a>'; }).join("") + '</nav>';
+  }
+  function skillBindingEditor(box, skills, initial, onChange) {
+    var uid = "ss-role-" + (++skillEditorSeq), bindings = [], versions = {}, loading = {}, sets = [];
+    function normalize(bs) {
+      var out = (bs || []).map(function (b) { return { skill_id: b.skill_id, skill_name: b.skill_name || "", role: b.role || "", mode: b.mode || (b.version_id ? "pinned" : "follow"), version_id: b.version_id || "" }; });
+      if (out.length && !out.some(function (b) { return b.role === "primary"; })) out[0].role = "primary";
+      out.forEach(function (b) { if (!b.role) b.role = "auxiliary"; if (b.mode !== "pinned") b.version_id = ""; });
+      return out.filter(function (b) { return b.role === "primary"; }).concat(out.filter(function (b) { return b.role !== "primary"; }));
+    }
+    function value() { return bindings.map(function (b) { return Object.assign({}, b); }); }
+    function changed() { bindings = normalize(bindings); paint(); if (onChange) onChange(value()); box.dispatchEvent(new Event("input", { bubbles: true })); }
+    function paint() {
+      var available = skills.filter(function (s) { return !bindings.some(function (b) { return b.skill_id === s.id; }); });
+      box.innerHTML = '<div class="ss-editor"><p class="hint">' + esc(T("ss.editor_hint")) + '</p>' +
+        (bindings.length ? '<div class="ss-members">' + bindings.map(function (b, i) {
+          var skill = skills.filter(function (s) { return s.id === b.skill_id; })[0], vs = versions[b.skill_id] || [], missingVersion = b.version_id && !vs.some(function (v) { return v.id === b.version_id; });
+          var opts = opt("", T("bt.latest"), b.mode !== "pinned");
+          if (missingVersion) opts += opt(b.version_id, T("ss.pinned") + " · " + b.version_id, true);
+          opts += vs.map(function (v) { return opt(v.id, T("bt.pin_v", { n: v.no }), b.mode === "pinned" && b.version_id === v.id); }).join("");
+          return '<div class="ss-member" data-member="' + i + '"><label class="ss-role"><input type="radio" name="' + uid + '" data-role="' + i + '"' + (b.role === "primary" ? " checked" : "") + '><span>' + esc(T(b.role === "primary" ? "ss.primary" : "ss.auxiliary")) + '</span></label><div class="ss-member-name"><strong>' + esc(skill ? skill.name : b.skill_name || b.skill_id) + '</strong>' + (!skill ? '<small class="field-err">' + esc(T("ss.missing")) + '</small>' : "") + '</div><select data-version="' + i + '" aria-label="' + esc(T("bt.skill_ver") + " " + (skill ? skill.name : b.skill_id)) + '">' + opts + '</select><button type="button" class="icon-btn sm" data-remove="' + i + '" aria-label="' + esc(T("ss.remove")) + '">' + ic("x", "sm") + '</button></div>';
+        }).join("") + '</div>' : '<p class="muted">' + esc(T("ss.no_members")) + '</p>') +
+        '<div class="ss-add"><select data-add aria-label="' + esc(T("ss.add")) + '"' + (bindings.length >= 16 ? " disabled" : "") + '>' + opt("", T("ss.add"), true) + available.map(function (s) { return opt(s.id, s.name, false); }).join("") + '</select><select data-set aria-label="' + esc(T("ss.use_set")) + '">' + opt("", T("ss.use_set"), true) + sets.map(function (s) { return opt(s.id, s.name + " · v" + s.version_no, false); }).join("") + '</select></div></div>';
+      $('[data-add]', box).addEventListener("change", function (e) { var sk = skills.filter(function (s) { return s.id === e.target.value; })[0]; if (!sk || bindings.length >= 16) return; bindings.push({ skill_id: sk.id, skill_name: sk.name, role: bindings.length ? "auxiliary" : "primary", mode: "follow", version_id: "" }); changed(); });
+      $('[data-set]', box).addEventListener("change", function (e) { var set = sets.filter(function (s) { return s.id === e.target.value; })[0]; if (set) { bindings = normalize(set.skill_bindings); changed(); } });
+      $$('[data-role]', box).forEach(function (r) { r.addEventListener("change", function () { var n = +r.getAttribute("data-role"); bindings.forEach(function (b, i) { b.role = i === n ? "primary" : "auxiliary"; }); changed(); }); });
+      $$('[data-remove]', box).forEach(function (b) { b.addEventListener("click", function () { bindings.splice(+b.getAttribute("data-remove"), 1); changed(); }); });
+      $$('[data-version]', box).forEach(function (v) { v.addEventListener("change", function () { var b = bindings[+v.getAttribute("data-version")]; b.mode = v.value ? "pinned" : "follow"; b.version_id = v.value; changed(); }); });
+      bindings.forEach(function (b) {
+        if (versions[b.skill_id] || loading[b.skill_id] || !skills.some(function (s) { return s.id === b.skill_id; })) return;
+        loading[b.skill_id] = true;
+        api("/api/skills/" + enc(b.skill_id) + "/versions").then(function (v) { versions[b.skill_id] = (v.versions || []).slice().reverse(); if (document.contains(box)) paint(); }).catch(function () { versions[b.skill_id] = []; });
+      });
+    }
+    bindings = normalize(initial); paint();
+    api("/api/skill-sets").then(function (v) { sets = v || []; if (document.contains(box)) paint(); }).catch(function () {});
+    return { value: value, set: function (bs) { bindings = normalize(bs); changed(); } };
+  }
+  function skillSetModal(set, skills) {
+    set = set || { name: "", skill_bindings: [] };
+    modal('<div class="card-head"><span class="ico">' + ic("skills") + '</span><h2>' + esc(T(set.id ? "ss.edit" : "ss.new")) + '</h2></div><form id="ss-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(set.name) + '">') + '<div id="ss-members"></div><p class="hint">' + esc(T("ss.freeze_hint")) + '</p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn" id="ss-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="submit" class="btn primary">' + esc(T("btn.save")) + '</button></div></form>', function (root, close) {
+      var f = $('#ss-form', root), editor = skillBindingEditor($('#ss-members', root), skills, set.skill_bindings);
+      $('#ss-dependencies', root).addEventListener("click", function () { dependencyCheck({ kind: "draft", skill_bindings: editor.value(), prompt: "", provider: "" }); });
+      f.addEventListener("submit", function (e) { e.preventDefault(); var bs = editor.value(); if (bs.length < 2) { toast(T("ss.need_two"), true); return; } var btn = $('button[type=submit]', f); btn.disabled = true;
+        api("/api/skill-sets" + (set.id ? "/" + enc(set.id) : ""), { method: set.id ? "PUT" : "POST", body: { name: f.name.value.trim(), skill_bindings: bs, expected_version_id: set.version_id || "" } }).then(function () { close(); toast(T("ss.saved")); renderSkillSets(); }).catch(function (err) { btn.disabled = false; fail(err); });
+      });
+    });
+  }
+  function renderSkillSets() {
+    return Promise.all([api("/api/skill-sets"), api("/api/skills")]).then(function (r) {
+      var sets = r[0], skills = r[1];
+      mount('<div class="page-head"><div><h1>' + esc(T("ss.title")) + '</h1><p>' + esc(T("ss.subtitle")) + '</p></div><div class="actions"><label class="btn">' + ic("upload", "sm") + esc(T("ss.import")) + '<input type="file" id="ss-import" class="hidden" accept=".zip"></label><button class="btn primary" id="ss-new">' + ic("plus", "sm") + esc(T("ss.new")) + '</button></div></div>' + skillTabs("skill-sets") +
+        (sets.length ? '<div class="ss-grid">' + sets.map(function (set) { return '<section class="card" data-set-card="' + esc(set.id) + '"><div class="card-head"><span class="ico">' + ic("skills") + '</span><h2>' + esc(set.name) + '</h2><span class="tag perm">v' + esc(set.version_no) + '</span></div><ul class="list-plain">' + set.skill_bindings.map(function (b) { return '<li><strong>' + esc(T(b.role === "primary" ? "ss.primary" : "ss.auxiliary")) + '</strong> · ' + esc(b.skill_name || b.skill_id) + '</li>'; }).join("") + '</ul><div class="row-actions ss-card-actions"><button class="btn primary sm" data-set-run>' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="btn sm" data-set-edit>' + esc(T("ss.edit")) + '</button><button class="btn sm" data-set-check>' + esc(T("ss.dependencies")) + '</button><button class="icon-btn sm" data-set-export aria-label="' + esc(T("ss.export")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" data-set-delete aria-label="' + esc(T("ss.delete")) + '">' + ic("trash", "sm") + '</button></div></section>'; }).join("") + '</div>' : emptyState("skills", T("ss.empty"), T("ss.subtitle"))), "skills", [[T("ss.title")]]);
+      $('#ss-new').addEventListener("click", function () { skillSetModal(null, skills); });
+      $('#ss-import').addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var fd = new FormData(); fd.append("file", f); e.target.disabled = true; upload("/api/skill-sets/import", fd).then(function () { toast(T("ss.imported")); renderSkillSets(); }).catch(function (err) { e.target.disabled = false; e.target.value = ""; if(err.data&&err.data.partial)toast(T("ss.import_partial",{n:(err.data.imported_skill_ids||[]).length})+" "+err.message,true);else fail(err); }); });
+      $$('[data-set-card]').forEach(function (card) { var set = sets.filter(function (s) { return s.id === card.getAttribute("data-set-card"); })[0];
+        $('[data-set-run]', card).addEventListener("click", function () { quickRunModal({ skill_bindings: set.skill_bindings }); });
+        $('[data-set-edit]', card).addEventListener("click", function () { skillSetModal(set, skills); });
+        $('[data-set-check]', card).addEventListener("click", function () { dependencyCheck({ kind: "skill_set", id: set.id }); });
+        $('[data-set-export]', card).addEventListener("click", function (e) { downloadFile("/api/skill-sets/" + enc(set.id) + "/export", "tidebot-skill-set.zip", e.currentTarget); });
+        $('[data-set-delete]', card).addEventListener("click", function () { confirmDialog({title:T("ss.delete"),body:T("ss.delete_note",{name:set.name}),ok:T("ss.delete"),danger:true}).then(function(yes){if(yes)api("/api/skill-sets/"+enc(set.id),{method:"DELETE"}).then(renderSkillSets).catch(fail);}); });
+      });
+    });
+  }
+
+  var workflowDraftGuard = null;
+  // ---------- workflow canvas ----------
+  function wfStatus(s) { return '<span class="pill ' + (s==='succeeded'?'ok':s==='failed'||s==='interrupted'?'bad':s==='running'||s==='queued'?'info':'') + '">' + esc(T('wf.status_'+s)) + '</span>'; }
+  function wfLevels(nodes) {
+    var levels=Object.create(null), pending=nodes.slice(), count=0;
+    while(pending.length && count++<=nodes.length) {
+      var next=[];pending.forEach(function(n){if((n.needs||[]).every(function(d){return levels[d.node_id]!=null;}))levels[n.id]=(n.needs||[]).reduce(function(m,d){return Math.max(m,levels[d.node_id]+1);},0);else next.push(n);});
+      if(next.length===pending.length)return null;pending=next;
+    } return levels;
+  }
+  function wfArrange(def) {
+    var levels=wfLevels(def.nodes);if(!levels)return false;var rows={};
+    def.nodes.forEach(function(n){var l=levels[n.id];n.position={x:40+l*290,y:50+(rows[l]||0)*150};rows[l]=(rows[l]||0)+1;});return true;
+  }
+  function wfScene(def, selected, states) {
+    var nodes=def.nodes||[], points=Object.create(null), width=1000,height=600,lines=[],boxes=[];
+    nodes.forEach(function(n,i){var p=n.position||{x:40+(i%3)*290,y:50+Math.floor(i/3)*150};points[n.id]=p;width=Math.max(width,p.x+280);height=Math.max(height,p.y+150);});
+    nodes.forEach(function(n){var p=points[n.id];(n.needs||[]).forEach(function(d){var q=points[d.node_id];if(!q)return;var y=q.y+(d.branch==='true'?30:d.branch==='false'?65:43);lines.push('<path class="wf-edge" d="M '+(q.x+200)+' '+y+' C '+(q.x+250)+' '+y+' '+(p.x-50)+' '+(p.y+43)+' '+p.x+' '+(p.y+43)+'"/>');if(d.branch)lines.push('<text class="wf-edge-label" x="'+(q.x+214)+'" y="'+(y-10)+'">'+esc(T('wf.branch_'+d.branch))+'</text>');});
+      var status=states&&states[n.id],title='',units=0;Array.from(n.name||n.id).some(function(c){var size=c.charCodeAt(0)>127?2:1;if(units+size>22){title+='…';return true;}title+=c;units+=size;return false;});
+      boxes.push('<g class="wf-node '+(n.kind==='condition'?'condition ':'')+(selected===n.id?'selected ':'')+esc(status||'')+'" data-node="'+esc(n.id)+'" tabindex="0" role="button" aria-label="'+esc(n.name||n.id)+'" transform="translate('+p.x+' '+p.y+')"><rect class="wf-node-bg" width="200" height="86" rx="14"/><text x="16" y="27" class="wf-node-title">'+esc(title)+'</text><text x="16" y="49" class="wf-node-sub">'+esc(n.id)+'</text><text x="16" y="70" class="wf-node-sub">'+esc(status?T('wf.status_'+status):T(n.kind==='condition'?'wf.condition':'wf.skill_step'))+'</text><circle class="wf-port in" data-in="'+esc(n.id)+'" cx="0" cy="43" r="8"/>'+(n.kind==='condition'?'<circle class="wf-port true" data-out="'+esc(n.id)+'" data-branch="true" cx="200" cy="30" r="8"/><circle class="wf-port false" data-out="'+esc(n.id)+'" data-branch="false" cx="200" cy="65" r="8"/>':'<circle class="wf-port out" data-out="'+esc(n.id)+'" data-branch="" cx="200" cy="43" r="8"/>')+'</g>');
+    });return {html:lines.join('')+boxes.join(''),width:width,height:height};
+  }
+  function wfDiagram(def, results) {
+    var states=Object.create(null);(results||[]).forEach(function(n){states[n.node_id]=n.status;});var copy=JSON.parse(JSON.stringify(def));if(copy.nodes.some(function(n){return !n.position;}))wfArrange(copy);var scene=wfScene(copy,'',states);
+    return '<div class="wf-trace-graph"><svg role="img" aria-label="'+esc(T('wf.graph'))+'" viewBox="0 0 '+scene.width+' '+scene.height+'">'+scene.html+'</svg></div>';
+  }
+  function renderWorkflows() {
+    return api('/api/workflows').then(function(items){
+      mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div>'+skillTabs('workflows')+
+        (items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
+      $$('[data-wf-run]').forEach(function(b){b.onclick=function(){workflowRunModal(b.dataset.wfRun);};});
+      $$('[data-wf-deps]').forEach(function(b){b.onclick=function(){dependencyCheck({kind:'workflow',id:b.dataset.wfDeps});};});
+    });
+  }
+  function workflowRunModal(id) {
+    Promise.all([api('/api/workflows/'+enc(id)),api('/api/settings')]).then(function(r){var w=r[0],st=r[1];
+      modal('<div class="card-head"><h2>'+esc(w.name)+'</h2><span class="tag">v'+esc(w.version)+'</span></div><form id="wf-run-form">'+fieldHtml(T('wf.input'),'<textarea name="input" rows="5" maxlength="32000" placeholder="'+esc(T('wf.input_hint'))+'"></textarea>')+fieldHtml(T('f.provider'),'<select name="provider">'+st.providers.map(function(p){return opt(p.name,p.name,p.name===st.default_provider);}).join('')+'</select>')+'<p class="notice">'+esc(T('wf.run_notice'))+'</p><p class="field-err" id="wf-run-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="submit" class="btn primary">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></form>',function(root,close){
+        var f=$('#wf-run-form',root);f.onsubmit=function(e){e.preventDefault();var b=f.querySelector('[type=submit]');b.disabled=true;
+          api('/api/workflows/'+enc(id)+'/run',{method:'POST',body:{input:f.input.value,provider:f.provider.value}}).then(function(x){close();location.hash='#/workflow-runs/'+enc(x.run_id);}).catch(function(e){b.disabled=false;$('#wf-run-error',root).textContent=e.message;});};
+      });
+    }).catch(fail);
+  }
+  function renderWorkflowEditor(id) {
+    var routeKey=location.hash,creating=!id||id==='new';
+    return Promise.all([api('/api/skills'),api('/api/skill-sets'),creating?Promise.resolve(null):api('/api/workflows/'+enc(id))]).then(function(r){
+      if(location.hash!==routeKey || workflowDraftGuard&&workflowDraftGuard.dirty())return;
+      var skills=r[0],sets=r[1],saved=r[2],def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:30,nodes:[]};
+      if(def.nodes.some(function(n){return !n.position;}))wfArrange(def);
+      var selected=def.nodes.length?def.nodes[0].id:'',zoom=0.85,drag=null,link=null,baseline=JSON.stringify(def);
+      mount('<div class="page-head wf-page-head"><div><a href="#/workflows">← '+esc(T('nav.workflows'))+'</a><h1>'+esc(creating?T('wf.create'):saved.name)+'</h1></div><div class="row-actions"><button class="btn" id="wf-check">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" id="wf-save">'+ic('check','sm')+esc(T('btn.save'))+'</button>'+(creating?'':'<button class="btn" id="wf-run">'+ic('play','sm')+esc(T('btn.run'))+'</button>')+'</div></div>'+
+        '<form id="wf-meta" class="card"><div class="form-row">'+fieldHtml(T('tf.name'),'<input name="name" required maxlength="80" value="'+esc(def.name)+'">')+fieldHtml(T('wf.parallel'),'<input name="max_parallel" type="number" min="1" max="4" value="'+def.max_parallel+'">')+fieldHtml(T('tf.timeout'),'<input name="timeout_minutes" type="number" min="1" max="1440" value="'+def.timeout_minutes+'">')+'</div>'+fieldHtml(T('sk.desc'),'<input name="description" maxlength="4096" value="'+esc(def.description||'')+'">')+'</form>'+
+        '<div class="wf-designer"><aside class="card wf-palette"><h2>'+esc(T('wf.palette'))+'</h2><p class="hint">'+esc(T('wf.drag_hint'))+'</p><div id="wf-palette-skills">'+skills.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="skill" data-palette-index="'+i+'">'+ic('skills','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+(skills.length?'':'<a href="#/skills">'+esc(T('wf.need_skill'))+'</a>')+'</div><h3>'+esc(T('ss.title'))+'</h3>'+sets.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="set" data-palette-index="'+i+'">'+ic('layers','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+'<h3>'+esc(T('wf.control'))+'</h3><button type="button" class="wf-palette-item" draggable="true" data-palette="condition">'+ic('branch','sm')+esc(T('wf.condition'))+'</button></aside>'+
+        '<section class="card wf-canvas-panel"><div class="wf-canvas-toolbar"><button class="btn sm" id="wf-arrange">'+esc(T('wf.arrange'))+'</button><button class="btn sm" id="wf-example">'+esc(T('wf.example'))+'</button><span class="grow"></span><label>'+esc(T('wf.zoom'))+' <select id="wf-zoom">'+[50,75,85,100,125].map(function(n){return opt(n,n+'%',n===85);}).join('')+'</select></label></div><p class="hint" id="wf-canvas-hint">'+esc(T('wf.connect_hint'))+'</p><div class="wf-canvas-scroll" id="wf-canvas-scroll"><svg id="wf-canvas" role="group" aria-label="'+esc(T('wf.graph'))+'" tabindex="0"></svg></div></section>'+
+        '<aside class="card wf-inspector" id="wf-inspector"></aside></div><p class="notice bad hidden" id="wf-error" role="alert"></p>'+
+        (creating?'':'<section class="card"><div class="card-head"><h2>'+esc(T('wf.history'))+'</h2><span class="grow"></span><button class="btn ghost sm" id="wf-delete">'+esc(T('btn.delete'))+'</button></div><div id="wf-history"></div></section>'),'workflows',[[T('nav.workflows'),'#/workflows'],[creating?T('wf.create'):saved.name]]);
+      var f=$('#wf-meta'),svg=$('#wf-canvas'),inspector=$('#wf-inspector'),host=$('#wf-canvas-scroll');
+      function read(){def.name=f.name.value.trim();def.description=f.description.value;def.max_parallel=+f.max_parallel.value;def.timeout_minutes=+f.timeout_minutes.value;return def;}
+      function error(msg){var el=$('#wf-error');el.textContent=msg||'';el.classList.toggle('hidden',!msg);}
+      function point(e){var p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;return p.matrixTransform(svg.getScreenCTM().inverse());}
+      function canvas(){var scene=wfScene(def,selected);svg.setAttribute('viewBox','0 0 '+scene.width+' '+scene.height);svg.style.width=(scene.width*zoom)+'px';svg.style.height=(scene.height*zoom)+'px';svg.innerHTML=scene.html;if(link&&link.to){var p=def.nodes.find(function(n){return n.id===link.from;}).position,y=p.y+(link.branch==='true'?30:link.branch==='false'?65:43);svg.insertAdjacentHTML('beforeend','<path class="wf-link-draft" d="M '+(p.x+200)+' '+y+' L '+link.to.x+' '+link.to.y+'"/>');}}
+      function connect(from,to,branch){if(from===to)return;var target=def.nodes.find(function(n){return n.id===to;});if(!target)return;var before=(target.needs||[]).slice();target.needs=before.filter(function(d){return d.node_id!==from;});target.needs.push({node_id:from,branch:branch||''});if(!wfLevels(def.nodes)){target.needs=before;error(T('wf.cycle'));}else error('');selected=to;canvas();inspect();}
+      function inspect(){
+        var n=def.nodes.find(function(n){return n.id===selected;});if(!n){inspector.innerHTML='<h2>'+esc(T('wf.properties'))+'</h2><p class="muted">'+esc(T('wf.select_hint'))+'</p>';return;}
+        inspector.innerHTML='<div class="card-head"><h2>'+esc(T('wf.properties'))+'</h2><span class="grow"></span><button class="icon-btn" id="wf-remove" aria-label="'+esc(T('btn.remove'))+'">'+ic('trash','sm')+'</button></div><p><code>'+esc(n.id)+'</code> · '+esc(T(n.kind==='condition'?'wf.condition':'wf.skill_step'))+'</p>'+fieldHtml(T('tf.name'),'<input id="wf-node-name" maxlength="80" value="'+esc(n.name)+'">')+
+          '<div class="wf-needs"><strong>'+esc(T('wf.predecessors'))+'</strong>'+def.nodes.filter(function(p){return p.id!==n.id;}).map(function(p){var edge=(n.needs||[]).find(function(d){return d.node_id===p.id;});return '<label class="wf-need-row"><span>'+esc(p.name||p.id)+'</span><select data-wf-need="'+esc(p.id)+'">'+opt('',T('wf.no_dependency'),!edge)+(p.kind==='condition'?opt('true',T('wf.branch_true'),edge&&edge.branch==='true')+opt('false',T('wf.branch_false'),edge&&edge.branch==='false'):opt('success',T('wf.after_success'),!!edge))+'</select></label>';}).join('')+'</div>'+fieldHtml(T('wf.join'),'<select id="wf-node-join">'+opt('all',T('wf.join_all'),n.join!=='any')+opt('any',T('wf.join_any'),n.join==='any')+'</select>')+
+          (n.kind==='skill'?'<div id="wf-bindings"></div>'+fieldHtml(T('tf.prompt'),'<textarea id="wf-node-prompt" rows="7" maxlength="32000">'+esc(n.prompt||'')+'</textarea>')+'<label class="field"><span>'+esc(T('wf.insert_output'))+'</span><select id="wf-insert-output"><option value="">'+esc(T('wf.choose_output'))+'</option><option value="{{input}}">'+esc(T('wf.input'))+'</option>'+def.nodes.filter(function(p){return p.id!==n.id&&p.kind==='skill';}).map(function(p){return opt('{{steps.'+p.id+'.output}}',p.name+' · '+p.id);}).join('')+'</select></label><p class="hint">'+esc(T('wf.input_template_hint'))+'</p>':
+          fieldHtml(T('wf.condition_source'),'<input id="wf-condition-source" value="'+esc(n.condition.source)+'">')+fieldHtml(T('wf.operator'),'<select id="wf-condition-operator">'+['contains','not_contains','equals','not_equals','empty','not_empty'].map(function(o){return opt(o,T('wf.op_'+o),o===n.condition.operator);}).join('')+'</select>')+fieldHtml(T('wf.compare_value'),'<input id="wf-condition-value" value="'+esc(n.condition.value||'')+'">')+'<p class="hint">'+esc(T('wf.condition_hint'))+'</p>');
+        $('#wf-node-name').oninput=function(){n.name=this.value;canvas();};$('#wf-node-join').onchange=function(){n.join=this.value;};
+        $('#wf-remove').onclick=function(){if(link&&link.from===n.id)link=null;if(drag&&drag.id===n.id)drag=null;def.nodes=def.nodes.filter(function(p){return p.id!==n.id;});def.nodes.forEach(function(p){p.needs=(p.needs||[]).filter(function(d){return d.node_id!==n.id;});});selected='';canvas();inspect();};
+        $$('[data-wf-need]',inspector).forEach(function(el){el.onchange=function(){if(el.value)connect(el.dataset.wfNeed,n.id,el.value==='success'?'':el.value);else{n.needs=(n.needs||[]).filter(function(d){return d.node_id!==el.dataset.wfNeed;});canvas();}};});
+        if(n.kind==='skill'){
+          skillBindingEditor($('#wf-bindings'),skills,n.skill_bindings||[],function(bs){n.skill_bindings=bs;});
+          var ta=$('#wf-node-prompt');ta.oninput=function(){n.prompt=ta.value;};
+          $('#wf-insert-output').onchange=function(){if(!this.value)return;ta.setRangeText(this.value,ta.selectionStart,ta.selectionEnd,'end');n.prompt=ta.value;ta.focus();this.value='';};
+        }else ['source','operator','value'].forEach(function(k){$('#wf-condition-'+k).oninput=function(){n.condition[k]=this.value;};});
+      }
+      function add(kind,index,position){
+        if(def.nodes.length>=32){error(T('wf.limit'));return;}var i=1;while(def.nodes.some(function(n){return n.id==='step_'+i;}))i++;
+        var item=kind==='set'?sets[index]:kind==='skill'?skills[index]:null,n={id:'step_'+i,name:item?item.name:T('wf.condition'),kind:kind==='condition'?'condition':'skill',needs:[],join:'all',position:position||{x:40+(def.nodes.length%3)*290,y:50+Math.floor(def.nodes.length/3)*150}};
+        if(n.kind==='condition')n.condition={source:'{{input}}',operator:'contains',value:''};else {n.prompt='{{input}}';n.skill_bindings=kind==='set'?JSON.parse(JSON.stringify(item.skill_bindings)):[{skill_id:item.id,role:'primary',mode:'follow'}];}
+        def.nodes.push(n);selected=n.id;canvas();inspect();
+      }
+      $$('[data-palette]').forEach(function(el){el.ondragstart=function(e){e.dataTransfer.setData('application/x-tidebot-step',JSON.stringify({kind:el.dataset.palette,index:+el.dataset.paletteIndex||0}));e.dataTransfer.effectAllowed='copy';};el.onclick=function(){add(el.dataset.palette,+el.dataset.paletteIndex||0);};});
+      host.ondragover=function(e){if(Array.from(e.dataTransfer.types).indexOf('application/x-tidebot-step')>=0){e.preventDefault();e.dataTransfer.dropEffect='copy';}};
+      host.ondrop=function(e){e.preventDefault();try{var data=JSON.parse(e.dataTransfer.getData('application/x-tidebot-step')),p=point(e);if(['skill','set','condition'].indexOf(data.kind)<0)return;if(data.kind==='skill'&&!skills[data.index]||data.kind==='set'&&!sets[data.index])return;add(data.kind,data.index,{x:Math.max(0,Math.min(10000,p.x-100)),y:Math.max(0,Math.min(10000,p.y-43))});}catch(ex){error(T('wf.bad_drop'));}};
+      svg.onpointerdown=function(e){
+        if(e.button!==0)return;var out=e.target.closest('[data-out]'),input=e.target.closest('[data-in]'),node=e.target.closest('[data-node]');
+        if(input&&link){connect(link.from,input.dataset.in,link.branch);link=null;canvas();return;}
+        if(out){link={from:out.dataset.out,branch:out.dataset.branch,to:point(e)};svg.setPointerCapture(e.pointerId);e.preventDefault();return;}
+        if(node){selected=node.dataset.node;var n=def.nodes.find(function(n){return n.id===selected;}),p=point(e);drag={id:n.id,x:p.x-n.position.x,y:p.y-n.position.y};svg.setPointerCapture(e.pointerId);canvas();inspect();e.preventDefault();}
+      };
+      svg.onpointermove=function(e){var p=point(e);if(drag){var n=def.nodes.find(function(n){return n.id===drag.id;});n.position={x:Math.max(0,Math.min(10000,p.x-drag.x)),y:Math.max(0,Math.min(10000,p.y-drag.y))};canvas();}else if(link){link.to=p;canvas();}};
+      svg.onpointerup=function(e){if(link){var hit=document.elementFromPoint(e.clientX,e.clientY),node=hit&&hit.closest('[data-node]');if(node&&node.dataset.node!==link.from){connect(link.from,node.dataset.node,link.branch);link=null;}}drag=null;if(svg.hasPointerCapture(e.pointerId))svg.releasePointerCapture(e.pointerId);canvas();};
+      svg.onpointercancel=function(){drag=null;link=null;canvas();};
+      svg.onkeydown=function(e){var el=e.target.closest('[data-node]');if(e.key==='Escape'){link=null;canvas();return;}if(!el)return;selected=el.dataset.node;var n=def.nodes.find(function(n){return n.id===selected;});if(e.key==='Enter'||e.key===' '){e.preventDefault();inspect();return;}var delta={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]}[e.key];if(delta){e.preventDefault();n.position.x=Math.max(0,Math.min(10000,n.position.x+delta[0]));n.position.y=Math.max(0,Math.min(10000,n.position.y+delta[1]));canvas();var focus=$$('[data-node]',svg).find(function(el){return el.dataset.node===selected;});if(focus)focus.focus();}};
+      $('#wf-arrange').onclick=function(){if(!wfArrange(def))error(T('wf.cycle'));canvas();};
+      $('#wf-zoom').onchange=function(){zoom=+this.value/100;canvas();};
+      $('#wf-example').onclick=function(){
+        if(def.nodes.length){error(T('wf.example_empty'));return;}
+        var binding=[],step=function(id,name,prompt,needs,join){return {id:id,name:T(name),kind:'skill',prompt:prompt,needs:needs,join:join||'all',skill_bindings:JSON.parse(JSON.stringify(binding))};};
+        def.nodes=[step('prepare','wf.sample_prepare','{{input}}',[]),{id:'gate',name:T('wf.sample_gate'),kind:'condition',needs:[{node_id:'prepare'}],join:'all',condition:{source:'{{steps.prepare.output}}',operator:'not_empty',value:''}},step('research','wf.sample_research',T('wf.sample_research_prompt')+'\n{{steps.prepare.output}}',[{node_id:'gate',branch:'true'}]),step('review','wf.sample_review',T('wf.sample_review_prompt')+'\n{{steps.prepare.output}}',[{node_id:'gate',branch:'true'}]),step('fallback','wf.sample_fallback','{{input}}',[{node_id:'gate',branch:'false'}]),step('merge','wf.sample_merge',T('wf.sample_merge_prompt')+'\n{{steps.research.output}}\n{{steps.review.output}}\n{{steps.fallback.output}}',[{node_id:'research'},{node_id:'review'},{node_id:'fallback'}],'any')];wfArrange(def);selected='prepare';canvas();inspect();toast(T('wf.example_choose'));
+      };
+      $('#wf-check').onclick=function(){dependencyCheck({kind:'workflow_draft',definition:JSON.parse(JSON.stringify(read()))});};
+      function save(e){if(e)e.preventDefault();if(!f.reportValidity())return;var b=$('#wf-save'),value=JSON.parse(JSON.stringify(read())),wasCreating=creating;b.disabled=true;error('');api(creating?'/api/workflows':'/api/workflows/'+enc(id),{method:creating?'POST':'PUT',body:creating?value:{expected_version:saved.version,definition:value}}).then(function(w){if(!document.contains(f))return;saved=w;baseline=JSON.stringify(value);toast(T('wf.saved'));if(wasCreating){creating=false;id=w.id;if(JSON.stringify(read())===baseline)location.hash='#/workflows/'+enc(w.id);else{history.replaceState(null,'','#/workflows/'+enc(w.id));lastHash=location.hash;}}else if(!$('#wf-run')&&JSON.stringify(read())===baseline){refresh();}}).catch(function(e){if(document.contains(f))error(e.message);}).finally(function(){b.disabled=false;});}
+      f.onsubmit=save;$('#wf-save').onclick=save;
+      if(!creating){$('#wf-run').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first'));return;}workflowRunModal(id);};$('#wf-delete').onclick=function(){confirmDialog({title:T('wf.delete_title'),body:T('wf.delete_hint'),ok:T('btn.delete'),danger:true}).then(function(yes){if(yes)api('/api/workflows/'+enc(id),{method:'DELETE'}).then(function(){location.hash='#/workflows';}).catch(fail);});};api('/api/workflow-runs?workflow_id='+enc(id)).then(function(rs){var h=document.contains(f)?$('#wf-history'):null;if(h)h.innerHTML=rs.length?'<ul class="wf-history">'+rs.map(function(x){return '<li><a href="#/workflow-runs/'+enc(x.id)+'">'+esc(fmtTime(x.created_at))+'</a><span class="tag">v'+esc(x.workflow_version)+'</span>'+wfStatus(x.status)+'</li>';}).join('')+'</ul>':'<p class="muted">'+esc(T('wf.no_runs'))+'</p>';}).catch(fail);}
+      baseline=JSON.stringify(read());
+      workflowDraftGuard={dirty:function(){return document.contains(f)&&JSON.stringify(read())!==baseline;}};
+      canvas();inspect();
+    });
+  }
+  function renderWorkflowRun(id) {
+    return api('/api/workflow-runs/'+enc(id)).then(function(r){
+      var active=r.status==='queued'||r.status==='running',byID=Object.create(null),order=Object.create(null);r.snapshot.nodes.forEach(function(n,i){byID[n.id]=n;order[n.id]=i;});var ordered=r.nodes.slice().sort(function(a,b){return order[a.node_id]-order[b.node_id];});
+      mount('<div class="page-head wf-page-head"><div><a href="#/workflows/'+enc(r.workflow_id)+'">← '+esc(r.snapshot.name)+'</a><h1>'+esc(T('wf.execution'))+'</h1></div><div class="row-actions">'+wfStatus(r.status)+(active?'<button class="btn danger" id="wf-stop">'+esc(T('btn.stop'))+'</button>':'')+'</div></div><section class="card"><div class="row-actions"><span class="tag">v'+esc(r.workflow_version)+'</span><span class="muted">'+esc(fmtTime(r.created_at))+'</span><span>'+esc(r.provider)+'</span></div><p class="hint">'+esc(T('wf.snapshot_hint'))+'</p><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(r.input)+'</pre></details>'+(r.error?'<p class="notice bad">'+esc(r.error)+'</p>':'')+wfDiagram(r.snapshot,r.nodes)+'</section><div class="wf-execution">'+ordered.map(function(n){var step=byID[n.node_id]||{};return '<article class="card"><div class="card-head"><strong>'+esc(step.name||n.node_id)+'</strong><code>'+esc(n.node_id)+'</code><span class="grow"></span>'+wfStatus(n.status)+'</div>'+(n.child_run_id?'<a class="btn sm" href="#/runs/'+enc(n.child_run_id)+'">'+ic('terminal','sm')+esc(T('wf.open_log'))+'</a>':'')+(n.branch?'<p>'+esc(T('wf.branch_result'))+' '+esc(T('wf.branch_'+n.branch))+'</p>':'')+(n.error?'<p class="notice bad">'+esc(n.error)+'</p>':'')+(n.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(n.output)+'</pre></details>':'')+((step.skill_bindings||[]).length?'<details><summary>'+esc(T('wf.skill_snapshot'))+'</summary><ul class="list-plain">'+step.skill_bindings.map(function(b){return '<li>'+esc(b.skill_name||b.skill_id)+' · '+esc(T(b.role==='primary'?'ss.primary':'ss.auxiliary'))+' · <code>'+esc(b.version_id)+'</code></li>';}).join('')+'</ul></details>':'')+'</article>';}).join('')+'</div>','workflows',[[T('nav.workflows'),'#/workflows'],[r.snapshot.name,'#/workflows/'+enc(r.workflow_id)],[T('wf.execution')]]);
+      if(active){$('#wf-stop').onclick=function(){var b=this;b.disabled=true;api('/api/workflow-runs/'+enc(id)+'/stop',{method:'POST',body:{}}).then(function(){return renderWorkflowRun(id);}).catch(function(e){b.disabled=false;fail(e);});};livePoll(function(){return api('/api/workflow-runs/'+enc(id)).then(function(next){if(JSON.stringify(next)!==JSON.stringify(r))return renderWorkflowRun(id);});},2000);}
+    });
+  }
+  // The drawer keeps an unsaved task/skill editor intact while the check runs.
+  function dependencyCheck(request) {
+    var current='',generation=0;
+    function findingHTML(items){return (items||[]).map(function(f){var level=['missing','uncertain','available'].indexOf(f.level)>=0?f.level:'uncertain';return '<article class="dep-finding"><div class="row-actions"><strong>'+esc(f.dependency)+'</strong><span class="grow"></span><span class="pill '+(level==='missing'?'bad':level==='available'?'ok':'warn')+'">'+esc(T('dep.'+level))+'</span></div><p>'+esc(f.reason)+'</p>'+(f.evidence?'<details><summary>'+esc(T('dep.evidence'))+'</summary><pre class="wf-output">'+esc(f.evidence)+'</pre></details>':'')+(f.suggestion?'<p class="notice">'+esc(f.suggestion)+'</p>':'')+'</article>';}).join('');}
+    var panel=openDrawer(function(dw){
+      dw.innerHTML='<div class="drawer-head"><h2>'+ic('shield','sm')+esc(T('dep.check'))+'</h2><button class="icon-btn" id="dep-close" aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="notice">'+esc(T('dep.scope'))+'</p><div id="dep-result" role="status" aria-live="polite">'+esc(T('dep.starting'))+'</div><div class="row-actions"><button class="btn hidden" id="dep-stop">'+esc(T('btn.stop'))+'</button><button class="btn hidden" id="dep-retry">'+esc(T('dep.retry'))+'</button><a class="btn hidden" id="dep-log">'+esc(T('wf.open_log'))+'</a></div></div>';
+      $('#dep-close',dw).onclick=closeDrawer;
+      $('#dep-retry',dw).onclick=function(){start();};
+      $('#dep-stop',dw).onclick=function(){var b=this;b.disabled=true;api('/api/runs/'+enc(current)+'/stop',{method:'POST',body:{}}).catch(fail).finally(function(){b.disabled=false;});};
+    });
+    function present(r){
+      var box=$('#dep-result',panel),active=r.status==='queued'||r.status==='running';
+      $('#dep-stop',panel).classList.toggle('hidden',!active);$('#dep-retry',panel).classList.toggle('hidden',active);
+      var log=$('#dep-log',panel);log.classList.remove('hidden');log.href='#/runs/'+enc(r.child_run_id||current);log.onclick=closeDrawer;
+      box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>'+findingHTML(r.static_findings):r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+findingHTML(r.report.findings):'<p class="notice bad">'+esc(r.error||T('wf.status_'+r.status))+'</p>'+findingHTML(r.static_findings);
+      return active;
+    }
+    function poll(gen){if(gen!==generation||!document.contains(panel))return;api('/api/dependencies/check/'+enc(current)).then(function(r){if(gen!==generation||!document.contains(panel))return;if(present(r))setTimeout(function(){poll(gen);},1500);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;$('#dep-retry',panel).classList.remove('hidden');}});}
+    function start(){var gen=++generation;$('#dep-result',panel).textContent=T('dep.starting');$('#dep-retry',panel).classList.add('hidden');api('/api/dependencies/check',{method:'POST',body:request}).then(function(r){current=r.run_id;poll(gen);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;$('#dep-retry',panel).classList.remove('hidden');}});}
+    start();
+  }
+
   // ---------- SKILLS ----------
   function renderSkills() {
     return api("/api/skills").then(function (skills) {
@@ -3327,11 +3542,12 @@
             '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="btn sm" data-sk-run="' + esc(s.id) + '" data-tip="' + esc(T("rn.run_skill_tip", { name: s.name })) + '">' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
-        '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
+        skillTabs("skills") + '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
       wireRows();
       $("#sk-import").addEventListener("click", function () { skillImportModal(renderSkills); });
       $$("[data-versions]").forEach(function (b) { b.addEventListener("click", function () { location.hash = "#/skills/" + enc(b.getAttribute("data-versions")); }); });
       $$("[data-sk-export]").forEach(function (b) { b.addEventListener("click", function () { exportSkill(b.getAttribute("data-sk-export"), "", b); }); });
+      $$("[data-sk-run]").forEach(function (b) { var check=document.createElement("button");check.className="icon-btn sm";check.setAttribute("aria-label",T("dep.check"));check.setAttribute("data-tip",T("dep.check"));check.innerHTML=ic("shield","sm");check.onclick=function(e){e.stopPropagation();dependencyCheck({kind:"skill",id:b.getAttribute("data-sk-run")});};b.parentNode.insertBefore(check,b); });
       $$("[data-sk-run]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); quickRunModal({ skill_id: b.getAttribute("data-sk-run") }); }); });
     });
   }
@@ -4058,6 +4274,11 @@
       $$("[data-sw]", root).forEach(function (x) { x.addEventListener("click", function () { b.color = x.getAttribute("data-sw"); $$("[data-sw]", root).forEach(function (y) { y.classList.toggle("on", y === x); }); preview(); }); });
       $$("[data-m]", root).forEach(function (x) { x.addEventListener("click", function () { mode = x.getAttribute("data-m"); showMode(); }); });
       f.skill_id.addEventListener("change", function () { b.skill_version_id = ""; loadVers(); });
+      var dep=document.createElement("button");dep.type="button";dep.className="btn";dep.textContent=T("dep.check");
+      var foot=$(".actions",root);if(foot)foot.prepend(dep);
+      dep.onclick=function(){
+        if(mode==="task"&&f.task_id.value)dependencyCheck({kind:"task",id:f.task_id.value});
+        else dependencyCheck({kind:"draft",prompt:f.prompt.value,skill_bindings:mode==="skill"&&f.skill_id.value?[{skill_id:f.skill_id.value,role:"primary",mode:f.skill_version_id.value?"pinned":"follow",version_id:f.skill_version_id.value}]:[]});};
       f.addEventListener("input", preview);
       f.addEventListener("change", preview);
       $("#p-add", root).addEventListener("click", function () { if (b.params.length < 10) { b.params.push({ name: "", default: "" }); drawParams(); } });
@@ -4895,7 +5116,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_version_id: "", workspace: pre.workspace || "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_version_id: "", workspace: pre.workspace || "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -4904,27 +5125,22 @@
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
         (taskId ? nameF + promptF : promptF + nameF) +
         '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
-        '<div class="form-row">' + fieldHtml(T("bt.skill"), '<select name="skill_id"><option value="">' + esc(T("tf.no_skill")) + "</option>" + skills.map(function (s) { return opt(s.id, s.name, s.id === tf.skill_id); }).join("") + "</select>") +
-        fieldHtml(T("bt.skill_ver"), '<select name="skill_version_id"><option value="">' + esc(T("bt.latest")) + "</option></select>") + "</div>" +
+        '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
         fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
         '<div class="form-row">' + fieldHtml(T("tf.budget_c", { c: curSym(state.currency || "USD") }), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint"), taskId ? "" : '<span class="af-pill hidden" id="af-budget" data-tip="">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
         wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" +
-        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
+        '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
-        var loadVers = function () {
-          var sel = f.skill_version_id;
-          if (!f.skill_id.value) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>"; sel.disabled = true; return; }
-          sel.disabled = false;
-          api("/api/skills/" + enc(f.skill_id.value) + "/versions").then(function (v) { sel.innerHTML = '<option value="">' + esc(T("bt.latest")) + "</option>" + v.versions.slice().reverse().map(function (x) { return opt(x.id, T("bt.pin_v", { n: x.no }), x.id === tf.skill_version_id); }).join(""); }).catch(fail);
-        };
+        var initial=tf.skill_bindings||(tf.skill_id?[{skill_id:tf.skill_id,mode:tf.skill_version_id?"pinned":"follow",version_id:tf.skill_version_id||"",role:"primary"}]:[]);
+        var editor=skillBindingEditor($("#tf-bindings",root),skills,initial,function(bs){f.skill_id.value=bs.length?bs[0].skill_id:"";f.skill_version_id.value=bs.length?bs[0].version_id:"";f.skill_id.dispatchEvent(new Event("change",{bubbles:true}));});
+        var first=editor.value()[0];f.skill_id.value=first?first.skill_id:"";f.skill_version_id.value=first?first.version_id:"";
+        $("#tf-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value()});});
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
-        loadVers();
         if (drafty) wireDraft(root, f.prompt, "task");
-        f.skill_id.addEventListener("change", function () { tf.skill_version_id = ""; loadVers(); });
         if (!taskId) wireTaskAutofill(root, f, se, skills);
         var ws = wireWsField(root, f.workspace, taskId);
         wirePolicyFields(root, f);
@@ -4932,7 +5148,7 @@
           e.preventDefault();
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
-          var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, provider: f.provider.value, cron: se.value(),
+          var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), provider: f.provider.value, cron: se.value(),
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
@@ -6099,8 +6315,8 @@
       if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });
       state.chgJump = null;
       bindRunPrompt(r);
-      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace, mode: r.run_mode }); });
-      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, workspace: r.workspace }); });
+      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, workspace: r.workspace, mode: r.run_mode }); });
+      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, workspace: r.workspace }); });
       logView($("#lv"), id, live, function (why) {
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);
@@ -8047,6 +8263,8 @@
   function refresh() { return route(true); }
   function route(soft) {
     soft = soft === true;
+    if (soft && workflowDraftGuard && workflowDraftGuard.dirty()) return Promise.resolve();
+    if (!soft) workflowDraftGuard = null;
     stopStream(); stopPoll();
     clearTimeout(scheduleRefresh._t);
     if (!soft) { draftFlush(); $("#modal-root").innerHTML = ""; closeDrawer(); }
@@ -8070,7 +8288,10 @@
     switch (parts[0]) {
       case undefined: p = renderHome(); break;
       case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(params); break;
+      case "skill-sets": p = renderSkillSets(); break;
       case "skills": p = parts[1] ? renderSkillDetail(parts[1], params) : renderSkills(); break;
+      case "workflows": p = parts[1] ? renderWorkflowEditor(parts[1]) : renderWorkflows(); break;
+      case "workflow-runs": p = renderWorkflowRun(parts[1]); break;
       case "buttons": p = renderButtons(); break;
       case "plugins": p = renderPlugins(); break;
       case "runs": p = parts[1] ? renderRunDetail(parts[1]) : renderRuns(params); break;
@@ -8093,12 +8314,19 @@
       modalGuard.ask(function () { location.hash = want; });
       return;
     }
+    if (workflowDraftGuard && location.hash !== lastHash && workflowDraftGuard.dirty()) {
+      var target = location.hash;
+      history.replaceState(null, "", lastHash || "#/");
+      confirmDialog({title:T("wf.leave_title"),body:T("wf.leave_hint"),ok:T("btn.discard"),danger:true}).then(function(yes){if(yes){workflowDraftGuard=null;location.hash=target;}});
+      return;
+    }
     route();
   });
   // Closing/reloading the tab with edits in a dialog: the browser's own "leave site?" prompt.
   // Not in the desktop window: WKWebView never shows it while WebView2 does, so it would differ by OS.
   window.addEventListener("beforeunload", function (e) {
     if (!state.native && modalGuard && modalGuard.dirty()) { e.preventDefault(); e.returnValue = ""; return ""; }
+    if (!state.native && workflowDraftGuard && workflowDraftGuard.dirty()) { e.preventDefault(); e.returnValue = ""; return ""; }
   });
 
   // ---------- appearance: theme × colour mode ----------

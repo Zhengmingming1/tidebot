@@ -221,6 +221,15 @@ func (s *Service) Rollback(ctx context.Context, skillID, versionID, actor string
 
 // PinOnTask sets a pinned skill binding on the task's current spec (creates new task version).
 func (s *Service) PinOnTask(ctx context.Context, taskID, skillID, skillVersionID, actor string) error {
+	mode := "pinned"
+	if skillVersionID == "" {
+		mode = "follow"
+	}
+	resolved, err := s.ResolveBindings(ctx, []tasksvc.SkillBinding{{SkillID: skillID, Mode: mode, VersionID: skillVersionID}})
+	if err != nil {
+		return err
+	}
+	skillVersionID = resolved[0].VersionID
 	view, err := s.Tasks.Get(ctx, taskID)
 	if err != nil {
 		return err

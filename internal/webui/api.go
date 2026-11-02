@@ -36,6 +36,12 @@ import (
 var Version = buildinfo.Version
 
 func (s *Server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("/api/workflows", s.withAuthCSRF(s.handleWorkflows))
+	mux.HandleFunc("/api/workflows/", s.withAuthCSRF(s.handleWorkflowSub))
+	mux.HandleFunc("/api/workflow-runs", s.withAuthCSRF(s.handleWorkflowRuns))
+	mux.HandleFunc("/api/workflow-runs/", s.withAuthCSRF(s.handleWorkflowRunSub))
+	mux.HandleFunc("/api/dependencies/check", s.withAuthCSRF(s.handleDependencyCheck))
+	mux.HandleFunc("/api/dependencies/check/", s.withAuthCSRF(s.handleDependencyCheckStatus))
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.withAuthCSRF(s.handleLogout))
 	mux.HandleFunc("/api/me", s.withAuthCSRF(s.handleMe))
@@ -45,6 +51,9 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tasks", s.withAuthCSRF(s.handleTasks))
 	mux.HandleFunc("/api/tasks/", s.withAuthCSRF(s.handleTaskSub))
 	mux.HandleFunc("/api/amendments/", s.withAuthCSRF(s.handleAmendAction))
+	mux.HandleFunc("/api/skill-sets", s.withAuthCSRF(s.handleSkillSets))
+	mux.HandleFunc("/api/skill-sets/import", s.withAuthCSRF(s.handleSkillSetImport))
+	mux.HandleFunc("/api/skill-sets/", s.withAuthCSRF(s.handleSkillSetSub))
 	mux.HandleFunc("/api/skills", s.withAuthCSRF(s.handleSkills))
 	mux.HandleFunc("/api/skills/import", s.withAuthCSRF(s.handleSkillsImport))
 	mux.HandleFunc("/api/skills/upload", s.withAuthCSRF(s.handleSkillUpload))
@@ -470,7 +479,7 @@ func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
 	var runID string
 	var err error
 	switch {
-	case body.SkillID == "" && strings.TrimSpace(body.Workspace) == "":
+	case body.SkillID == "" && len(body.SkillBindings) == 0 && strings.TrimSpace(body.Workspace) == "":
 		if s.deps.QuickRun == nil {
 			writeErr(w, 500, "execution not available")
 			return
@@ -1322,16 +1331,25 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes, changes_undone_at, changes_undone_files FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes, &undoneAt, &undoneFiles)
 		out := struct {
 			runDTO
-			CostDetail         json.RawMessage `json:"cost_detail"`
-			Currency           string          `json:"currency"`
-			Result             string          `json:"result"`
-			ResultTruncated    bool            `json:"result_truncated,omitempty"`
-			AnswerSame         *answerSameDTO  `json:"answer_same,omitempty"`
-			AnswerPrev         *answerSameDTO  `json:"answer_prev,omitempty"`
-			FileChanges        json.RawMessage `json:"file_changes,omitempty"`
-			ChangesUndoneAt    string          `json:"changes_undone_at,omitempty"`
-			ChangesUndoneFiles []string        `json:"changes_undone_files,omitempty"`
-		}{runs[0], nil, s.fx().Display, result, cut != 0, nil, nil, nil, undoneAt, nil}
+			SkillBindings      []tasksvc.SkillBinding `json:"skill_bindings"`
+			CostDetail         json.RawMessage        `json:"cost_detail"`
+			Currency           string                 `json:"currency"`
+			Result             string                 `json:"result"`
+			ResultTruncated    bool                   `json:"result_truncated,omitempty"`
+			AnswerSame         *answerSameDTO         `json:"answer_same,omitempty"`
+			AnswerPrev         *answerSameDTO         `json:"answer_prev,omitempty"`
+			FileChanges        json.RawMessage        `json:"file_changes,omitempty"`
+			ChangesUndoneAt    string                 `json:"changes_undone_at,omitempty"`
+			ChangesUndoneFiles []string               `json:"changes_undone_files,omitempty"`
+		}{runs[0], nil, nil, s.fx().Display, result, cut != 0, nil, nil, nil, undoneAt, nil}
+		out.SkillBindings, _ = s.deps.Skills.RunBindings(r.Context(), id)
+		if len(out.SkillBindings) == 0 && runs[0].SkillID != "" {
+			mode := "follow"
+			if runs[0].SkillVerID != "" {
+				mode = "pinned"
+			}
+			out.SkillBindings = []tasksvc.SkillBinding{{SkillID: runs[0].SkillID, SkillName: runs[0].SkillName, VersionID: runs[0].SkillVerID, Mode: mode, Role: "primary"}}
+		}
 		if undoneAt == "" && undoneFiles != "" {
 			_ = json.Unmarshal([]byte(undoneFiles), &out.ChangesUndoneFiles)
 		}

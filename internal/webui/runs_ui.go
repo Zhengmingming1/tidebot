@@ -20,6 +20,17 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	run := runs[0]
+	var bindings []tasksvc.SkillBinding
+	if run.TaskID == "" && s.deps.Skills != nil {
+		bindings, err = s.deps.Skills.RunBindings(r.Context(), id)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if len(bindings) == 0 {
+			bindings = nil
+		}
+	}
 	var newID string
 	if run.TaskID != "" {
 		if s.deps.RunTask == nil {
@@ -30,7 +41,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			writeErr(w, 400, err.Error())
 			return
 		}
-	} else if run.SkillID != "" || run.RunMode != "" {
+	} else if len(bindings) > 0 || run.SkillID != "" || run.RunMode != "" {
 		if s.deps.StartRun == nil {
 			writeErr(w, 503, "runner not available")
 			return
@@ -40,7 +51,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			ws = "" // skill run in a scratch folder
 		}
 		if newID, err = s.deps.StartRun(RunRequest{Prompt: run.Prompt, Provider: run.Provider, SkillID: run.SkillID,
-			VersionID: run.SkillVerID, Workspace: ws, Mode: run.RunMode}); err != nil {
+			VersionID: run.SkillVerID, SkillBindings: bindings, Workspace: ws, Mode: run.RunMode}); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}

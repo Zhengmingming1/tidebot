@@ -4,6 +4,7 @@
 set -euo pipefail
 
 PROMPT=""
+PROMPT_STDIN=0
 OUTPUT_FORMAT=""
 VERBOSE=0
 BARE=0
@@ -13,8 +14,12 @@ while [[ $i -lt $# ]]; do
   a="${ARGS[$i]}"
   case "$a" in
     -p)
-      i=$((i+1))
-      PROMPT="${ARGS[$i]:-}"
+      if [[ "${ARGS[$((i+1))]:-}" == --* || $((i+1)) -ge $# ]]; then
+        PROMPT_STDIN=1
+      else
+        i=$((i+1))
+        PROMPT="${ARGS[$i]:-}"
+      fi
       ;;
     --output-format)
       i=$((i+1))
@@ -37,6 +42,12 @@ while [[ $i -lt $# ]]; do
   esac
   i=$((i+1))
 done
+
+if [[ "$PROMPT_STDIN" == 1 ]]; then
+  # The sentinel preserves trailing newlines in command substitution.
+  PROMPT="$(cat; printf '.')"
+  PROMPT="${PROMPT%.}"
+fi
 
 if [[ -n "${TIDEBOT_MOCK_ARGS_FILE:-}" ]]; then
   printf '%s\n' "$@" > "$TIDEBOT_MOCK_ARGS_FILE"
@@ -129,5 +140,14 @@ if [[ "${TIDEBOT_MOCK_REQUIRE_AUTH:-}" == "1" ]]; then
   fi
 fi
 
-printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok: ${PROMPT//$'\n'/ }\",\"session_id\":\"$SESSION\",\"is_error\":false,\"duration_ms\":42,\"duration_api_ms\":30,\"num_turns\":1,\"total_cost_usd\":$COST,\"usage\":{\"input_tokens\":$IN_TOK,\"output_tokens\":$OUT_TOK,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}"
+if [[ -n "${TIDEBOT_MOCK_RESULT_TEXT:-}" ]]; then
+  RESULT_JSON=$(printf '%s' "$TIDEBOT_MOCK_RESULT_TEXT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+elif [[ "$PROMPT" == TIDEBOT_DEPENDENCY_SNAPSHOT_V1* && -n "${TIDEBOT_MOCK_DEPENDENCY_JSON:-}" ]]; then
+  RESULT_JSON=$(printf '%s' "$TIDEBOT_MOCK_DEPENDENCY_JSON" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+elif [[ "$PROMPT_STDIN" == 1 ]]; then
+  RESULT_JSON=$(printf 'ok: %s' "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+else
+  RESULT_JSON="\"ok: ${PROMPT//$'\n'/ }\""
+fi
+printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"result\":$RESULT_JSON,\"session_id\":\"$SESSION\",\"is_error\":false,\"duration_ms\":42,\"duration_api_ms\":30,\"num_turns\":1,\"total_cost_usd\":$COST,\"usage\":{\"input_tokens\":$IN_TOK,\"output_tokens\":$OUT_TOK,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}"
 exit 0

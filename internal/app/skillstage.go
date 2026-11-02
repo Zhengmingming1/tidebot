@@ -89,10 +89,13 @@ func (st *skillStage) Args(modern, explicit bool) []string {
 	if modern {
 		args = append(args, "--plugin-dir", st.Dir)
 	}
-	if explicit && modern {
+	if explicit && modern && len(st.Skills) == 1 {
 		return args
 	}
 	text := st.systemPrompt()
+	if explicit && modern {
+		text = st.supportPrompt()
+	}
 	if modern {
 		p := filepath.Join(st.Dir, "skills-system-prompt.md")
 		if os.WriteFile(p, []byte(text), 0o600) == nil {
@@ -119,6 +122,9 @@ func (st *skillStage) Invoke(modern bool, prompt string) string {
 func (st *skillStage) systemPrompt() string {
 	var b strings.Builder
 	b.WriteString("# Skills attached by tidebot\n\nThe owner attached these skills to this run. Follow a skill's instructions when the task calls for it. A skill's own files are in its base directory.\n")
+	if len(st.Skills) > 1 {
+		fmt.Fprintf(&b, "\nPrimary skill: %s. Other skills provide auxiliary instructions within the same task; follow the primary procedure.\n", st.Skills[0].Name)
+	}
 	for _, s := range st.Skills {
 		fmt.Fprintf(&b, "\n## Skill: %s\n\nBase directory for this skill: %s\n\n%s\n", s.Name, s.Dir, strings.TrimSpace(string(s.SkillMD)))
 	}
@@ -240,4 +246,68 @@ func (a *App) legacyWorkspaces(ctx context.Context) []string {
 		rows.Close()
 	}
 	return out
+}
+
+// CheckedArgs never silently drops instructions from a composition.
+func (st *skillStage) CheckedArgs(modern, explicit bool) ([]string, error) {
+	if st == nil || len(st.Skills) == 0 {
+		return nil, nil
+	}
+	text := st.systemPrompt()
+	if explicit && modern {
+		text = st.supportPrompt()
+	}
+	if !modern && len(st.Skills) > 1 && len(text) > 16<<10 {
+		return nil, fmt.Errorf("combined skill instructions exceed the legacy Claude limit; update Claude Code")
+	}
+	args := st.Args(modern, explicit)
+	if modern && (!explicit || len(st.Skills) > 1) {
+		found := false
+		for _, arg := range args {
+			if arg == "--append-system-prompt-file" {
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("cannot write skill context file")
+		}
+	}
+	return args, nil
+}
+
+func (st *skillStage) supportPrompt() string {
+	if st == nil || len(st.Skills) < 2 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Skill composition\nThe primary skill is %s (%s). Complete the owner's task using that skill as the main procedure. The following auxiliary skills are available in this same run; use their instructions and supporting files when needed. They are supporting capabilities, not additional independent tasks. Do not assume a Skill tool is available; their instructions are provided below. Runtime permissions still apply.\n", st.Skills[0].Name, st.Skills[0].Command())
+	for _, sk := range st.Skills[1:] {
+		fmt.Fprintf(&b, "\n## Auxiliary skill: %s\nBase directory: %s\n\n%s\n", sk.Name, sk.Dir, string(sk.SkillMD))
+	}
+	return b.String()
+}
+
+func (st *skillStage) Bindings() []tasksvc.SkillBinding {
+	if st == nil {
+		return nil
+	}
+	out := make([]tasksvc.SkillBinding, 0, len(st.Skills))
+	for _, sk := range st.Skills {
+		out = append(out, tasksvc.SkillBinding{SkillID: sk.SkillID, SkillName: sk.DisplayName, VersionID: sk.VersionID, Mode: "pinned", Role: sk.Role})
+	}
+	return out
+}
+
+func (a *App) skillStart(st *skillStage, next func(string)) func(string) {
+	return func(runID string) {
+		if st != nil && len(st.Skills) > 0 {
+			if err := a.Skills.RecordRunBindings(context.Background(), runID, st.Bindings()); err != nil {
+				a.Log.Error("record skill snapshot", "run_id", runID, "error", err)
+				a.Runner.Cancel(runID)
+			}
+		}
+		if next != nil {
+			next(runID)
+		}
+	}
 }

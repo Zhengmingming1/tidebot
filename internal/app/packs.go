@@ -44,19 +44,11 @@ type PackTask struct {
 	Skills         []string                 `json:"skills,omitempty"`
 }
 
-// ExportPack writes the given tasks (and the current versions of their skills) to a zip.
+// ExportPack writes the given tasks and their resolved skill versions to a zip.
 func (a *App) ExportPack(ctx context.Context, name string, taskIDs []string, out string) (string, error) {
 	p := Pack{Format: PackFormat, Name: name, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	skillFiles := map[string]map[string][]byte{}
-	skills, _ := a.Skills.List(ctx)
-	byID := map[string]string{}
-	verOf := map[string]string{}
-	for _, s := range skills {
-		byID[s.ID] = s.Name
-		if s.CurrentVersion != nil {
-			verOf[s.ID] = s.CurrentVersion.ID
-		}
-	}
+	versionByName := map[string]string{}
 	for _, tid := range taskIDs {
 		v, err := a.Tasks.Get(ctx, tid)
 		if err != nil || v.Spec == nil {
@@ -64,15 +56,18 @@ func (a *App) ExportPack(ctx context.Context, name string, taskIDs []string, out
 		}
 		pt := PackTask{Name: v.Task.Name, Goal: v.Spec.Goal, Prompt: v.Spec.Prompt, Constraints: v.Spec.Constraints,
 			CronExpr: v.Task.CronExpr, OverlapPolicy: v.Task.OverlapPolicy, TimeoutMinutes: v.Spec.TimeoutMinutes, AllowedTools: v.Spec.AllowedTools}
-		for _, b := range v.Spec.SkillBindings {
-			sn := byID[b.SkillID]
-			vid := verOf[b.SkillID]
-			if b.Mode == "pinned" && b.VersionID != "" {
-				vid = b.VersionID
+		bindings, err := a.Skills.ResolveBindings(ctx, v.Spec.SkillBindings)
+		if err != nil {
+			return "", fmt.Errorf("task %s: %w", tid, err)
+		}
+		for _, b := range bindings {
+			sn, vid := b.SkillName, b.VersionID
+			// Pack/1 stores one directory per skill name; it cannot represent two
+			// versions of that name without silently changing a task's binding.
+			if previous, ok := versionByName[sn]; ok && previous != vid {
+				return "", fmt.Errorf("skill %q resolves to different versions in these tasks; export the tasks separately", sn)
 			}
-			if sn == "" || vid == "" {
-				continue
-			}
+			versionByName[sn] = vid
 			pt.Skills = append(pt.Skills, sn)
 			if _, done := skillFiles[sn]; !done {
 				files, err := a.Skills.Files(ctx, vid)
@@ -181,6 +176,37 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 	if p.Format != PackFormat {
 		return nil, errors.New("not a tidebot workflow pack")
 	}
+	// Validate all references before importing any skill or creating a task. A
+	// missing auxiliary skill must not turn a composition into a partial task.
+	checkSkill := func(sn string) error {
+		files, ok := skillFiles[sn]
+		if !ok {
+			return fmt.Errorf("pack is missing referenced skill %q", sn)
+		}
+		if _, upper := files["SKILL.md"]; !upper {
+			if _, lower := files["skill.md"]; !lower {
+				return fmt.Errorf("pack skill %q is missing SKILL.md", sn)
+			}
+		}
+		return nil
+	}
+	for sn := range skillFiles {
+		if err := checkSkill(sn); err != nil {
+			return nil, err
+		}
+	}
+	for _, sn := range p.Skills {
+		if err := checkSkill(sn); err != nil {
+			return nil, err
+		}
+	}
+	for _, task := range p.Tasks {
+		for _, sn := range task.Skills {
+			if err := checkSkill(sn); err != nil {
+				return nil, fmt.Errorf("task %q: %w", task.Name, err)
+			}
+		}
+	}
 	skillIDs := map[string]string{}
 	for sn, files := range skillFiles {
 		tmp, err := os.MkdirTemp("", "pack-skill-")
@@ -210,9 +236,7 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 		spec.Constraints = t.Constraints
 		spec.AllowedTools = t.AllowedTools
 		for _, sn := range t.Skills {
-			if sid := skillIDs[sn]; sid != "" {
-				spec.SkillBindings = append(spec.SkillBindings, tasksvc.SkillBinding{SkillID: sid, SkillName: sn, Mode: "follow"})
-			}
+			spec.SkillBindings = append(spec.SkillBindings, tasksvc.SkillBinding{SkillID: skillIDs[sn], SkillName: sn, Mode: "follow"})
 		}
 		if _, err := a.Tasks.UpdateSpec(ctx, tv.Task.ID, spec, "pack", "imported from pack "+p.Name); err != nil {
 			return nil, err

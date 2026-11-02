@@ -27,6 +27,9 @@ const PluginName = "tidebot"
 
 // StagedSkill is one skill written into a stage directory.
 type StagedSkill struct {
+	Role        string
+	DisplayName string
+
 	SkillID     string
 	VersionID   string
 	Name        string // command name: /tidebot:<Name>
@@ -54,14 +57,40 @@ func CommandName(name string) string {
 // ResolveVersion returns the version a binding runs: its pinned version, or the
 // skill's current one when it follows the latest.
 func (s *Service) ResolveVersion(ctx context.Context, b tasksvc.SkillBinding) (string, error) {
-	if b.Mode != "follow" && b.VersionID != "" {
-		return b.VersionID, nil
-	}
-	cur, err := s.Ver.CurrentVersion(ctx, version.EntitySkill, b.SkillID)
+	out, err := s.ResolveBindings(ctx, []tasksvc.SkillBinding{{SkillID: b.SkillID, Mode: b.Mode, VersionID: b.VersionID}})
 	if err != nil {
-		return "", fmt.Errorf("skill %s current: %w", b.SkillID, err)
+		return "", err
 	}
-	return cur.ID, nil
+	return out[0].VersionID, nil
+}
+
+// ResolveBindings freezes follow bindings and verifies every version belongs to its skill.
+func (s *Service) ResolveBindings(ctx context.Context, in []tasksvc.SkillBinding) ([]tasksvc.SkillBinding, error) {
+	out, err := tasksvc.NormalizeBindings(in)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		b := &out[i]
+		if err := s.DB.QueryRowContext(ctx, `SELECT name FROM skills WHERE id=?`, b.SkillID).Scan(&b.SkillName); err != nil {
+			return nil, fmt.Errorf("skill %s not found", b.SkillID)
+		}
+		vid := b.VersionID
+		if b.Mode == "follow" {
+			v, err := s.Ver.CurrentVersion(ctx, version.EntitySkill, b.SkillID)
+			if err != nil {
+				return nil, fmt.Errorf("skill %s current: %w", b.SkillID, err)
+			}
+			vid = v.ID
+		}
+		v, err := s.Ver.GetVersion(ctx, vid)
+		if err != nil || v.EntityType != version.EntitySkill || v.EntityID != b.SkillID {
+			return nil, fmt.Errorf("version does not belong to skill %s", b.SkillID)
+		}
+		b.Mode = "pinned"
+		b.VersionID = vid
+	}
+	return out, nil
 }
 
 // Stage writes the bound skills as a Claude Code plugin under root (a directory
@@ -69,6 +98,10 @@ func (s *Service) ResolveVersion(ctx context.Context, b tasksvc.SkillBinding) (s
 // and root/skills/<name>/. Load it with --plugin-dir root. File paths from the
 // store must stay inside the skill folder.
 func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.SkillBinding) ([]StagedSkill, error) {
+	bindings, err := s.ResolveBindings(ctx, bindings)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o700); err != nil {
 		return nil, err
 	}
@@ -89,24 +122,19 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 		if err != nil {
 			return out, err
 		}
-		name := ""
-		if md, ok := files["SKILL.md"]; ok {
-			if meta, err := skillpkg.ParseFrontmatter(md); err == nil {
-				name = CommandName(meta.Name)
-			}
+		if len(files["SKILL.md"]) == 0 {
+			return nil, fmt.Errorf("skill %s has no SKILL.md", b.SkillID)
 		}
-		for _, c := range []string{man.Name, b.SkillName, b.SkillID} {
-			if name == "" {
-				name = CommandName(c)
-			}
-		}
-		if name == "" {
-			name = fmt.Sprintf("skill-%d", i+1)
-		}
-		for base, n := name, 2; used[name]; n++ {
-			name = fmt.Sprintf("%s-%d", base, n)
+		name := stagedName(files, man, b, i)
+		if used[name] {
+			return nil, fmt.Errorf("duplicate skill command name %q: rename one skill before combining", name)
 		}
 		used[name] = true
+		normalized, err := stagedSkillMD(files["SKILL.md"], name)
+		if err != nil {
+			return nil, fmt.Errorf("skill %s: %w", b.SkillID, err)
+		}
+		files["SKILL.md"] = normalized
 		dir := filepath.Join(root, "skills", name)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return out, err
@@ -129,7 +157,7 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 				return out, err
 			}
 		}
-		st := StagedSkill{SkillID: b.SkillID, VersionID: verID, Name: name, Dir: dir, SkillMD: files["SKILL.md"]}
+		st := StagedSkill{DisplayName: b.SkillName, Role: b.Role, SkillID: b.SkillID, VersionID: verID, Name: name, Dir: dir, SkillMD: files["SKILL.md"]}
 		if meta, err := skillpkg.ParseFrontmatter(st.SkillMD); err == nil {
 			st.Description = meta.Description
 		}
@@ -346,4 +374,22 @@ func matchVersion(known map[string]map[string]string, got map[string]string) str
 		}
 	}
 	return ""
+}
+
+func stagedName(files map[string][]byte, man Manifest, b tasksvc.SkillBinding, i int) string {
+	name := ""
+	if md, ok := files["SKILL.md"]; ok {
+		if meta, err := skillpkg.ParseFrontmatter(md); err == nil {
+			name = CommandName(meta.Name)
+		}
+	}
+	for _, c := range []string{man.Name, b.SkillName, b.SkillID} {
+		if name == "" {
+			name = CommandName(c)
+		}
+	}
+	if name == "" {
+		name = fmt.Sprintf("skill-%d", i+1)
+	}
+	return name
 }

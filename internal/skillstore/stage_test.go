@@ -45,11 +45,11 @@ func TestStageWritesPluginLayout(t *testing.T) {
 		"refs/notes.txt": "n",
 	})
 	root := t.TempDir()
-	got, err := s.Stage(context.Background(), root, []tasksvc.SkillBinding{{SkillID: sk.ID, Mode: "follow"}, {SkillID: sk.ID, Mode: "follow"}})
-	if err != nil || len(got) != 2 {
+	got, err := s.Stage(context.Background(), root, []tasksvc.SkillBinding{{SkillID: sk.ID, Mode: "follow"}})
+	if err != nil || len(got) != 1 {
 		t.Fatal(got, err)
 	}
-	if got[0].Name != "code-review" || got[1].Name != "code-review-2" || got[0].Command() != "/tidebot:code-review" || got[0].Description != "Review code" {
+	if got[0].Name != "code-review" || got[0].Command() != "/tidebot:code-review" || got[0].Description != "Review code" {
 		t.Fatalf("%+v", got)
 	}
 	for _, p := range []string{".claude-plugin/plugin.json", "skills/code-review/SKILL.md", "skills/code-review/refs/notes.txt"} {
