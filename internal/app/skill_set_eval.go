@@ -333,7 +333,7 @@ func (a *App) runEvaluationCase(ctx context.Context, set skillstore.SkillSet, in
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var recordErr error
-	res, err := a.RunPromptEx(runCtx, runner.Options{Prompt: input, DisplayPrompt: input, PromptStdin: true, WorkspaceDir: ws, TriggerKind: "skill_set_eval", CostBucket: cost.BucketAssist, NoPluginMCP: true, RunMode: "read", SkillID: primary.SkillID, SkillVersionID: primary.VersionID, ContextArgs: args,
+	res, err := a.RunPromptEx(runCtx, runner.Options{Prompt: input, DisplayPrompt: input, PromptStdin: true, WorkspaceDir: ws, TriggerKind: "skill_set_eval", CostBucket: cost.BucketAssist, NoPluginMCP: true, RunMode: "read", SkillID: primary.SkillID, SkillVersionID: primary.VersionID, ContextArgs: args, ContextRequest: st.contextRequest(a.modernClaude(), false),
 		ExtraArgs: []string{"--permission-mode", "dontAsk", "--permission-prompts", "none", "--restricted", "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", strings.Join(readOnlyDeny, ","), "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--max-budget-usd", strconv.FormatFloat(budget, 'f', 6, 64), "--effort", "low"},
 		OnStart: func(runID string) {
 			if err := a.Skills.RecordRunBindings(context.Background(), runID, st.Bindings()); err != nil {

@@ -1,10 +1,11 @@
 name: ci
-# Every push/PR to main runs the full Linux/macOS/Windows matrix (defined once in
+# Main and Context Planner branch pushes run the full matrix without requiring a PR.
+# Every PR also runs the full Linux/macOS/Windows matrix (defined once in
 # full-matrix.yml, which release.yml also runs before packaging a v* tag).
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/context-planner-*"]
     paths-ignore:
       - "docs/**"
       - "README.md"

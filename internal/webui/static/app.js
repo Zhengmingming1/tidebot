@@ -3609,12 +3609,14 @@
         var n=def.nodes.find(function(n){return n.id===selected;});if(!n){inspector.innerHTML='<h2>'+esc(T('wf.properties'))+'</h2><p class="muted">'+esc(T('wf.select_hint'))+'</p>';return;}
         inspector.innerHTML='<div class="card-head"><h2>'+esc(T('wf.properties'))+'</h2><span class="grow"></span><button class="icon-btn" id="wf-remove" aria-label="'+esc(T('btn.remove'))+'">'+ic('trash','sm')+'</button></div><p><code>'+esc(n.id)+'</code> · '+esc(T(n.kind==='condition'?'wf.condition':'wf.skill_step'))+'</p>'+fieldHtml(T('tf.name'),'<input id="wf-node-name" maxlength="80" value="'+esc(n.name)+'">')+
           '<div class="wf-needs"><strong>'+esc(T('wf.predecessors'))+'</strong>'+def.nodes.filter(function(p){return p.id!==n.id;}).map(function(p){var edge=(n.needs||[]).find(function(d){return d.node_id===p.id;});return '<label class="wf-need-row"><span>'+esc(p.name||p.id)+'</span><select data-wf-need="'+esc(p.id)+'">'+opt('',T('wf.no_dependency'),!edge)+(p.kind==='condition'?opt('true',T('wf.branch_true'),edge&&edge.branch==='true')+opt('false',T('wf.branch_false'),edge&&edge.branch==='false'):opt('success',T('wf.after_success'),!!edge))+'</select></label>';}).join('')+'</div>'+fieldHtml(T('wf.join'),'<select id="wf-node-join">'+opt('all',T('wf.join_all'),n.join!=='any')+opt('any',T('wf.join_any'),n.join==='any')+'</select>')+
-          (n.kind==='skill'?'<div id="wf-bindings"></div>'+fieldHtml(T('wf.retry_max'),'<input id="wf-retry-max" type="number" min="0" max="5" step="1" value="'+esc(n.retry_max||0)+'">')+fieldHtml(T('wf.retry_backoff'),'<input id="wf-retry-backoff" type="number" min="1" max="60000" step="1" value="'+esc(n.retry_backoff_ms||1000)+'">')+'<p class="hint">'+esc(T('wf.retry_hint'))+'</p>'+fieldHtml(T('tf.prompt'),'<textarea id="wf-node-prompt" rows="7" maxlength="32000">'+esc(n.prompt||'')+'</textarea>')+'<label class="field"><span>'+esc(T('wf.insert_output'))+'</span><select id="wf-insert-output"><option value="">'+esc(T('wf.choose_output'))+'</option><option value="{{input}}">'+esc(T('wf.input'))+'</option>'+def.nodes.filter(function(p){return p.id!==n.id&&p.kind==='skill';}).map(function(p){return opt('{{steps.'+p.id+'.output}}',p.name+' · '+p.id);}).join('')+'</select></label><p class="hint">'+esc(T('wf.input_template_hint'))+'</p>':
+          (n.kind==='skill'?'<div id="wf-bindings"></div>'+fieldHtml(T('wf.retry_max'),'<input id="wf-retry-max" type="number" min="0" max="5" step="1" value="'+esc(n.retry_max||0)+'">')+fieldHtml(T('wf.retry_backoff'),'<input id="wf-retry-backoff" type="number" min="1" max="60000" step="1" value="'+esc(n.retry_backoff_ms||1000)+'">')+'<p class="hint">'+esc(T('wf.retry_hint'))+'</p>'+workflowContextFields(n)+fieldHtml(T('tf.prompt'),'<textarea id="wf-node-prompt" rows="7" maxlength="32000">'+esc(n.prompt||'')+'</textarea>')+'<label class="field"><span>'+esc(T('wf.insert_output'))+'</span><select id="wf-insert-output"><option value="">'+esc(T('wf.choose_output'))+'</option><option value="{{input}}">'+esc(T('wf.input'))+'</option>'+def.nodes.filter(function(p){return p.id!==n.id&&p.kind==='skill';}).map(function(p){return opt('{{steps.'+p.id+'.output}}',p.name+' · '+p.id);}).join('')+'</select></label><p class="hint">'+esc(T('wf.input_template_hint'))+'</p>':
           fieldHtml(T('wf.condition_source'),'<input id="wf-condition-source" value="'+esc(n.condition.source)+'">')+fieldHtml(T('wf.operator'),'<select id="wf-condition-operator">'+['contains','not_contains','equals','not_equals','empty','not_empty'].map(function(o){return opt(o,T('wf.op_'+o),o===n.condition.operator);}).join('')+'</select>')+fieldHtml(T('wf.compare_value'),'<input id="wf-condition-value" value="'+esc(n.condition.value||'')+'">')+'<p class="hint">'+esc(T('wf.condition_hint'))+'</p>');
         $('#wf-node-name').oninput=function(){n.name=this.value;canvas();};$('#wf-node-join').onchange=function(){n.join=this.value;};
         $('#wf-remove').onclick=function(){if(link&&link.from===n.id)link=null;if(drag&&drag.id===n.id)drag=null;def.nodes=def.nodes.filter(function(p){return p.id!==n.id;});def.nodes.forEach(function(p){p.needs=(p.needs||[]).filter(function(d){return d.node_id!==n.id;});});selected='';canvas();inspect();};
         $$('[data-wf-need]',inspector).forEach(function(el){el.onchange=function(){if(el.value)connect(el.dataset.wfNeed,n.id,el.value==='success'?'':el.value);else{n.needs=(n.needs||[]).filter(function(d){return d.node_id!==el.dataset.wfNeed;});canvas();}};});
         if(n.kind==='skill'){
+          $('#wf-context-enabled').onchange=function(){if(this.checked)n.context={mode:'full',max_tokens:2048,budget:{max_input_tokens:65536}};else delete n.context;inspect();};
+          if(n.context){$('#wf-context-budget').oninput=function(){n.context.budget=n.context.budget||{};n.context.budget.max_input_tokens=+this.value;};$('#wf-context-mode').onchange=function(){n.context.mode=this.value;};$('#wf-context-limit').oninput=function(){n.context.max_tokens=+this.value;};}
           $('#wf-retry-max').oninput=function(){n.retry_max=+this.value;};
           $('#wf-retry-backoff').oninput=function(){n.retry_backoff_ms=+this.value;};
           skillBindingEditor($('#wf-bindings'),skills,n.skill_bindings||[],function(bs,source){n.skill_bindings=bs;n.skill_set_source=source;},{source:n.skill_set_source});
@@ -3713,6 +3715,14 @@
     start(!localOnly);
   }
 
+
+  function workflowContextFields(n) {
+    var c=n.context;
+    return '<label class="field"><span>'+esc(T('cp.enable'))+'</span><input type="checkbox" id="wf-context-enabled"'+(c?' checked':'')+'></label>'+(c?
+      fieldHtml(T('cp.budget'),'<input type="number" min="4097" max="2000000" id="wf-context-budget" value="'+esc((c.budget||{}).max_input_tokens||65536)+'">')+
+      fieldHtml(T('cp.mode'),'<select id="wf-context-mode">'+['full','summary','reference'].map(function(mode){return opt(mode,T('cp.mode_'+mode),mode===(c.mode||'full'));}).join('')+'</select>')+
+      fieldHtml(T('cp.limit'),'<input type="number" min="256" max="65536" id="wf-context-limit" value="'+esc(c.max_tokens||2048)+'">')+'<p class="hint">'+esc(T('cp.hint'))+'</p>':'');
+  }
   // ---------- SKILLS ----------
   function renderSkills() {
     return api("/api/skills").then(function (skills) {
@@ -6472,7 +6482,7 @@
         '<button type="button" role="tab" id="rw-tab-diff" data-run-view="diff" aria-controls="rw-answer"' + (!r.result || !r.answer_prev ? ' disabled data-tip="' + esc(T("rw.no_previous")) + '"' : "") + '>' + esc(T("rd.ans_diff")) + '</button></div><div class="rw-panel" id="rw-answer" role="tabpanel" aria-labelledby="rw-tab-answer">' +
         runAnswerHtml(r, ansMode(r)) +
         runChangesHtml(r) +
-        costCalcHtml(r) +
+        costCalcHtml(r) + contextPlanHtml(r) +
         (!r.result ? '<div class="rw-no-answer">' + emptyState("chat", T("rw.no_answer"), T(live ? "rw.answer_running" : "rw.answer_missing")) + "</div>" : "") + '</div>' +
         '<section class="rw-panel card" id="rw-log" role="tabpanel" aria-labelledby="rw-tab-log"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section></div>' +
         '<aside class="rw-inspector" id="rd-inspector" aria-label="' + esc(T("rw.inspector")) + '" hidden><section><div class="card-head rd-head"><h3>' + esc(T("rw.run_snapshot")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '</div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" : esc(T("run.adhoc"))) + "</dd>" +
@@ -6921,6 +6931,13 @@
     return head + '<table class="table"><thead><tr><th>' + esc(T("f.model")) + "</th><th>" + esc(T("cost.formula")) + '</th><th class="right">' + esc(T("col.cost")) + "</th></tr></thead><tbody>" + rows +
       '<tr><td colspan="2"><strong>' + esc(T("cost.total")) + '</strong></td><td class="right"><strong>' + esc(money(c.amount, c.currency, 4)) + "</strong></td></tr></tbody></table>" +
       '<p class="hint pad-x">' + esc(foot) + "</p></section>";
+  }
+
+  function contextPlanHtml(r) {
+    var p=r.context_plan;if(!p)return '';
+    return '<details class="card"><summary>'+esc(T('cp.audit'))+' · '+esc(p.estimated_tokens)+' / '+esc(p.budget_tokens)+'</summary><p class="hint">'+esc(T('cp.estimate'))+'</p><div class="table-wrap"><table><thead><tr><th>'+esc(T('cp.material'))+'</th><th>'+esc(T('cp.tokens'))+'</th><th>'+esc(T('cp.decision'))+'</th></tr></thead><tbody>'+
+      (p.materials||[]).map(function(m){return '<tr><td>'+esc(m.id)+'</td><td>'+esc(m.estimated_tokens)+'</td><td>'+esc(T(m.kind==='reservation'?'cp.reserved':'cp.selected'))+(m.mode?' · '+esc(T('cp.mode_'+m.mode)):'')+'</td></tr>';}).join('')+
+      (p.omitted||[]).map(function(m){return '<tr><td>'+esc(m.id)+'</td><td>—</td><td>'+esc(m.reason)+'</td></tr>';}).join('')+'</tbody></table></div><details><summary>'+esc(T('cp.details'))+'</summary><pre>'+esc(JSON.stringify(p,null,2))+'</pre></details></details>';
   }
   // ---------- SPEND ----------
   var taskNames = {};

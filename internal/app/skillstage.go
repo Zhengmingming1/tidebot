@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Zhengmingming1/tidebot/internal/contextplan"
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
@@ -49,6 +50,13 @@ func (a *App) stageSkills(ctx context.Context, bindings []tasksvc.SkillBinding) 
 		return nil, err
 	}
 	if err := a.Skills.ValidateDependencyBindings(ctx, bindings); err != nil {
+		return nil, err
+	}
+	materials, err := a.Skills.ContextMaterials(ctx, bindings, "skill-stage")
+	if err != nil {
+		return nil, err
+	}
+	if _, err = (contextplan.Deterministic{}).Plan(ctx, contextplan.Request{Scope: "skill-stage", Budget: contextplan.Budget{MaxInputTokens: 2000000}, Materials: materials}); err != nil {
 		return nil, err
 	}
 	root := a.skillStageRoot()

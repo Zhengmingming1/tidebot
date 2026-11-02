@@ -137,7 +137,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		defer st.Close()
 		opts := runner.Options{
 			Prompt: st.Invoke(modern, req.Prompt), DisplayPrompt: req.Prompt, WorkspaceDir: dir,
-			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, a.sourceStart(req.SkillSetSource, bindings, onStart)), ContextArgs: args,
+			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, a.sourceStart(req.SkillSetSource, bindings, onStart)), ContextArgs: args, ContextRequest: st.contextRequest(modern, true),
 			SkillID: req.SkillID, SkillVersionID: versionID, RunMode: mode,
 		}
 		if mode == "edit" {

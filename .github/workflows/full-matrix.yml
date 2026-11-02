@@ -112,7 +112,7 @@ jobs:
           go-version: "1.26.x"
           cache-dependency-path: go.sum
       - name: Skill binding and bounded DAG context benchmarks
-        run: go test -run '^$' -bench 'BenchmarkResolveBindings16|BenchmarkRender' -benchmem -count=3 ./internal/skillstore ./internal/workflow
+        run: go test -run '^$' -bench 'BenchmarkResolveBindings16|BenchmarkRender|BenchmarkPlan16Skills|BenchmarkContextRepeatedOutput' -benchmem -count=3 ./internal/skillstore ./internal/workflow ./internal/contextplan
 
   desktop:
     strategy:

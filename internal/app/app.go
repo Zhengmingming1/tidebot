@@ -367,6 +367,9 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, rm)
 		return nil
 	}
+	if err := a.planRunContext(ctx, &opts); err != nil {
+		return runner.Result{}, err
+	}
 	res, err := a.Runner.RunOnce(ctx, opts)
 	a.recordRunMeta(ctx, res.RunID)
 	// failed / stopped runs still spent tokens: record them too. The caller's
@@ -597,7 +600,7 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	res, err := a.RunPromptEx(ctx, runner.Options{
 		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
 		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket,
-		OnStart: a.skillStart(staged, a.sourceStart(setSource, declared, onStart)), ContextArgs: skillArgs,
+		OnStart: a.skillStart(staged, a.sourceStart(setSource, declared, onStart)), ContextArgs: skillArgs, ContextRequest: staged.contextRequest(a.modernClaude(), staged != nil && len(staged.Skills) > 1),
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
@@ -761,7 +764,7 @@ func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string
 	return launch(startWait, func(onStart func(string)) error {
 		defer st.Close()
 		_, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: st.Invoke(modern, prompt), WorkspaceDir: ws, TriggerKind: "quick",
-			CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, onStart), ContextArgs: args}, providerName, 0)
+			CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, onStart), ContextArgs: args, ContextRequest: st.contextRequest(modern, true)}, providerName, 0)
 		return err
 	}, func(err error) { a.Log.Warn("button run", "error", err) })
 }

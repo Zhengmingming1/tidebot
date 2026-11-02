@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/contextplan"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -410,6 +411,25 @@ func (a *App) recordRunMeta(ctx context.Context, runID string) {
 
 func (a *App) systemRPC() map[string]rpcFunc {
 	return map[string]rpcFunc{
+		"context.policy.get": func(ctx context.Context, _ json.RawMessage) (any, error) {
+			b, err := a.contextBudget(ctx)
+			if err != nil {
+				return nil, err
+			}
+			resolved, _, err := b.Resolve()
+			return resolved, err
+		},
+		"context.policy.set": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			b, err := decode[contextplan.Budget](raw)
+			if err != nil {
+				return nil, err
+			}
+			if _, _, err = b.Resolve(); err != nil {
+				return nil, err
+			}
+			return b, a.saveJSONSetting(ctx, "context.policy", b)
+		},
+
 		"backup.create": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			o, _ := decode[BackupOptions](raw)
 			o.Kind = "manual"

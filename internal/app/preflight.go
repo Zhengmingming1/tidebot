@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
+	"github.com/Zhengmingming1/tidebot/internal/contextplan"
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
 	"github.com/Zhengmingming1/tidebot/internal/provider"
@@ -25,22 +25,7 @@ import (
 const skillContextMaxBytes = 256 << 10
 const contextEstimateMethod = "仅 SKILL.md 正文粗估：ASCII 约 4 字符/token，非 ASCII 约 1 字符/token；不是模型实际 token 用量，不含任务提示词、包装和工具结果"
 
-func estimateSkillTokens(data []byte) int {
-	ascii, other := 0, 0
-	for len(data) > 0 {
-		// Most instruction text is ASCII. Avoid decoding every ASCII byte;
-		// DecodeRune still handles multibyte and malformed UTF-8 consistently.
-		if data[0] < utf8.RuneSelf {
-			ascii++
-			data = data[1:]
-			continue
-		}
-		_, n := utf8.DecodeRune(data)
-		other++
-		data = data[n:]
-	}
-	return (ascii+3)/4 + other
-}
+func estimateSkillTokens(data []byte) int { return contextplan.Estimate(data) }
 
 func (a *App) dependencyPreflight(ctx context.Context, req webui.DependencyCheckRequest) (webui.DependencyPreflightReport, error) {
 	snapshot, err := a.collectDependencySnapshot(ctx, req)

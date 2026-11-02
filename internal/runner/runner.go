@@ -18,6 +18,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 
+	"github.com/Zhengmingming1/tidebot/internal/contextplan"
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
@@ -26,8 +27,9 @@ import (
 
 // Options configure a single Claude Code invocation.
 type Options struct {
-	ClaudeBin string
-	Prompt    string
+	ContextRequest *contextplan.Request // immutable inputs planned by App before launch
+	ClaudeBin      string
+	Prompt         string
 	// PromptStdin keeps composed workflow inputs out of OS command-line size limits.
 	PromptStdin  bool
 	WorkspaceDir string
@@ -264,6 +266,7 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 	}
 
 	runID := id.New("run")
+	opts.RunID = runID // available to admission/audit hooks before the process starts
 	created := time.Now().UTC().Format(time.RFC3339)
 	row := db.Run{
 		ID:           runID,
@@ -356,16 +359,25 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 
 	if opts.StartCheck != nil {
 		if why := opts.StartCheck(runCtx); why != nil {
+			if runCtx.Err() != nil {
+				return r.finishUnstarted(runID, opts, logW, context.Cause(runCtx))
+			}
 			return r.finishSkipped(runID, opts, logW, why)
 		}
 	}
 	if waited && opts.BeforeStart != nil {
 		if why := opts.BeforeStart(runCtx, &opts); why != nil {
+			if runCtx.Err() != nil {
+				return r.finishUnstarted(runID, opts, logW, context.Cause(runCtx))
+			}
 			return r.finishSkipped(runID, opts, logW, why)
 		}
 	}
 	if opts.AtStart != nil {
 		if why := opts.AtStart(runCtx, &opts); why != nil {
+			if runCtx.Err() != nil {
+				return r.finishUnstarted(runID, opts, logW, context.Cause(runCtx))
+			}
 			return r.finishSkipped(runID, opts, logW, why)
 		}
 	}
@@ -398,9 +410,6 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 	)
 
 	fmt.Fprintf(logW, "[%s] run %s started (provider=%s)\n", started.Local().Format("15:04:05"), runID, opts.Profile.Name)
-	if opts.RunID == "" {
-		opts.RunID = runID
-	}
 	var onUsage func(pricing.Cost)
 	if every := r.usageEvery(); every > 0 && opts.Cost != nil {
 		onUsage = func(c pricing.Cost) {

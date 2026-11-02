@@ -1,0 +1,23 @@
+Go 1.26.10; GOMAXPROCS=2; three repetitions; initial Context Planner MVP
+
+goos: linux
+goarch: amd64
+pkg: github.com/Zhengmingming1/tidebot/internal/contextplan
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkPlan16Skills-2   	    7068	    233746 ns/op	   92399 B/op	     107 allocs/op
+BenchmarkPlan16Skills-2   	    5874	    190858 ns/op	   92408 B/op	     107 allocs/op
+BenchmarkPlan16Skills-2   	    6711	    196842 ns/op	   92402 B/op	     107 allocs/op
+PASS
+ok  	github.com/Zhengmingming1/tidebot/internal/contextplan	4.884s
+goos: linux
+goarch: amd64
+pkg: github.com/Zhengmingming1/tidebot/internal/workflow
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkContextRepeatedOutput/inline-2         	   19454	     92828 ns/op	  205776 B/op	       8 allocs/op
+BenchmarkContextRepeatedOutput/inline-2         	   12760	    112686 ns/op	  205842 B/op	       8 allocs/op
+BenchmarkContextRepeatedOutput/inline-2         	    9237	    108813 ns/op	  205850 B/op	       8 allocs/op
+BenchmarkContextRepeatedOutput/selected_once-2  	  233977	      5218 ns/op	     778 B/op	      17 allocs/op
+BenchmarkContextRepeatedOutput/selected_once-2  	  230724	      5041 ns/op	     778 B/op	      17 allocs/op
+BenchmarkContextRepeatedOutput/selected_once-2  	  271794	      5288 ns/op	     778 B/op	      17 allocs/op
+PASS
+ok  	github.com/Zhengmingming1/tidebot/internal/workflow	10.860s

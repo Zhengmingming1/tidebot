@@ -2475,5 +2475,21 @@
   "ev.options": "试跑设置",
   "wf.retry_max": "临时错误重试次数（0–5）",
   "wf.retry_backoff": "首次重试等待时间（毫秒）",
-  "wf.retry_hint": "默认关闭。仅对可安全重复执行的技能开启；只重试临时错误，等待时间逐次翻倍、最长一分钟。已完成节点不会重放。"
+  "wf.retry_hint": "默认关闭。仅对可安全重复执行的技能开启；只重试临时错误，等待时间逐次翻倍、最长一分钟。已完成节点不会重放。",
+  "cp.enable": "规划上游上下文",
+  "cp.budget": "输入 Token 上限（含系统预留）",
+  "cp.mode": "上游输出加载方式",
+  "cp.mode_full": "完整输出",
+  "cp.mode_summary": "规则摘要",
+  "cp.mode_reference": "仅引用原文",
+  "cp.limit": "每份摘要 Token 上限",
+  "cp.hint": "只加载此节点引用或明确选择的祖先输出。重复引用只装入一次；摘要可能丢失信息，原文保留供按需读取。必需技能指令不会被截断。",
+  "cp.audit": "上下文计划",
+  "cp.estimate": "Token 为粗估；这里只规划初始输入，模型运行中的工具结果和隐藏系统上下文另有预留。",
+  "cp.material": "材料",
+  "cp.tokens": "估算 Token",
+  "cp.decision": "选择结果",
+  "cp.selected": "已加载",
+  "cp.details": "版本、哈希与决策记录",
+  "cp.reserved": "预留"
 }

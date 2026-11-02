@@ -104,7 +104,7 @@ func (a *App) StartDryRun(taskID string) (*DryRun, error) {
 		defer os.RemoveAll(box)
 		defer st.Close()
 		res, err := a.RunPromptEx(ctx, runner.Options{Prompt: prompt, WorkspaceDir: box, TriggerKind: "dry_run", TaskID: taskID,
-			TaskVersionID: versionID, CostBucket: cost.BucketDryRun, ContextArgs: args, OnStart: a.skillStart(st, a.sourceStart(source, declared, nil))}, "", 15*time.Minute)
+			TaskVersionID: versionID, CostBucket: cost.BucketDryRun, ContextArgs: args, ContextRequest: st.contextRequest(modern, explicit), OnStart: a.skillStart(st, a.sourceStart(source, declared, nil))}, "", 15*time.Minute)
 		after := hashTree(box)
 		dryRuns.Lock()
 		defer dryRuns.Unlock()

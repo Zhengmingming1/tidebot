@@ -296,6 +296,7 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			SkillBindings      []tasksvc.SkillBinding   `json:"skill_bindings"`
 			SkillSetSource     *skillstore.RunSetSource `json:"skill_set_source,omitempty"`
 			SkillEvidence      []skillEvidence          `json:"skill_evidence"`
+			ContextPlan        json.RawMessage          `json:"context_plan,omitempty"`
 			CostDetail         json.RawMessage          `json:"cost_detail"`
 			Currency           string                   `json:"currency"`
 			Result             string                   `json:"result"`
@@ -306,6 +307,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			ChangesUndoneAt    string                   `json:"changes_undone_at,omitempty"`
 			ChangesUndoneFiles []string                 `json:"changes_undone_files,omitempty"`
 		}{runDTO: runs[0], Currency: s.fx().Display, Result: result, ResultTruncated: cut != 0, ChangesUndoneAt: undoneAt}
+		var contextAudit string
+		if err := s.deps.DB.QueryRowContext(r.Context(), `SELECT detail_json FROM operation_log WHERE entity_type='run' AND entity_id=? AND action='context.plan' ORDER BY id DESC LIMIT 1`, id).Scan(&contextAudit); err == nil && json.Valid([]byte(contextAudit)) {
+			out.ContextPlan = json.RawMessage(contextAudit)
+		}
 		out.SkillBindings, _ = s.deps.Skills.RunBindings(r.Context(), id)
 		out.SkillSetSource, _ = s.deps.Skills.RunSource(r.Context(), id)
 		out.SkillEvidence = loadedSkillEvidence(out.SkillBindings)

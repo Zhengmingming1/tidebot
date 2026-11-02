@@ -28,6 +28,9 @@ type Definition struct {
 	Nodes          []Node `json:"nodes"`
 }
 type Node struct {
+	Context          *ContextPolicy    `json:"context,omitempty"`
+	ContextRunID     string            `json:"-"`
+	ContextArtifacts []ContextArtifact `json:"-"`
 	// SkillSetState is derived before freezing bindings in a run snapshot.
 	SkillSetState  string                  `json:"skill_set_state,omitempty"`
 	SkillSetSource *tasksvc.SkillSetSource `json:"skill_set_source,omitempty"`

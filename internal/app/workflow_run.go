@@ -76,6 +76,10 @@ func (a *App) executeWorkflowNode(ctx context.Context, n workflow.Node, prompt, 
 		return "", err
 	}
 	args = append(args, "--disallowedTools", strings.Join(readOnlyDeny, ","))
+	contextRequest, err := workflowContext(st, n, modern, ws)
+	if err != nil {
+		return "", err
+	}
 	primary := n.SkillBindings[0]
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -83,7 +87,7 @@ func (a *App) executeWorkflowNode(ctx context.Context, n workflow.Node, prompt, 
 	res, err := a.RunPromptEx(childCtx, runner.Options{
 		Prompt: st.Invoke(modern, prompt), PromptStdin: true, DisplayPrompt: prompt,
 		WorkspaceDir: ws, TriggerKind: "workflow", CostBucket: cost.BucketProduction,
-		ContextArgs: args, SkillID: primary.SkillID, SkillVersionID: primary.VersionID, RunMode: "read",
+		ContextArgs: args, ContextRequest: contextRequest, SkillID: primary.SkillID, SkillVersionID: primary.VersionID, RunMode: "read",
 		OnStart: func(id string) {
 			// The public callback records the child link before the run can wait for a slot.
 			onChild(id)

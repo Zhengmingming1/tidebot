@@ -2475,5 +2475,21 @@
   "ev.options": "Comparison settings",
   "wf.retry_max": "Retries after a temporary failure (0–5)",
   "wf.retry_backoff": "Initial retry delay (milliseconds)",
-  "wf.retry_hint": "Off by default. Enable only for skills that can safely repeat an action. Only temporary errors retry; the delay doubles up to one minute. Completed nodes are never replayed."
+  "wf.retry_hint": "Off by default. Enable only for skills that can safely repeat an action. Only temporary errors retry; the delay doubles up to one minute. Completed nodes are never replayed.",
+  "cp.enable": "Plan upstream context",
+  "cp.budget": "Input token cap (including system reserve)",
+  "cp.mode": "Upstream output loading",
+  "cp.mode_full": "Full output",
+  "cp.mode_summary": "Rule-based extract",
+  "cp.mode_reference": "Original reference only",
+  "cp.limit": "Token cap per extract",
+  "cp.hint": "Only referenced or explicitly selected ancestor outputs are loaded. Repeated references load once. Extracts can omit information; originals remain available for inspection. Required skill instructions are never truncated.",
+  "cp.audit": "Context plan",
+  "cp.estimate": "Tokens are estimates. This plans initial input; runtime tool results and hidden system context have separate reservations.",
+  "cp.material": "Material",
+  "cp.tokens": "Estimated tokens",
+  "cp.decision": "Decision",
+  "cp.selected": "Loaded",
+  "cp.details": "Versions, hashes and decisions",
+  "cp.reserved": "Reserved"
 }

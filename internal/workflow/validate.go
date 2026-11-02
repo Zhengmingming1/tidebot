@@ -151,6 +151,9 @@ func Validate(d *Definition) error {
 			}
 		}
 		collect(n.ID)
+		if err := validateContext(n, ancestors); err != nil {
+			return fmt.Errorf("node %s: %w", n.ID, err)
+		}
 		text := n.Prompt
 		if n.Kind == "condition" {
 			text = n.Condition.Source

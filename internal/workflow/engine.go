@@ -82,7 +82,13 @@ func (s *Service) run(parent context.Context, rid string, d Definition, input, p
 				if n.Kind == "condition" {
 					template = n.Condition.Source
 				}
-				prompt, err := render(template, input, states, n.Join)
+				var prompt string
+				var err error
+				if n.Kind == "skill" && n.Context != nil {
+					n, prompt, err = prepareContext(n, rid, input, states)
+				} else {
+					prompt, err = render(template, input, states, n.Join)
+				}
 				state.StartedAt = now()
 				if err != nil {
 					state.Status = "failed"

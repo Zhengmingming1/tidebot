@@ -125,3 +125,18 @@ func TestCancelBetweenInsertAndStartKeepsUserReason(t *testing.T) {
 		t.Fatal(m)
 	}
 }
+
+func TestCancelDuringAdmissionKeepsUserReason(t *testing.T) {
+	r, _, _ := drainRunner(t, 1)
+	opts := helperOptions(t, "good")
+	opts.AtStart = func(ctx context.Context, o *Options) error {
+		if o.RunID == "" || !r.Cancel(o.RunID) {
+			t.Fatal("admission has no registered run")
+		}
+		return ctx.Err()
+	}
+	result, err := r.RunOnce(context.Background(), opts)
+	if result.Status != "canceled" || !errors.Is(err, ErrStoppedByUser) {
+		t.Fatal(result, err)
+	}
+}
