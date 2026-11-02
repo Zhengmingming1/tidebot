@@ -1018,7 +1018,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .toast .t-undo { font-weight: 600; color: var(--tip-link); padding: 0 8px; }
 .toast .t-x { display: grid; place-items: center; width: 28px; opacity: .8; }
 @keyframes t-in { from { opacity: 0; transform: translateY(8px); } }
-.modal-bg { position: fixed; inset: 0; z-index: 40; background: var(--overlay); display: grid; place-items: center; padding: var(--s3); }
+.modal-bg { position: fixed; inset: 0; z-index: 40; background: var(--overlay); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: var(--s3); }
 .modal { width: 520px; max-width: 100%; }
 .modal form { display: flex; flex-direction: column; gap: var(--s2); }
 .modal .actions { display: flex; justify-content: flex-end; gap: var(--s1); margin-top: var(--s1); }
@@ -1057,6 +1057,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .drop label.btn { cursor: pointer; }
 .preview { margin-top: var(--s2); padding: var(--s2); border: 1px solid var(--border); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: var(--s1); }
 .preview form { gap: var(--s1); }
+#sk-prev { min-width: 0; overflow-wrap: anywhere; }
 .preview h4 { margin: var(--s1) 0 0; font-size: 13px; }
 .desc-box { margin: 0; padding: var(--s1) 12px; background: var(--bg-sunk); border-radius: var(--radius-sm); color: var(--text-2); white-space: pre-wrap; max-height: 140px; overflow: auto; }
 .notice { display: flex; gap: 6px; align-items: flex-start; margin: var(--s1) 0 0; padding: var(--s1) 12px; border-radius: var(--radius-sm); background: var(--info-50); color: var(--text); font-size: 13px; }
@@ -3437,6 +3438,7 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
   .shell[data-nav-size="expanded"] .sidebar-status .cc-card { width: 100%; padding: 4px 8px; }
   .content { gap: 14px; padding: 12px; }
   .card, .card.modal { padding: 12px; }
+  .card.modal { --sp-6: 12px; }
   .card.flush { padding: 0; }
   .grid.g2, .form-row { grid-template-columns: minmax(0, 1fr); }
   .grid.g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
