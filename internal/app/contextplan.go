@@ -113,9 +113,24 @@ func (a *App) planRunContext(ctx context.Context, opts *runner.Options) error {
 	if err != nil {
 		return err
 	}
+	chunks := []string{opts.Prompt}
+	totalBytes := len(opts.Prompt)
+	add := func(text string) error {
+		if len(text) > workflow.MaxPromptBytes-totalBytes {
+			return fmt.Errorf("planned prompt exceeds %d KiB", workflow.MaxPromptBytes>>10)
+		}
+		totalBytes += len(text)
+		chunks = append(chunks, text)
+		return nil
+	}
+	if totalBytes > workflow.MaxPromptBytes {
+		return fmt.Errorf("planned prompt exceeds %d KiB", workflow.MaxPromptBytes>>10)
+	}
 	for _, m := range plan.Materials {
 		if m.Kind == "upstream" {
-			opts.Prompt += m.Body
+			if err := add(m.Body); err != nil {
+				return err
+			}
 		}
 	}
 	if notices.Len() > 0 {
@@ -123,10 +138,19 @@ func (a *App) planRunContext(ctx context.Context, opts *runner.Options) error {
 		for _, omitted := range plan.Omitted {
 			fmt.Fprintf(&noticeOutput, "\n[%s: omitted from initial context; inspect its original artifact if needed.]", omitted.ID)
 		}
-		opts.Prompt += noticeOutput.String()
+		if err := add(noticeOutput.String()); err != nil {
+			return err
+		}
 	}
-	if len(opts.Prompt) > workflow.MaxPromptBytes {
-		return fmt.Errorf("planned prompt exceeds %d KiB", workflow.MaxPromptBytes>>10)
+	// Validate the byte bound before allocation, including when the owner has
+	// configured a token budget larger than the legacy prompt byte limit.
+	if len(chunks) > 1 {
+		var assembled strings.Builder
+		assembled.Grow(totalBytes)
+		for _, chunk := range chunks {
+			assembled.WriteString(chunk)
+		}
+		opts.Prompt = assembled.String()
 	}
 	if req.NodeID != "" {
 		opts.PromptStdin = true

@@ -200,3 +200,18 @@ func TestContextCannotChangeAfterPlanning(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestContextByteLimitRejectsBeforeChangingPrompt(t *testing.T) {
+	a := newTestApp(t)
+	req := &contextplan.Request{Scope: "execution", Budget: contextplan.Budget{MaxInputTokens: 200000}}
+	for _, name := range []string{"a", "b", "c"} {
+		req.Materials = append(req.Materials, contextplan.Material{ID: name, Kind: "upstream", Scope: "execution", Allowed: true, Required: true, Body: strings.Repeat(name, 100000)})
+	}
+	o := runner.Options{Prompt: "original task", ContextRequest: req}
+	if err := a.planRunContext(context.Background(), &o); err == nil || !strings.Contains(err.Error(), "256 KiB") {
+		t.Fatal(err)
+	}
+	if o.Prompt != "original task" {
+		t.Fatal("rejected plan expanded the prompt")
+	}
+}
