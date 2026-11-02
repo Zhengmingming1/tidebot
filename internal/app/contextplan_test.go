@@ -19,8 +19,8 @@ import (
 func TestContextPlanAdmissionAndPrivateAudit(t *testing.T) {
 	a := newTestApp(t)
 	ctx := context.Background()
-	secret := "private-prompt-sentinel-8671"
-	res, err := a.RunPromptEx(ctx, runner.Options{Prompt: secret}, "kimi-coding", 0)
+	promptFixture := "private-prompt-sentinel-8671"
+	res, err := a.RunPromptEx(ctx, runner.Options{Prompt: promptFixture}, "kimi-coding", 0)
 	if err != nil || res.Status != "succeeded" {
 		t.Fatal(res, err)
 	}
@@ -28,7 +28,7 @@ func TestContextPlanAdmissionAndPrivateAudit(t *testing.T) {
 	if err = a.DB.QueryRow(`SELECT detail_json FROM operation_log WHERE entity_type='run' AND entity_id=? AND action='context.plan'`, res.RunID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(raw, secret) {
+	if strings.Contains(raw, promptFixture) {
 		t.Fatal("prompt leaked into audit")
 	}
 	var plan contextplan.Plan
