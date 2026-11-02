@@ -252,7 +252,6 @@ func TestMCPServer(t *testing.T) {
 	if err := ServeMCP(strings.NewReader(in), writer, "t", "1", tools); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
 	got := map[float64]map[string]any{}
 	for _, l := range strings.Split(strings.TrimSpace(writer.String()), "\n") {
 		var m map[string]any
@@ -276,6 +275,8 @@ func (s *syncW) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock();
 func (s *syncW) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if b, ok := s.w.(*bytes.Buffer); ok { return b.String() }
+	if b, ok := s.w.(*bytes.Buffer); ok {
+		return b.String()
+	}
 	return ""
 }

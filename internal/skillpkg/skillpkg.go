@@ -51,7 +51,14 @@ func CleanRel(name string) (string, error) {
 		return "", fmt.Errorf("unsafe path %q", name)
 	}
 	for _, seg := range strings.Split(c, "/") {
-		if seg == ".." {
+		// Reject Windows aliases on every OS so a package accepted on Linux
+		// cannot create device files, ADS streams or colliding names on Windows.
+		base := strings.ToUpper(strings.SplitN(seg, ".", 2)[0])
+		reserved := base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" || base == "CONIN$" || base == "CONOUT$"
+		if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9' {
+			reserved = true
+		}
+		if strings.ContainsAny(seg, ":\x00<>\"|?*") || strings.TrimRight(seg, " .") != seg || reserved {
 			return "", fmt.Errorf("unsafe path %q", name)
 		}
 	}
@@ -84,21 +91,29 @@ func (w *writer) addMode(name string, r io.Reader, exec bool) error {
 	if !strings.HasPrefix(dst, filepath.Clean(w.dest)+string(os.PathSeparator)) {
 		return fmt.Errorf("unsafe path %q", name)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	root, err := os.OpenRoot(w.dest)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(filepath.FromSlash(rel)), 0o755); err != nil {
 		return err
 	}
 	perm := os.FileMode(0o644)
 	if exec {
 		perm = 0o755
 	}
-	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	f, err := root.OpenFile(filepath.FromSlash(rel), os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
 	if err != nil {
 		return fmt.Errorf("duplicate or bad entry %q", name)
 	}
 	n, err := io.Copy(f, io.LimitReader(r, MaxFileBytes+1))
-	f.Close()
+	closeErr := f.Close()
 	if err != nil {
 		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	if n > MaxFileBytes {
 		return fmt.Errorf("%s is larger than %d MB", rel, MaxFileBytes>>20)
@@ -124,6 +139,7 @@ func Extract(filename string, data []byte, dest string) error {
 		if err != nil {
 			return errors.New("not a valid .tar.gz")
 		}
+		defer gz.Close()
 		tr := tar.NewReader(gz)
 		for {
 			h, err := tr.Next()
@@ -135,6 +151,10 @@ func Extract(filename string, data []byte, dest string) error {
 			}
 			switch h.Typeflag {
 			case tar.TypeDir:
+				w.entries++
+				if w.entries > MaxEntries {
+					return fmt.Errorf("too many files (max %d)", MaxEntries)
+				}
 				// tar -czf package.tar.gz -C package . includes this harmless root directory.
 				if h.Name == "." || h.Name == "./" {
 					continue

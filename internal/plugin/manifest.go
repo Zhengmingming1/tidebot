@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -100,6 +102,7 @@ type Permissions struct {
 var (
 	reID         = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	reSemver     = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`)
+	reSecretName = regexp.MustCompile(`^[a-z0-9_]{1,80}$`)
 	reSecretRef  = regexp.MustCompile(`\$\{secret:([a-z0-9_]+)\}`)
 	hostAPIs     = map[string]bool{"runs.start": true, "notify.send": true, "tasks.read": true, "kv": true, "log.write": true}
 	triggerKinds = map[string]bool{"email": true, "webhook": true, "file_change": true, "im": true, "rss": true, "web_monitor": true, "poll": true}
@@ -166,6 +169,9 @@ func (m *Manifest) Validate(dir string) error {
 	}
 	declared := map[string]bool{}
 	for _, s := range m.Permissions.Secrets {
+		if !reSecretName.MatchString(s) {
+			return errors.New("secret names must contain only lowercase letters, digits and underscores (max 80)")
+		}
 		declared[s] = true
 	}
 	for _, c := range m.Contributes.Connectors {
@@ -204,7 +210,7 @@ func (m *Manifest) Validate(dir string) error {
 }
 
 func insideDir(dir, rel string) error {
-	if filepath.IsAbs(rel) {
+	if _, err := skillpkg.CleanRel(rel); err != nil {
 		return errors.New("must be relative to the plugin")
 	}
 	p := filepath.Clean(filepath.Join(dir, rel))

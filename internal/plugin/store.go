@@ -393,7 +393,23 @@ func (s *Store) MCPConfig(ctx context.Context, sandbox bool) ([]byte, int, error
 				}
 				cmd, args = BuiltinExe, append([]string{BuiltinArg, c.MCP.Builtin, "mcp"}, c.MCP.Args...)
 			}
-			env := s.ResolveEnv(p.ID, c.MCP.Env)
+			// Connector secrets obey the same grants as plugin processes. Revoking
+			// a secret must not leave it accessible through --mcp-config.
+			permitted := map[string]bool{}
+			for _, name := range p.Current.Manifest.Restrict(p.Current.Approved).Permissions.Secrets {
+				permitted[name] = true
+			}
+			env := map[string]string{}
+			for key, value := range c.MCP.Env {
+				env[key] = reSecretRef.ReplaceAllStringFunc(value, func(ref string) string {
+					name := reSecretRef.FindStringSubmatch(ref)[1]
+					if !permitted[name] {
+						return ""
+					}
+					secret, _ := s.Secrets.Get(secretKey(p.ID, name))
+					return secret
+				})
+			}
 			if c.MCP.Builtin != "" {
 				// Official runtimes read their settings (incl. write-only secrets) from here;
 				// the file holding this document is 0600, like ${secret:} refs above.

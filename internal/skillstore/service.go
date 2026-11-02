@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/id"
+	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
 )
@@ -157,24 +158,51 @@ ON CONFLICT(sha256) DO UPDATE SET refcount=refcount+1`, sha, len(data), data)
 
 func readTree(root string) (map[string][]byte, error) {
 	out := map[string][]byte{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	var total int
+	confined, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer confined.Close()
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
 			return nil
+		}
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("skill imports require regular files: %s", d.Name())
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if _, err := skillpkg.CleanRel(rel); err != nil {
+			return err
+		}
+		if len(out) >= skillpkg.MaxEntries {
+			return fmt.Errorf("too many skill files")
+		}
 		if strings.HasPrefix(rel, ".git/") {
 			return nil
 		}
-		b, err := os.ReadFile(path)
+		f, err := confined.Open(filepath.FromSlash(rel))
 		if err != nil {
 			return err
+		}
+		b, err := io.ReadAll(io.LimitReader(f, skillpkg.MaxFileBytes+1))
+		f.Close()
+		if err != nil {
+			return err
+		}
+		total += len(b)
+		if len(b) > skillpkg.MaxFileBytes || total > skillpkg.MaxTotalBytes {
+			return fmt.Errorf("skill import exceeds size limit")
 		}
 		out[rel] = b
 		return nil

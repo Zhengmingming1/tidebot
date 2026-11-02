@@ -33,6 +33,7 @@ type Conn struct {
 	mu      sync.Mutex
 	next    int64
 	pending map[int64]chan msg
+	closed  bool
 	// ErrMethodNotFound-style errors use code -32601.
 }
 
@@ -53,13 +54,25 @@ func (c *Conn) send(m msg) error {
 
 // Call sends a request to the host and waits for its answer.
 func (c *Conn) Call(method string, params any, out any) error {
-	pb, _ := json.Marshal(params)
+	pb, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return io.ErrClosedPipe
+	}
 	c.next++
 	id := c.next
 	ch := make(chan msg, 1)
 	c.pending[id] = ch
 	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+	}()
 	if err := c.send(msg{ID: &id, Method: method, Params: pb}); err != nil {
 		return err
 	}
@@ -76,9 +89,6 @@ func (c *Conn) Call(method string, params any, out any) error {
 		}
 		return nil
 	case <-time.After(30 * time.Second):
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
 		return errors.New("host call timed out")
 	}
 }
@@ -92,6 +102,11 @@ func (c *Conn) Notify(method string, params any) error {
 // Serve reads r until EOF, dispatching requests to h (each in its own goroutine) and
 // routing responses to pending Calls.
 func (c *Conn) Serve(r io.Reader, h Handler) error {
+	var handlers sync.WaitGroup
+	// Never block the reader on a handler: handlers may be waiting for a host
+	// response on this same connection. Reject overload instead of spawning an
+	// unbounded number of goroutines.
+	slots := make(chan struct{}, 64)
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 	for sc.Scan() {
@@ -100,8 +115,19 @@ func (c *Conn) Serve(r io.Reader, h Handler) error {
 			continue
 		}
 		if m.Method != "" {
+			select {
+			case slots <- struct{}{}:
+			default:
+				if m.ID != nil {
+					_ = c.send(msg{ID: m.ID, Error: &rpcError{Code: -32000, Message: "too many concurrent requests"}})
+				}
+				continue
+			}
+			handlers.Add(1)
 			go func(m msg) {
-				res, err := h(m.Method, m.Params)
+				defer handlers.Done()
+				defer func() { <-slots }()
+				res, err := callHandler(h, m.Method, m.Params)
 				if m.ID == nil {
 					return
 				}
@@ -133,12 +159,26 @@ func (c *Conn) Serve(r io.Reader, h Handler) error {
 		}
 	}
 	c.mu.Lock()
+	c.closed = true
 	for id, ch := range c.pending {
 		close(ch)
 		delete(c.pending, id)
 	}
 	c.mu.Unlock()
+	// A successful return means all response writes finished; callers can safely
+	// consume the output without sleeps or concurrent buffer reads.
+	handlers.Wait()
 	return sc.Err()
+}
+
+func callHandler(h Handler, method string, params json.RawMessage) (result any, err error) {
+	defer func() {
+		if recover() != nil {
+			// A panic can contain credentials from a plugin. Keep it out of RPC.
+			result, err = nil, errors.New("plugin handler panicked")
+		}
+	}()
+	return h(method, params)
 }
 
 var errNoMethod = errors.New("method not found")

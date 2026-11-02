@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
+	"github.com/Zhengmingming1/tidebot/internal/provider"
 )
 
 // Protocol: JSON-RPC 2.0, one JSON object per line on the plugin's stdin/stdout.
@@ -67,6 +68,7 @@ type proc struct {
 	lastUse  time.Time
 	stopping bool
 	done     chan struct{}
+	secrets  []string // immutable launch snapshot, used only for log redaction
 }
 
 // Host runs and supervises plugin processes.
@@ -78,6 +80,7 @@ type Host struct {
 	Backoff time.Duration
 
 	mu      sync.Mutex
+	startMu sync.Mutex // coalesce concurrent lazy starts before publishing a proc
 	procs   map[string]*proc
 	crashes map[string][]time.Time
 	open    map[string]bool // breaker open
@@ -135,7 +138,10 @@ func (h *Host) BreakerOpen(pluginID string) bool {
 }
 
 func (h *Host) ensure(pluginID string) (*proc, error) {
+	h.startMu.Lock()
+	defer h.startMu.Unlock()
 	h.mu.Lock()
+	ctx := h.ctx
 	if h.open[pluginID] {
 		h.mu.Unlock()
 		return nil, errors.New("plugin circuit breaker is open")
@@ -145,7 +151,10 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 		return p, nil
 	}
 	h.mu.Unlock()
-	in, err := h.Store.Get(h.ctx, pluginID)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	in, err := h.Store.Get(ctx, pluginID)
 	if err != nil || in.Current == nil || !in.Enabled {
 		return nil, errors.New("plugin not installed or disabled")
 	}
@@ -167,11 +176,13 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 	}
 	cmd.Dir = in.Current.Dir
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dataDir, "TIDEBOT_PLUGIN_ID=" + pluginID, "TIDEBOT_PLUGIN_DATA=" + dataDir}
+	var secretValues []string
 	if v := os.Getenv("TIDEBOT_TEST_PLUGIN"); v != "" {
 		env = append(env, "TIDEBOT_TEST_PLUGIN="+v)
 	}
 	for _, sname := range m.Permissions.Secrets {
 		if v, err := h.Store.Secrets.Get(secretKey(pluginID, sname)); err == nil {
+			secretValues = append(secretValues, v)
 			env = append(env, "TIDEBOT_SECRET_"+strings.ToUpper(sname)+"="+v)
 		}
 	}
@@ -189,24 +200,32 @@ func (h *Host) ensure(pluginID string) (*proc, error) {
 		return nil, err
 	}
 	applyLimits(cmd.Process.Pid, m.Runtime.Limits)
-	p := &proc{pluginID: pluginID, cmd: cmd, stdin: stdin, pending: map[int64]chan rpcMsg{}, lastUse: time.Now(), done: make(chan struct{})}
+	cfg := h.Store.ActivationConfig(ctx, pluginID)
+	fields, _ := ParseSchema(m.ConfigSchema)
+	for _, field := range fields {
+		if field.WriteOnly {
+			if v, ok := cfg[field.Key].(string); ok {
+				secretValues = append(secretValues, v)
+			}
+		}
+	}
+	p := &proc{pluginID: pluginID, cmd: cmd, stdin: stdin, pending: map[int64]chan rpcMsg{}, lastUse: time.Now(), done: make(chan struct{}), secrets: secretValues}
 	h.mu.Lock()
 	h.procs[pluginID] = p
 	h.mu.Unlock()
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			h.Log.Info("plugin stderr", "plugin", pluginID, "line", truncate(sc.Text(), 300))
+			h.Log.Info("plugin stderr", "plugin", pluginID, "line", truncate(p.redact(sc.Text()), 300))
 		}
 	}()
 	go h.readLoop(p, stdout, m)
 	go h.waitLoop(p)
-	cfg := h.Store.ActivationConfig(h.ctx, pluginID)
 	if _, err := h.call(p, "plugin.activate", map[string]any{"config": cfg, "data_dir": dataDir}, 10*time.Second); err != nil {
 		h.Log.Warn("plugin activate", "plugin", pluginID, "error", err)
 	}
 	// Re-subscribe existing trigger bindings so polling triggers survive restarts.
-	if rows, err := h.Store.DB.QueryContext(h.ctx, `SELECT id, config_json FROM trigger_bindings WHERE plugin_id=? AND enabled=1`, pluginID); err == nil {
+	if rows, err := h.Store.DB.QueryContext(ctx, `SELECT id, config_json FROM trigger_bindings WHERE plugin_id=? AND enabled=1`, pluginID); err == nil {
 		type sub struct{ id, cfg string }
 		var subs []sub
 		for rows.Next() {
@@ -324,6 +343,7 @@ func (h *Host) call(p *proc, method string, params any, timeout time.Duration) (
 	p.pending[idv] = ch
 	p.lastUse = time.Now()
 	p.mu.Unlock()
+	defer func() { p.mu.Lock(); delete(p.pending, idv); p.mu.Unlock() }()
 	if err := p.send(rpcMsg{ID: &idv, Method: method, Params: pb}); err != nil {
 		return nil, err
 	}
@@ -333,7 +353,7 @@ func (h *Host) call(p *proc, method string, params any, timeout time.Duration) (
 			return nil, errors.New("plugin exited")
 		}
 		if msg.Error != nil {
-			return nil, errors.New(msg.Error.Message)
+			return nil, errors.New(p.redact(msg.Error.Message))
 		}
 		return msg.Result, nil
 	case <-time.After(timeout):
@@ -363,7 +383,9 @@ func allowed(m *Manifest, api string) bool {
 }
 
 func (h *Host) handle(p *proc, m *Manifest, msg rpcMsg) {
+	h.mu.Lock()
 	ctx := h.ctx
+	h.mu.Unlock()
 	p.mu.Lock()
 	p.lastUse = time.Now()
 	p.mu.Unlock()
@@ -412,19 +434,28 @@ func (h *Host) handle(p *proc, m *Manifest, msg rpcMsg) {
 			result, err = h.API.TasksRead(ctx, p.pluginID)
 		}
 	case "kv.get":
+		if deny("kv") {
+			break
+		}
 		var a struct{ Key string }
 		_ = json.Unmarshal(msg.Params, &a)
 		v, ok := h.Store.KVGet(ctx, p.pluginID, a.Key)
 		result = map[string]any{"value": v, "found": ok}
 	case "kv.set":
+		if deny("kv") {
+			break
+		}
 		var a struct{ Key, Value string }
 		_ = json.Unmarshal(msg.Params, &a)
 		err = h.Store.KVSet(ctx, p.pluginID, a.Key, a.Value)
 		result = map[string]bool{"ok": err == nil}
 	case "log.write":
+		if deny("log.write") {
+			break
+		}
 		var a struct{ Level, Message string }
 		_ = json.Unmarshal(msg.Params, &a)
-		h.Log.Info("plugin log", "plugin", p.pluginID, "level", a.Level, "msg", truncate(a.Message, 1000))
+		h.Log.Info("plugin log", "plugin", p.pluginID, "level", truncate(p.redact(a.Level), 20), "msg", truncate(p.redact(a.Message), 1000))
 		result = map[string]bool{"ok": true}
 	default:
 		err = fmt.Errorf("method not found: %s", msg.Method)
@@ -434,11 +465,18 @@ func (h *Host) handle(p *proc, m *Manifest, msg rpcMsg) {
 	}
 	resp := rpcMsg{ID: msg.ID}
 	if err != nil {
-		resp.Error = &rpcErr{Code: -32000, Message: err.Error()}
+		resp.Error = &rpcErr{Code: -32000, Message: p.redact(err.Error())}
 	} else {
 		resp.Result, _ = json.Marshal(result)
 	}
 	_ = p.send(resp)
+}
+
+func (p *proc) redact(text string) string {
+	for _, secret := range p.secrets {
+		text = provider.MaskSecret(text, secret)
+	}
+	return text
 }
 
 // Stop shuts one plugin down (plugin.shutdown, then kill after 3 s).
@@ -464,12 +502,16 @@ func (h *Host) Stop(pluginID string) {
 
 // StopAll stops every running plugin.
 func (h *Host) StopAll() {
+	// Wait for any in-progress lazy start to publish its process. When Run's
+	// context is canceled, ensure refuses further starts before taking a snapshot.
+	h.startMu.Lock()
 	h.mu.Lock()
 	ids := make([]string, 0, len(h.procs))
 	for k := range h.procs {
 		ids = append(ids, k)
 	}
 	h.mu.Unlock()
+	h.startMu.Unlock()
 	for _, k := range ids {
 		h.Stop(k)
 	}
