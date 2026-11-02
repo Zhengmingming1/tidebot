@@ -67,8 +67,9 @@ func TestDependencyPreflightAPIAndRuntimeInput(t *testing.T) {
 		calls++
 		return DependencyPreflightReport{RuntimeProfile: DependencyRuntimeProfile{Mode: req.Mode}, ContextUsage: []DependencyContextUsage{}}, nil
 	}
-	code, out := c.json(http.MethodPost, "/api/dependencies/preflight", map[string]string{"kind": "draft", "prompt": "test", "mode": "read", "workspace": "/tmp/example", "python_environment": "/tmp/venv"})
-	if code != 200 || out["runtime_profile"] == nil || seen.Workspace != "/tmp/example" || seen.PythonEnvironment != "/tmp/venv" || calls != 1 {
+	workspace, venv := t.TempDir(), t.TempDir()
+	code, out := c.json(http.MethodPost, "/api/dependencies/preflight", map[string]string{"kind": "draft", "prompt": "test", "mode": "read", "workspace": workspace, "python_environment": venv})
+	if code != 200 || out["runtime_profile"] == nil || seen.Workspace != workspace || seen.PythonEnvironment != venv || calls != 1 {
 		t.Fatalf("preflight %d %v %+v calls=%d", code, out, seen, calls)
 	}
 	code, _ = c.json(http.MethodGet, "/api/dependencies/preflight?kind=skill&id=skill_example", nil)
