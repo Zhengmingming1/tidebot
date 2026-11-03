@@ -281,6 +281,9 @@ func (s *Store) SetConfig(ctx context.Context, pluginID string, values map[strin
 	}
 	b, _ := json.Marshal(plain)
 	_, err = s.DB.ExecContext(ctx, `UPDATE plugins SET config_json=? WHERE id=?`, string(b), pluginID)
+	if err == nil {
+		s.changed(ctx, pluginID)
+	}
 	return err
 }
 
@@ -330,8 +333,11 @@ func (s *Store) setApproved(ctx context.Context, v *VersionInfo, list []string, 
 	}
 	if makeCurrent {
 		_, err := s.DB.ExecContext(ctx, `UPDATE plugins SET current_version_id=? WHERE id=?`, v.ID, v.Manifest.ID)
-		return err
+		if err != nil {
+			return err
+		}
 	}
+	s.changed(ctx, v.Manifest.ID)
 	return nil
 }
 

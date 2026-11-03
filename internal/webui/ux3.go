@@ -314,6 +314,7 @@ type ProviderView struct {
 	KeySet         bool              `json:"key_set"`
 	KeyLast4       string            `json:"key_last4,omitempty"`
 	KeySource      string            `json:"key_source,omitempty"` // store | env
+	ManagedBy      string            `json:"managed_by,omitempty"`
 	Builtin        bool              `json:"builtin"`
 	Default        bool              `json:"default"`
 	UsedBy         int               `json:"used_by"`

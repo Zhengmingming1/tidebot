@@ -2,7 +2,7 @@
   var OF_BRAND = { "rss-feed": "br-rss", "web-monitor": "br-web", wecom: "br-wecom", dingtalk: "br-ding", email: "br-mail", "daily-digest": "br-digest" };
   var catView = { cat: "all" };
   function catalogWall(cat) {
-    var cats = [["all", "of.c_all"], ["trigger", "of.c_trigger"], ["connector", "of.c_connector"], ["pack", "of.c_pack"]];
+    var cats = [["all", "of.c_all"], ["provider", "of.c_provider"], ["trigger", "of.c_trigger"], ["connector", "of.c_connector"], ["pack", "of.c_pack"]];
     return '<div class="of-wall"><div class="of-filter seg sm" role="radiogroup">' + cats.map(function (c) { return '<button type="button" role="radio" data-ofc="' + c[0] + '" class="' + (catView.cat === c[0] ? "active" : "") + '" aria-checked="' + (catView.cat === c[0]) + '">' + esc(T(c[1])) + "</button>"; }).join("") + "</div>" +
       '<div class="of-grid">' + cat.map(function (e) {
         var hide = catView.cat !== "all" && e.category !== catView.cat;

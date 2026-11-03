@@ -4794,7 +4794,7 @@
   // ---------- providers: list on the left, details on the right ----------
   var provSel = null, pvOpen = null;
   var PV_COLORS = ["#2563eb", "#0d9488", "#7c3aed", "#db2777", "#ea580c", "#16a34a", "#0891b2", "#4f46e5"];
-  function pvDisplay(p, presetById) { var pr = presetById[p.preset] || presetById[p.name]; return pr && pr.name && pr.id !== "custom" ? pr.name : p.name; }
+  function pvDisplay(p, presetById) { if (p.managed_by === "kilo-free-pool") return T("of.kilo-free-pool.n"); var pr = presetById[p.preset] || presetById[p.name]; return pr && pr.name && pr.id !== "custom" ? pr.name : p.name; }
   function pvAvatar(p, presetById) {
     var n = pvDisplay(p || {}, presetById || {}) || "?", h = 0;
     for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
@@ -4829,8 +4829,8 @@
       var card = function (p) {
         return '<li class="pv-card" draggable="true" data-pv="' + esc(p.name) + '" tabindex="0" role="button" aria-label="' + esc(pvDisplay(p, presetById)) + '">' + pvAvatar(p, presetById) +
           '<div class="pv-main"><div class="pv-title"><strong>' + esc(pvDisplay(p, presetById)) + "</strong>" + (p.default ? '<span class="pill ok sm">' + esc(T("pv.default")) + "</span>" : "") + "</div>" +
-          '<small class="pv-meta"><code>' + esc((p.base_url || "https://api.anthropic.com").replace(/^https?:\/\//, "")) + "</code>" + (p.model ? " · " + esc(p.model) : "") + "</small></div>" +
-          '<span class="pv-key ' + (p.key_set ? "ok" : "") + '"><span class="dot ' + (p.key_set ? "ok" : "") + '"></span>' + esc(T(p.key_set ? "pv.key_ok" : "pv.key_none")) + "</span>" + ic("chev", "sm") + "</li>";
+          '<small class="pv-meta"><code>' + esc(p.managed_by ? T("fp.managed") : (p.base_url || "https://api.anthropic.com").replace(/^https?:\/\//, "")) + "</code>" + (p.model ? " · " + esc(p.model) : "") + "</small></div>" +
+          '<span class="pv-key ' + (p.key_set ? "ok" : "") + '"><span class="dot ' + (p.key_set ? "ok" : "") + '"></span>' + esc(T(p.managed_by ? "fp.no_key" : p.key_set ? "pv.key_ok" : "pv.key_none")) + "</span>" + ic("chev", "sm") + "</li>";
       };
       box.innerHTML = (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
         (hidden.length ? '<details class="pv-more"><summary>' + esc(T("pv.more", { n: hidden.length })) + '</summary><ul class="pv-cards">' + hidden.map(card).join("") + "</ul></details>" : "") +
@@ -5037,7 +5037,23 @@
     ["name", "base_url", "api_key"].forEach(function (n) { f[n].addEventListener("paste", onPaste); });
   }
   var pvJustCreated = "";
+  function freePoolProviderDetail(host, p, done) {
+    host.innerHTML = '<div class="drawer-head"><div class="grow-col"><h2>' + esc(T("of.kilo-free-pool.n")) + '</h2><small class="muted">kilo-free · ' + esc(T("fp.managed")) + '</small></div><button type="button" class="icon-btn" data-drawer-close aria-label="' + esc(T("btn.close")) + '">' + ic("x") + '</button></div>' +
+      '<div class="drawer-body"><p class="notice">' + esc(T("fp.managed_hint")) + '</p><p><strong>' + esc(T("fp.model")) + '</strong><br><code>' + esc(p.model) + '</code></p><p>' + esc(T("fp.no_key")) + ' · ' + esc(T("fp.free_only")) + '</p><p class="notice warn">' + esc(T("fp.privacy")) + '</p><p class="hint">' + esc(T("fp.use_hint")) + '</p><div id="fp-test-result" aria-live="polite"></div></div>' +
+      '<div class="drawer-foot">' + (p.default ? '<span class="pill ok">' + esc(T("pv.default")) + '</span>' : '<button type="button" class="btn ghost" id="fp-default">' + esc(T("pv.make_default")) + '</button>') + '<span class="grow"></span><button type="button" class="btn" id="fp-test">' + esc(T("pv.check")) + '</button><button type="button" class="btn primary" id="fp-config">' + esc(T("cfg.open")) + '</button></div>';
+    $("[data-drawer-close]", host).addEventListener("click", closeDrawer);
+    $("#fp-config", host).addEventListener("click", function () { closeDrawer(); freePoolConfigModal(function () { done(); }); });
+    var def = $("#fp-default", host);
+    if (def) def.addEventListener("click", function () { api("/api/providers/" + enc(p.name) + "/default", { method: "POST", body: {} }).then(function () { toast(T("pv.default_set")); done(p.name); }).catch(fail); });
+    $("#fp-test", host).addEventListener("click", function (e) {
+      var btn = e.currentTarget, result = $("#fp-test-result", host); btn.disabled = true; result.textContent = T("pv.testing");
+      api("/api/providers/" + enc(p.name) + "/test", { method: "POST", body: { model: p.model } }).then(function (r) {
+        result.textContent = r.ok ? T("pv.test_ok", { ms: r.latency_ms, m: r.model || p.model }) : r.error || T("pv.test_bad", { s: r.status || "—" });
+      }).catch(function (err) { result.textContent = err.message; }).finally(function () { btn.disabled = false; });
+    });
+  }
   function providerDetail(host, p, preset, presetById, done) {
+    if (p && p.managed_by === "kilo-free-pool") return freePoolProviderDetail(host, p, done);
     var creating = !p || p.dup;
     var base = p ? (presetById[p.preset] || null) : preset;
     var v = p || { name: preset.id === "custom" ? "" : preset.id, preset: preset.id, base_url: preset.base_url || "", auth_env: preset.auth_env || "ANTHROPIC_AUTH_TOKEN", model: preset.model || "", small_fast_model: preset.small_fast_model || "", opus_model: preset.opus_model || "", sonnet_model: preset.sonnet_model || "", haiku_model: preset.haiku_model || "", extra_env: preset.extra_env || {} };
@@ -5967,7 +5983,61 @@
     }
   }
   var PL_TESTABLE = { wecom: 1, dingtalk: 1, email: 1 };
+  function freePoolStatusText(s) {
+    if (s.ready) return T("fp.ready");
+    if (!s.installed) return T("fp.need_install");
+    if (!s.enabled) return T("fp.need_enable");
+    if (!s.approved) return T("fp.need_network");
+    if (!s.training_acknowledged) return T("fp.need_consent");
+    return s.error || T("fp.inactive");
+  }
+  function freePoolConfigModal(after) {
+    return Promise.all([rpc("plugins.config_get", { id: "kilo-free-pool" }), rpc("free_pool.status")]).then(function (r) {
+      var values = r[0].values || {}, status = r[1] || {}, selected = values.model || "kilo-auto/free";
+      var option = function (id, label) { return '<option value="' + esc(id) + '">' + esc(label || id) + "</option>"; };
+      modal('<div class="card-head"><span class="ico">' + ic("sparkle") + '</span><h2>' + esc(T("of.kilo-free-pool.n")) + '</h2></div><form id="free-pool-form">' +
+        '<p class="hint">' + esc(T("fp.intro")) + '</p><p class="notice warn">' + esc(T("fp.privacy")) + '</p>' +
+        '<label class="check"><input type="checkbox" name="acknowledge_prompt_training"' + (values.acknowledge_prompt_training === true ? " checked" : "") + '> ' + esc(T("fp.consent")) + '</label>' +
+        '<label class="field"><span>' + esc(T("fp.model")) + '</span><select name="model">' + option(selected) + (selected !== "kilo-auto/free" ? option("kilo-auto/free") : "") + '</select><small class="hint">' + esc(T("fp.models_hint")) + '</small></label>' +
+        '<button type="button" class="btn" id="fp-load">' + ic("refresh", "sm") + esc(T("fp.load")) + '</button>' +
+        '<p class="hint" id="fp-model-info" aria-live="polite"></p><p class="notice" id="fp-status" aria-live="polite">' + esc(freePoolStatusText(status)) + '</p>' +
+        '<p class="hint">' + esc(T("fp.use_hint")) + '</p><a class="link" href="https://kilo.ai/docs/gateway/models-and-providers" target="_blank" rel="noopener noreferrer">' + esc(T("fp.docs")) + '</a>' +
+        '<p class="notice bad hidden" id="fp-error" role="alert"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="submit" class="btn primary">' + esc(T("btn.save")) + '</button></div></form>', function (root, close) {
+        var form = $("#free-pool-form", root), ack = form.elements.acknowledge_prompt_training, model = form.elements.model, load = $("#fp-load", root), submit = $('button[type="submit"]', form), error = $("#fp-error", root), info = $("#fp-model-info", root), models = [], busy = false;
+        var alive = function () { return document.contains(form); };
+        var controls = function () { load.disabled = busy || !ack.checked; submit.disabled = busy; model.disabled = busy; ack.disabled = busy; };
+        var showError = function (e) { if (alive()) { error.textContent = e.message; error.classList.remove("hidden"); } };
+        var save = function () { return rpc("plugins.config_set", { id: "kilo-free-pool", values: { model: model.value, acknowledge_prompt_training: ack.checked } }); };
+        var describe = function () {
+          var m = models.filter(function (x) { return x.id === model.value; })[0];
+          info.textContent = m ? T("fp.model_info", { n: models.length, context: m.context_length || "—", output: m.max_output_tokens || "—" }) : "";
+        };
+        ack.addEventListener("change", controls);
+        model.addEventListener("change", describe);
+        load.addEventListener("click", function () {
+          if (busy || !ack.checked) return;
+          busy = true; controls(); error.classList.add("hidden"); info.textContent = T("fp.loading");
+          save().then(function () { return rpc("free_pool.models", { refresh: true }); }).then(function (d) {
+            if (!alive()) return;
+            var prev = model.value; models = d.models || [];
+            model.innerHTML = models.length ? models.map(function (m) { return option(m.id, m.name ? m.name + " · " + m.id : m.id); }).join("") : option(prev);
+            if (models.some(function (m) { return m.id === prev; })) model.value = prev;
+            else if (models.some(function (m) { return m.id === "kilo-auto/free"; })) model.value = "kilo-auto/free";
+            describe(); if (!models.length) info.textContent = T("fp.no_models");
+            return rpc("free_pool.status").then(function (s) { if (alive()) $("#fp-status", root).textContent = freePoolStatusText(s); });
+          }).catch(function (e) { info.textContent = ""; showError(e); }).finally(function () { busy = false; if (alive()) controls(); });
+        });
+        form.addEventListener("submit", function (e) {
+          e.preventDefault(); if (busy) return;
+          busy = true; controls(); error.classList.add("hidden");
+          save().then(function () { if (!alive()) return; close(); toast(T("cfg.saved")); (after || refresh)(); }).catch(showError).finally(function () { busy = false; if (alive()) controls(); });
+        });
+        controls();
+      });
+    }).catch(fail);
+  }
   function pluginConfigModal(p, after) {
+    if (p.id === "kilo-free-pool" && p.source === "official") return freePoolConfigModal(after);
     rpc("plugins.config_get", { id: p.id }).then(function (cv) {
       var testable = PL_TESTABLE[p.id] && p.source === "official";
       modal('<div class="card-head"><span class="ico">' + ic("settings") + "</span><h2>" + esc(T("cfg.title", { n: plName(p) })) + '</h2></div><form id="pcf" novalidate>' + (state.dict["of." + p.id + ".cfg"] ? '<p class="hint">' + esc(T("of." + p.id + ".cfg")) + "</p>" : "") + schemaForm(cv.fields || [], cv.values || {}, cv.secrets_set || {}, p.id) + '<p class="notice bad hidden" id="pcf-err"></p><p class="notice ok hidden" id="pcf-ok"></p><div class="actions">' + (testable ? '<button type="button" class="btn" id="pcf-test">' + ic("send", "sm") + esc(T("of.test_send")) + '</button><span class="grow"></span>' : "") + '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {
@@ -5993,7 +6063,7 @@
   var OF_BRAND = { "rss-feed": "br-rss", "web-monitor": "br-web", wecom: "br-wecom", dingtalk: "br-ding", email: "br-mail", "daily-digest": "br-digest" };
   var catView = { cat: "all" };
   function catalogWall(cat) {
-    var cats = [["all", "of.c_all"], ["trigger", "of.c_trigger"], ["connector", "of.c_connector"], ["pack", "of.c_pack"]];
+    var cats = [["all", "of.c_all"], ["provider", "of.c_provider"], ["trigger", "of.c_trigger"], ["connector", "of.c_connector"], ["pack", "of.c_pack"]];
     return '<div class="of-wall"><div class="of-filter seg sm" role="radiogroup">' + cats.map(function (c) { return '<button type="button" role="radio" data-ofc="' + c[0] + '" class="' + (catView.cat === c[0] ? "active" : "") + '" aria-checked="' + (catView.cat === c[0]) + '">' + esc(T(c[1])) + "</button>"; }).join("") + "</div>" +
       '<div class="of-grid">' + cat.map(function (e) {
         var hide = catView.cat !== "all" && e.category !== catView.cat;

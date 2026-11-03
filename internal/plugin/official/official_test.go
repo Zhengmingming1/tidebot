@@ -20,8 +20,8 @@ func TestCatalogLoadsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 6 {
-		t.Fatalf("want 6 official plugins, got %d", len(list))
+	if len(list) != 7 {
+		t.Fatalf("want 7 official plugins, got %d", len(list))
 	}
 	for _, e := range list {
 		if e.Hash == "" || e.Manifest.ID != e.ID {

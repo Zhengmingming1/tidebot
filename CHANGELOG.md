@@ -10,6 +10,7 @@
 
 ### 新增
 
+- 官方「Kilo 免费模型池」插件：批准网络权限并确认上游数据使用政策后，可动态选择支持工具调用的零价模型，在任务中使用 `kilo-free`；匿名转发 Kilo 原生 Messages 与 SSE，无需上游 API Key，不自动切换付费模型或更改现有默认服务商。禁用或撤销权限会停止本地网关。[使用与验证边界](docs/free-model-pool.md)。
 - Skill 仓库列表内置 Anthropic Skills、OpenAI Plugin Skills 与 Vercel Agent Skills 公开来源，可一键添加并扫描；已有匹配仓库提供浏览入口，技能仍需预览后安装。OpenAI 使用当前 `openai/plugins`，不预置已弃用的 `openai/skills`。
 
 ### 修复与优化

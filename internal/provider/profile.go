@@ -15,6 +15,7 @@ import (
 // Profile is a concrete provider configuration used when spawning Claude Code.
 type Profile struct {
 	Name           string            `json:"name" yaml:"name"`
+	ManagedBy      string            `json:"managed_by,omitempty" yaml:"-"`
 	Preset         string            `json:"preset,omitempty" yaml:"preset,omitempty"`
 	BaseURL        string            `json:"base_url,omitempty" yaml:"base_url,omitempty"`
 	AuthEnv        string            `json:"auth_env,omitempty" yaml:"auth_env,omitempty"`
@@ -196,6 +197,9 @@ func LoadFile(path string) ([]Profile, error) {
 		if err := yaml.Unmarshal(b, &doc); err != nil {
 			return nil, fmt.Errorf("parse providers yaml: %w", err)
 		}
+	}
+	for i := range doc.Providers {
+		doc.Providers[i].ManagedBy = ""
 	}
 	return doc.Providers, nil
 }

@@ -310,7 +310,61 @@
     }
   }
   var PL_TESTABLE = { wecom: 1, dingtalk: 1, email: 1 };
+  function freePoolStatusText(s) {
+    if (s.ready) return T("fp.ready");
+    if (!s.installed) return T("fp.need_install");
+    if (!s.enabled) return T("fp.need_enable");
+    if (!s.approved) return T("fp.need_network");
+    if (!s.training_acknowledged) return T("fp.need_consent");
+    return s.error || T("fp.inactive");
+  }
+  function freePoolConfigModal(after) {
+    return Promise.all([rpc("plugins.config_get", { id: "kilo-free-pool" }), rpc("free_pool.status")]).then(function (r) {
+      var values = r[0].values || {}, status = r[1] || {}, selected = values.model || "kilo-auto/free";
+      var option = function (id, label) { return '<option value="' + esc(id) + '">' + esc(label || id) + "</option>"; };
+      modal('<div class="card-head"><span class="ico">' + ic("sparkle") + '</span><h2>' + esc(T("of.kilo-free-pool.n")) + '</h2></div><form id="free-pool-form">' +
+        '<p class="hint">' + esc(T("fp.intro")) + '</p><p class="notice warn">' + esc(T("fp.privacy")) + '</p>' +
+        '<label class="check"><input type="checkbox" name="acknowledge_prompt_training"' + (values.acknowledge_prompt_training === true ? " checked" : "") + '> ' + esc(T("fp.consent")) + '</label>' +
+        '<label class="field"><span>' + esc(T("fp.model")) + '</span><select name="model">' + option(selected) + (selected !== "kilo-auto/free" ? option("kilo-auto/free") : "") + '</select><small class="hint">' + esc(T("fp.models_hint")) + '</small></label>' +
+        '<button type="button" class="btn" id="fp-load">' + ic("refresh", "sm") + esc(T("fp.load")) + '</button>' +
+        '<p class="hint" id="fp-model-info" aria-live="polite"></p><p class="notice" id="fp-status" aria-live="polite">' + esc(freePoolStatusText(status)) + '</p>' +
+        '<p class="hint">' + esc(T("fp.use_hint")) + '</p><a class="link" href="https://kilo.ai/docs/gateway/models-and-providers" target="_blank" rel="noopener noreferrer">' + esc(T("fp.docs")) + '</a>' +
+        '<p class="notice bad hidden" id="fp-error" role="alert"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="submit" class="btn primary">' + esc(T("btn.save")) + '</button></div></form>', function (root, close) {
+        var form = $("#free-pool-form", root), ack = form.elements.acknowledge_prompt_training, model = form.elements.model, load = $("#fp-load", root), submit = $('button[type="submit"]', form), error = $("#fp-error", root), info = $("#fp-model-info", root), models = [], busy = false;
+        var alive = function () { return document.contains(form); };
+        var controls = function () { load.disabled = busy || !ack.checked; submit.disabled = busy; model.disabled = busy; ack.disabled = busy; };
+        var showError = function (e) { if (alive()) { error.textContent = e.message; error.classList.remove("hidden"); } };
+        var save = function () { return rpc("plugins.config_set", { id: "kilo-free-pool", values: { model: model.value, acknowledge_prompt_training: ack.checked } }); };
+        var describe = function () {
+          var m = models.filter(function (x) { return x.id === model.value; })[0];
+          info.textContent = m ? T("fp.model_info", { n: models.length, context: m.context_length || "—", output: m.max_output_tokens || "—" }) : "";
+        };
+        ack.addEventListener("change", controls);
+        model.addEventListener("change", describe);
+        load.addEventListener("click", function () {
+          if (busy || !ack.checked) return;
+          busy = true; controls(); error.classList.add("hidden"); info.textContent = T("fp.loading");
+          save().then(function () { return rpc("free_pool.models", { refresh: true }); }).then(function (d) {
+            if (!alive()) return;
+            var prev = model.value; models = d.models || [];
+            model.innerHTML = models.length ? models.map(function (m) { return option(m.id, m.name ? m.name + " · " + m.id : m.id); }).join("") : option(prev);
+            if (models.some(function (m) { return m.id === prev; })) model.value = prev;
+            else if (models.some(function (m) { return m.id === "kilo-auto/free"; })) model.value = "kilo-auto/free";
+            describe(); if (!models.length) info.textContent = T("fp.no_models");
+            return rpc("free_pool.status").then(function (s) { if (alive()) $("#fp-status", root).textContent = freePoolStatusText(s); });
+          }).catch(function (e) { info.textContent = ""; showError(e); }).finally(function () { busy = false; if (alive()) controls(); });
+        });
+        form.addEventListener("submit", function (e) {
+          e.preventDefault(); if (busy) return;
+          busy = true; controls(); error.classList.add("hidden");
+          save().then(function () { if (!alive()) return; close(); toast(T("cfg.saved")); (after || refresh)(); }).catch(showError).finally(function () { busy = false; if (alive()) controls(); });
+        });
+        controls();
+      });
+    }).catch(fail);
+  }
   function pluginConfigModal(p, after) {
+    if (p.id === "kilo-free-pool" && p.source === "official") return freePoolConfigModal(after);
     rpc("plugins.config_get", { id: p.id }).then(function (cv) {
       var testable = PL_TESTABLE[p.id] && p.source === "official";
       modal('<div class="card-head"><span class="ico">' + ic("settings") + "</span><h2>" + esc(T("cfg.title", { n: plName(p) })) + '</h2></div><form id="pcf" novalidate>' + (state.dict["of." + p.id + ".cfg"] ? '<p class="hint">' + esc(T("of." + p.id + ".cfg")) + "</p>" : "") + schemaForm(cv.fields || [], cv.values || {}, cv.secrets_set || {}, p.id) + '<p class="notice bad hidden" id="pcf-err"></p><p class="notice ok hidden" id="pcf-ok"></p><div class="actions">' + (testable ? '<button type="button" class="btn" id="pcf-test">' + ic("send", "sm") + esc(T("of.test_send")) + '</button><span class="grow"></span>' : "") + '<button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T("btn.save")) + "</button></div></form>", function (root, close) {

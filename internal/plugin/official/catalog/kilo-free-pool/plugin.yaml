@@ -1,0 +1,21 @@
+id: kilo-free-pool
+name: Kilo free model pool
+version: 1.0.0
+runtime: {}
+contributes: {}
+permissions:
+  network: [ai-gateway.kilo.ai]
+config_schema:
+  type: object
+  properties:
+    acknowledge_prompt_training:
+      type: boolean
+      title: I understand that upstream free models may use prompts for training
+      default: false
+      x-order: 1
+    model:
+      type: string
+      title: Free model
+      default: kilo-auto/free
+      maxLength: 200
+      x-order: 2

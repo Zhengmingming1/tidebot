@@ -180,6 +180,9 @@ type pricingSetInput struct {
 
 // setProviderPricing stores billing/prices on the provider's user profile.
 func (a *App) setProviderPricing(ctx context.Context, in pricingSetInput) (map[string]any, error) {
+	if a.managedProvider(in.Provider) {
+		return nil, errManagedProvider
+	}
 	p, ok := a.Registry.Get(in.Provider)
 	if !ok {
 		return nil, errors.New("provider not found")

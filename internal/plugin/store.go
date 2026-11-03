@@ -29,6 +29,29 @@ type Store struct {
 	Secrets secrets.Backend
 	// OnUninstall lets the app pause tasks / unregister triggers that depend on a plugin.
 	OnUninstall func(ctx context.Context, pluginID string)
+	// OnChange reconciles host-managed capabilities after a committed plugin change.
+	OnChange func(ctx context.Context, pluginID string)
+}
+
+func (s *Store) changed(ctx context.Context, pluginID string) {
+	if s.OnChange != nil {
+		s.OnChange(ctx, pluginID)
+	}
+}
+
+// SetEnabled changes the plugin state and immediately reconciles its capabilities.
+func (s *Store) SetEnabled(ctx context.Context, pluginID string, enabled bool) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE plugins SET enabled=? WHERE id=?`, enabled, pluginID)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return errors.New("plugin not found")
+	}
+	s.changed(ctx, pluginID)
+	return nil
 }
 
 // Info is a plugin with its current version.
@@ -179,7 +202,11 @@ func (s *Store) StageSource(ctx context.Context, srcDir, expectedHash, source st
 		vid, m.ID, m.Version, hash, string(mj), dst, now); err != nil {
 		return nil, err
 	}
-	return s.version(ctx, vid)
+	v, err := s.version(ctx, vid)
+	if err == nil {
+		s.changed(ctx, m.ID)
+	}
+	return v, err
 }
 
 func (s *Store) version(ctx context.Context, vid string) (*VersionInfo, error) {
@@ -232,6 +259,9 @@ func (s *Store) SetCurrent(ctx context.Context, pluginID, versionID string) erro
 		return errors.New("permissions of this version are not approved")
 	}
 	_, err = s.DB.ExecContext(ctx, `UPDATE plugins SET current_version_id=? WHERE id=?`, versionID, pluginID)
+	if err == nil {
+		s.changed(ctx, pluginID)
+	}
 	return err
 }
 
@@ -351,6 +381,9 @@ func (s *Store) Uninstall(ctx context.Context, pluginID string, keepData bool) e
 	}
 	_, _ = s.DB.ExecContext(ctx, `DELETE FROM plugin_versions WHERE plugin_id=?`, pluginID)
 	_, err = s.DB.ExecContext(ctx, `DELETE FROM plugins WHERE id=?`, pluginID)
+	if err == nil {
+		s.changed(ctx, pluginID)
+	}
 	return err
 }
 

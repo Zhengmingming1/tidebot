@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/freepool"
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
@@ -64,6 +65,13 @@ type triggerState struct {
 func (a *App) initPlugins() {
 	a.Plugins = &plugin.Store{DB: a.DB, Root: filepath.Join(a.Cfg.HomeDir, "plugins"), Secrets: a.Secrets}
 	a.Plugins.OnUninstall = a.pauseDependents
+	a.Plugins.OnChange = func(ctx context.Context, pluginID string) {
+		if pluginID == freepool.PluginID {
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			a.syncFreePool(cctx)
+		}
+	}
 	a.PluginHost = plugin.NewHost(a.Plugins, pluginAPI{a}, a.Log)
 	if plugin.BuiltinExe == "" {
 		if exe, err := os.Executable(); err == nil {

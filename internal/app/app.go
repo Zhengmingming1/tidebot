@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/freepool"
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/notify"
 	"github.com/Zhengmingming1/tidebot/internal/optimize"
@@ -68,6 +69,7 @@ type App struct {
 	Optimize   *optimize.Service
 	Plugins    *plugin.Store
 	PluginHost *plugin.Host
+	freePool   freePoolState
 
 	trig  *triggerState
 	disk  diskWatch
@@ -167,6 +169,12 @@ func Open(cfg config.Config) (*App, error) {
 	}
 	a.applyLoc(a.resolveLoc(context.Background()))
 	a.applyProviderSettings(context.Background())
+	a.syncFreePool(context.Background())
+	var savedDefault string
+	a.loadJSONSetting(context.Background(), setProvidersDefault, &savedDefault)
+	if savedDefault == freepool.ProviderName {
+		a.Cfg.DefaultProvider = savedDefault
+	}
 	a.Sched.OnAutoResume = a.onSchedPauseEnded
 	a.Sched.Wake = a.wakeSnoozedTasks
 	a.loadSchedPause(context.Background())
@@ -203,6 +211,7 @@ func Open(cfg config.Config) (*App, error) {
 
 // Close releases DB resources.
 func (a *App) Close() error {
+	a.closeFreePool()
 	if a.Sched != nil {
 		a.Sched.Stop()
 	}
@@ -229,6 +238,9 @@ func (a *App) Close() error {
 
 // ResolveAPIKey loads the key for a profile (env / secret backend). Never log the return value.
 func (a *App) ResolveAPIKey(p provider.Profile) (string, error) {
+	if managedFreePool(p) {
+		return a.freePoolKey(p)
+	}
 	if key, err := a.Secrets.Get("provider:" + p.Name); err == nil && key != "" {
 		return key, nil
 	}
@@ -243,6 +255,11 @@ func (a *App) ResolveProfile(name string) (provider.Profile, error) {
 	p, ok := a.Registry.Get(name)
 	if !ok {
 		return provider.Profile{}, fmt.Errorf("unknown provider %q", name)
+	}
+	if managedFreePool(p) {
+		if _, err := a.freePoolKey(p); err != nil {
+			return provider.Profile{}, err
+		}
 	}
 	return p, nil
 }
@@ -356,6 +373,13 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		return a.powerStartCheck(sctx, taskID, trigger) // scheduled runs of non-urgent tasks on battery
 	}
 	opts.BeforeStart = func(sctx context.Context, o *runner.Options) error {
+		if managedFreePool(prof) {
+			currentKey, err := a.freePoolKey(prof)
+			if err != nil {
+				return err
+			}
+			o.APIKey = currentKey
+		}
 		if !a.taskStillRunnable(sctx, o.TaskID, o.TriggerKind) {
 			return errTaskInactive
 		}

@@ -16,6 +16,18 @@ type rpcFunc = func(context.Context, json.RawMessage) (any, error)
 // for the owner's WebUI session, through /api/rpc/<method>.
 func (a *App) extRPC() map[string]rpcFunc {
 	m := map[string]rpcFunc{
+		"free_pool.status": func(ctx context.Context, _ json.RawMessage) (any, error) {
+			return a.freePoolStatus(ctx), nil
+		},
+		"free_pool.models": func(ctx context.Context, raw json.RawMessage) (any, error) {
+			p, err := decode[struct {
+				Refresh bool `json:"refresh"`
+			}](raw)
+			if err != nil {
+				return nil, err
+			}
+			return a.freePoolModels(ctx, p.Refresh)
+		},
 		// Settings page: channels without URLs or secrets (robot URLs carry the access token).
 		"notify.overview": func(ctx context.Context, _ json.RawMessage) (any, error) {
 			list, err := a.Notify.Summaries(ctx)
@@ -171,12 +183,7 @@ func (a *App) extRPC() map[string]rpcFunc {
 			if !p.Enabled {
 				a.PluginHost.Stop(p.ID)
 			}
-			v := 0
-			if p.Enabled {
-				v = 1
-			}
-			_, err := a.DB.ExecContext(ctx, `UPDATE plugins SET enabled=? WHERE id=?`, v, p.ID)
-			return nil, err
+			return nil, a.Plugins.SetEnabled(ctx, p.ID, p.Enabled)
 		},
 		"plugins.uninstall": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			p, _ := decode[struct {

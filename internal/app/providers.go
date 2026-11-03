@@ -16,6 +16,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 
+	"github.com/Zhengmingming1/tidebot/internal/freepool"
 	"github.com/Zhengmingming1/tidebot/internal/provider"
 	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
@@ -58,6 +59,7 @@ func (a *App) applyProviderSettings(ctx context.Context) {
 	var user []provider.Profile
 	a.loadJSONSetting(ctx, setProvidersUser, &user)
 	for _, p := range user {
+		p.ManagedBy = "" // persisted user settings cannot claim host-managed ownership
 		if _, err := a.Registry.Put(p); err != nil {
 			a.Log.Warn("stored provider", "name", p.Name, "error", err)
 		}
@@ -70,6 +72,10 @@ func (a *App) applyProviderSettings(ctx context.Context) {
 }
 
 func (pa providerAdmin) keyInfo(p provider.Profile) (bool, string, string) {
+	if managedFreePool(p) {
+		_, err := pa.a.freePoolKey(p)
+		return err == nil, "", "plugin"
+	}
 	if k, err := pa.a.Secrets.Get("provider:" + p.Name); err == nil && k != "" {
 		return true, last4(k), "store"
 	}
@@ -104,7 +110,7 @@ func (pa providerAdmin) view(p provider.Profile, used map[string]int) webui.Prov
 	if extra == nil {
 		extra = map[string]string{}
 	}
-	return webui.ProviderView{Name: p.Name, Preset: p.Preset, BaseURL: p.BaseURL, AuthEnv: p.AuthEnv, Model: p.Model,
+	return webui.ProviderView{Name: p.Name, ManagedBy: p.ManagedBy, Preset: p.Preset, BaseURL: p.BaseURL, AuthEnv: p.AuthEnv, Model: p.Model,
 		SmallFastModel: p.SmallFastModel, OpusModel: p.OpusModel, SonnetModel: p.SonnetModel, HaikuModel: p.HaikuModel,
 		ExtraEnv: extra, KeySet: set, KeyLast4: l4, KeySource: src, Builtin: builtin && p.Preset == p.Name,
 		Default: p.Name == pa.a.Cfg.DefaultProvider, UsedBy: used[p.Name]}
@@ -162,6 +168,9 @@ func (pa providerAdmin) Presets() []map[string]any {
 func (pa providerAdmin) SaveProvider(ctx context.Context, in webui.ProviderInput) (webui.ProviderView, error) {
 	a := pa.a
 	in.Name = strings.TrimSpace(in.Name)
+	if a.managedProvider(in.Name) || a.managedProvider(strings.TrimSpace(in.OriginalName)) {
+		return webui.ProviderView{}, errManagedProvider
+	}
 	if !providerNameRe.MatchString(in.Name) {
 		return webui.ProviderView{}, errors.New("name: lowercase letters, digits, . _ - (max 40)")
 	}
@@ -249,6 +258,9 @@ func (pa providerAdmin) SaveProvider(ctx context.Context, in webui.ProviderInput
 			_ = pa.SetDefaultProvider(ctx, in.Name)
 		}
 	}
+	if in.Name == freepool.ProviderName || in.OriginalName == freepool.ProviderName {
+		a.syncFreePool(ctx)
+	}
 	a.Log.Info("provider saved", "name", in.Name, "base_url", res.BaseURL, "key_updated", in.APIKey != nil && *in.APIKey != "")
 	return pa.view(res, pa.usedBy(ctx)), nil
 }
@@ -277,6 +289,9 @@ func (pa providerAdmin) removeName(ctx context.Context, name string, hide bool) 
 }
 
 func (pa providerAdmin) DeleteProvider(ctx context.Context, name string) error {
+	if pa.a.managedProvider(name) {
+		return errManagedProvider
+	}
 	if _, ok := pa.a.Registry.Get(name); !ok {
 		return errors.New("provider not found")
 	}
@@ -291,6 +306,9 @@ func (pa providerAdmin) DeleteProvider(ctx context.Context, name string) error {
 	}
 	_ = pa.a.Secrets.Delete("provider:" + name)
 	forgetModelList(name)
+	if name == freepool.ProviderName {
+		pa.a.syncFreePool(ctx)
+	}
 	return nil
 }
 

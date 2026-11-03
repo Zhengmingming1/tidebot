@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/freepool"
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 
 	"github.com/Zhengmingming1/tidebot/internal/contextplan"
@@ -652,6 +653,9 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 		baseEnv = os.Environ()
 	}
 	cmd.Env = withProxyEnv(provider.ChildEnv(baseEnv, opts.Profile, opts.APIKey))
+	if opts.Profile.ManagedBy == freepool.PluginID {
+		cmd.Env = withLoopbackBypass(cmd.Env)
+	}
 	// Own process group (unix) / job object (windows) so the whole tree dies on cancel.
 	setupProcess(cmd)
 
@@ -871,4 +875,34 @@ func withProxyEnv(env []string) []string {
 		}
 	}
 	return env
+}
+
+// Local gateway tokens and prompts must never be sent to a configured proxy.
+// Apply last, after inherited and Tidebot-resolved proxy settings have merged.
+func withLoopbackBypass(env []string) []string {
+	out := make([]string, 0, len(env)+2)
+	var hosts []string
+	seen := map[string]bool{}
+	add := func(host string) {
+		host = strings.TrimSpace(host)
+		if host != "" && !seen[host] {
+			hosts = append(hosts, host)
+			seen[host] = true
+		}
+	}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		if key == "NO_PROXY" || key == "no_proxy" {
+			for _, host := range strings.Split(value, ",") {
+				add(host)
+			}
+		} else {
+			out = append(out, kv)
+		}
+	}
+	for _, host := range []string{"127.0.0.1", "localhost", "::1"} {
+		add(host)
+	}
+	value := strings.Join(hosts, ",")
+	return append(out, "NO_PROXY="+value, "no_proxy="+value)
 }

@@ -26,23 +26,24 @@ var catalogFS embed.FS
 // Entry is one catalog card.
 type Entry struct {
 	ID       string           `json:"id"`
-	Category string           `json:"category"` // trigger | connector | pack
+	Category string           `json:"category"` // trigger | connector | pack | provider
 	Icon     string           `json:"icon"`
 	Hash     string           `json:"hash"`
 	Manifest *plugin.Manifest `json:"manifest"`
 }
 
 var meta = map[string][2]string{
-	"rss-feed":     {"trigger", "rss"},
-	"web-monitor":  {"trigger", "eye"},
-	"email":        {"connector", "mail"},
-	"wecom":        {"connector", "chat"},
-	"dingtalk":     {"connector", "bell"},
-	"daily-digest": {"pack", "book"},
+	"kilo-free-pool": {"provider", "sparkle"},
+	"rss-feed":       {"trigger", "rss"},
+	"web-monitor":    {"trigger", "eye"},
+	"email":          {"connector", "mail"},
+	"wecom":          {"connector", "chat"},
+	"dingtalk":       {"connector", "bell"},
+	"daily-digest":   {"pack", "book"},
 }
 
 // Order is the display order.
-var Order = []string{"rss-feed", "web-monitor", "wecom", "dingtalk", "email", "daily-digest"}
+var Order = []string{"kilo-free-pool", "rss-feed", "web-monitor", "wecom", "dingtalk", "email", "daily-digest"}
 
 var (
 	once    sync.Once

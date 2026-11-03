@@ -49,7 +49,7 @@ func TestOfficialCatalogInstallAndRSSTrigger(t *testing.T) {
 	defer srv.Close()
 
 	cat, err := a.CallExt(ctx, "plugins.catalog", nil)
-	if err != nil || len(cat.([]map[string]any)) != 6 {
+	if err != nil || len(cat.([]map[string]any)) != len(official.Order) {
 		t.Fatalf("catalog %v %v", cat, err)
 	}
 	// A look-alike that is not the embedded package is refused even if it claims official.

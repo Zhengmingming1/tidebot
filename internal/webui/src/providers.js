@@ -1,7 +1,7 @@
   // ---------- providers: list on the left, details on the right ----------
   var provSel = null, pvOpen = null;
   var PV_COLORS = ["#2563eb", "#0d9488", "#7c3aed", "#db2777", "#ea580c", "#16a34a", "#0891b2", "#4f46e5"];
-  function pvDisplay(p, presetById) { var pr = presetById[p.preset] || presetById[p.name]; return pr && pr.name && pr.id !== "custom" ? pr.name : p.name; }
+  function pvDisplay(p, presetById) { if (p.managed_by === "kilo-free-pool") return T("of.kilo-free-pool.n"); var pr = presetById[p.preset] || presetById[p.name]; return pr && pr.name && pr.id !== "custom" ? pr.name : p.name; }
   function pvAvatar(p, presetById) {
     var n = pvDisplay(p || {}, presetById || {}) || "?", h = 0;
     for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
@@ -36,8 +36,8 @@
       var card = function (p) {
         return '<li class="pv-card" draggable="true" data-pv="' + esc(p.name) + '" tabindex="0" role="button" aria-label="' + esc(pvDisplay(p, presetById)) + '">' + pvAvatar(p, presetById) +
           '<div class="pv-main"><div class="pv-title"><strong>' + esc(pvDisplay(p, presetById)) + "</strong>" + (p.default ? '<span class="pill ok sm">' + esc(T("pv.default")) + "</span>" : "") + "</div>" +
-          '<small class="pv-meta"><code>' + esc((p.base_url || "https://api.anthropic.com").replace(/^https?:\/\//, "")) + "</code>" + (p.model ? " · " + esc(p.model) : "") + "</small></div>" +
-          '<span class="pv-key ' + (p.key_set ? "ok" : "") + '"><span class="dot ' + (p.key_set ? "ok" : "") + '"></span>' + esc(T(p.key_set ? "pv.key_ok" : "pv.key_none")) + "</span>" + ic("chev", "sm") + "</li>";
+          '<small class="pv-meta"><code>' + esc(p.managed_by ? T("fp.managed") : (p.base_url || "https://api.anthropic.com").replace(/^https?:\/\//, "")) + "</code>" + (p.model ? " · " + esc(p.model) : "") + "</small></div>" +
+          '<span class="pv-key ' + (p.key_set ? "ok" : "") + '"><span class="dot ' + (p.key_set ? "ok" : "") + '"></span>' + esc(T(p.managed_by ? "fp.no_key" : p.key_set ? "pv.key_ok" : "pv.key_none")) + "</span>" + ic("chev", "sm") + "</li>";
       };
       box.innerHTML = (shown.length ? '<ul class="pv-cards" id="pv-ul" aria-label="' + esc(T("set.providers")) + '">' + shown.map(card).join("") + "</ul>" : '<p class="muted pv-empty">' + esc(T("pv.none_configured")) + "</p>") +
         (hidden.length ? '<details class="pv-more"><summary>' + esc(T("pv.more", { n: hidden.length })) + '</summary><ul class="pv-cards">' + hidden.map(card).join("") + "</ul></details>" : "") +
@@ -244,7 +244,23 @@
     ["name", "base_url", "api_key"].forEach(function (n) { f[n].addEventListener("paste", onPaste); });
   }
   var pvJustCreated = "";
+  function freePoolProviderDetail(host, p, done) {
+    host.innerHTML = '<div class="drawer-head"><div class="grow-col"><h2>' + esc(T("of.kilo-free-pool.n")) + '</h2><small class="muted">kilo-free · ' + esc(T("fp.managed")) + '</small></div><button type="button" class="icon-btn" data-drawer-close aria-label="' + esc(T("btn.close")) + '">' + ic("x") + '</button></div>' +
+      '<div class="drawer-body"><p class="notice">' + esc(T("fp.managed_hint")) + '</p><p><strong>' + esc(T("fp.model")) + '</strong><br><code>' + esc(p.model) + '</code></p><p>' + esc(T("fp.no_key")) + ' · ' + esc(T("fp.free_only")) + '</p><p class="notice warn">' + esc(T("fp.privacy")) + '</p><p class="hint">' + esc(T("fp.use_hint")) + '</p><div id="fp-test-result" aria-live="polite"></div></div>' +
+      '<div class="drawer-foot">' + (p.default ? '<span class="pill ok">' + esc(T("pv.default")) + '</span>' : '<button type="button" class="btn ghost" id="fp-default">' + esc(T("pv.make_default")) + '</button>') + '<span class="grow"></span><button type="button" class="btn" id="fp-test">' + esc(T("pv.check")) + '</button><button type="button" class="btn primary" id="fp-config">' + esc(T("cfg.open")) + '</button></div>';
+    $("[data-drawer-close]", host).addEventListener("click", closeDrawer);
+    $("#fp-config", host).addEventListener("click", function () { closeDrawer(); freePoolConfigModal(function () { done(); }); });
+    var def = $("#fp-default", host);
+    if (def) def.addEventListener("click", function () { api("/api/providers/" + enc(p.name) + "/default", { method: "POST", body: {} }).then(function () { toast(T("pv.default_set")); done(p.name); }).catch(fail); });
+    $("#fp-test", host).addEventListener("click", function (e) {
+      var btn = e.currentTarget, result = $("#fp-test-result", host); btn.disabled = true; result.textContent = T("pv.testing");
+      api("/api/providers/" + enc(p.name) + "/test", { method: "POST", body: { model: p.model } }).then(function (r) {
+        result.textContent = r.ok ? T("pv.test_ok", { ms: r.latency_ms, m: r.model || p.model }) : r.error || T("pv.test_bad", { s: r.status || "—" });
+      }).catch(function (err) { result.textContent = err.message; }).finally(function () { btn.disabled = false; });
+    });
+  }
   function providerDetail(host, p, preset, presetById, done) {
+    if (p && p.managed_by === "kilo-free-pool") return freePoolProviderDetail(host, p, done);
     var creating = !p || p.dup;
     var base = p ? (presetById[p.preset] || null) : preset;
     var v = p || { name: preset.id === "custom" ? "" : preset.id, preset: preset.id, base_url: preset.base_url || "", auth_env: preset.auth_env || "ANTHROPIC_AUTH_TOKEN", model: preset.model || "", small_fast_model: preset.small_fast_model || "", opus_model: preset.opus_model || "", sonnet_model: preset.sonnet_model || "", haiku_model: preset.haiku_model || "", extra_env: preset.extra_env || {} };
