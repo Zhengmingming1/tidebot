@@ -149,7 +149,7 @@ func TestRunDialogUI(t *testing.T) {
 		`T("pal.run_skill"`,
 		`name="mode" value="edit"`,
 		`T("rn.hint_dirty", { n: g.dirty })`,
-		`r.task_name || r.skill_name || T("trig.quick")`,
+		`r.task_name || r.skill_name || T(r.trigger === "session" ? "trig.session" : "trig.quick")`,
 		`function runCtxText(r, short)`,
 		`setWs(l.workspace); setMode(l.mode); drawDirs();`,
 	} {

@@ -1,0 +1,192 @@
+  // ---------- run page: continue the conversation (会话 P0) ----------
+  // A finished run gets a message box under it. The first message makes the run a session
+  // (POST /api/chat-sessions, the same run always gives the same session), every message is
+  // one turn (POST …/turns) that runs `claude -p --resume` read-only. The turns show under
+  // the run in order: question, answer, cost; the one being answered shows a status line
+  // with elapsed time and Stop and the run's live log lines. Ideas: siteboon/claudecodeui
+  // src/modules/chat/composer/ActivityIndicator.tsx (inline "working · 12s · stop" line
+  // above the composer while a turn runs) and QueuedMessageCard.tsx (composer state says
+  // why it can't send); tidebot keeps one turn at a time (409 busy) instead of a queue.
+  var RC_LIVE_MAX = 200, RC_POLL_MS = 1500, rcEs = null, rcEsRun = "", rcTick = null;
+  function stopChatStream() { if (rcEs) { rcEs.close(); rcEs = null; rcEsRun = ""; } }
+  function rcDone(st) { return st === "succeeded" || st === "failed" || st === "timeout" || st === "canceled"; }
+  function rcBusy(st) { return st === "running" || st === "queued"; }
+  function rcDraftKey(id) { return "rc_" + id; }
+  // Stable codes from /api/chat-sessions → the viewer's language; anything else as sent.
+  function rcErrText(e) {
+    var code = e && e.data && e.data.code;
+    return code && state.dict["rc.err_" + code] ? T("rc.err_" + code) : (e && e.message) || "";
+  }
+  // The title row of a turn's own run page: which session it is part of, linking back.
+  function runChatOfHtml(r) {
+    var cs = r.chat_session;
+    if (!cs || !(cs.turn > 0) || !/^[\w-]{1,64}$/.test(cs.origin_run_id || "")) return "";
+    return '<a class="pill plain sm rc-of" href="#/runs/' + enc(cs.origin_run_id) + '" data-tip="' + esc(T("rc.of_tip")) + '">' + ic("chat", "sm") + esc(T("rc.of", { n: num(cs.turn) })) + "</a>";
+  }
+  // The run a session continues: its turns come with the page (one paint, no skeleton).
+  function runChatPreload(r) {
+    var cs = r.chat_session;
+    if (!cs || cs.turn !== 0 || !rcDone(r.status)) return r;
+    return api("/api/chat-sessions/" + enc(cs.id), { fresh: true }).then(function (s) { r._chat = s; return r; }, function () { return r; });
+  }
+  function rcTurns(s) { return ((s && s.turn_list) || []).filter(function (t) { return t.index > 0; }); }
+  // The section under a finished run (not under a session's later turns: their thread is on
+  // the run they continue).
+  function runChatHtml(r) {
+    var cs = r.chat_session;
+    if ((cs && cs.turn > 0) || r.trigger === "session" || !rcDone(r.status)) return "";
+    var pre = rcTurns(r._chat);
+    return '<section class="rc" id="rc" aria-label="' + esc(T("rc.title")) + '"><div class="rc-sep" id="rc-sep"' + (pre.length || (cs && !r._chat) ? "" : " hidden") + "><span>" + esc(T("rc.title")) + '</span></div><div class="rc-thread" id="rc-thread" aria-live="polite">' +
+      (r._chat ? pre.map(rcTurnHtml).join("") : cs ? skeleton("list") : "") + "</div>" +
+      '<form class="rc-box" id="rc-form" novalidate><label class="sr-only" for="rc-in">' + esc(T("rc.label")) + "</label>" +
+      '<textarea id="rc-in" rows="1" maxlength="16384" data-noguard placeholder="' + esc(T("rc.ph")) + '"></textarea>' +
+      '<div class="rc-bar"><span class="rc-tags"><span class="rc-tag" tabindex="0" data-tip="' + esc(T("rc.read_tip")) + '">' + ic("eye", "sm") + esc(T("rc.read")) + "</span>" +
+      '<span class="rc-tag" id="rc-noweb" tabindex="0" data-tip="' + esc(T("rc.noweb_tip")) + '">' + ic("offline", "sm") + esc(T("rc.noweb")) + "</span></span>" +
+      '<span class="rc-meta" id="rc-meta"></span>' +
+      '<button type="submit" class="btn primary sm" id="rc-send">' + ic("send", "sm") + esc(T("rc.send")) + "</button></div>" +
+      '<p class="field-err" id="rc-err" role="alert"></p></form></section>';
+  }
+  function rcTurnHtml(t) {
+    var busy = rcBusy(t.status), ok = /^[\w-]{1,64}$/.test(t.run_id || "");
+    var head = '<div class="rc-a-head"><span class="rc-av">' + ic("sparkle", "sm") + "</span>";
+    if (busy) head += '<span class="rc-act"><span class="rc-dot"></span>' + esc(T(t.status === "queued" ? "rc.queued" : "rc.answering")) + ' <span class="rc-el num" data-since="' + esc(t.created_at || "") + '"></span></span>';
+    else if (t.status !== "succeeded") head += t.status ? statusPill(t.status, 0, t.error) : '<span class="muted">' + esc(T("rc.run_gone")) + "</span>";
+    if (t.answer_truncated) head += '<span class="pill warn sm" data-tip="' + esc(T("rd.ans_cut_tip")) + '">' + esc(T("rd.ans_cut")) + "</span>";
+    head += '<span class="rc-sp"></span>';
+    if (!busy && t.status) head += '<span class="rc-cost num" data-tip="' + esc(T("rc.cost_tip", { t: when(t.created_at) })) + '">' + esc(usd(t.cost_usd, 4)) + "</span>";
+    if (busy && ok) head += '<button type="button" class="icon-btn sm" data-rc-stop="' + esc(t.run_id) + '" data-st="' + esc(t.status) + '" aria-label="' + esc(T("run.stop")) + '" data-tip="' + esc(T("run.stop_tip")) + '">' + ic("stop", "sm") + "</button>";
+    if (!busy && t.answer) head += '<button type="button" class="icon-btn sm" data-rc-copy="' + t.index + '" aria-label="' + esc(T("rd.ans_copy")) + '" data-tip="' + esc(T("rd.ans_copy")) + '">' + ic("copy", "sm") + "</button>";
+    if (ok) head += '<a class="icon-btn sm" href="#/runs/' + enc(t.run_id) + '" aria-label="' + esc(T("rc.open_run")) + '" data-tip="' + esc(T("rc.open_run")) + '">' + ic("terminal", "sm") + "</a>";
+    head += "</div>";
+    var body = busy ? '<div class="log rc-live" data-rc-live="' + esc(t.run_id || "") + '" tabindex="0" aria-label="' + esc(T("rd.log")) + '"></div>' :
+      (t.answer ? '<div class="rc-a-body md" tabindex="0">' + mdHtml(t.answer, null) + "</div>" : "") +
+      (t.error && t.status !== "succeeded" ? '<p class="rc-a-err">' + esc(runErr(t.error)) + "</p>" : "") +
+      (!t.answer && !t.error && t.status ? '<p class="rc-a-err muted">' + esc(T("rw.answer_missing")) + "</p>" : "");
+    return '<article class="rc-turn" data-turn="' + t.index + '"><div class="rc-q"><div class="rc-bubble" data-tip="' + esc(when(t.created_at)) + '">' + esc(t.message) + "</div></div>" +
+      '<div class="rc-a' + (busy ? " busy" : "") + '">' + head + body + "</div></article>";
+  }
+  // Live lines of the turn being answered: the run's own event stream (same lines and
+  // colours as the run log), only the newest few on screen, the full log on the turn's page.
+  function rcLiveLine(text) {
+    var l = classifyLog(text), body = l.text, tool = "";
+    if (l.kind === "tool") {
+      var m = /^assistant: tool (\S+)\s?(.*)$/.exec(body) || [null, "", body]; tool = m[1]; body = m[2];
+      // the input's main field, like the run log's one-line preview
+      try { var o = JSON.parse(body); if (o && typeof o === "object") body = String(o.command || o.file_path || o.path || o.pattern || o.url || o.query || o.description || body); } catch (e) {}
+    }
+    else if (l.kind === "text") body = body.replace(/^assistant: /, "");
+    else if (l.kind === "result") body = "↳ " + body.replace(/^user: /, "");
+    return '<div class="ln k-' + l.kind + '"><span class="ts">' + esc(l.ts || "") + '</span><span class="tx">' + (tool ? '<span class="tool-chip">' + esc(tool) + "</span> " : "") + esc(body) + "</span></div>";
+  }
+  function rcStream(box, runId, onEnd) {
+    if (rcEsRun === runId && rcEs) return;
+    stopChatStream();
+    var es = new EventSource("/api/runs/" + enc(runId) + "/events");
+    rcEs = es; rcEsRun = runId;
+    es.onmessage = function (ev) {
+      var cur = $('[data-rc-live="' + runId + '"]');
+      if (!cur) { stopChatStream(); return; }
+      var stick = cur.scrollTop + cur.clientHeight >= cur.scrollHeight - 24;
+      cur.insertAdjacentHTML("beforeend", rcLiveLine(ev.data));
+      while (cur.childElementCount > RC_LIVE_MAX) cur.removeChild(cur.firstChild);
+      if (stick) cur.scrollTop = cur.scrollHeight;
+    };
+    var end = function () { if (rcEs === es) stopChatStream(); else es.close(); if (onEnd) onEnd(); };
+    es.addEventListener("end", end);
+    es.addEventListener("idle", function () { if (rcEs === es) stopChatStream(); else es.close(); });
+    es.onerror = function () { if (es.readyState === 2 && rcEs === es) stopChatStream(); };
+  }
+  function rcElapsed() {
+    var els = $$(".rc-el[data-since]");
+    if (!els.length) { clearInterval(rcTick); rcTick = null; return; }
+    els.forEach(function (el) {
+      var t = Date.parse(el.getAttribute("data-since")), s = isNaN(t) ? 0 : Math.max(0, Date.now() - t);
+      var v = s >= 1000 ? dur(s) : "";
+      if (el.textContent !== v) el.textContent = v;
+    });
+  }
+  function bindRunChat(r) {
+    var sec = $("#rc");
+    if (!sec) return;
+    var thread = $("#rc-thread", sec), form = $("#rc-form", sec), ta = $("#rc-in", sec), send = $("#rc-send", sec), meta = $("#rc-meta", sec), err = $("#rc-err", sec);
+    var st = { id: r.chat_session ? r.chat_session.id : "", ses: null, sending: false, painted: {} };
+    var key = rcDraftKey(r.id), d = draftLoad(key);
+    if (d) ta.value = d.text;
+    var fit = function () { ta.style.height = ""; ta.style.height = Math.min(Math.round(window.innerHeight * 0.4), ta.scrollHeight) + "px"; };
+    fit();
+    var full = function () { var s = st.ses; return !!(s && s.turn_max && s.turns >= s.turn_max); };
+    var busy = function () { return st.sending || !!(st.ses && (st.ses.status === "running" || (st.ses.turn_list || []).some(function (t) { return t.index > 0 && rcBusy(t.status); }))); };
+    var sync = function () {
+      var b = busy(), f = full(), empty = !ta.value.trim();
+      send.disabled = b || f || empty;
+      ta.disabled = f;
+      ta.placeholder = T(f ? "rc.limit_ph" : "rc.ph");
+      send.setAttribute("data-tip", T(f ? "rc.limit_tip" : b ? "rc.busy_tip" : "rc.send_tip"));
+      var s = st.ses, html = "";
+      if (s) html = (f ? '<span class="pill warn sm">' + esc(T("rc.limit")) + "</span>" : "") +
+        '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), m: num(s.turn_max), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns), m: num(s.turn_max) })) + "</span>";
+      if (meta._h !== html) { meta.innerHTML = html; meta._h = html; }
+      $("#rc-noweb", sec).hidden = !!(s && s.web_access);
+    };
+    // keyed by turn: only a turn whose content changed is redrawn (no flicker, the live
+    // lines of the turn being answered are kept)
+    var paint = function (s) {
+      st.ses = s;
+      var turns = rcTurns(s), seen = {};
+      if (thread.firstElementChild && !thread.firstElementChild.classList.contains("rc-turn")) thread.innerHTML = "";
+      turns.forEach(function (t) {
+        var html = rcTurnHtml(t), el = $('.rc-turn[data-turn="' + t.index + '"]', thread);
+        seen[t.index] = 1;
+        if (el && st.painted[t.index] === html) return;
+        var tmp = document.createElement("div"); tmp.innerHTML = html;
+        var next = tmp.firstChild;
+        if (el) thread.replaceChild(next, el); else thread.appendChild(next);
+        st.painted[t.index] = html;
+      });
+      $$(".rc-turn", thread).forEach(function (el) { if (!seen[el.getAttribute("data-turn")]) { delete st.painted[el.getAttribute("data-turn")]; el.remove(); } });
+      var live = turns.filter(function (t) { return rcBusy(t.status) && t.run_id; })[0];
+      if (live && live.status === "running" && /^[\w-]{1,64}$/.test(live.run_id)) rcStream(thread, live.run_id, function () { load(); });
+      else if (!live) stopChatStream();
+      if ($(".rc-el[data-since]", thread) && !rcTick) { rcTick = setInterval(rcElapsed, 1000); }
+      $("#rc-sep", sec).hidden = !turns.length;
+      rcElapsed();
+      sync();
+      if (busy()) livePoll(load, RC_POLL_MS); else if (st.polling) stopPoll();
+      st.polling = busy();
+    };
+    var load = function () {
+      if (!st.id) return Promise.resolve();
+      return api("/api/chat-sessions/" + enc(st.id), { fresh: true }).then(function (s) { if (document.contains(sec)) paint(s); }).catch(function (e) {
+        if (!document.contains(sec)) return;
+        if (e.status === 404) { st.id = ""; st.ses = null; thread.innerHTML = ""; st.painted = {}; $("#rc-sep", sec).hidden = true; sync(); return; }
+        if (!st.ses) thread.innerHTML = errorState(rcErrText(e));
+      });
+    };
+    var showErr = function (m) { err.textContent = m || ""; };
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var v = ta.value.trim();
+      if (!v || busy() || full()) return;
+      if (new Blob([v]).size > 16384) { showErr(T("rc.err_too_long")); return; }
+      showErr(""); st.sending = true; sync();
+      (st.id ? Promise.resolve({ id: st.id }) : api("/api/chat-sessions", { method: "POST", body: { run_id: r.id } })).then(function (s) {
+        st.id = s.id;
+        return api("/api/chat-sessions/" + enc(s.id) + "/turns", { method: "POST", body: { message: v } });
+      }).then(function () {
+        ta.value = ""; draftClear(key); fit();
+        return load().then(function () { var last = thread.lastElementChild; if (last && last.scrollIntoView) last.scrollIntoView({ block: "nearest" }); });
+      }).catch(function (e) {
+        if (e.auth || !document.contains(sec)) return;
+        showErr(rcErrText(e));
+        if (e.data && (e.data.code === "busy" || e.data.code === "turn_limit")) load();
+      }).then(function () { st.sending = false; if (document.contains(sec)) sync(); });
+    });
+    ta.addEventListener("input", function () { fit(); showErr(""); draftSave(key, ta.value); sync(); });
+    thread.addEventListener("click", function (e) {
+      var c = e.target.closest("[data-rc-copy]"), s = e.target.closest("[data-rc-stop]");
+      if (c && st.ses) { var t = (st.ses.turn_list || []).filter(function (x) { return String(x.index) === c.getAttribute("data-rc-copy"); })[0]; if (t) copyText(t.answer || "").catch(fail); }
+      if (s) { s.disabled = true; stopRun(s.getAttribute("data-rc-stop"), s.getAttribute("data-st")).then(function () { load(); }).catch(function (x) { s.disabled = false; fail(x); }); }
+    });
+    sync();
+    if (r._chat) { rcTurns(r._chat).forEach(function (t) { st.painted[t.index] = rcTurnHtml(t); }); paint(r._chat); } else load();
+  }

@@ -21,6 +21,7 @@
   "plugin-catalog.js",
   "runs.js",
   "log-view.js",
+  "run-chat.js",
   "spend.js",
   "settings-general.js",
   "settings-security.js",

@@ -227,13 +227,15 @@
     inspect(media.matches);
   }
   function renderRunDetail(id) {
-    return api("/api/runs/" + enc(id)).then(function (r) {
+    return api("/api/runs/" + enc(id)).then(runChatPreload).then(function (r) {
       var live = r.status === "running" || r.status === "queued", queued = r.status === "queued";
-      mount('<div class="run-workspace" id="run-workspace"><header class="rw-head"><div class="rw-title"><h1>' + esc(runTitle(r)) + '</h1><div>' + statusPill(r.status, r.queue_pos, r.error) + '<span class="muted">' + esc(when(r.started_at || r.created_at)) + '</span></div></div><div class="rw-actions">' +
+      // a session's later turn: rerun / edit / save as task make no sense without the session
+      var turn = r.trigger === "session" || !!(r.chat_session && r.chat_session.turn > 0);
+      mount('<div class="run-workspace" id="run-workspace"><header class="rw-head"><div class="rw-title"><h1>' + esc(runTitle(r)) + '</h1><div>' + statusPill(r.status, r.queue_pos, r.error) + '<span class="muted">' + esc(when(r.started_at || r.created_at)) + '</span>' + runChatOfHtml(r) + '</div></div><div class="rw-actions">' +
         (live ? '<button type="button" class="btn sm danger rd-stop" id="rd-stop" data-tip="' + esc(T(queued ? "run.dequeue_tip" : "run.stop_tip")) + '">' + ic("stop", "sm") + esc(T(queued ? "run.dequeue" : "run.stop")) + "</button>" : "") +
-        (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
-        '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>" +
-        (r.task_id ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") +
+        (r.task_id || turn ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
+        (turn ? "" : '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>") +
+        (r.task_id || turn ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") +
         '<button type="button" class="btn sm" id="rd-inspect-toggle" aria-expanded="false" aria-controls="rd-inspector">' + ic("info", "sm") + esc(T("rw.inspector")) + '</button></div></header><div class="grid g4 rw-stats">' +
         '<div class="card stat"><small>' + esc(T("col.status")) + "</small><strong>" + statusPill(r.status, r.queue_pos, r.error) + "</strong><span class=\"ell\"" + (r.workspace ? ' data-tip="' + esc(r.workspace) + '"' : "") + ">" + esc(runCtxText(r, true)) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.duration")) + "</small><strong>" + esc(queued ? T("rd.waiting") : live ? T("rd.running") : r.started_at ? dur(r.duration_ms) : "—") + "</strong><span>" + esc(r.started_at || !r.finished_at ? T(queued ? "rd.queued_at" : "rd.started", { t: when(r.started_at || r.created_at) }) : T("rd.never_started")) + "</span></div>" +
@@ -247,14 +249,14 @@
         runChangesHtml(r) +
         costCalcHtml(r) + contextPlanHtml(r) +
         (!r.result ? '<div class="rw-no-answer">' + emptyState("chat", T("rw.no_answer"), T(live ? "rw.answer_running" : "rw.answer_missing")) + "</div>" : "") + '</div>' +
-        '<section class="rw-panel card" id="rw-log" role="tabpanel" aria-labelledby="rw-tab-log"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section></div>' +
+        '<section class="rw-panel card" id="rw-log" role="tabpanel" aria-labelledby="rw-tab-log"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' + runChatHtml(r) + '</div>' +
         '<aside class="rw-inspector" id="rd-inspector" aria-label="' + esc(T("rw.inspector")) + '" hidden><section><div class="card-head rd-head"><h3>' + esc(T("rw.run_snapshot")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '</div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" : esc(T("run.adhoc"))) + "</dd>" +
         (r.version_no ? '<dt>' + esc(T("rw.run_version")) + '</dt><dd>v' + esc(r.version_no) + '</dd>' : '') +
         runSkillKv(r) + "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(r.provider || "—") + "</dd><dt>" + esc(T("f.model")) + "</dt><dd>" + esc(r.model || "—") + "</dd>" + runPromptHtml(r) + (r.error ? "<dt>" + esc(T("rd.error")) + '</dt><dd class="err">' + esc(runErr(r.error)) + "</dd>" : "") + "</dl></section>" +
         (r.task_id ? '<section id="rw-current-task"><h3>' + esc(T("rw.current_task")) + '</h3>' + skeleton("list") + '</section>' : '') + '</aside></div></div>',
         "runs", [[T("nav.runs"), "#/runs"], [runTitle(r)]]);
       bumpIdle();
-      $("#rd-rerun").addEventListener("click", function (e) {
+      if ($("#rd-rerun")) $("#rd-rerun").addEventListener("click", function (e) {
         var b = e.currentTarget; b.disabled = true;
         api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} }).then(function (res) {
           openStarted(res, "runs.rerun_started");
@@ -271,6 +273,7 @@
       if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });
       state.chgJump = null;
       bindRunPrompt(r);
+      bindRunChat(r);
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, mode: r.run_mode }); });
       if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace }); });
       logView($("#lv"), id, live, function (why) {

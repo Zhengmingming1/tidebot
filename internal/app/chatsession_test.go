@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/pricing"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
@@ -74,7 +75,7 @@ func TestChatSessionResumeOnlyInTidebotConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ses.Title != "summarize the notes" || ses.Status != "idle" || ses.PermissionMode != "read" || ses.WebAccess || ses.Turns != 0 {
+	if ses.Title != "summarize the notes" || ses.Status != "idle" || ses.PermissionMode != "read" || ses.WebAccess || ses.Turns != 0 || ses.TurnMax != chatMaxTurns {
 		t.Fatalf("session %+v", ses)
 	}
 	if again, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid}); err != nil || again.ID != ses.ID {
@@ -264,5 +265,47 @@ func TestHasEnvLastWins(t *testing.T) {
 	}
 	if !isUUID(newClaudeSessionID()) || isUUID("../../x") {
 		t.Fatal("uuid")
+	}
+}
+
+// TestChatSessionCostInDisplayCurrency: like cost_usd on runs, a session's and its turns'
+// money is in the display currency (the run page shows them next to the run's own cost).
+func TestChatSessionCostInDisplayCurrency(t *testing.T) {
+	chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	rid := originRun(t, a, runner.Options{Prompt: "notes"})
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SendChatTurn(ctx, ses.ID, "more?"); err != nil {
+		t.Fatal(err)
+	}
+	d := waitTurn(t, a, ses.ID, 1)
+	// the turn cost 0.5 USD (the test provider prices it at 0)
+	if _, err := a.DB.Exec(`UPDATE runs SET cost_amount=0.5, cost_currency='USD' WHERE id=?`, d.TurnList[1].RunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec(`UPDATE chat_sessions SET cost_total=0.5 WHERE id=?`, ses.ID); err != nil {
+		t.Fatal(err)
+	}
+	usd, _ := a.GetChatSession(ctx, ses.ID)
+	if usd.CostUSD != 0.5 || usd.TurnList[1].CostUSD != 0.5 {
+		t.Fatalf("USD %+v", usd)
+	}
+	if err := a.SetFX(ctx, pricing.FX{Display: pricing.CNY, USDCNY: 7}); err != nil {
+		t.Fatal(err)
+	}
+	cny, err := a.GetChatSession(ctx, ses.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	near := func(x, y float64) bool { return x-y < 1e-9 && y-x < 1e-9 }
+	if !near(cny.CostUSD, usd.CostUSD*7) || !near(cny.TurnList[1].CostUSD, usd.TurnList[1].CostUSD*7) {
+		t.Fatalf("not in CNY: session %v→%v, turn %v→%v", usd.CostUSD, cny.CostUSD, usd.TurnList[1].CostUSD, cny.TurnList[1].CostUSD)
+	}
+	if list, _ := a.ListChatSessions(ctx, 5); len(list) != 1 || !near(list[0].CostUSD, cny.CostUSD) {
+		t.Fatalf("list %+v", list)
 	}
 }

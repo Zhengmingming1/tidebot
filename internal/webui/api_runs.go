@@ -306,6 +306,7 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			FileChanges        json.RawMessage          `json:"file_changes,omitempty"`
 			ChangesUndoneAt    string                   `json:"changes_undone_at,omitempty"`
 			ChangesUndoneFiles []string                 `json:"changes_undone_files,omitempty"`
+			ChatSession        *runChatRef              `json:"chat_session,omitempty"`
 		}{runDTO: runs[0], Currency: s.fx().Display, Result: result, ResultTruncated: cut != 0, ChangesUndoneAt: undoneAt}
 		var contextAudit string
 		if err := s.deps.DB.QueryRowContext(r.Context(), `SELECT detail_json FROM operation_log WHERE entity_type='run' AND entity_id=? AND action='context.plan' ORDER BY id DESC LIMIT 1`, id).Scan(&contextAudit); err == nil && json.Valid([]byte(contextAudit)) {
@@ -342,6 +343,7 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		if json.Valid([]byte(detail)) {
 			out.CostDetail = json.RawMessage(detail)
 		}
+		out.ChatSession = s.runChatRef(r.Context(), id)
 		writeJSON(w, 200, out)
 		return
 	}

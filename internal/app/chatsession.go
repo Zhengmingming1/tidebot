@@ -147,6 +147,7 @@ func scanChat(sc interface{ Scan(...any) error }) (chatRow, error) {
 	err := sc.Scan(&c.ID, &c.Title, &c.Origin, &c.OriginRunID, &c.WorkspaceDir, &c.PermissionMode, &c.Provider,
 		&c.ClaudeSessionID, &c.Turns, &c.CostUSD, &web, &c.Status, &c.CreatedAt, &c.UpdatedAt)
 	c.WebAccess = web != 0
+	c.TurnMax = chatMaxTurns
 	return c, err
 }
 
@@ -155,7 +156,15 @@ func (a *App) chatSession(ctx context.Context, sid string) (chatRow, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, webui.ErrChatSessionNotFound
 	}
+	a.chatDisplayCost(&c.ChatSession)
 	return c, err
+}
+
+// chatDisplayCost: cost_total is kept in USD; the API shows money in the display
+// currency, like cost_usd on runs.
+func (a *App) chatDisplayCost(c *webui.ChatSession) {
+	fx := a.cachedFX()
+	c.CostUSD = fx.Convert(c.CostUSD, pricing.USD, fx.Display)
 }
 
 var finishedRun = map[string]bool{"succeeded": true, "failed": true, "timeout": true, "canceled": true}
@@ -251,6 +260,7 @@ func (a *App) ListChatSessions(ctx context.Context, limit int) ([]webui.ChatSess
 		if err != nil {
 			return nil, err
 		}
+		a.chatDisplayCost(&c.ChatSession)
 		out = append(out, c.ChatSession)
 	}
 	return out, rows.Err()
@@ -281,7 +291,7 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 		}
 		t.Truncated = trunc != 0
 		if amount != 0 && cur != "" {
-			t.CostUSD = fx.Convert(amount, cur, pricing.USD)
+			t.CostUSD = fx.Convert(amount, cur, fx.Display)
 		}
 		d.TurnList = append(d.TurnList, t)
 	}

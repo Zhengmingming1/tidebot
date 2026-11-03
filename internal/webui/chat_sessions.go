@@ -19,8 +19,9 @@ type ChatSession struct {
 	WorkspaceDir   string  `json:"workspace_dir"`
 	PermissionMode string  `json:"permission_mode"` // read
 	Provider       string  `json:"provider"`
-	Turns          int     `json:"turns"` // turns sent (the origin run is turn 0)
-	CostUSD        float64 `json:"cost_usd"`
+	Turns          int     `json:"turns"`    // turns sent (the origin run is turn 0)
+	TurnMax        int     `json:"turn_max"` // turns a session may send
+	CostUSD        float64 `json:"cost_usd"` // display currency, like runs' cost_usd
 	WebAccess      bool    `json:"web_access"`
 	Status         string  `json:"status"` // idle | running | closed
 	CreatedAt      string  `json:"created_at"`
@@ -36,7 +37,7 @@ type ChatTurn struct {
 	Answer    string  `json:"answer"`
 	Truncated bool    `json:"answer_truncated,omitempty"`
 	Error     string  `json:"error,omitempty"`
-	CostUSD   float64 `json:"cost_usd"`
+	CostUSD   float64 `json:"cost_usd"` // display currency
 	CreatedAt string  `json:"created_at"`
 }
 
@@ -77,6 +78,27 @@ var (
 	ErrChatTurnLimit       = errors.New("the session has reached its turn limit")
 	ErrChatInvalid         = errors.New("invalid session request")
 )
+
+// runChatRef: the session a run belongs to (turn 0 = the run it continues).
+type runChatRef struct {
+	ID          string `json:"id"`
+	Turn        int    `json:"turn"`
+	OriginRunID string `json:"origin_run_id"`
+}
+
+// runChatRef finds the session a run is a turn of, or nil.
+func (s *Server) runChatRef(ctx context.Context, runID string) *runChatRef {
+	if s.deps.ChatSessions == nil {
+		return nil
+	}
+	var c runChatRef
+	err := s.deps.DB.QueryRowContext(ctx, `SELECT t.session_id, t.turn_index, cs.origin_run_id FROM chat_session_turns t
+  JOIN chat_sessions cs ON cs.id=t.session_id WHERE t.run_id=? ORDER BY t.turn_index LIMIT 1`, runID).Scan(&c.ID, &c.Turn, &c.OriginRunID)
+	if err != nil {
+		return nil
+	}
+	return &c
+}
 
 // ChatMessageMax caps one turn's message (bytes).
 const ChatMessageMax = 16 << 10

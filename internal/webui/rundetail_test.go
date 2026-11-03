@@ -17,7 +17,7 @@ func TestRunDetailActions(t *testing.T) {
 	for _, want := range []string{
 		`id="rd-rerun"' + (live ? " disabled" : "")`,
 		`api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} })`,
-		`(r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task"`,
+		`(r.task_id || turn ? "" : '<button type="button" class="btn sm" id="rd-save-task"`,
 		`taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace })`,
 		`prompt: pre.prompt || ""`,
 	} {

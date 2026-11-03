@@ -80,7 +80,7 @@
     if (soft && repositoryScan) return Promise.resolve();
     if (soft && workflowDraftGuard && workflowDraftGuard.dirty()) return Promise.resolve();
     if (!soft) workflowDraftGuard = null;
-    stopStream(); stopPoll();
+    stopStream(); stopChatStream(); stopPoll();
     if (!soft) stopRepositoryScan();
     clearTimeout(scheduleRefresh._t);
     if (!soft) { draftFlush(); $("#modal-root").innerHTML = ""; closeDrawer(); }

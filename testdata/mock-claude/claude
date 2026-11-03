@@ -176,7 +176,21 @@ if [[ "${TIDEBOT_MOCK_REQUIRE_AUTH:-}" == "1" ]]; then
   fi
 fi
 
-if [[ -n "${TIDEBOT_MOCK_RESULT_TEXT:-}" ]]; then
+# A session's first turn carries the earlier run's record: answer only the follow-up.
+case "$PROMPT" in
+  *"The owner's follow-up:"*) PROMPT="${PROMPT##*The owner\'s follow-up:}"; PROMPT="${PROMPT#"${PROMPT%%[![:space:]]*}"}" ;;
+esac
+# TIDEBOT_MOCK_REPLY_MAP=file.json: {"text in the prompt": "answer"}, first match wins (demos).
+MAPPED=""
+if [[ -n "${TIDEBOT_MOCK_REPLY_MAP:-}" && -f "$TIDEBOT_MOCK_REPLY_MAP" ]]; then
+  MAPPED=$(printf '%s' "$PROMPT" | python3 -c 'import json,sys
+m=json.load(open(sys.argv[1])); p=sys.stdin.read()
+for k,v in m.items():
+    if k in p: print(json.dumps(v)); break' "$TIDEBOT_MOCK_REPLY_MAP")
+fi
+if [[ -n "$MAPPED" ]]; then
+  RESULT_JSON="$MAPPED"
+elif [[ -n "${TIDEBOT_MOCK_RESULT_TEXT:-}" ]]; then
   RESULT_JSON=$(printf '%s' "$TIDEBOT_MOCK_RESULT_TEXT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
 elif [[ "$PROMPT" == TIDEBOT_DEPENDENCY_SNAPSHOT_V1* && -n "${TIDEBOT_MOCK_DEPENDENCY_JSON:-}" ]]; then
   RESULT_JSON=$(printf '%s' "$TIDEBOT_MOCK_DEPENDENCY_JSON" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')

@@ -80,7 +80,7 @@
     return "terminal";
   }
   // a run of a skill (no task) is titled by the skill, so the list and the breadcrumb say what ran
-  function runTitle(r) { return (r.task_name || r.skill_name || T("trig.quick")) + " #" + shortId(r.id); }
+  function runTitle(r) { return (r.task_name || r.skill_name || T(r.trigger === "session" ? "trig.session" : "trig.quick")) + " #" + shortId(r.id); }
   // runCtxText: "Quick run · tidebot · Read-only" for runs started in a folder from the Run dialog
   // (short: just "tidebot · Read-only", for the narrow status card)
   function runCtxText(r, short) {
