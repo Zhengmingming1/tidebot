@@ -50,8 +50,8 @@
   --tip-link: #a8ceff;
   --mark-bg: #fde68a;
   --mark-cur: #fef3c7;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #ffd98a;
   --mark-sand: #efe4cf;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(8, 103, 213, .55);
@@ -120,8 +120,8 @@ html[data-theme="graphite"][data-mode="dark"], html:not([data-theme])[data-mode=
   --tip-link: #0757b4;
   --mark-bg: #6b5310;
   --mark-cur: #3a2f0c;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #ffd98a;
   --mark-sand: #e3d6bd;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(139, 188, 255, .55);
@@ -191,8 +191,8 @@ html[data-theme="graphite"][data-mode="system"] {
   --tip-link: #0757b4;
   --mark-bg: #6b5310;
   --mark-cur: #3a2f0c;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #ffd98a;
   --mark-sand: #e3d6bd;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(139, 188, 255, .55);
@@ -262,8 +262,8 @@ html[data-theme="tide"] {
   --tip-link: #abd7ff;
   --mark-bg: #fde68a;
   --mark-cur: #fef3c7;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #ffd98a;
   --mark-sand: #efe4cf;
   --nav-glass: rgba(228, 239, 248, .97); --bar-glass: rgba(242, 248, 252, .98);
@@ -333,8 +333,8 @@ html[data-theme="tide"][data-mode="dark"] {
   --tip-link: #0053a5;
   --mark-bg: #6b5310;
   --mark-cur: #3a2f0c;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #ffd98a;
   --mark-sand: #d9cdb6;
   --nav-glass: rgba(16, 32, 44, .97); --bar-glass: rgba(20, 33, 43, .98);
@@ -405,8 +405,8 @@ html[data-theme="tide"][data-mode="system"] {
   --tip-link: #0053a5;
   --mark-bg: #6b5310;
   --mark-cur: #3a2f0c;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #ffd98a;
   --mark-sand: #d9cdb6;
   --nav-glass: rgba(16, 32, 44, .97); --bar-glass: rgba(20, 33, 43, .98);
@@ -477,8 +477,8 @@ html[data-theme="midnight"] {
   --tip-link: #b0ceff;
   --mark-bg: #fde68a;
   --mark-cur: #fef3c7;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #f2b33d;
   --mark-sand: #3a3226;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(28, 97, 189, .55);
@@ -547,8 +547,8 @@ html[data-theme="midnight"][data-mode="dark"] {
   --tip-link: #174f9d;
   --mark-bg: #6b5310;
   --mark-cur: #3a2f0c;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #f2b33d;
   --mark-sand: #3a3226;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(131, 180, 255, .55);
@@ -618,8 +618,8 @@ html[data-theme="midnight"][data-mode="system"] {
   --tip-link: #174f9d;
   --mark-bg: #6b5310;
   --mark-cur: #3a2f0c;
-  --mark-a: #8bd3ff;
-  --mark-b: #0865d6;
+  --mark-a: #0865ef;
+  --mark-b: #0644d7;
   --mark-sun: #f2b33d;
   --mark-sand: #3a3226;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(131, 180, 255, .55);
@@ -1804,13 +1804,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 @media (max-width: 760px) { .ai-promise, .ai-checks { grid-template-columns: 1fr; } .ai-files { grid-template-columns: 1fr; height: auto; } .ai-steps li { font-size: 0; } }
 .drawer > .drawer-foot { margin: 0; }
 
-/* ---- flowing tide brand mark ---- */
-.tide .tw { animation: tide-crest 7s ease-in-out infinite; transform-origin: 32px 40px; will-change: transform; }
-.tide .tw2 { animation-name: tide-foreground; animation-duration: 6s; animation-delay: -1.3s; }
-@keyframes tide-crest { 0%, 100% { transform: translate(0, 0) rotate(0); } 50% { transform: translate(-1px, .7px) rotate(-2deg); } }
-@keyframes tide-foreground { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(1.5px, -1px); } }
+/* ---- Tide T: calm vertical tide motion ---- */
+.tide .tw { animation: tide-level 7s ease-in-out infinite; will-change: transform; }
+@keyframes tide-level { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-.6px); } }
 html.tb-busy .tide .tw { animation-duration: 3.2s; }
-html.tb-busy .tide .tw2 { animation-duration: 2.7s; }
 html.tb-hidden .tide * { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .tide * { animation: none !important; } }
 .boot { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 50; }

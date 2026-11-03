@@ -45,7 +45,7 @@ T = {
     shadow_pop="0 0 0 1px rgba(0, 0, 0, .04), 0 4px 12px rgba(0, 0, 0, .06), 0 16px 40px rgba(0, 0, 0, .10)",
     overlay="rgba(9, 9, 11, .32)", code_bg="#f1f3f6", sb_thumb="#c9d1dc", sb_thumb_hover="#a1a1aa",
     tip_bg="#1c2431", tip_fg="#fafafa", tip_link="#a8ceff", mark_bg="#fde68a", mark_cur="#fef3c7",
-    mark_a="#8bd3ff", mark_b="#0865d6", mark_sun="#ffd98a", mark_sand="#efe4cf"),
+    mark_a="#0865ef", mark_b="#0644d7", mark_sun="#ffd98a", mark_sand="#efe4cf"),
   "dark": dict(
     bg="#17191e", bg_sunk="#242830", surface="#1f2228", surface_2="#252932", row_hover="#2a2f38",
     border="#343a44", border_strong="#4b5461",
@@ -60,7 +60,7 @@ T = {
     shadow_pop="0 0 0 1px rgba(255, 255, 255, .06), 0 8px 24px rgba(0, 0, 0, .5)",
     overlay="rgba(0, 0, 0, .6)", code_bg="#242830", sb_thumb="#3a3a40", sb_thumb_hover="#55555c",
     tip_bg="#eef1f6", tip_fg="#17191e", tip_link="#0757b4", mark_bg="#6b5310", mark_cur="#3a2f0c",
-    mark_a="#8bd3ff", mark_b="#0865d6", mark_sun="#ffd98a", mark_sand="#e3d6bd"),
+    mark_a="#0865ef", mark_b="#0644d7", mark_sun="#ffd98a", mark_sand="#e3d6bd"),
  },
  "tide": {
   "light": dict(
@@ -77,7 +77,7 @@ T = {
     shadow_pop="0 0 0 1px rgba(15, 60, 80, .06), 0 6px 16px rgba(15, 60, 80, .08), 0 18px 44px rgba(15, 60, 80, .12)",
     overlay="rgba(8, 30, 40, .32)", code_bg="#eaf2f9", sb_thumb="#bed0df", sb_thumb_hover="#93aab3",
     tip_bg="#173044", tip_fg="#f2f8f9", tip_link="#abd7ff", mark_bg="#fde68a", mark_cur="#fef3c7",
-    mark_a="#8bd3ff", mark_b="#0865d6", mark_sun="#ffd98a", mark_sand="#efe4cf"),
+    mark_a="#0865ef", mark_b="#0644d7", mark_sun="#ffd98a", mark_sand="#efe4cf"),
   "dark": dict(
     bg="#14212b", bg_sunk="#203341", surface="#1b2c39", surface_2="#203341", row_hover="#283e4f",
     border="#344e60", border_strong="#4a6578",
@@ -92,7 +92,7 @@ T = {
     shadow_pop="0 0 0 1px rgba(255, 255, 255, .05), 0 10px 28px rgba(0, 0, 0, .5)",
     overlay="rgba(0, 8, 12, .62)", code_bg="#203341", sb_thumb="#2a4756", sb_thumb_hover="#3d6070",
     tip_bg="#eef6fc", tip_fg="#14212b", tip_link="#0053a5", mark_bg="#6b5310", mark_cur="#3a2f0c",
-    mark_a="#8bd3ff", mark_b="#0865d6", mark_sun="#ffd98a", mark_sand="#d9cdb6"),
+    mark_a="#0865ef", mark_b="#0644d7", mark_sun="#ffd98a", mark_sand="#d9cdb6"),
  },
  "midnight": {
   "light": dict(
@@ -109,7 +109,7 @@ T = {
     shadow_pop="0 0 0 1px rgba(0, 0, 0, .05), 0 6px 16px rgba(0, 0, 0, .08), 0 18px 44px rgba(0, 0, 0, .12)",
     overlay="rgba(0, 0, 0, .36)", code_bg="#eef1f5", sb_thumb="#d2d2d8", sb_thumb_hover="#9e9ea8",
     tip_bg="#202735", tip_fg="#f4f4f5", tip_link="#b0ceff", mark_bg="#fde68a", mark_cur="#fef3c7",
-    mark_a="#8bd3ff", mark_b="#0865d6", mark_sun="#f2b33d", mark_sand="#3a3226"),
+    mark_a="#0865ef", mark_b="#0644d7", mark_sun="#f2b33d", mark_sand="#3a3226"),
   "dark": dict(
     bg="#181b20", bg_sunk="#282d35", surface="#22262d", surface_2="#282d35", row_hover="#303640",
     border="#373e49", border_strong="#4d5765",
@@ -124,7 +124,7 @@ T = {
     shadow_pop="0 0 0 1px rgba(255, 255, 255, .07), inset 0 1px 0 rgba(255, 255, 255, .05), 0 12px 32px rgba(0, 0, 0, .55)",
     overlay="rgba(0, 0, 0, .64)", code_bg="#282d35", sb_thumb="#34343b", sb_thumb_hover="#50505a",
     tip_bg="#f1f3f6", tip_fg="#181b20", tip_link="#174f9d", mark_bg="#6b5310", mark_cur="#3a2f0c",
-    mark_a="#8bd3ff", mark_b="#0865d6", mark_sun="#f2b33d", mark_sand="#3a3226"),
+    mark_a="#0865ef", mark_b="#0644d7", mark_sun="#f2b33d", mark_sand="#3a3226"),
  },
 }
 

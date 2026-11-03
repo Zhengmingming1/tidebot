@@ -128,7 +128,7 @@
   }
 
   function renderShell() {
-    $("#brand-mark").innerHTML = waveMark();
+    $("#brand-mark").innerHTML = tideMark();
     $("#nav").innerHTML = NAV.map(function (n) { return '<a href="' + n[1] + '" data-nav="' + n[0] + '" aria-label="' + esc(T("nav." + n[0])) + '">' + ic(n[0]) + "<span>" + esc(T("nav." + n[0])) + "</span></a>"; }).join("");
     wireShellNav();
     paintChannelDot();

@@ -81,7 +81,7 @@
         : scope === "next" ? "thread.r_scheduled" : "thread.r_done");
       var impact = pending.length ? impactHtml(impactLines(tk, pending)) : "";
       return '<div class="msg"><span class="avatar">' + esc(T("thread.me")) + '</span><div><div class="msg-meta"><strong>' + esc(T("thread.you")) + '</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(g.utter || T("thread.amendment")) + "</div></div></div>" +
-        '<div class="msg"><span class="avatar bot">' + waveMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
+        '<div class="msg"><span class="avatar bot">' + tideMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
         '<div class="req-card"><div class="req-card-head">' + esc(T("req.structured")) +
         (scope === "next" ? '<span class="tag next">' + esc(T("req.next_only")) + "</span>" : scope === "perm" ? '<span class="tag perm">' + esc(T("req.permanent")) + "</span>" : '<span class="tag">' + esc(T("req.mixed")) + "</span>") + "</div>" +
         g.items.map(function (i) {

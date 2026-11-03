@@ -272,7 +272,7 @@
     $("#shell").classList.add("hidden");
     var l = $("#login");
     l.classList.remove("hidden");
-    l.innerHTML = '<div class="card login-card"><div class="brand"><span class="brand-mark">' + waveMark() + '</span><span class="brand-text"><strong>tidebot</strong><small>' + esc(T("brand.tagline")) + '</small></span></div>' +
+    l.innerHTML = '<div class="card login-card"><div class="brand"><span class="brand-mark">' + tideMark() + '</span><span class="brand-text"><strong>tidebot</strong><small>' + esc(T("brand.tagline")) + '</small></span></div>' +
       '<form id="login-form" autocomplete="on"><label class="field"><span>' + esc(T("login.password")) + '</span><input type="password" id="lp" required minlength="8" autocomplete="current-password" autofocus></label>' +
       '<div class="' + (totp ? "" : "hidden") + '" id="totp-field"><label class="field"><span id="lt-lbl">' + esc(T("login.totp")) + '</span><input id="lt" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>' +
       '<button type="button" class="link-btn" id="lt-rec">' + esc(T("login.use_recovery")) + "</button></div>" +

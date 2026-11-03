@@ -513,7 +513,7 @@
         // Short link text with an external-link mark; the full address is the tooltip.
         var ext = function (href, text) { return '<a class="ext-link" href="' + esc(href) + '" target="_blank" rel="noopener" data-tip="' + esc(href.replace(/^https:\/\//, "")) + '">' + esc(text) + ic("ext", "sm") + "</a>"; };
         var src = state.sourceURL || SOURCE_REPO, ref = (/\/tree\/([^/?#]+)/.exec(src) || [])[1];
-        body = '<section class="card about-hero" id="set-version"><span class="about-mark">' + waveMark() + '</span><div class="about-t"><strong>tidebot ' + esc(state.version || "dev") + "</strong><small>" + esc(T("set.version_sub")) + "</small></div>" +
+        body = '<section class="card about-hero" id="set-version"><span class="about-mark">' + tideMark() + '</span><div class="about-t"><strong>tidebot ' + esc(state.version || "dev") + "</strong><small>" + esc(T("set.version_sub")) + "</small></div>" +
           '<span class="pill plain mono">' + esc(state.license || "AGPL-3.0-only") + "</span></section>" +
           '<section class="card">' +
           row("source", T("set.source"), T("set.source_sub"), ext(RELEASES_PAGE, "tidebot-releases")) +

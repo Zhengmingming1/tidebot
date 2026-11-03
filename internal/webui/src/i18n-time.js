@@ -134,21 +134,18 @@
   function btnIcon(b) { return P[b.icon] ? b.icon : "bolt"; }
 
   var markN = 0;
-  // The curled-wave brand mark shares its geometry with branding/mark.svg. CSS gives
-  // the crest and foreground a gentle swell, faster while tasks run, paused when hidden
-  // and disabled for prefers-reduced-motion. No animation timers are needed.
-  // The favicon / app icon (branding/mark.svg) stays static.
-  function wavePath(layer) {
-    return ["M-4 45C10 33 21 35 31 43S55 49 68 39V68H-4Z", "M4 40C12 38 14 23 25 20C33 18 41 22 43 28C37 24 31 26 31 32C31 40 44 44 59 35C57 46 48 51 37 49C23 47 23 35 13 37C9 38 6 40 4 43Z", "M-3 55C9 45 20 46 31 51S53 58 67 47V68H-3Z"][layer];
+  // The Tide T shares its geometry with branding/mark.svg. Only the cyan tide
+  // band rises gently; CSS preserves busy, hidden and reduced-motion behavior.
+  function tidePath(layer) {
+    return ["M24 30H40V47C40 52 37 55 32 55S24 52 24 47Z", "M16 12H48C52.4 12 56 15.6 56 20H35C32.8 20 31 21.8 31 24H8V20C8 15.6 11.6 12 16 12Z", "M8 26H30C32.2 26 34 24.2 34 22H56V25C56 29.4 52.4 33 48 33H16C11.6 33 8 29.4 8 26Z"][layer];
   }
-  function waveMark() {
-    var g = "tbg" + (markN++), c = "tbc" + markN, w = "tbw" + markN;
-    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".3" y2="1"><stop class="mk-a" offset="0"/><stop class="mk-b" offset="1"/></linearGradient><linearGradient id="' + w + '" x1="0" y1="0" x2=".8" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#b9efff"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
-      '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/>' +
-      '<path d="' + wavePath(0) + '" fill="#0756bf" opacity=".55"/>' +
-      '<path class="tw tw1" d="' + wavePath(1) + '" fill="url(#' + w + ')"/>' +
-      '<path class="tw tw2" d="' + wavePath(2) + '" fill="#169aee" opacity=".85"/>' +
-      '<rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="#fff" stroke-opacity=".2"/></g></svg>';
+  function tideMark() {
+    var g = "tbg" + (markN++), w = "tbw" + markN;
+    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2="1" y2="1"><stop class="mk-a" offset="0"/><stop class="mk-b" offset="1"/></linearGradient><linearGradient id="' + w + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6eeeff"/><stop offset="1" stop-color="#94f6fa"/></linearGradient></defs>' +
+      '<rect width="64" height="64" rx="15" fill="url(#' + g + ')"/>' +
+      '<path d="' + tidePath(0) + '" fill="#fff"/>' +
+      '<path d="' + tidePath(1) + '" fill="#fff"/>' +
+      '<path class="tw" d="' + tidePath(2) + '" fill="url(#' + w + ')"/></svg>';
   }
   document.addEventListener("visibilitychange", function () { document.documentElement.classList.toggle("tb-hidden", document.hidden); });
   function waveArt() {

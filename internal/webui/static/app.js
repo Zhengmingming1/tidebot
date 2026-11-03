@@ -231,21 +231,18 @@
   function btnIcon(b) { return P[b.icon] ? b.icon : "bolt"; }
 
   var markN = 0;
-  // The curled-wave brand mark shares its geometry with branding/mark.svg. CSS gives
-  // the crest and foreground a gentle swell, faster while tasks run, paused when hidden
-  // and disabled for prefers-reduced-motion. No animation timers are needed.
-  // The favicon / app icon (branding/mark.svg) stays static.
-  function wavePath(layer) {
-    return ["M-4 45C10 33 21 35 31 43S55 49 68 39V68H-4Z", "M4 40C12 38 14 23 25 20C33 18 41 22 43 28C37 24 31 26 31 32C31 40 44 44 59 35C57 46 48 51 37 49C23 47 23 35 13 37C9 38 6 40 4 43Z", "M-3 55C9 45 20 46 31 51S53 58 67 47V68H-3Z"][layer];
+  // The Tide T shares its geometry with branding/mark.svg. Only the cyan tide
+  // band rises gently; CSS preserves busy, hidden and reduced-motion behavior.
+  function tidePath(layer) {
+    return ["M24 30H40V47C40 52 37 55 32 55S24 52 24 47Z", "M16 12H48C52.4 12 56 15.6 56 20H35C32.8 20 31 21.8 31 24H8V20C8 15.6 11.6 12 16 12Z", "M8 26H30C32.2 26 34 24.2 34 22H56V25C56 29.4 52.4 33 48 33H16C11.6 33 8 29.4 8 26Z"][layer];
   }
-  function waveMark() {
-    var g = "tbg" + (markN++), c = "tbc" + markN, w = "tbw" + markN;
-    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2=".3" y2="1"><stop class="mk-a" offset="0"/><stop class="mk-b" offset="1"/></linearGradient><linearGradient id="' + w + '" x1="0" y1="0" x2=".8" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#b9efff"/></linearGradient><clipPath id="' + c + '"><rect width="64" height="64" rx="15"/></clipPath></defs>' +
-      '<g clip-path="url(#' + c + ')"><rect width="64" height="64" fill="url(#' + g + ')"/>' +
-      '<path d="' + wavePath(0) + '" fill="#0756bf" opacity=".55"/>' +
-      '<path class="tw tw1" d="' + wavePath(1) + '" fill="url(#' + w + ')"/>' +
-      '<path class="tw tw2" d="' + wavePath(2) + '" fill="#169aee" opacity=".85"/>' +
-      '<rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="#fff" stroke-opacity=".2"/></g></svg>';
+  function tideMark() {
+    var g = "tbg" + (markN++), w = "tbw" + markN;
+    return '<svg class="tide" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="' + g + '" x1="0" y1="0" x2="1" y2="1"><stop class="mk-a" offset="0"/><stop class="mk-b" offset="1"/></linearGradient><linearGradient id="' + w + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6eeeff"/><stop offset="1" stop-color="#94f6fa"/></linearGradient></defs>' +
+      '<rect width="64" height="64" rx="15" fill="url(#' + g + ')"/>' +
+      '<path d="' + tidePath(0) + '" fill="#fff"/>' +
+      '<path d="' + tidePath(1) + '" fill="#fff"/>' +
+      '<path class="tw" d="' + tidePath(2) + '" fill="url(#' + w + ')"/></svg>';
   }
   document.addEventListener("visibilitychange", function () { document.documentElement.classList.toggle("tb-hidden", document.hidden); });
   function waveArt() {
@@ -770,7 +767,7 @@
   }
 
   function renderShell() {
-    $("#brand-mark").innerHTML = waveMark();
+    $("#brand-mark").innerHTML = tideMark();
     $("#nav").innerHTML = NAV.map(function (n) { return '<a href="' + n[1] + '" data-nav="' + n[0] + '" aria-label="' + esc(T("nav." + n[0])) + '">' + ic(n[0]) + "<span>" + esc(T("nav." + n[0])) + "</span></a>"; }).join("");
     wireShellNav();
     paintChannelDot();
@@ -1862,7 +1859,7 @@
     $("#shell").classList.add("hidden");
     var l = $("#login");
     l.classList.remove("hidden");
-    l.innerHTML = '<div class="card login-card"><div class="brand"><span class="brand-mark">' + waveMark() + '</span><span class="brand-text"><strong>tidebot</strong><small>' + esc(T("brand.tagline")) + '</small></span></div>' +
+    l.innerHTML = '<div class="card login-card"><div class="brand"><span class="brand-mark">' + tideMark() + '</span><span class="brand-text"><strong>tidebot</strong><small>' + esc(T("brand.tagline")) + '</small></span></div>' +
       '<form id="login-form" autocomplete="on"><label class="field"><span>' + esc(T("login.password")) + '</span><input type="password" id="lp" required minlength="8" autocomplete="current-password" autofocus></label>' +
       '<div class="' + (totp ? "" : "hidden") + '" id="totp-field"><label class="field"><span id="lt-lbl">' + esc(T("login.totp")) + '</span><input id="lt" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>' +
       '<button type="button" class="link-btn" id="lt-rec">' + esc(T("login.use_recovery")) + "</button></div>" +
@@ -3012,7 +3009,7 @@
         : scope === "next" ? "thread.r_scheduled" : "thread.r_done");
       var impact = pending.length ? impactHtml(impactLines(tk, pending)) : "";
       return '<div class="msg"><span class="avatar">' + esc(T("thread.me")) + '</span><div><div class="msg-meta"><strong>' + esc(T("thread.you")) + '</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(g.utter || T("thread.amendment")) + "</div></div></div>" +
-        '<div class="msg"><span class="avatar bot">' + waveMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
+        '<div class="msg"><span class="avatar bot">' + tideMark() + '</span><div><div class="msg-meta"><strong>tidebot</strong><small>' + agoHtml(g.at) + '</small></div><div class="msg-body">' + esc(reply) + "</div>" +
         '<div class="req-card"><div class="req-card-head">' + esc(T("req.structured")) +
         (scope === "next" ? '<span class="tag next">' + esc(T("req.next_only")) + "</span>" : scope === "perm" ? '<span class="tag perm">' + esc(T("req.permanent")) + "</span>" : '<span class="tag">' + esc(T("req.mixed")) + "</span>") + "</div>" +
         g.items.map(function (i) {
@@ -8466,7 +8463,7 @@
         // Short link text with an external-link mark; the full address is the tooltip.
         var ext = function (href, text) { return '<a class="ext-link" href="' + esc(href) + '" target="_blank" rel="noopener" data-tip="' + esc(href.replace(/^https:\/\//, "")) + '">' + esc(text) + ic("ext", "sm") + "</a>"; };
         var src = state.sourceURL || SOURCE_REPO, ref = (/\/tree\/([^/?#]+)/.exec(src) || [])[1];
-        body = '<section class="card about-hero" id="set-version"><span class="about-mark">' + waveMark() + '</span><div class="about-t"><strong>tidebot ' + esc(state.version || "dev") + "</strong><small>" + esc(T("set.version_sub")) + "</small></div>" +
+        body = '<section class="card about-hero" id="set-version"><span class="about-mark">' + tideMark() + '</span><div class="about-t"><strong>tidebot ' + esc(state.version || "dev") + "</strong><small>" + esc(T("set.version_sub")) + "</small></div>" +
           '<span class="pill plain mono">' + esc(state.license || "AGPL-3.0-only") + "</span></section>" +
           '<section class="card">' +
           row("source", T("set.source"), T("set.source_sub"), ext(RELEASES_PAGE, "tidebot-releases")) +
