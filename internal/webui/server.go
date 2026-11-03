@@ -80,6 +80,9 @@ type Deps struct {
 	// QuickRunSkill runs a prompt with a skill materialized (button skill binding).
 	QuickRunSkill func(prompt, providerName, skillID, versionID string) (string, error)
 	Providers     ProviderAdmin
+	// ChatSessions (optional) backs /api/chat-sessions: continue a finished run as
+	// a session, one read-only `claude -p --resume` per turn. No page uses it yet.
+	ChatSessions ChatSessionAPI
 
 	// Public handlers mounted without session auth (they authenticate themselves),
 	// e.g. /hooks/ (webhook token/HMAC) and /metrics (bearer token).

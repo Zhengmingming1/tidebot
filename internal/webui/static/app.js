@@ -706,7 +706,7 @@
     return '<p class="notice ' + (k === "pack" ? "" : "warn ") + 'pz-note" id="pz-note"' + (t.paused_at ? ' data-tip="' + esc(pauseWhy(t)) + '"' : "") + ">" + ic(k === "pack" ? "info" : "pause", "sm") + "<span>" + esc(body) + "</span>" + link + "</p>";
   }
   function triggerText(tr) {
-    return { cron: T("trig.cron"), manual: T("trig.manual"), quick: T("trig.quick"), button: T("trig.button") }[tr] || T("trig.other", { t: tr });
+    return { cron: T("trig.cron"), manual: T("trig.manual"), quick: T("trig.quick"), button: T("trig.button"), session: T("trig.session") }[tr] || T("trig.other", { t: tr });
   }
   function runIcon(r) {
     var n = (r.task_name || r.prompt || "").toLowerCase();

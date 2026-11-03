@@ -61,6 +61,11 @@ type Options struct {
 	OnStart func(runID string)
 	// NoPluginMCP keeps the owner's plugin connectors out of this run (AI plugin builder).
 	NoPluginMCP bool
+	// KeepSession lets Claude Code save the run's transcript (a session turn: the
+	// caller passes --session-id or --resume in ContextArgs). Other runs get
+	// --no-session-persistence. The transcript goes to CLAUDE_CONFIG_DIR, which
+	// App points at tidebot's own folder; never the owner's ~/.claude.
+	KeepSession bool
 	// Cost prices the run from token usage and enforces caps mid-run (nil = no pricing).
 	Cost *CostControl
 	// OnUsage, if set, receives the run's usage so far each time the runner saves it

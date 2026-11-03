@@ -23,6 +23,8 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/workflow-runs/", s.withAuthCSRF(s.handleWorkflowRunSub))
 	mux.HandleFunc("/api/dependencies/check", s.withAuthCSRF(s.handleDependencyCheck))
 	mux.HandleFunc("/api/dependencies/check/", s.withAuthCSRF(s.handleDependencyCheckStatus))
+	mux.HandleFunc("/api/chat-sessions", s.withAuthCSRF(s.handleChatSessions))
+	mux.HandleFunc("/api/chat-sessions/", s.withAuthCSRF(s.handleChatSessionSub))
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.withAuthCSRF(s.handleLogout))
 	mux.HandleFunc("/api/me", s.withAuthCSRF(s.handleMe))

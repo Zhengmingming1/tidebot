@@ -51,6 +51,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	}
 	a.purgeSkillStages()
 	a.purgeRunMCP()
+	a.recoverChatSessions(ctx)
 	a.purgeRunSnaps()
 	a.cleanLegacySkillCopies(ctx)
 	srv := ipc.NewServer(a.Log)

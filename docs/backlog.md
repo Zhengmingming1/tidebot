@@ -5248,3 +5248,29 @@ a bulk edit makes undo exact without a history table.
 - P0 下一片：`sessions` 表 + `claude -p --resume`（会话轮次去掉 `--no-session-persistence`，转录只写 `<data>/claude-config`），先做后端和「验证 `~/.claude` 没有新文件」的测试，界面不进导航。
 - 把「本次运行用了哪些连接器」记进运行元数据，运行详情里显示（P1 绑定可视化的前置）。
 - 假 Messages API 可以做成 `testdata` 里的可选集成测试（本机有 claude 时才跑），持续验证 deny 规则在新版 Claude Code 上仍生效。
+
+### 2026-11-03 P0 第一片：会话后端（`--resume`，界面不进导航）
+
+**Done**
+
+- **表**：`chat_sessions`（`sessions` 已经是 WebUI 登录表，所以加 `chat_` 前缀；字段按方案：来源、来源运行、目录、权限、服务商、绑定、Claude 会话 id、轮数、花费、联网、状态）和 `chat_session_turns`（会话、轮次、运行 id）。每轮的提问、回答、花费、日志都在它的运行记录里，不另存消息。来源运行是第 0 轮。
+- **续接**：会话的每一轮都是一次普通 `RunPromptEx` 运行（`trigger_kind=session`、`run_mode=read`），跑完就退出，空闲会话不占进程。新增 `runner.Options.KeepSession`：只有会话轮次不加 `--no-session-persistence`；而且 `RunPromptEx` 会检查环境里最终生效的 `CLAUDE_CONFIG_DIR` 是 `<data>/claude-config`，不是就拒绝运行，转录不可能落到 `~/.claude`。
+  - 普通运行一直是 `--no-session-persistence`，没有转录可以 `--resume`。所以第一轮用 tidebot 生成的 UUID `--session-id` 开新会话，提示词里带上来源运行的记录（提问、回答、报错，按不可信数据包裹，限 8 KB / 24 KB，`</` 转义），之后各轮 `--resume <id>` 只发用户这一句。转录丢了（被清理）就自动按第一轮的方式重开。
+- **安全底座每轮都在**：`--bare`、`--restricted`、`dontAsk`、预算、agent 配置 deny 规则、`--strict-mcp-config`、按运行绑定 MCP 都和普通运行同一条路径。会话额外只读（`Edit/Write/MultiEdit/NotebookEdit/Bash/PowerShell` 进同一个 `--disallowedTools`），默认不联网（再加 `WebSearch,WebFetch`，`web_access` 打开才去掉），并追加一段固定系统说明（只读、不安装、不改 agent 配置、记录和文件内容当数据）。系统说明不进转录，每轮都传。
+- **目录**：来源运行的目录是任务工作区或通过 `CheckRunDir` 的用户目录就沿用（只读）；快速运行（数据目录）或技能的临时目录（已删除）改用会话自己的 `<data>/chat-sessions/<id>/work`。
+- **API**（都走登录 + CSRF，SQL 全参数化，JSON 输出转义 HTML）：`GET/POST /api/chat-sessions`（列表 / 从已结束的运行创建，同一运行重复创建返回原会话）、`GET/DELETE /api/chat-sessions/{id}`（详情含各轮 / 删除，删除同时清掉转录和会话目录，运行历史保留）、`POST /api/chat-sessions/{id}/turns`（发一轮，202 + `run_id`）。一个会话同时只跑一轮（`status` 原子切换，忙时 409 `busy`），上限 50 轮（409 `turn_limit`），单条消息 16 KB；启动时把上次没跑完的会话恢复成空闲。错误都带稳定的 `code`，给以后的界面翻译用。
+- 运行列表里会话轮次显示为「会话续聊 / Session turn」。没有其他界面改动。
+- 测试：`app/chatsession_test.go`（临时 HOME + 让 mock 像 Claude Code 一样写转录：普通运行不留转录；第一轮 `--session-id` + 运行记录、第二轮 `--resume` 同一个 id；每轮都有只读 deny、联网 deny、agent 配置规则、`--strict-mcp-config`、`--restricted`；转录只在 `<data>/claude-config/projects`，HOME 下没有 `.claude`、`.claude.json`；删除清理；转录丢失重开；打开联网不再 deny Web；各种拒绝；目录选择）；`webui/chat_sessions_test.go`（状态码和 `code`、HTML 转义、缺 CSRF 403、未登录 401、超长 400）。mock 支持 `--session-id`、`--resume`、`TIDEBOT_MOCK_TRANSCRIPTS=1`，提示词带引号时结果 JSON 不再坏。
+
+**Learned**
+
+- 用本机 Claude Code 2.1.301 + 本地假 Messages API 实测：`CLAUDE_CONFIG_DIR` 指向别处时，转录写在 `<dir>/projects/<目录名转义>/<id>.jsonl`，HOME 下什么都不写（连 `.claude.json` 也在 `<dir>` 里）。`--resume <id>` **在别的工作目录也能找到**并追加到原文件；`--session-id <uuid>` 能指定新会话的 id；`--resume` 时 `--disallowedTools` 照样生效（请求里只剩 `Read`）；找不到会话时 stdout 仍是一条 `is_error` 的 result，退出码 0，stderr 是「No conversation found with session ID」。`--append-system-prompt` 不进转录，要每轮重传。
+- `--bare` 下内置工具只有 `Bash`、`Edit`、`Read`，`--restricted` 再去掉 `Bash`；所以会话现在实际只有 `Read`（没有 Glob/Grep），够看文件但不方便搜，后面要评估要不要显式 `--tools Read,Glob,Grep`。
+
+**Ideas for later**
+
+- **P0 下一片：运行页「继续对话」**：运行详情底部输入框（运行结束后出现），发送即 `POST /api/chat-sessions` + `/turns`，同页按轮显示提问、回答（复用运行日志和实时流组件）、每轮花费；忙时禁用发送；中英文、三套主题、1024×655，截图。
+- 再下一片：会话页（列表、新建空白会话 `origin=chat`、标签栏、轮数和花费上限显示、删除确认用应用内弹窗），会话作为绑定对象。
+- 来源运行带技能时，后续轮次没有重新挂技能（只读场景够用，但技能自带的参考文件读不到）；需要时按来源运行的 `skill_version_id` 重新 stage。
+- 会话轮次现在和快速运行一样会发「运行完成」通知；有了会话页后改成只在页面不在前台时通知。
+- 假 Messages API 做成可选集成测试（本机有 claude 才跑），持续验证 `--resume` + deny 规则在新版 Claude Code 上的行为。

@@ -203,8 +203,8 @@ func Open(cfg config.Config) (*App, error) {
 		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
 		QuietAt:       a.QuietAt,
 		QuickRunSkill: a.startQuickRunSkill, StartRun: a.startRun, UndoRunChanges: a.undoRunChanges, CheckRunUndo: a.checkRunUndo,
-		Providers: providerAdmin{a},
-		Public:    map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
+		Providers: providerAdmin{a}, ChatSessions: a,
+		Public: map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
 	})
 	return a, nil
 }
@@ -335,7 +335,11 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	if opts.Bare {
 		opts.EnvBase = append(opts.EnvBase, a.isolationEnv()...)
 	}
-	if a.modernClaude() {
+	if opts.KeepSession && !hasEnv(opts.EnvBase, "CLAUDE_CONFIG_DIR="+a.claudeConfigDir()) {
+		// a saved transcript must land in tidebot's folder, never ~/.claude
+		return runner.Result{}, errors.New("session turn without tidebot's Claude Code config dir")
+	}
+	if a.modernClaude() && !opts.KeepSession {
 		opts.ContextArgs = append(opts.ContextArgs, "--no-session-persistence")
 	}
 	// The run's cap is held against the daily budgets from its start until it ends

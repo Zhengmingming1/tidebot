@@ -1157,6 +1157,7 @@
   "trig.manual": "Triggered manually",
   "trig.other": "Trigger: {t}",
   "trig.quick": "Quick run",
+  "trig.session": "Session turn",
   "up.drop": "Drop a file or folder here",
   "up.drop_sub_plugin": ".zip or .tar.gz with plugin.yaml",
   "up.drop_sub_skill": ".zip, .skill, .tar.gz/.tgz, or a folder; supports skill folders with SKILL.md and plugin packages using the standard skills/<name>/ layout",

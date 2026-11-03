@@ -1157,6 +1157,7 @@
   "trig.manual": "手动触发",
   "trig.other": "触发方式：{t}",
   "trig.quick": "快速运行",
+  "trig.session": "会话续聊",
   "up.drop": "把文件或文件夹拖到这里",
   "up.drop_sub_plugin": "包含 plugin.yaml 的 .zip 或 .tar.gz",
   "up.drop_sub_skill": ".zip、.skill、.tar.gz/.tgz 或文件夹；支持含 SKILL.md 的技能目录，以及标准 skills/<名称>/ 目录的插件包",
