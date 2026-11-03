@@ -3569,6 +3569,17 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 .wf-inspector input[type=radio], .wf-inspector input[type=checkbox] { width: auto; flex: none; }
 .wf-canvas-toolbar select, .wf-need-row select, .wf-inspector > .field input, .wf-inspector > .field select { min-height: 34px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 8px; padding: 6px 10px; font: inherit; }
 @media (max-width: 1250px) { .wf-designer { grid-template-columns: 160px minmax(0,1fr); } }
+/* 901-1250px (1024x655 window): step settings stay beside the canvas instead of ~700px below
+   it; the palette becomes a strip above both, and the inspector sticks under the top bar. */
+@media (min-width: 901px) and (max-width: 1250px) {
+  .wf-designer { grid-template-columns: minmax(0,1fr) 300px; }
+  .wf-designer .wf-palette { grid-column: 1/-1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; max-height: 112px; padding: 8px 14px; }
+  .wf-palette h2, .wf-palette h3, .wf-palette .hint { margin: 0; }
+  .wf-palette h3 { margin-left: 8px; }
+  #wf-palette-skills { display: contents; }
+  .wf-palette-item { width: auto; margin: 0; padding: 6px 10px; }
+  .wf-inspector { grid-column: auto; position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100vh - var(--topbar-h) - 24px); }
+}
 @media (max-width: 640px) {
   .wf-designer, #wf-meta .form-row { grid-template-columns: minmax(0,1fr); }
   .wf-canvas-scroll { height: 420px; }
