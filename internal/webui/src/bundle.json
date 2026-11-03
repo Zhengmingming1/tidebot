@@ -12,6 +12,7 @@
   "task-detail.js",
   "compositions-workflows.js",
   "skills.js",
+  "skill-repositories.js",
   "markdown-buttons.js",
   "editors-import.js",
   "providers.js",

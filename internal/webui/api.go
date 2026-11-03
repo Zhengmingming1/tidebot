@@ -12,6 +12,8 @@ import (
 var Version = buildinfo.Version
 
 func (s *Server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("/api/skill-repositories", s.withAuthCSRF(s.handleSkillRepositories))
+	mux.HandleFunc("/api/skill-repositories/", s.withAuthCSRF(s.handleSkillRepositorySub))
 	mux.HandleFunc("/api/dependencies/preflight", s.withAuthCSRF(s.handleDependencyPreflight))
 	mux.HandleFunc("/api/skill-sets/preview", s.withAuthCSRF(s.handleSkillSetPreview))
 	mux.HandleFunc("/api/skill-manifests/", s.withAuthCSRF(s.handleSkillManifest))

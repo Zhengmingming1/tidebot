@@ -1,7 +1,7 @@
   // ---------- reusable skill compositions ----------
   var skillEditorSeq = 0;
   function skillTabs(active) {
-    return '<nav class="ss-tabs" aria-label="' + esc(T("ss.tabs")) + '">' + [["skills", "nav.skills"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) { return '<a class="btn sm ' + (active === x[0] ? "primary" : "ghost") + '" href="#/' + x[0] + '"' + (active === x[0] ? ' aria-current="page"' : "") + '>' + esc(T(x[1])) + '</a>'; }).join("") + '</nav>';
+    return '<nav class="ss-tabs" aria-label="' + esc(T("ss.tabs")) + '">' + [["skills", "nav.skills"], ["skill-repositories", "sr.title"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) { return '<a class="btn sm ' + (active === x[0] ? "primary" : "ghost") + '" href="#/' + x[0] + '"' + (active === x[0] ? ' aria-current="page"' : "") + '>' + esc(T(x[1])) + '</a>'; }).join("") + '</nav>';
   }
   function skillBindingEditor(box, skills, initial, onChange, options) {
     options = options || {}; var source = cleanSetSource(options.source);

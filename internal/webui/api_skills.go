@@ -74,6 +74,10 @@ func (s *Server) handleSkillSub(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	switch parts[1] {
+	case "repository-source":
+		s.handleRepositorySource(w, r, id)
+	case "repository-apply":
+		s.handleRepositoryApply(w, r, id)
 	case "versions":
 		vers, err := s.deps.Ver.ListVersions(r.Context(), version.EntitySkill, id)
 		if err != nil {

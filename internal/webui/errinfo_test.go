@@ -33,6 +33,12 @@ func TestErrInfoCatalogTranslated(t *testing.T) {
 		}
 		codes[p.code] = names
 	}
+	for _, code := range repositoryErrorCodes {
+		if codes[code] != nil {
+			t.Errorf("duplicate typed error %s", code)
+		}
+		codes[code] = map[string]bool{}
+	}
 	ph := regexp.MustCompile(`\{(\w+)\}`)
 	for _, lang := range []string{"zh-CN", "en"} {
 		raw, err := os.ReadFile("static/i18n/" + lang + ".json")

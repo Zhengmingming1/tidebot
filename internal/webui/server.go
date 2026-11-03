@@ -97,13 +97,14 @@ type Deps struct {
 
 // Server is a togglable HTTP listener.
 type Server struct {
-	deps       Deps
-	mu         sync.Mutex
-	srv        *http.Server
-	ln         net.Listener
-	enabled    bool
-	lastActive time.Time
-	sseIdle    time.Duration
+	repositories repositoryHTTPState
+	deps         Deps
+	mu           sync.Mutex
+	srv          *http.Server
+	ln           net.Listener
+	enabled      bool
+	lastActive   time.Time
+	sseIdle      time.Duration
 	// Live log stream timing with Deps.LogWait: fallback poll (status / idle checks)
 	// and the minimum gap between reads in a burst of output.
 	logPoll time.Duration

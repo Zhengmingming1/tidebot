@@ -3591,3 +3591,14 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 #ev-result { margin-top:16px; }
 #sm-form .row-actions select { flex:1; min-width:0; }
 @media (max-width:620px) { .ss-eval-pair { grid-template-columns:1fr; } }
+
+/* Skill repository catalog and previews share the existing card/modal controls. */
+.sr-path, .sr-source dd { overflow-wrap: anywhere; word-break: break-word; }
+.sr-table { overflow-x: auto; }
+.sr-table .table { min-width: 540px; }
+.sr-table td:nth-child(2) { min-width: 180px; max-width: 540px; }
+.sr-preview { border-top: 1px solid var(--border); padding-top: var(--s2); }
+.sr-preview details { margin: var(--s2) 0; }
+.sr-preview summary { cursor: pointer; font-weight: 600; }
+.sr-markdown { max-height: 360px; overflow: auto; margin: var(--s2) 0; }
+.sr-preview .diff-file { max-height: 380px; overflow: auto; }

@@ -52,14 +52,19 @@
     var body = opts.body;
     if (body !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
     // opts.timeout (ms): abort and reject with a readable error instead of waiting forever.
-    var ac = opts.timeout && window.AbortController ? new AbortController() : null, tm = null;
-    if (ac) tm = setTimeout(function () { ac.abort(); }, opts.timeout);
+    var ac = (opts.timeout || opts.signal) && window.AbortController ? new AbortController() : null, tm = null, timedOut = false;
+    var abortExternal = function () { if (ac) ac.abort(); };
+    if (opts.signal && ac) {
+      if (opts.signal.aborted) ac.abort(); else opts.signal.addEventListener("abort", abortExternal, { once: true });
+    }
+    function cleanupRequest() { if (tm) clearTimeout(tm); if (opts.signal) opts.signal.removeEventListener("abort", abortExternal); }
+    if (ac && opts.timeout) tm = setTimeout(function () { timedOut = true; ac.abort(); }, opts.timeout);
     return netFetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).catch(function (err) {
-      if (tm) clearTimeout(tm);
-      if (ac && ac.signal.aborted) { var et = new Error(T("err.req_timeout")); et.timeout = true; throw et; }
+      cleanupRequest();
+      if (timedOut) { var et = new Error(T("err.req_timeout")); et.timeout = true; throw et; }
       throw err;
     }).then(function (res) {
-      if (tm) clearTimeout(tm);
+      cleanupRequest();
       var ct = res.headers.get("content-type") || "";
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {

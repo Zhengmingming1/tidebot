@@ -32,7 +32,7 @@
   }
   function renderSkillDetail(id, params) {
     var base = "/api/skills/" + enc(id);
-    return Promise.all([api("/api/skills"), api(base + "/versions"), rpcRead("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), rpc("skills.proposals", { skill_id: id }).catch(function () { return []; }), rpc("skills.compare", { skill_id: id }).catch(function () { return null; })]).then(function (r) {
+    return Promise.all([api("/api/skills"), api(base + "/versions"), rpcRead("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), rpc("skills.proposals", { skill_id: id }).catch(function () { return []; }), rpc("skills.compare", { skill_id: id }).catch(function () { return null; }), api(base + "/repository-source").catch(function () { return null; })]).then(function (r) {
       var sk = (r[0] || []).filter(function (x) { return x.id === id; })[0];
       if (!sk) throw new Error(T("sk.not_found"));
       var vers = r[1], oset = r[2] || { mode: "off" }, props = r[3] || [], cmp = r[4];
@@ -72,10 +72,11 @@
         '<nav class="tabs sk-tabs" role="tablist" aria-label="' + esc(sk.name) + '">' + [["diff", T("sk.tab_diff")], ["files", T("sk.tab_files")]].map(function (x) { var on = x[0] === tab; return '<button type="button" role="tab" data-sktab="' + x[0] + '" class="' + (on ? "active" : "") + '" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' + esc(x[1]) + "</button>"; }).join("") + "</nav>" +
         '<div id="pane-diff" class="sk-pane' + (tab === "diff" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></div>" +
         '<div id="pane-files" class="sk-pane' + (tab === "files" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar fb-bar"><label>' + esc(T("fb.version")) + ' <select id="fb-v">' + vopt(fv) + '</select></label><small class="muted" id="fb-sum"></small></div><div class="fb"><div class="fb-tree" id="fb-tree" role="tree" aria-label="' + esc(T("fb.tree")) + '">' + skeleton("list") + '</div><div class="fb-view" id="fb-view"></div></div></div></section>' +
-        '<div class="stack"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + "</span><h3>" + esc(T("ver.tree")) + "</h3></div>" + tree + '<p class="hint mt">' + ic("info", "sm") + esc(T("ver.rb_pointer")) + "</p></section>" +
+        '<div class="stack">' + repositorySourceHtml(r[5]) + '<section class="card"><div class="card-head"><span class="ico">' + ic("branch") + "</span><h3>" + esc(T("ver.tree")) + "</h3></div>" + tree + '<p class="hint mt">' + ic("info", "sm") + esc(T("ver.rb_pointer")) + "</p></section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("opt.title")) + '</h3></div><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
         '<h4 class="mt">' + esc(T("opt.proposals")) + "</h4>" + propHtml + "</section></div></div>",
         "skills", [[T("nav.skills"), "#/skills"], [sk.name]]);
+      wireRepositorySource(r[5], page());
       $("#sk-manifest").onclick=function(){skillManifestModal(id);};
       var diffLoaded = false, filesLoaded = false, fgen = 0, tcache = {}, fcache = {}, fkeys = [];
       // The address keeps the tab, the browsed version and file, so a reload or a shared link opens the same view.

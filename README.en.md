@@ -88,6 +88,8 @@ Skill sets and visual workflows. Combine one primary skill with supporting skill
 
 Skill package maintenance (unreleased). Declare required or optional skill dependencies in `tidebot.json`, preview additions before adopting them, and run a local preflight without model calls. Optional AI analysis and primary-versus-composition text evaluations incur model usage. Package versions retain documentation and examples; explicit upgrade previews protect locally edited task and node bindings. Loaded skill material is not proof of model execution. See the [dependency, upgrade and evaluation guide (Chinese)](docs/skill-manifests.md).
 
+Skill repositories (unreleased). Add HTTPS/SSH Git repositories from GitHub, GitLab, Gitee or a company host in the Skills area, browse and batch-install complete skill folders, then download and explicitly adopt updates while retaining provenance and history. See the [repository installation and update guide (Chinese)](docs/skill-repositories.md).
+
 Skills with versions and rollback. Import a Claude Code skill directory; every re-import is a new version. A task can pin a specific skill version, and you can roll back when a new one misbehaves.
 
 Optional skill optimization (off by default). Three modes: off, suggest only, canary. Canary sends part of the runs to a candidate version and shows success rate, cost and duration side by side. It never promotes anything on its own; you confirm that.

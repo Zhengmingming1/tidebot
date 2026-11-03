@@ -77,9 +77,11 @@
   var routeSeq = 0;
   function route(soft) {
     soft = soft === true;
+    if (soft && repositoryScan) return Promise.resolve();
     if (soft && workflowDraftGuard && workflowDraftGuard.dirty()) return Promise.resolve();
     if (!soft) workflowDraftGuard = null;
     stopStream(); stopPoll();
+    if (!soft) stopRepositoryScan();
     clearTimeout(scheduleRefresh._t);
     if (!soft) { draftFlush(); $("#modal-root").innerHTML = ""; closeDrawer(); }
     var y = window.scrollY, pg = page(), sy = pg ? pg.scrollTop : 0;
@@ -104,6 +106,7 @@
       case undefined: p = renderHome(); break;
       case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(params); break;
       case "skill-sets": p = renderSkillSets(); break;
+      case "skill-repositories": p = renderSkillRepositories(parts[1]); break;
       case "skills": p = parts[1] ? renderSkillDetail(parts[1], params) : renderSkills(); break;
       case "workflows": p = parts[1] ? renderWorkflowEditor(parts[1]) : renderWorkflows(); break;
       case "workflow-runs": p = renderWorkflowRun(parts[1]); break;
