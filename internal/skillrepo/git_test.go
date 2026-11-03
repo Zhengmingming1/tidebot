@@ -1,6 +1,7 @@
 package skillrepo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -75,7 +76,7 @@ func fixture(t *testing.T) (string, *Client) {
 	fixtureGit(t, repo, "init", "-b", "main")
 	c := New(t.TempDir())
 	// Only the test seam substitutes the HTTPS remote. Public entry points still validate it.
-	c.runOverride = func(ctx context.Context, dir, remote string, limit int, args ...string) ([]byte, error) {
+	c.runOverride = func(ctx context.Context, dir, remote string, limit int, stdin []byte, args ...string) ([]byte, error) {
 		args = append([]string{}, args...)
 		for i, arg := range args {
 			if arg == "https://fixture.invalid/skills.git" {
@@ -85,6 +86,9 @@ func fixture(t *testing.T) (string, *Client) {
 		cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "protocol.file.allow=always"}, args...)...)
 		cmd.Dir = dir
 		cmd.Env = append(gitEnv(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+		if stdin != nil {
+			cmd.Stdin = bytes.NewReader(stdin)
+		}
 		b, err := cmd.Output()
 		if err != nil {
 			return nil, err
@@ -240,7 +244,7 @@ func TestOutputAndCacheLimits(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
-	_, err := runGit(context.Background(), dir, "", 1, "version")
+	_, err := runGit(context.Background(), dir, "", 1, nil, "version")
 	var issue *Error
 	if !errors.As(err, &issue) || issue.Code != "scan_limit" {
 		t.Fatalf("unbounded Git output: %v", err)

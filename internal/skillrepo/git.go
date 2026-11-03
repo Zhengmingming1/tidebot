@@ -59,7 +59,7 @@ type Snapshot struct {
 type Client struct {
 	CacheDir string
 	// runOverride lets package tests use real local Git fixtures without permitting local URLs in production.
-	runOverride func(context.Context, string, string, int, ...string) ([]byte, error)
+	runOverride func(ctx context.Context, dir, remote string, limit int, stdin []byte, args ...string) ([]byte, error)
 }
 
 func New(cacheDir string) *Client { return &Client{CacheDir: cacheDir} }
@@ -233,7 +233,7 @@ func (c *Client) Scan(ctx context.Context, id, raw, ref, root string) (Snapshot,
 		return Snapshot{}, err
 	}
 	if _, err = os.Stat(filepath.Join(dir, "HEAD")); os.IsNotExist(err) {
-		if _, err = c.run(ctx, dir, u, 4096, "init", "--bare", "--template=", dir); err != nil {
+		if _, err = c.run(ctx, dir, u, 4096, nil, "init", "--bare", "--template=", dir); err != nil {
 			return Snapshot{}, err
 		}
 	} else if err != nil {
@@ -242,10 +242,10 @@ func (c *Client) Scan(ctx context.Context, id, raw, ref, root string) (Snapshot,
 	if ref == "" {
 		ref = "HEAD"
 	}
-	if _, err = c.run(ctx, dir, u, 4096, "fetch", "--depth=1", "--no-tags", "--no-recurse-submodules", "--", u, ref); err != nil {
+	if _, err = c.run(ctx, dir, u, 4096, nil, "fetch", "--depth=1", "--no-tags", "--no-recurse-submodules", "--", u, ref); err != nil {
 		return Snapshot{}, err
 	}
-	b, err := c.run(ctx, dir, u, 256, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+	b, err := c.run(ctx, dir, u, 256, nil, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -270,6 +270,10 @@ func (c *Client) Scan(ctx context.Context, id, raw, ref, root string) (Snapshot,
 		}
 	}
 	candidates := []Candidate{}
+	// SKILL.md files are read together after the tree walk: one Git process per
+	// batch instead of one per candidate.
+	var manifests []entry
+	var owners []int
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
 			return Snapshot{}, err
@@ -280,36 +284,42 @@ func (c *Client) Scan(ctx context.Context, id, raw, ref, root string) (Snapshot,
 		if len(candidates) >= MaxCandidates {
 			return Snapshot{}, fail("scan_limit", "too many skill candidates")
 		}
-		d := path.Dir(e.Path)
-		candidate := summarize(entries, d)
+		candidate := summarize(entries, path.Dir(e.Path))
 		if candidate.Error == "" {
-			b, readErr := c.blob(ctx, dir, e)
-			if readErr != nil {
-				var issue *Error
-				if errors.As(readErr, &issue) && issue.Code == "lfs_unsupported" {
-					candidate.Error = issue.Code
-				} else {
-					return Snapshot{}, readErr
-				}
-			}
-			meta, parseErr := skillpkg.ParseFrontmatter(b)
-			if parseErr != nil {
-				candidate.Error = "invalid_frontmatter"
-			} else {
-				candidate.Name = meta.Name
-				candidate.Description = meta.Description
-				if strings.Contains(string(b), "../") {
-					candidate.Warning = "external_resources"
-				}
-			}
-		}
-		if candidate.Name == "" {
-			candidate.Name = path.Base(d)
-			if d == "." {
-				candidate.Name = "skill"
-			}
+			manifests = append(manifests, e)
+			owners = append(owners, len(candidates))
 		}
 		candidates = append(candidates, candidate)
+	}
+	err = c.readBlobs(ctx, dir, manifests, func(i int, b []byte) error {
+		candidate := &candidates[owners[i]]
+		if isLFS(b) {
+			candidate.Error = "lfs_unsupported"
+			return nil
+		}
+		meta, parseErr := skillpkg.ParseFrontmatter(b)
+		if parseErr != nil {
+			candidate.Error = "invalid_frontmatter"
+			return nil
+		}
+		candidate.Name = meta.Name
+		candidate.Description = meta.Description
+		if bytes.Contains(b, []byte("../")) {
+			candidate.Warning = "external_resources"
+		}
+		return nil
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for i := range candidates {
+		if candidates[i].Name == "" {
+			d := candidates[i].Path
+			candidates[i].Name = path.Base(d)
+			if d == "." {
+				candidates[i].Name = "skill"
+			}
+		}
 	}
 	for i := range candidates {
 		for j := range candidates {
@@ -319,7 +329,7 @@ func (c *Client) Scan(ctx context.Context, id, raw, ref, root string) (Snapshot,
 			}
 		}
 	}
-	if _, err = c.run(ctx, dir, "", 256, "update-ref", "refs/tidebot/snapshots/"+commit, commit); err != nil {
+	if _, err = c.run(ctx, dir, "", 256, nil, "update-ref", "refs/tidebot/snapshots/"+commit, commit); err != nil {
 		return Snapshot{}, err
 	}
 	SortCandidates(candidates)
@@ -332,7 +342,7 @@ type entry struct {
 }
 
 func (c *Client) entries(ctx context.Context, dir, commit string) ([]entry, error) {
-	b, err := c.run(ctx, dir, "", MaxTreeBytes, "ls-tree", "-r", "-t", "-l", "-z", "--full-tree", commit)
+	b, err := c.run(ctx, dir, "", MaxTreeBytes, nil, "ls-tree", "-r", "-t", "-l", "-z", "--full-tree", commit)
 	if err != nil {
 		return nil, err
 	}
@@ -405,24 +415,69 @@ func summarize(entries []entry, root string) Candidate {
 	c.TreeHash = hex.EncodeToString(h.Sum(nil))
 	return c
 }
-func (c *Client) blob(ctx context.Context, dir string, e entry) ([]byte, error) {
-	if e.Kind != "blob" || (e.Mode != "100644" && e.Mode != "100755") {
-		return nil, fail("unsupported_file", "symlinks and submodules are not supported")
+func isLFS(b []byte) bool {
+	return bytes.HasPrefix(b, []byte("version https://git-lfs.github.com/spec/v1\n"))
+}
+
+// blobBatchBytes bounds how much file content one `git cat-file --batch` call
+// buffers, so a repository with many large SKILL.md files cannot pin memory.
+const blobBatchBytes = 8 << 20
+
+// readBlobs streams the entries through `git cat-file --batch`, one process per
+// blobBatchBytes of content rather than one per file, and hands each file to
+// each in order. Process start-up dominated scans and installs before.
+func (c *Client) readBlobs(ctx context.Context, dir string, list []entry, each func(int, []byte) error) error {
+	for start := 0; start < len(list); {
+		end, total := start, int64(0)
+		var in bytes.Buffer
+		for ; end < len(list); end++ {
+			e := list[end]
+			if e.Kind != "blob" || (e.Mode != "100644" && e.Mode != "100755") {
+				return fail("unsupported_file", "symlinks and submodules are not supported")
+			}
+			if e.Size > skillpkg.MaxFileBytes {
+				return fail("skill_size_limit", "skill file exceeds size limit")
+			}
+			if end > start && total+e.Size > blobBatchBytes {
+				break
+			}
+			total += e.Size
+			in.WriteString(e.OID)
+			in.WriteByte('\n')
+		}
+		// Each object is "<oid> blob <size>\n<content>\n".
+		out, err := c.run(ctx, dir, "", int(total)+(end-start)*96, in.Bytes(), "cat-file", "--batch")
+		if err != nil {
+			return err
+		}
+		for i := start; i < end; i++ {
+			e := list[i]
+			nl := bytes.IndexByte(out, '\n')
+			if nl < 0 {
+				return fail("invalid_snapshot", "invalid Git object")
+			}
+			fields := strings.Fields(string(out[:nl]))
+			if len(fields) != 3 || fields[0] != e.OID || fields[1] != "blob" {
+				return fail("invalid_snapshot", "invalid Git object")
+			}
+			if size, perr := strconv.ParseInt(fields[2], 10, 64); perr != nil || size != e.Size {
+				return fail("invalid_snapshot", "Git file size mismatch")
+			}
+			out = out[nl+1:]
+			if int64(len(out)) < e.Size+1 || out[e.Size] != '\n' {
+				return fail("invalid_snapshot", "Git file size mismatch")
+			}
+			if err := each(i, out[:e.Size:e.Size]); err != nil {
+				return err
+			}
+			out = out[e.Size+1:]
+		}
+		if len(out) != 0 {
+			return fail("invalid_snapshot", "invalid Git object")
+		}
+		start = end
 	}
-	if e.Size > skillpkg.MaxFileBytes {
-		return nil, fail("skill_size_limit", "skill file exceeds size limit")
-	}
-	b, err := c.run(ctx, dir, "", int(e.Size)+1, "cat-file", "blob", e.OID)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(b)) != e.Size {
-		return nil, fail("invalid_snapshot", "Git file size mismatch")
-	}
-	if bytes.HasPrefix(b, []byte("version https://git-lfs.github.com/spec/v1\n")) {
-		return nil, fail("lfs_unsupported", "Git LFS content must be included as ordinary files")
-	}
-	return b, nil
+	return nil
 }
 
 // ReadSkill accepts only a previously scanned immutable commit, never a moving branch.
@@ -445,7 +500,7 @@ func (c *Client) ReadSkill(ctx context.Context, id, commit, root string) (map[st
 		return nil, err
 	}
 	defer unlock()
-	if _, err = c.run(ctx, dir, "", 256, "rev-parse", "--verify", "refs/tidebot/snapshots/"+commit); err != nil {
+	if _, err = c.run(ctx, dir, "", 256, nil, "rev-parse", "--verify", "refs/tidebot/snapshots/"+commit); err != nil {
 		return nil, fail("snapshot_missing", "snapshot unavailable; refresh the repository")
 	}
 	entries, err := c.entries(ctx, dir, commit)
@@ -456,16 +511,22 @@ func (c *Client) ReadSkill(ctx context.Context, id, commit, root string) (map[st
 	if summary.Error != "" {
 		return nil, fail(summary.Error, "skill contains unsupported paths, files, or exceeds size limits")
 	}
-	files := map[string][]byte{}
+	var list []entry
 	for _, e := range entries {
-		if !within(e.Path, root) || e.Kind == "tree" {
-			continue
+		if within(e.Path, root) && e.Kind != "tree" {
+			list = append(list, e)
 		}
-		b, err := c.blob(ctx, dir, e)
-		if err != nil {
-			return nil, err
+	}
+	files := make(map[string][]byte, len(list))
+	err = c.readBlobs(ctx, dir, list, func(i int, b []byte) error {
+		if isLFS(b) {
+			return fail("lfs_unsupported", "Git LFS content must be included as ordinary files")
 		}
-		files[relative(e.Path, root)] = b
+		files[relative(list[i].Path, root)] = b
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if _, ok := files["SKILL.md"]; !ok {
 		return nil, fail("skill_missing", "directory does not contain SKILL.md")
@@ -527,13 +588,19 @@ func cacheSize(dir string) (int64, error) {
 	})
 	return size, err
 }
-func (c *Client) run(ctx context.Context, dir, remote string, limit int, args ...string) ([]byte, error) {
+func (c *Client) run(ctx context.Context, dir, remote string, limit int, stdin []byte, args ...string) ([]byte, error) {
 	if c.runOverride != nil {
-		return c.runOverride(ctx, dir, remote, limit, args...)
+		return c.runOverride(ctx, dir, remote, limit, stdin, args...)
 	}
-	return runGit(ctx, dir, remote, limit, args...)
+	return runGit(ctx, dir, remote, limit, stdin, args...)
 }
-func runGit(ctx context.Context, dir, remote string, limit int, args ...string) ([]byte, error) {
+
+// writesCache reports Git commands that can grow the cache. Reads (ls-tree,
+// cat-file, rev-parse) skip the cache walk, which used to run after every file.
+func writesCache(args []string) bool {
+	return len(args) > 0 && (args[0] == "init" || args[0] == "fetch" || args[0] == "update-ref")
+}
+func runGit(ctx context.Context, dir, remote string, limit int, stdin []byte, args ...string) ([]byte, error) {
 	bin, err := exec.LookPath("git")
 	if err != nil {
 		return nil, fail("git_missing", "Git is not installed on the Tidebot host")
@@ -557,6 +624,10 @@ func runGit(ctx context.Context, dir, remote string, limit int, args ...string) 
 	stderr := &boundedOutput{limit: 64 << 10, cancel: cancel}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	writes := writesCache(args)
 	if err = cmd.Start(); err != nil {
 		return nil, fail("git_failed", "could not start Git")
 	}
@@ -578,11 +649,16 @@ func runGit(ctx context.Context, dir, remote string, limit int, args ...string) 
 			if err != nil {
 				return nil, classify(stderr.String())
 			}
-			if _, err = cacheSize(dir); err != nil {
-				return nil, err
+			if writes {
+				if _, err = cacheSize(dir); err != nil {
+					return nil, err
+				}
 			}
 			return stdout.Bytes(), nil
 		case <-ticker.C:
+			if !writes {
+				continue
+			}
 			if _, sizeErr := cacheSize(dir); sizeErr != nil {
 				cancel()
 				<-done

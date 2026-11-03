@@ -5172,3 +5172,26 @@ a bulk edit makes undo exact without a history table.
 - 技能组合评测（`x.error`）和依赖检查（`r.error`）的报错还是原文，可以按同样的方式补上码。
 - 子运行失败时里层的 `detail` 是 Claude 或提供商的原文，比如限流、额度用完。可以复用 `policy.Classify` 的分类，给出「限流，稍后重试」这类本地化提示。
 - 运行（runs）页的 `error_message` 也可以接入 `error_info`。
+
+### 本轮优化：Git 技能仓库扫描和安装改成批量读文件（11-03 新功能 `0d64eaf`）
+
+- 问题：`skillrepo` 每读一个文件就起一个 `git cat-file blob` 进程。扫描时每个 SKILL.md 一个，安装时技能里每个文件一个。每次 Git 调用结束后（以及运行中每秒）还要遍历整个仓库缓存目录算大小，只读命令也算。300 个文件的技能安装就要起 300 个 git 进程、遍历 300 次缓存目录。Windows 和 macOS 上起进程比 Linux 慢得多，差距会更大。
+- 改法：新增 `readBlobs()`，用一个 `git cat-file --batch` 进程从 stdin 读 OID 列表，严格核对返回的 OID、类型和大小（缺失、大小不符、多出或截断的输出都按 `invalid_snapshot` 拒绝）。每批最多 8 MiB 内容，超过就分批，恶意仓库放很多大 SKILL.md 也不会一次占满内存。扫描先遍历目录树收集候选，再一次读出所有 SKILL.md。缓存大小检查只在 `init`、`fetch`、`update-ref` 这类会写缓存的命令上做，256 MiB 上限照旧。安全限制（协议白名单、环境变量清理、输出上限、文件模式和大小检查）都没动。
+- 测试：`skillrepo/git_perf_test.go`。①40 个技能 × 30 个文件，扫描只起 1 个 cat-file，Git 进程总数不超过 6；安装一个 30 个文件的技能只起 3 个进程，内容逐字节一致；②4 个 3 MiB 文件分 2–3 批读出，内容一致；③6 种伪造的 cat-file 应答（missing、大小不符、OID 不符、类型不对、截断、多余输出）全部拒绝；④缓存超限时只读命令照常执行，写命令仍报 `cache_limit`。`go test -race -count=3` 通过。`TIDEBOT_PERF=1` 可以单独跑计时。
+
+| 场景（本机 Linux，8 核，git 2.47；扫描时间已减去 fetch） | 优化前（`c878a5f`） | 优化后 |
+| --- | ---: | ---: |
+| 扫描 50 个技能 × 10 个文件 | 约 70 ms，cat-file 进程 50 个 | 约 10 ms，1 个 |
+| 扫描 200 个技能 × 10 个文件 | 约 230 ms，200 个 | 约 24 ms，1 个 |
+| 安装一个 300 个文件的技能 | 321–334 ms，300 个 | 12 ms，1 个 |
+| 安装一个 10 个文件的技能 | 14–16 ms，10 个 | 4–7 ms，1 个 |
+
+实际仓库：`TIDEBOT_TEST_SKILL_REPO_URL=https://github.com/anthropics/skills` 的联网测试照常通过（20 个候选）。
+
+**参考**：go-gitea/gitea `modules/git/batch_reader.go` 用长驻的 `git cat-file --batch` 读对象，不再每个对象起一个进程。tidebot 的一次扫描或安装就是一批固定的 OID，所以没必要长驻，每次操作起一个就够了，用完就退出，不会留下常驻进程。
+
+**心得**：外部进程的启动成本在 Linux 上只有约 1 ms，测试里看不出来，到了 Windows（杀毒软件还会扫描）就是每个几十毫秒。凡是按文件或按条目循环调外部命令的地方，都要先看能不能批量做。
+
+**后续想法**：
+- 扫描时 `summarize()` 对每个候选都遍历一遍整棵树，复杂度是候选数 × 条目数。`ls-tree -r -t` 的输出里同一目录下的条目是连续的，可以按区间切片，降到线性。
+- 扫描的大头现在是 `fetch`。可以考虑 `--filter=blob:none` 部分克隆，只按需拉要读的 blob，大仓库会省很多流量，但要先确认服务端支持，以及失败时怎么回退。
