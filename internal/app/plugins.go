@@ -102,27 +102,6 @@ func (a *App) pauseDependents(ctx context.Context, pluginID string) {
 	}
 }
 
-// mcpArgs writes the plugin connector config for a run (sandbox drops side-effect connectors).
-func (a *App) mcpArgs(ctx context.Context, bucket string) []string {
-	if a.Plugins == nil {
-		return nil
-	}
-	sandbox := bucket == cost.BucketDryRun
-	b, n, err := a.Plugins.MCPConfig(ctx, sandbox)
-	if err != nil || n == 0 {
-		return nil
-	}
-	name := "mcp-plugins.json"
-	if sandbox {
-		name = "mcp-plugins-sandbox.json"
-	}
-	p := filepath.Join(a.Cfg.DataDir, name)
-	if err := os.WriteFile(p, b, 0o600); err != nil {
-		return nil
-	}
-	return []string{"--mcp-config", p}
-}
-
 // fireTask starts a task for an external event with the payload wrapped as untrusted data.
 func (a *App) fireTask(bindingID, taskID, kind, source, payload string) (err error) {
 	defer func() {

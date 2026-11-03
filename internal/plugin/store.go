@@ -404,8 +404,10 @@ func (s *Store) KVSet(ctx context.Context, pluginID, key, value string) error {
 }
 
 // MCPConfig builds the --mcp-config document for enabled plugins' connectors.
-// sandbox replaces side-effect connectors with nothing (dry runs).
-func (s *Store) MCPConfig(ctx context.Context, sandbox bool) ([]byte, int, error) {
+// sandbox replaces side-effect connectors with nothing (dry runs). include, if
+// set, keeps only the connectors it accepts (server is "<plugin>__<connector>"):
+// a run only gets the connectors it is bound to.
+func (s *Store) MCPConfig(ctx context.Context, sandbox bool, include ...func(server, connector string) bool) ([]byte, int, error) {
 	list, err := s.List(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -417,6 +419,9 @@ func (s *Store) MCPConfig(ctx context.Context, sandbox bool) ([]byte, int, error
 		}
 		for _, c := range p.Current.Manifest.Contributes.Connectors {
 			if sandbox && c.SideEffects {
+				continue
+			}
+			if len(include) > 0 && include[0] != nil && !include[0](p.ID+"__"+c.ID, c.ID) {
 				continue
 			}
 			cmd, args := filepath.Join(p.Current.Dir, c.MCP.Command), c.MCP.Args

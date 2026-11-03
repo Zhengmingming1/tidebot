@@ -5221,3 +5221,30 @@ a bulk edit makes undo exact without a history table.
 - 画布在 1024 下只能同时看到约 2.5 个节点。可以在选中节点时自动把它滚到可视区中间，或者默认缩放跟着画布宽度变。
 - 工作流执行页运行中每 2 秒轮询，只要有变化就整页重新 `mount`，展开的输出和滚动位置可能被重置。可以改成只局部更新步骤卡片，或者接入现有的 SSE。
 
+
+## 会话 + 能力包
+
+方案：会话里让 tidebot 找、装、绑定能力包（技能、CLI、MCP、密钥），所有写操作只能通过服务端生成、用户点击的确认卡执行。分期：第一刀安全底座 → P0 会话（含运行续聊）→ P1 能力包核心和技能、确认卡、按绑定注入、扩展页 → P2 托管依赖和本地 MCP → P3 远程 MCP OAuth、Claude Code 插件包（hooks 不启用）、生命周期、手动「优化这个技能」。没做完的界面不进导航。
+
+### 2026-11-03 第一刀：安全底座（对现有所有运行生效）
+
+**Done**
+
+- **所有运行都不能改 agent 配置。** 每次运行的 `--disallowedTools` 都追加一组规则（`guard.AgentConfigDeny`）：`Edit(//**/.claude/**)`、`.codex`、`.cursor`、`.gemini`、`.agents`、`.config/opencode`，以及 `.mcp.json`、`.claude.json`、`CLAUDE.md`、`CLAUDE.local.md`、`AGENTS.md`、`GEMINI.md`；外加 `claude mcp add*`、`claude mcp remove`、`claude plugin`、`npx skills`、`dws skill` 这些往 agent 目录装东西的命令（Bash 和 PowerShell 各一条）。`//**/` 从文件系统根开始匹配，所以工作目录、`--add-dir` 目录和家目录都覆盖到，Windows 上跨盘符也生效。只读模式原有的 deny 列表合并进同一个 `--disallowedTools`，不重复传参，也不改调用方共用的切片。可修改模式（直接改原目录）同样带这组规则。
+- **护栏同步加了 `agent-config` 规则**（`guard.Check`）：Write/Edit 的路径落在上述目录或文件上、Bash 里出现这些安装命令或往这些路径重定向/tee/cp/mv/mkdir/sed -i，都拒绝。现在的运行都是 `--bare`，钩子不执行，这条主要给以后的非 bare 模式和单测兜底，真正起作用的是上面的 deny 规则。
+- **所有运行都加 `--strict-mcp-config`**（调用方已经传了的不重复加），Claude Code 只用 tidebot 给的 MCP 配置。
+- **插件 MCP 连接器只给绑定了它的运行。** 以前所有已启用插件的连接器写进全局 `<data>/mcp-plugins.json` 传给每次运行。现在按运行计算：运行的允许工具、提示词、系统提示文件、附带技能的 `SKILL.md` 里点名了 `mcp__<插件>__<连接器>[__工具]`（支持 `mcp__x__*` 通配），或技能 `tidebot.json` 里声明了 `mcp` 依赖，才算绑定。配置写到 `<data>/run-mcp/mcp-*.json`（0600），运行结束就删；启动时清掉残留和旧的全局文件（里面有连接器密钥）。dry run 照旧去掉有副作用的连接器。
+  - 没有做「旧连接器迁移成默认绑定」：运行都是 `dontAsk`，没被允许的 MCP 工具本来就调用不了，只多启动进程、多占上下文、多暴露密钥。官方打包任务（如每日摘要）都在 `allowed_tools` 里点名了连接器工具，不受影响。
+- 测试：`guard/agentconfig_test.go`（路径和命令的拦截/放行样例、deny 规则里不能有 `Write(path)` 和逗号）；`app/runmcp_test.go`（未绑定的运行拿不到连接器和密钥、按允许工具/通配/技能文本绑定、前缀相似的插件不误绑、调用方的 MCP 配置不被替换、deny 合并成一个参数、运行结束配置文件删除、旧全局文件清理）；`startrun_test` 改成检查可修改模式仍带 agent 配置规则。
+
+**Learned**
+
+- 用本机 Claude Code 2.1.301 + 本地假 Messages API（SSE，返回指定的 tool_use）实测：`--bare --permission-mode dontAsk` 下，`Edit` 写 `CLAUDE.md`、`sub/.claude/settings.json` 都被拒（「File is in a directory that is denied by your permission settings」，进 `permission_denials`），普通文件照常写；Bash `echo x > AGENTS.md` 和 `claude mcp add …` 被拒，`echo x > notes2.txt` 正常。`--bare` 下没有 Write 工具，Edit 用空 `old_string` 新建文件，同样受 Edit 规则约束。
+- `--disallowedTools` 是可变参数，后面紧跟的位置参数会被当成工具名吞掉；tidebot 的提示词都跟在 `-p` 后面，不受影响，但新代码不要把提示词放在最后。
+- 官方文档：`Write(path)`、`NotebookEdit(path)` 规则永远不会匹配，只能写 `Edit(path)`；Edit deny 也覆盖 Bash 里识别出的文件命令和重定向，但管不了脚本自己打开文件（要靠 sandbox，P4）。
+
+**Ideas for later**
+
+- P0 下一片：`sessions` 表 + `claude -p --resume`（会话轮次去掉 `--no-session-persistence`，转录只写 `<data>/claude-config`），先做后端和「验证 `~/.claude` 没有新文件」的测试，界面不进导航。
+- 把「本次运行用了哪些连接器」记进运行元数据，运行详情里显示（P1 绑定可视化的前置）。
+- 假 Messages API 可以做成 `testdata` 里的可选集成测试（本机有 claude 时才跑），持续验证 deny 规则在新版 Claude Code 上仍生效。

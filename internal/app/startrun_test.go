@@ -60,7 +60,8 @@ func TestStartRunReadOnlyLeavesFoldersAlone(t *testing.T) {
 	}
 }
 
-// Edit mode drops the deny list; the folder is taken until the run ends.
+// Edit mode drops the read-only deny list (agent config stays off limits); the
+// folder is taken until the run ends.
 func TestStartRunEditMode(t *testing.T) {
 	a := newTestApp(t)
 	fakeHome(t)
@@ -73,7 +74,9 @@ func TestStartRunEditMode(t *testing.T) {
 	}
 	waitRunDone(t, a, runID)
 	b, _ := os.ReadFile(argsFile)
-	if strings.Contains(string(b), "--disallowedTools") || strings.Contains(string(b), "--plugin-dir") {
+	args := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	deny := argAfter(args, "--disallowedTools")
+	if strings.HasPrefix(deny, "Edit,") || !strings.HasPrefix(deny, "Edit(//**/.claude/**)") || strings.Contains(string(b), "--plugin-dir") {
 		t.Fatalf("%s", b)
 	}
 	real, _ := filepath.EvalSymlinks(ws)

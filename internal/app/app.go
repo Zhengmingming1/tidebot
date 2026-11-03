@@ -320,12 +320,10 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		}
 	}
 	opts.ExtraArgs = a.budgetArgs(opts.ExtraArgs, prof, runMax)
-	if !opts.NoPluginMCP {
-		opts.ExtraArgs = append(opts.ExtraArgs, a.mcpArgs(ctx, bucket)...)
-	}
 	if err := a.applyGuard(ctx, &opts); err != nil {
 		return runner.Result{}, err
 	}
+	defer a.applyRunMCP(ctx, &opts, bucket)()
 	// Keep Claude Code from self-updating mid-run; version is recorded per run.
 	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
 	// Its own state for the run stays in tidebot's directory, not the owner's home.

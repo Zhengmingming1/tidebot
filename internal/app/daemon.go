@@ -50,6 +50,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 		go func() { defer background.Done(); fn(ctx) }()
 	}
 	a.purgeSkillStages()
+	a.purgeRunMCP()
 	a.purgeRunSnaps()
 	a.cleanLegacySkillCopies(ctx)
 	srv := ipc.NewServer(a.Log)

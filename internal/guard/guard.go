@@ -61,6 +61,9 @@ func Check(c Call, workspace string, extraDirs []string) Verdict {
 	switch c.Tool {
 	case "Bash":
 		cmd, _ := in["command"].(string)
+		if why := agentConfigBash(cmd); why != "" {
+			return Verdict{Deny: true, RuleID: "agent-config", Reason: why, Key: key}
+		}
 		for _, r := range DefaultRules {
 			if r.Tool == "Bash" && r.re.MatchString(cmd) {
 				return Verdict{Deny: true, RuleID: r.ID, Reason: r.Reason, Key: key}
@@ -70,6 +73,9 @@ func Check(c Call, workspace string, extraDirs []string) Verdict {
 		p, _ := in["file_path"].(string)
 		if p == "" {
 			p, _ = in["notebook_path"].(string)
+		}
+		if IsAgentConfigPath(p, c.Cwd) {
+			return Verdict{Deny: true, RuleID: "agent-config", Reason: "writes agent configuration (.claude, .mcp.json, CLAUDE.md …)", Key: key}
 		}
 		if p != "" && workspace != "" && !within(p, c.Cwd, append([]string{workspace}, extraDirs...)) {
 			return Verdict{Deny: true, RuleID: "write-outside-workspace", Reason: "writes outside the task workspace", Key: key}
