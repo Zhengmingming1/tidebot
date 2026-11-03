@@ -5213,7 +5213,7 @@ a bulk edit makes undo exact without a history table.
 
 方法：Playwright + Chrome，读 `getBoundingClientRect()`。截图：`/workspace/tidebot-shots/2026-11-03-1600-wf-editor-1024x655-{zh-CN,midnight,tide}.png`（午夜那张是英文界面）。
 
-**参考**：n8n-io/n8n `packages/frontend/editor-ui/src/components/NodeDetailsView.vue` 的节点设置面板浮在画布旁边，不会把画布挤到屏幕外；langgenius/dify `web/app/components/workflow/panel/index.tsx` 的节点面板固定在画布右侧。tidebot 保留现有三列设计，只在中等宽度把技能库改成横栏，让出右侧给步骤设置。
+**参考**：langgenius/dify `web/app/components/workflow/panel/index.tsx`：选中节点后，`NodePanel` 放在一个 `absolute top-14 right-0 bottom-1` 的容器里，固定在画布右侧、顶栏下方，不随页面往下排。tidebot 保留现有的三列设计，只在中等宽度把技能库压成横栏，把右侧让给步骤设置，再用 sticky 达到同样的「设置面板一直在画布旁边」。
 
 **心得**：断点不能只看视口宽度，要按内容区实际宽度算（1024 的窗口去掉侧栏只剩约 800 px）。三列放不下时，先把最不常用的那一列压扁，不要把最常用的编辑面板挤到最下面。
 
