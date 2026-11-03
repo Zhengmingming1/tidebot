@@ -2681,5 +2681,15 @@
   "sr.kind_button": "快捷按钮",
   "sr.usage_follow": "跟随当前版本 · 下次运行采用新版",
   "sr.usage_pinned": "固定版本 · 不受本次更新影响",
-  "sr.usage_unknown": "绑定方式待核实"
+  "sr.usage_unknown": "绑定方式待核实",
+  "sr.presets": "内置公开仓库",
+  "sr.presets_hint": "一键添加并扫描仓库目录，再选择需要的技能安装；不会自动安装技能或启用插件。",
+  "sr.preset_anthropic": "文档处理、设计与开发任务的技能示例。",
+  "sr.preset_openai": "开发与服务插件中的技能；依赖与授权需另行配置。",
+  "sr.preset_vercel": "面向 React、Next.js 与网页设计的开发技能。",
+  "sr.source_page": "查看原仓库",
+  "sr.browse_added": "已添加 · 浏览技能",
+  "sr.add_scan": "一键添加并扫描",
+  "sr.preset_adding": "正在添加仓库…",
+  "sr.preset_saved": "仓库已添加，扫描未完成。可进入仓库查看原因并重试。"
 }

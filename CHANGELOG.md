@@ -1,10 +1,22 @@
 # Changelog
 
-本文件记录版本变更。完整说明见 [v0.2.1 发布说明](docs/release-notes/v0.2.1.md)及 [release-notes](docs/release-notes/)。
+本文件记录版本变更。完整说明见 [v0.2.2 发布说明](docs/release-notes/v0.2.2.md)及 [release-notes](docs/release-notes/)。
 
 ## Unreleased
 
 暂无待发布改动。
+
+## v0.2.2 — 2026-11-03
+
+### 新增
+
+- Skill 仓库列表内置 Anthropic Skills、OpenAI Plugin Skills 与 Vercel Agent Skills 公开来源，可一键添加并扫描；已有匹配仓库提供浏览入口，技能仍需预览后安装。OpenAI 使用当前 `openai/plugins`，不预置已弃用的 `openai/skills`。
+
+### 修复与优化
+
+- 修复仓库添加弹窗的标题、提示裁切与遮挡问题；Git 地址、分支和扫描目录采用常显字段帮助。
+- 扫描和安装改用有大小上限的 `git cat-file --batch` 批量读取，保留对象、文件类型、大小及完整性校验。只读命令不再重复遍历缓存目录，写入时继续检查缓存上限。
+- 本次没有新增数据库迁移；已有来源、技能版本与更新采用规则保持兼容。真实网络、第三方技能运行环境与端到端耗时仍需按使用环境验证。
 
 ## v0.2.1 — 2026-11-03
 

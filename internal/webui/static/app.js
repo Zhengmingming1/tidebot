@@ -4072,6 +4072,81 @@
       });
     };
   }
+  // Public source shortcuts are visible without a network request; adding/scanning is explicit.
+  var repositoryPresets = [
+    { id: 'anthropic', name: 'Anthropic Skills', owner: 'Anthropic', url: 'https://github.com/anthropics/skills.git', page: 'https://github.com/anthropics/skills', root: 'skills', default_ref: 'main' },
+    { id: 'openai', name: 'OpenAI Plugin Skills', owner: 'OpenAI', url: 'https://github.com/openai/plugins.git', page: 'https://github.com/openai/plugins', root: 'plugins', default_ref: 'main' },
+    { id: 'vercel', name: 'Vercel Agent Skills', owner: 'Vercel Labs', url: 'https://github.com/vercel-labs/agent-skills.git', page: 'https://github.com/vercel-labs/agent-skills', root: 'skills', default_ref: 'main' }
+  ];
+  var repositoryPresetPending = Object.create(null);
+  function repositoryPresetURL(raw) {
+    try {
+      var u = new URL(String(raw || '').trim().replace(/^git@github\.com:/i, 'ssh://git@github.com/'));
+      if (u.hostname.toLowerCase() !== 'github.com' || ['https:', 'ssh:'].indexOf(u.protocol) < 0 || u.search || u.hash || u.port && u.port !== (u.protocol === 'ssh:' ? '22' : '443')) return '';
+      return u.hostname.toLowerCase() + u.pathname.replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase();
+    } catch (_) { return ''; }
+  }
+  function repositoryPresetMatch(repos, preset) {
+    return (repos || []).filter(function (r) {
+      var root = (r.root || '').replace(/^\/+|\/+$/g, ''); if (root === '.') root = '';
+      var ref = (r.ref || '').replace(/^refs\/heads\//, '');
+      return repositoryPresetURL(r.url) === repositoryPresetURL(preset.url) && (!ref || ref === preset.default_ref) && (!root || root === preset.root || preset.root.indexOf(root + '/') === 0);
+    })[0] || null;
+  }
+  function repositoryPresetsHtml(repos) {
+    return '<section class="card sr-presets" aria-labelledby="sr-presets-title"><div class="card-head"><h2 id="sr-presets-title">' + esc(T('sr.presets')) + '</h2></div><p class="hint">' + esc(T('sr.presets_hint')) + '</p><div class="sr-preset-grid">' + repositoryPresets.map(function (p, i) {
+      var existing = repositoryPresetMatch(repos, p);
+      return '<article class="sr-preset"><small>' + esc(p.owner) + '</small><h3>' + esc(p.name) + '</h3><p>' + esc(T('sr.preset_' + p.id)) + '</p><div class="row-actions"><a class="btn sm ghost" href="' + esc(p.page) + '" target="_blank" rel="noopener noreferrer">' + esc(T('sr.source_page')) + '</a>' +
+        (existing ? '<a class="btn sm" href="#/skill-repositories/' + enc(existing.id) + '">' + esc(T('sr.browse_added')) + '</a>' : repositoryButton('sr.add_scan', 'data-sr-preset="' + i + '"', true)) + '</div></article>';
+    }).join('') + '</div></section>';
+  }
+  async function ensureRepositoryPreset(preset, signal) {
+    var repos = await api('/api/skill-repositories', {fresh:true,signal:signal});
+    if (signal.aborted) throw Object.assign(new Error('cancelled'), {name:'AbortError'});
+    var existing = repositoryPresetMatch(repos, preset);
+    if (existing) return existing;
+    try {
+      return await api('/api/skill-repositories', {method:'POST',body:{name:preset.name,url:preset.url,ref:'',root:preset.root},signal:signal});
+    } catch (e) {
+      if (signal.aborted || e.status !== 400 && e.status !== 409) throw e;
+      // Another tab may have added the same preset while this request was in flight.
+      repos = await api('/api/skill-repositories', {fresh:true,signal:signal});
+      existing = repositoryPresetMatch(repos, preset);
+      if (existing) return existing;
+      throw e;
+    }
+  }
+  function repositoryAddPreset(preset) {
+    if (repositoryPresetPending[preset.id]) return;
+    var ac = new AbortController(), seq = routeSeq, saved = null, navigating = false;
+    repositoryPresetPending[preset.id] = ac;
+    stopRepositoryScan(); repositoryScan = ac;
+    modal('<div class="card-head"><h2>' + esc(T('sr.add_scan')) + ' · ' + esc(preset.name) + '</h2></div><div id="sr-preset-progress" role="status" aria-live="polite"><p class="notice">' + esc(T('sr.preset_adding')) + '</p></div><p class="hint">' + esc(T('sr.presets_hint')) + '</p><div class="actions"><button class="btn ghost" data-close>' + esc(T('btn.cancel')) + '</button></div>', function (root, close) {
+      var progress = $('#sr-preset-progress', root);
+      function alive() { return seq === routeSeq && document.contains(progress) && !ac.signal.aborted; }
+      (async function () {
+        try {
+          saved = await ensureRepositoryPreset(preset, ac.signal);
+          if (!alive()) return;
+          progress.innerHTML = '<p class="notice">' + esc(T('sr.scanning')) + '</p>';
+          await api('/api/skill-repositories/' + enc(saved.id) + '/refresh', {method:'POST',signal:ac.signal});
+          if (!alive()) return;
+          if (repositoryScan === ac) repositoryScan = null;
+          navigating = true; close(); location.hash = '#/skill-repositories/' + enc(saved.id);
+        } catch (e) {
+          if (!alive()) return;
+          progress.innerHTML = '<p class="notice bad">' + esc(e.message) + '</p>' + (saved ? '<p>' + esc(T('sr.preset_saved')) + '</p><a class="btn" href="#/skill-repositories/' + enc(saved.id) + '">' + esc(T('sr.open')) + '</a>' : '');
+        } finally {
+          if (repositoryPresetPending[preset.id] === ac) delete repositoryPresetPending[preset.id];
+          // Keep the page stable while the result dialog remains open.
+        }
+      })();
+    }, function () {
+      ac.abort(); if (repositoryScan === ac) repositoryScan = null;
+      if (repositoryPresetPending[preset.id] === ac) delete repositoryPresetPending[preset.id];
+      if (saved && !navigating && seq === routeSeq) refresh();
+    });
+  }
   function renderSkillRepositories(id) {
     var seq = routeSeq;
     if (id) return api('/api/skill-repositories/' + enc(id) + '/skills', { fresh: true }).then(function (data) {
@@ -4082,10 +4157,11 @@
       if (seq !== routeSeq) return;
       repos = repos || [];
       mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true) + '</div></div>' + skillTabs('skill-repositories') +
-        '<p class="hint">' + esc(T('sr.transport_hint')) + '</p><div class="stack">' + (repos.length ? repos.map(function (r, i) {
+        repositoryPresetsHtml(repos) + '<p class="hint">' + esc(T('sr.transport_hint')) + '</p><div class="stack">' + (repos.length ? repos.map(function (r, i) {
           return '<section class="card"><div class="card-head"><span class="ico">' + ic('git') + '</span><div class="grow"><h2><a href="#/skill-repositories/' + enc(r.id) + '">' + esc(r.name || r.url) + '</a></h2><small class="sr-path">' + esc(r.url) + '</small></div><div class="row-actions"><a class="btn sm" href="#/skill-repositories/' + enc(r.id) + '">' + esc(T('sr.open')) + '</a>' + repositoryButton('btn.edit', 'data-sr-edit="' + i + '"') + repositoryButton('sr.remove', 'data-sr-remove="' + i + '"') + '</div></div><p class="muted">' + esc(T('sr.count', {n: Array.isArray(r.candidates) ? r.candidates.length : 0})) + ' · ' + esc(r.ref || T('sr.default_ref')) + ' · <code>' + esc(r.root || '.') + '</code> · ' + esc(r.last_scanned_at ? T('sr.scanned_at', { t: fullTime(r.last_scanned_at) }) : T('sr.not_scanned')) + '</p>' + (r.last_error || r.last_error_code ? '<p class="notice bad">' + esc(repositoryLastError(r)) + '</p>' : '') + '</section>';
         }).join('') : emptyState('git', T('sr.empty'), T('sr.empty_hint'))) + '</div>', 'skills', [[T('nav.skills'), '#/skills'], [T('sr.title')]]);
       $('#sr-add').onclick = function () { repositoryEditModal(null); };
+      $$('[data-sr-preset]').forEach(function (b) { b.onclick = function () { repositoryAddPreset(repositoryPresets[+b.getAttribute('data-sr-preset')]); }; });
       $$('[data-sr-edit]').forEach(function (b) { b.onclick = function () { repositoryEditModal(repos[+b.getAttribute('data-sr-edit')]); }; });
       $$('[data-sr-remove]').forEach(function (b) { b.onclick = function () { repositoryRemove(repos[+b.getAttribute('data-sr-remove')]); }; });
     });
@@ -4093,9 +4169,9 @@
   function repositoryEditModal(repo) {
     var r = repo || {};
     modal('<div class="card-head"><h2>' + esc(T(repo ? 'sr.edit' : 'sr.add')) + '</h2></div><form id="sr-form">' +
-      fieldHtml(T('sr.url'), '<input name="url" required maxlength="2048" autocomplete="off" spellcheck="false" value="' + esc(r.url || '') + '" placeholder="https://git.example.com/team/skills.git">', T('sr.url_hint')) +
+      fieldHtml(T('sr.url'), '<input name="url" required maxlength="2048" autocomplete="off" spellcheck="false" aria-describedby="sr-url-help" value="' + esc(r.url || '') + '" placeholder="https://git.example.com/team/skills.git"><small id="sr-url-help" class="hint sr-field-help">' + esc(T('sr.url_hint')) + '</small>') +
       fieldHtml(T('tf.name'), '<input name="name" maxlength="120" value="' + esc(r.name || '') + '">') +
-      '<div class="form-row">' + fieldHtml(T('sr.ref'), '<input name="ref" maxlength="255" value="' + esc(r.ref || '') + '">', T('sr.default_ref')) + fieldHtml(T('sr.root'), '<input name="root" maxlength="1024" value="' + esc(r.root || '') + '">', T('sr.root_hint')) + '</div>' +
+      '<div class="form-row">' + fieldHtml(T('sr.ref'), '<input name="ref" maxlength="255" aria-describedby="sr-ref-help" value="' + esc(r.ref || '') + '"><small id="sr-ref-help" class="hint sr-field-help">' + esc(T('sr.default_ref')) + '</small>') + fieldHtml(T('sr.root'), '<input name="root" maxlength="1024" aria-describedby="sr-root-help" value="' + esc(r.root || '') + '"><small id="sr-root-help" class="hint sr-field-help">' + esc(T('sr.root_hint')) + '</small>') + '</div>' +
       '<p class="hint">' + esc(T('sr.auth_hint')) + '</p>' + (repo ? '<p class="notice">' + esc(T('sr.edit_hint')) + '</p>' : '') + '<p class="field-err" id="sr-save-error" role="alert"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T('btn.cancel')) + '</button><button type="submit" class="btn primary">' + esc(T('btn.save')) + '</button></div></form>', function (root, close) {
       var f = $('#sr-form', root);
       f.onsubmit = function (ev) {

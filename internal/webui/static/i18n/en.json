@@ -2681,5 +2681,15 @@
   "sr.kind_button": "Quick button",
   "sr.usage_follow": "Follows current · adopts on next run",
   "sr.usage_pinned": "Pinned version · unaffected by this update",
-  "sr.usage_unknown": "Binding mode not verified"
+  "sr.usage_unknown": "Binding mode not verified",
+  "sr.presets": "Built-in public repositories",
+  "sr.presets_hint": "Add and scan a repository, then choose which skills to install. Skills and plugins are not installed or enabled automatically.",
+  "sr.preset_anthropic": "Skill examples for document work, design and development.",
+  "sr.preset_openai": "Skills from development and service plugins; configure their dependencies and permissions separately.",
+  "sr.preset_vercel": "Development skills for React, Next.js and web design.",
+  "sr.source_page": "View source",
+  "sr.browse_added": "Added · Browse skills",
+  "sr.add_scan": "Add and scan",
+  "sr.preset_adding": "Adding repository…",
+  "sr.preset_saved": "The repository was added, but scanning did not complete. Open it to review the error and retry."
 }
