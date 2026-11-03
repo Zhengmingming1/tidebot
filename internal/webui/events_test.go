@@ -88,7 +88,8 @@ func shortEvents(t *testing.T, tick, beat time.Duration) {
 	t.Cleanup(func() { eventsTick, eventsHeartbeat = ot, ob })
 }
 
-// TestEventsStream: the first message is the state; reads send nothing; a new notification
+// TestEventsStream: the first message is the state; reads do not change data (minute
+// refreshes are allowed); a new notification
 // moves notif and rev, a run starting moves busy, the read mark moves notif; the watcher stops
 // with the last stream.
 func TestEventsStream(t *testing.T) {
@@ -105,11 +106,30 @@ func TestEventsStream(t *testing.T) {
 	if !ok || first.Rev == "" || first.Notif == "" || first.Busy != "0" {
 		t.Fatalf("first %+v %v", first, ok)
 	}
-	for _, p := range []string{"/api/overview", "/api/runs", "/api/notifications/center", "/api/rev"} {
-		c.do(http.MethodGet, p, "", nil)
+	firstChanges, _, valid := strings.Cut(first.Rev, ".")
+	if !valid || firstChanges == "" {
+		t.Fatalf("invalid initial revision %q", first.Rev)
 	}
-	if st, got := es.next(300 * time.Millisecond); got && st.Rev != first.Rev {
-		t.Fatalf("reads sent %+v", st)
+	for _, p := range []string{"/api/overview", "/api/runs", "/api/notifications/center", "/api/rev"} {
+		if rr := c.do(http.MethodGet, p, "", nil); rr.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", p, rr.Code)
+		}
+	}
+	if got := revChanges(t, c); got != firstChanges {
+		t.Fatalf("reads changed data: %s -> %s", firstChanges, got)
+	}
+	// Rev also contains the current minute. The watcher intentionally sends a
+	// minute-only refresh even without writes, including on a slow race runner.
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		st, got := es.next(time.Until(deadline))
+		if !got {
+			break
+		}
+		changes, _, valid := strings.Cut(st.Rev, ".")
+		if !valid || changes != firstChanges || st.Notif != first.Notif || st.Busy != first.Busy {
+			t.Fatalf("reads changed event data: %+v -> %+v", first, st)
+		}
 	}
 	db := c.s.deps.DB
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -133,7 +153,7 @@ func TestEventsStream(t *testing.T) {
 	es.wait("read mark", func(s evState) bool { return s.Notif != st2.Notif })
 	es.cancel()
 	<-es.done
-	deadline := time.Now().Add(3 * time.Second)
+	deadline = time.Now().Add(3 * time.Second)
 	for {
 		c.s.events.mu.Lock()
 		idle := c.s.events.stop == nil && len(c.s.events.subs) == 0

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func revChanges(t *testing.T, c *client) string {
@@ -18,6 +19,18 @@ func revChanges(t *testing.T, c *client) string {
 		t.Fatalf("rev %d %v", code, out)
 	}
 	return changes
+}
+
+// A minute rollover refreshes time-based views without implying a database write.
+func TestRevTokenMinuteBoundary(t *testing.T) {
+	before := time.Date(2026, time.November, 3, 3, 1, 59, 999999999, time.UTC)
+	after := before.Add(time.Nanosecond)
+	first := revToken(40, before)
+	rolled := revToken(40, after)
+	written := revToken(41, after)
+	if first != "40.29894581" || rolled != "40.29894582" || written != "41.29894582" {
+		t.Fatalf("revision boundary: before=%q after=%q written=%q", first, rolled, written)
+	}
 }
 
 // TestRevAPI: reads (the home page's polls included) leave the token alone; any write moves it.
