@@ -23,7 +23,7 @@ func (s *Server) setError(w http.ResponseWriter, err error) {
 		return
 	}
 	if errors.As(err, &deps) {
-		writeJSON(w, 400, map[string]any{"error": err.Error(), "dependency_preview": deps.Preview})
+		writeJSON(w, 400, withErrInfo(map[string]any{"error": err.Error(), "dependency_preview": deps.Preview}))
 		return
 	}
 	code := 400
@@ -33,7 +33,7 @@ func (s *Server) setError(w http.ResponseWriter, err error) {
 	if errors.Is(err, skillstore.ErrSetConflict) || errors.Is(err, skillstore.ErrManifestConflict) {
 		code = 409
 	}
-	writeErr(w, code, err.Error())
+	writeErrInfo(w, code, err.Error())
 }
 func (s *Server) saveSkillSet(w http.ResponseWriter, r *http.Request, id string) {
 	var in struct {
@@ -75,7 +75,7 @@ func (s *Server) handleSkillSets(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSkillSetSub(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/skill-sets/"), "/")
 	if len(parts) < 1 || !idRe.MatchString(parts[0]) {
-		writeErr(w, 404, "skill set not found")
+		writeErrInfo(w, 404, "skill set not found")
 		return
 	}
 	id := parts[0]
@@ -122,19 +122,19 @@ func (s *Server) handleSkillSetImport(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, skillpkg.MaxArchiveBytes+(1<<20))
 	if r.ParseMultipartForm(8<<20) != nil {
-		writeErr(w, 400, "invalid or oversized archive")
+		writeErrInfo(w, 400, "invalid or oversized archive")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
 	f, _, err := r.FormFile("file")
 	if err != nil {
-		writeErr(w, 400, "choose a skill set ZIP")
+		writeErrInfo(w, 400, "choose a skill set ZIP")
 		return
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, skillpkg.MaxArchiveBytes+1))
 	if err != nil {
-		writeErr(w, 400, "cannot read archive")
+		writeErrInfo(w, 400, "cannot read archive")
 		return
 	}
 	out, err := s.deps.Skills.ImportSet(r.Context(), data)

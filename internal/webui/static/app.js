@@ -111,6 +111,18 @@
     if (vars) s = s.replace(/\{(\w+)\}/g, function (m, n) { return vars[n] == null ? m : String(vars[n]); });
     return s;
   }
+  // Server error codes (error_info) in the reader's language; codes this page doesn't
+  // know, and the raw inner text of "node X: …", fall back to the server's English.
+  function errInfoText(info, raw, depth) {
+    if (!info || !info.code || (depth || 0) > 3) return raw || "";
+    var key = "wfe." + info.code;
+    if (state.dict[key] == null) return raw || info.code;
+    var p = {}, src = info.params || {};
+    for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) p[k] = src[k];
+    if (p.status && state.dict["wf.status_" + p.status] != null) p.status = T("wf.status_" + p.status);
+    if (info.cause) p.detail = errInfoText(info.cause, p.detail, (depth || 0) + 1);
+    return T(key, p);
+  }
   function loadLang(pref) {
     state.langPref = pref || "auto";
     var lang = pickLang(state.langPref);
@@ -395,7 +407,7 @@
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {
         if (res.status === 401 && path !== "/api/login" && !opts.quiet) { showLogin(); var e1 = new Error(T("err.sign_in")); e1.auth = true; throw e1; }
-        if (!res.ok) { var e2 = new Error((data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
+        if (!res.ok) { var e2 = new Error(data && data.error_info ? errInfoText(data.error_info, data.error) : (data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
         return data;
       });
     });
@@ -3516,7 +3528,7 @@
         api('/api/skill-set-evals/'+enc(selected)).then(function(r){
           if(gen!==generation||!document.contains(panel))return;var box=$('#ev-result',panel),active=r.status==='running';
           box.innerHTML='<div class="row-actions"><span class="pill">'+esc(T('ev.status_'+r.status))+'</span><span>'+esc(money(r.cost_usd||0,'USD',4))+' / '+esc(money(r.budget_usd,'USD',2))+'</span>'+(active?'<button class="btn sm" data-cancel>'+esc(T('btn.stop'))+'</button>':'')+'</div><p class="hint"><code>'+esc(r.version_id)+'</code> · '+esc(r.provider)+(r.model?' / '+esc(r.model):'')+'</p>'+
-            (r.error?'<p class="notice bad">'+esc(r.error)+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
+            (r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
           var cancel=$('[data-cancel]',box);if(cancel)cancel.onclick=function(){cancel.disabled=true;api('/api/skill-set-evals/'+enc(r.id)+'/cancel',{method:'POST',body:{}}).then(function(){poll(++generation);}).catch(function(e){cancel.disabled=false;fail(e);});};
           $$('[data-run-log]',box).forEach(function(a){a.onclick=closeDrawer;});
           if(active)setTimeout(function(){poll(gen);},1500);else history();
@@ -3662,7 +3674,7 @@
   function renderWorkflowRun(id) {
     return api('/api/workflow-runs/'+enc(id)).then(function(r){
       var active=r.status==='queued'||r.status==='running',byID=Object.create(null),order=Object.create(null);r.snapshot.nodes.forEach(function(n,i){byID[n.id]=n;order[n.id]=i;});var ordered=r.nodes.slice().sort(function(a,b){return order[a.node_id]-order[b.node_id];});
-      mount('<div class="page-head wf-page-head"><div><a href="#/workflows/'+enc(r.workflow_id)+'">← '+esc(r.snapshot.name)+'</a><h1>'+esc(T('wf.execution'))+'</h1></div><div class="row-actions">'+wfStatus(r.status)+(active?'<button class="btn danger" id="wf-stop">'+esc(T('btn.stop'))+'</button>':'')+'</div></div><section class="card"><div class="row-actions"><span class="tag">v'+esc(r.workflow_version)+'</span><span class="muted">'+esc(fmtTime(r.created_at))+'</span><span>'+esc(r.provider)+'</span></div><p class="hint">'+esc(T('wf.snapshot_hint'))+'</p><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(r.input)+'</pre></details>'+(r.error?'<p class="notice bad">'+esc(r.error)+'</p>':'')+wfDiagram(r.snapshot,r.nodes)+'</section><div class="wf-execution">'+ordered.map(function(n){var step=byID[n.node_id]||{};return '<article class="card"><div class="card-head"><strong>'+esc(step.name||n.node_id)+'</strong><code>'+esc(n.node_id)+'</code><span class="grow"></span>'+wfStatus(n.status)+'</div>'+(n.child_run_id?'<a class="btn sm" href="#/runs/'+enc(n.child_run_id)+'">'+ic('terminal','sm')+esc(T('wf.open_log'))+'</a>':'')+(n.branch?'<p>'+esc(T('wf.branch_result'))+' '+esc(T('wf.branch_'+n.branch))+'</p>':'')+(n.error?'<p class="notice bad">'+esc(n.error)+'</p>':'')+(n.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(n.output)+'</pre></details>':'')+((step.skill_bindings||[]).length?'<details><summary>'+esc(T('wf.skill_snapshot'))+'</summary><ul class="list-plain">'+step.skill_bindings.map(function(b){return '<li>'+esc(b.skill_name||b.skill_id)+' · '+esc(T(b.role==='primary'?'ss.primary':'ss.auxiliary'))+' · <code>'+esc(b.version_id)+'</code></li>';}).join('')+'</ul></details>':'')+'</article>';}).join('')+'</div>','workflows',[[T('nav.workflows'),'#/workflows'],[r.snapshot.name,'#/workflows/'+enc(r.workflow_id)],[T('wf.execution')]]);
+      mount('<div class="page-head wf-page-head"><div><a href="#/workflows/'+enc(r.workflow_id)+'">← '+esc(r.snapshot.name)+'</a><h1>'+esc(T('wf.execution'))+'</h1></div><div class="row-actions">'+wfStatus(r.status)+(active?'<button class="btn danger" id="wf-stop">'+esc(T('btn.stop'))+'</button>':'')+'</div></div><section class="card"><div class="row-actions"><span class="tag">v'+esc(r.workflow_version)+'</span><span class="muted">'+esc(fmtTime(r.created_at))+'</span><span>'+esc(r.provider)+'</span></div><p class="hint">'+esc(T('wf.snapshot_hint'))+'</p><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(r.input)+'</pre></details>'+(r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+wfDiagram(r.snapshot,r.nodes)+'</section><div class="wf-execution">'+ordered.map(function(n){var step=byID[n.node_id]||{};return '<article class="card"><div class="card-head"><strong>'+esc(step.name||n.node_id)+'</strong><code>'+esc(n.node_id)+'</code><span class="grow"></span>'+wfStatus(n.status)+'</div>'+(n.child_run_id?'<a class="btn sm" href="#/runs/'+enc(n.child_run_id)+'">'+ic('terminal','sm')+esc(T('wf.open_log'))+'</a>':'')+(n.branch?'<p>'+esc(T('wf.branch_result'))+' '+esc(T('wf.branch_'+n.branch))+'</p>':'')+(n.error?'<p class="notice bad">'+esc(errInfoText(n.error_info,n.error))+'</p>':'')+(n.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(n.output)+'</pre></details>':'')+((step.skill_bindings||[]).length?'<details><summary>'+esc(T('wf.skill_snapshot'))+'</summary><ul class="list-plain">'+step.skill_bindings.map(function(b){return '<li>'+esc(b.skill_name||b.skill_id)+' · '+esc(T(b.role==='primary'?'ss.primary':'ss.auxiliary'))+' · <code>'+esc(b.version_id)+'</code></li>';}).join('')+'</ul></details>':'')+'</article>';}).join('')+'</div>','workflows',[[T('nav.workflows'),'#/workflows'],[r.snapshot.name,'#/workflows/'+enc(r.workflow_id)],[T('wf.execution')]]);
       if(active){$('#wf-stop').onclick=function(){var b=this;b.disabled=true;api('/api/workflow-runs/'+enc(id)+'/stop',{method:'POST',body:{}}).then(function(){return renderWorkflowRun(id);}).catch(function(e){b.disabled=false;fail(e);});};livePoll(function(){return api('/api/workflow-runs/'+enc(id)).then(function(next){if(JSON.stringify(next)!==JSON.stringify(r))return renderWorkflowRun(id);});},2000);}
     });
   }

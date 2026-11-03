@@ -5120,9 +5120,9 @@ a bulk edit makes undo exact without a history table.
 ### 发现（按优先级）
 
 1. **P0 已修 · 打不开的页面一直显示骨架屏**：失败很快的请求（运行、任务、工作流、工作流执行被删掉或 id 不对时返回 404/400）会先显示错误，200 ms 后骨架屏定时器又把它盖掉。页面就一直停在骨架屏，`aria-busy=true`，也没有重试按钮。从通知或历史链接打开已删的工作流执行必然遇到。在 10/10 个场景（5 个路由 × 中英文）里复现。另外，已经离开的页面如果后来才失败，会把错误画到新页面上。
-2. **P1 · 工作流和技能组合的服务端报错没有翻译**：校验和执行时的错误文案都是 Go 里写死的英文，中文界面也直接显示原文，比如「workflow needs 1-32 nodes」「workflow stopped before this node started」，用户停止时正在跑的步骤显示「context canceled」。需要错误码加 i18n 映射。
+2. **P1 已修 · 工作流和技能组合的服务端报错没有翻译**：校验和执行时的错误文案都是 Go 里写死的英文，中文界面也直接显示原文，比如「workflow needs 1-32 nodes」「workflow stopped before this node started」，用户停止时正在跑的步骤显示「context canceled」。需要错误码加 i18n 映射。
 3. **P1 · 1024×655 下工作流编辑器的「步骤设置」在画布下面**：选中一个节点后要往下滚大约 700 px 才能编辑，画布和设置看不到同一屏。可以考虑窄屏下改成右侧抽屉或者跟画布并排（要先确认宽屏的样子，不改设计方向）。
-4. **P1 · `#/skills/<不存在的 id>` 返回 400 而不是 404**：页面显示的是服务端原文，不是「找不到」。
+4. **P1 已核实（不用改） · `#/skills/<不存在的 id>` 返回 400 而不是 404**：页面显示的是服务端原文，不是「找不到」。11-03 08:00 复查：页面显示的是前端自己的「找不到这个技能。」（中英文都对），有错误和「重试」。两个 400 来自 `skills.optimize_settings` 和 `skills.compare` 两个 RPC，前端已经 `catch` 掉，不影响页面。骨架屏那轮（#1）修好之后这一条就不再出现。
 5. **P2 · WebUI 是单个 743 KB 的包**：工作流画布、依赖检查这些新代码每个页面都会加载，注释也一起发出去。可以在 `build-webui.py` 里去掉注释、压缩空白，对比 gzip 前后的大小，并确认 CSP 和测试不受影响。
 6. **P2 · `workflow_runs` 和 `workflow_run_nodes` 不会清理**：每个节点的输出最多 128 KB，单次执行最多 32 个节点。工作流删除只是软删除，历史执行一直保留。要评估数据目录增长，看是否纳入「设置 › 数据」的清理统计。
 7. **P1 · Runner 的 `OnStart` 早于入队**：`startQuickRunAsync` 拿到 id 时，运行还没进等待队列，`QueuePos` 会短暂为 0。如果调度慢一拍，正好赶上空出来的槽位，就会跳过「排队后再检查」（`BeforeStart` 只在等过之后才执行）。CI 上 Go 1.27 两次偶发失败（`TestUserStopQueuedAndRunning` 报 queue pos 0，`TestQueuedRunSkippedWhenBudgetRanOut` 超时）都是这个原因。本轮先让两个测试等运行真正入队；产品上可以考虑在入队之后再调用 OnStart。
@@ -5143,3 +5143,32 @@ a bulk edit makes undo exact without a history table.
 方法：headless Chrome，1024×655，每 100 ms 采样一次 `#page`，持续 3 s。修复前用 `8737c7f` 的构建跑在同一份演示数据的副本上。截图：`/workspace/tidebot-shots/2026-11-03-0400-route-error-{zh-CN,en}.png`。
 
 **参考**：TanStack/query `packages/query-core/src/query.ts` 的 reducer 在 `error` 分支里把 `fetchStatus` 同时设回 `idle`，失败本身就结束加载态，不会出现「失败了但还在加载」的组合。tidebot 照这个思路做：失败时取消骨架屏定时器并去掉 aria-busy。
+
+### 本轮修复：工作流和技能组合的报错按界面语言显示（#2）
+
+- 新增 `internal/webui/errinfo.go`：一张锚定的正则表，把 workflow、skillstore、tasksvc 里的英文报错对上稳定的错误码和参数（步骤 ID、上限、引用名、状态等），共 82 个码。「node X: …」这类包装的报错会继续解析里层的原因（最多 3 层）。不认识的消息不加码，照旧显示原文。Go 里的报错文本一字没改，CLI、日志和旧页面不受影响。
+- 工作流接口（保存、读取、运行、停止、执行列表和详情）和技能组合接口（保存、读取、导入）的报错在原来的 `error` 之外多返回一个 `error_info`。执行详情和执行列表给 run 和每个步骤的 `error` 也附上 `error_info`，**以前存下的执行记录也能翻译**，不用迁移数据库。
+- 前端新增 `errInfoText()`：`api()` 收到带 `error_info` 的报错时，`e.message` 直接是当前语言的文案，所以工作流编辑器、运行弹窗、技能组合编辑器这些原本显示 `e.message` 的地方都不用改。执行页的 run 和步骤报错也改用它。状态参数会翻译成「失败 / 已取消」等，页面不认识的码退回原文。
+- i18n 新增 82 个 `wfe.*` 键（中英文）。`sql: no rows in result set` 单独用一个中性的码，不会在「技能 X 不可用」里层被说成「找不到技能组合」。
+- 测试：`errinfo_test.go`。①每个码中英文都有文案，文案里的占位符都是这个码实际带的参数，也没有孤立的 `wfe.*` 键；②直接调真实的 `workflow.Validate`、`tasksvc.NormalizeBindings`、`skillstore.ValidateSkillSetDetails` 造出 16 种工作流错误和 7 种组合错误，逐一检查码和参数。以后 Go 里改了措辞，这里会失败，不会悄悄又显示英文；③接口测试：校验报错、404、409 和失败执行里每个步骤的 `error_info`，同时确认英文 `error` 仍在；④在 node 下跑 `errInfoText`：嵌套原因、状态翻译、未知码回退、参数里的 `{node}` 不会被二次替换。
+
+| 指标（演示实例，中文界面） | 修复前（`f931e5f`） | 修复后 |
+| --- | --- | --- |
+| 12 种工作流报错（7 种保存校验 + 404 + 停止已结束的执行 409 + 停止后 run 和 2 个步骤的报错），中文界面显示中文 | 0/12 | 12/12 |
+| 5 种技能组合报错（少于两个技能、没有名称、技能重复、技能不存在、组合不存在） | 0/5 | 5/5 |
+| 修复前存下的那次执行，换新版本后再打开 | 3 条英文 | 3 条中文（「已手动停止。」「执行中被停止。」「工作流停止时这个步骤还没开始。」） |
+| `GET /api/workflow-runs/<id>`（2 个步骤，60 次取后 50 次） | p50 0.36 / p95 0.65 ms，556 B | p50 0.41 / p95 0.60 ms，583 B |
+| `explainError` 单条消息 | — | 命中 1.6 µs；嵌套两层 12 µs；都不命中 3.3 µs、0 次分配。一页执行最多 33 条，不到 0.5 ms |
+| app.js | 761.5 KB / gzip 211.3 KB | 762.3 KB / gzip 211.7 KB（+0.3 KB） |
+| zh-CN.json / en.json（gzip） | 43.3 / 40.5 KB | 45.0 / 42.1 KB |
+
+方法：同一份演示数据复制两份，分别用 `f931e5f` 和本轮的构建跑（端口 17432 / 17431）。用 headless Chrome 在 1024×655 下打开执行页和新建工作流页，读 `.notice.bad` 和 `#wf-error`。接口用 Python 脚本逐个触发，看有没有 `error_info`。截图：`/workspace/tidebot-shots/2026-11-03-0800-wf-errors-{zh-CN,en}.png`。
+
+**参考**：langgenius/dify `api/libs/exception.py` 的 `BaseHTTPException`，响应体同时带稳定的 `code` 和面向人的 `message`，前端按 code 处理。tidebot 也是码和英文原文一起返回。不同的是 tidebot 不在每个报错的地方手写错误类，而是在展示层集中匹配，这样历史执行里早就存成英文的报错也能翻译。
+
+**心得**：报错先存成文本、后面才要翻译时，在展示层集中做匹配，比回头去改每个 `fmt.Errorf` 成本低，还能顺带覆盖历史数据。代价是匹配依赖英文措辞，所以测试必须调真实的校验函数，不能手抄字符串。
+
+**后续想法**：
+- 技能组合评测（`x.error`）和依赖检查（`r.error`）的报错还是原文，可以按同样的方式补上码。
+- 子运行失败时里层的 `detail` 是 Claude 或提供商的原文，比如限流、额度用完。可以复用 `policy.Classify` 的分类，给出「限流，稍后重试」这类本地化提示。
+- 运行（runs）页的 `error_message` 也可以接入 `error_info`。

@@ -14,6 +14,18 @@
     if (vars) s = s.replace(/\{(\w+)\}/g, function (m, n) { return vars[n] == null ? m : String(vars[n]); });
     return s;
   }
+  // Server error codes (error_info) in the reader's language; codes this page doesn't
+  // know, and the raw inner text of "node X: …", fall back to the server's English.
+  function errInfoText(info, raw, depth) {
+    if (!info || !info.code || (depth || 0) > 3) return raw || "";
+    var key = "wfe." + info.code;
+    if (state.dict[key] == null) return raw || info.code;
+    var p = {}, src = info.params || {};
+    for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) p[k] = src[k];
+    if (p.status && state.dict["wf.status_" + p.status] != null) p.status = T("wf.status_" + p.status);
+    if (info.cause) p.detail = errInfoText(info.cause, p.detail, (depth || 0) + 1);
+    return T(key, p);
+  }
   function loadLang(pref) {
     state.langPref = pref || "auto";
     var lang = pickLang(state.langPref);

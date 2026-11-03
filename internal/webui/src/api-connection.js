@@ -64,7 +64,7 @@
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {
         if (res.status === 401 && path !== "/api/login" && !opts.quiet) { showLogin(); var e1 = new Error(T("err.sign_in")); e1.auth = true; throw e1; }
-        if (!res.ok) { var e2 = new Error((data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
+        if (!res.ok) { var e2 = new Error(data && data.error_info ? errInfoText(data.error_info, data.error) : (data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
         return data;
       });
     });

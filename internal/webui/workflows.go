@@ -29,11 +29,11 @@ func workflowError(w http.ResponseWriter, err error) {
 	} else if errors.Is(err, workflow.ErrClosing) {
 		code = 503
 	}
-	writeErr(w, code, err.Error())
+	writeErrInfo(w, code, err.Error())
 }
 func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Workflows == nil {
-		writeErr(w, 503, "workflows unavailable")
+		writeErrInfo(w, 503, "workflows unavailable")
 		return
 	}
 	switch r.Method {
@@ -47,7 +47,7 @@ func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var d workflow.Definition
 		if err := workflowBody(w, r, &d); err != nil {
-			writeErr(w, 400, "invalid workflow JSON")
+			writeErrInfo(w, 400, "invalid workflow JSON")
 			return
 		}
 		item, err := s.deps.Workflows.Save(r.Context(), "", 0, d)
@@ -62,7 +62,7 @@ func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) handleWorkflowSub(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Workflows == nil {
-		writeErr(w, 503, "workflows unavailable")
+		writeErrInfo(w, 503, "workflows unavailable")
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/workflows/"), "/")
@@ -81,7 +81,7 @@ func (s *Server) handleWorkflowSub(w http.ResponseWriter, r *http.Request) {
 			Provider string `json:"provider"`
 		}
 		if err := workflowBody(w, r, &in); err != nil {
-			writeErr(w, 400, "invalid run JSON")
+			writeErrInfo(w, 400, "invalid run JSON")
 			return
 		}
 		if in.Provider == "" && s.deps.Cfg != nil {
@@ -89,7 +89,7 @@ func (s *Server) handleWorkflowSub(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.deps.Reg != nil {
 			if _, ok := s.deps.Reg.Get(in.Provider); !ok {
-				writeErr(w, 400, "unknown provider")
+				writeErrInfo(w, 400, "unknown provider")
 				return
 			}
 		}
@@ -119,7 +119,7 @@ func (s *Server) handleWorkflowSub(w http.ResponseWriter, r *http.Request) {
 			Definition      workflow.Definition `json:"definition"`
 		}
 		if err := workflowBody(w, r, &in); err != nil {
-			writeErr(w, 400, "invalid workflow JSON")
+			writeErrInfo(w, 400, "invalid workflow JSON")
 			return
 		}
 		item, err := s.deps.Workflows.Save(r.Context(), wid, in.ExpectedVersion, in.Definition)
@@ -140,7 +140,7 @@ func (s *Server) handleWorkflowSub(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Workflows == nil {
-		writeErr(w, 503, "workflows unavailable")
+		writeErrInfo(w, 503, "workflows unavailable")
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -152,11 +152,15 @@ func (s *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		workflowError(w, err)
 		return
 	}
-	writeJSON(w, 200, list)
+	out := make([]workflowRunDTO, len(list))
+	for i, run := range list {
+		out[i] = workflowRunView(run)
+	}
+	writeJSON(w, 200, out)
 }
 func (s *Server) handleWorkflowRunSub(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Workflows == nil {
-		writeErr(w, 503, "workflows unavailable")
+		writeErrInfo(w, 503, "workflows unavailable")
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/workflow-runs/"), "/")
@@ -189,5 +193,25 @@ func (s *Server) handleWorkflowRunSub(w http.ResponseWriter, r *http.Request) {
 		workflowError(w, err)
 		return
 	}
-	writeJSON(w, 200, run)
+	writeJSON(w, 200, workflowRunView(run))
+}
+
+// workflowRunDTO adds error codes to an execution, so the page can show stored
+// English errors (also on executions recorded before codes existed) in its language.
+type workflowRunDTO struct {
+	workflow.Run
+	ErrorInfo *errInfo          `json:"error_info,omitempty"`
+	Nodes     []workflowNodeDTO `json:"nodes"`
+}
+type workflowNodeDTO struct {
+	workflow.NodeRun
+	ErrorInfo *errInfo `json:"error_info,omitempty"`
+}
+
+func workflowRunView(r workflow.Run) workflowRunDTO {
+	out := workflowRunDTO{Run: r, ErrorInfo: explainError(r.Error), Nodes: make([]workflowNodeDTO, len(r.Nodes))}
+	for i, n := range r.Nodes {
+		out.Nodes[i] = workflowNodeDTO{NodeRun: n, ErrorInfo: explainError(n.Error)}
+	}
+	return out
 }
