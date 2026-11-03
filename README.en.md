@@ -86,9 +86,9 @@ Scheduled tasks you can keep talking to. Tasks have a cron schedule or run on de
 
 Skill sets and visual workflows. Combine one primary skill with supporting skills, drag them onto a canvas, connect conditional and parallel steps, and inspect each step's output and logs. See the [design and usage guide](docs/skills-workflows.md).
 
-Skill package maintenance (unreleased). Declare required or optional skill dependencies in `tidebot.json`, preview additions before adopting them, and run a local preflight without model calls. Optional AI analysis and primary-versus-composition text evaluations incur model usage. Package versions retain documentation and examples; explicit upgrade previews protect locally edited task and node bindings. Loaded skill material is not proof of model execution. See the [dependency, upgrade and evaluation guide (Chinese)](docs/skill-manifests.md).
+Skill package maintenance (v0.2.1). Declare required or optional skill dependencies in `tidebot.json`, preview additions before adopting them, and run a local preflight without model calls. Optional AI analysis and primary-versus-composition text evaluations incur model usage. Package versions retain documentation and examples; explicit upgrade previews protect locally edited task and node bindings. Loaded skill material is not proof of model execution. See the [dependency, upgrade and evaluation guide (Chinese)](docs/skill-manifests.md).
 
-Skill repositories (unreleased). Add HTTPS/SSH Git repositories from GitHub, GitLab, Gitee or a company host in the Skills area, browse and batch-install complete skill folders, then download and explicitly adopt updates while retaining provenance and history. See the [repository installation and update guide (Chinese)](docs/skill-repositories.md).
+Skill repositories (v0.2.1). Add HTTPS/SSH Git repositories from GitHub, GitLab, Gitee or a company host in the Skills area, browse and batch-install complete skill folders, then download and explicitly adopt updates while retaining provenance and history. See the [repository installation and update guide (Chinese)](docs/skill-repositories.md).
 
 Skills with versions and rollback. Import a Claude Code skill directory; every re-import is a new version. A task can pin a specific skill version, and you can roll back when a new one misbehaves.
 
