@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/safepath"
 	"os"
 	"path"
 	"path/filepath"
@@ -348,7 +349,7 @@ func mkdirNoSymlink(dir string) error {
 			return err
 		}
 	}
-	info, err := os.Lstat(abs)
+	info, err := safepath.LstatDirectory(abs)
 	if errors.Is(err, os.ErrNotExist) {
 		return os.Mkdir(abs, 0700)
 	}

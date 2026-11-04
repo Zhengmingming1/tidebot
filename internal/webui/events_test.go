@@ -356,7 +356,10 @@ func runNode(t *testing.T, script string, vars map[string]string) {
 		b, _ := json.Marshal(v)
 		pre += "var " + k + " = " + string(b) + ";\n"
 	}
-	if out, err := exec.Command(node, "-e", pre+script).CombinedOutput(); err != nil {
+	// Feed large fixtures on stdin instead of Windows' 32K command line.
+	cmd := exec.Command(node)
+	cmd.Stdin = strings.NewReader(pre + script)
+	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
 }

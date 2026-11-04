@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/safepath"
 	"net/http"
 	"os"
 	"os/exec"
@@ -181,7 +182,7 @@ func secureDir(p string) error {
 			return err
 		}
 	}
-	info, err := os.Lstat(p)
+	info, err := safepath.LstatDirectory(p)
 	if os.IsNotExist(err) {
 		return os.Mkdir(p, 0700)
 	}

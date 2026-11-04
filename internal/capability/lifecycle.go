@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/Zhengmingming1/tidebot/internal/safepath"
 	"io"
 	"os"
 	"path/filepath"
@@ -638,7 +639,7 @@ func checkExistingDirectory(dir string) error {
 		return err
 	}
 	for {
-		info, e := os.Lstat(abs)
+		info, e := safepath.LstatDirectory(abs)
 		if e != nil {
 			return e
 		}

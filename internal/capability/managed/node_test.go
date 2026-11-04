@@ -91,8 +91,8 @@ func TestNPMUsesExplicitManagedNode(t *testing.T) {
 	e := &fakeExecutor{}
 	i := &Installer{DataDir: t.TempDir(), Executor: e, MalwareChecker: &fakeChecker{}}
 	r := npmFixture()
-	r.NodePath = "/managed/node/bin/node"
-	r.NPMCLI = "/managed/node/lib/node_modules/npm/bin/npm-cli.js"
+	r.NodePath = filepath.Join(i.DataDir, "node", "bin", "node")
+	r.NPMCLI = filepath.Join(i.DataDir, "node", "lib", "node_modules", "npm", "bin", "npm-cli.js")
 	if _, err := i.InstallNPM(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}

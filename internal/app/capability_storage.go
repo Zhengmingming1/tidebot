@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/safepath"
 	"math"
 	"os"
 	"path/filepath"
@@ -222,7 +223,7 @@ func capabilityManagedReference(root string, resolved capability.Resolved) (mana
 // Accounting never follows symlinks, including a replaced ancestor directory.
 func capabilityStorageSize(ctx context.Context, root string) (int64, error) {
 	for parent := root; ; parent = filepath.Dir(parent) {
-		info, err := os.Lstat(parent)
+		info, err := safepath.LstatDirectory(parent)
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, nil
 		}

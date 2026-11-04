@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Zhengmingming1/tidebot/internal/safepath"
 	"os"
 	"path/filepath"
 	"sort"
@@ -258,7 +259,7 @@ func checkExistingParents(path string) error {
 			return err
 		}
 	}
-	info, err := os.Lstat(abs)
+	info, err := safepath.LstatDirectory(abs)
 	if err != nil {
 		return err
 	}
