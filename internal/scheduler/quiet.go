@@ -22,7 +22,8 @@ import (
 // getRunningTimeslot looks for the window that started within the last duration;
 // src/pages/EditMaintenance.vue: a time range plus a Mon…Sun weekday picker).
 // Here the end is a wall-clock time, so a window that crosses a daylight-saving change
-// still ends at 07:00.
+// still ends at 07:00. A boundary skipped by a spring-forward change moves to
+// the first valid instant after the gap, just like a fixed-time scheduled job.
 
 // Quiet is the stored quiet-hours setting.
 type Quiet struct {
@@ -105,13 +106,23 @@ func (q Quiet) window(day time.Time, loc *time.Location) (start, end time.Time, 
 	if !q.startsOn(time.Date(y, m, d, 12, 0, 0, 0, loc).Weekday()) {
 		return
 	}
-	start = time.Date(y, m, d, f/60, f%60, 0, 0, loc)
+	start = quietBoundary(y, m, d, f, loc)
 	ed := d
 	if t < f {
 		ed++
 	}
-	end = time.Date(y, m, ed, t/60, t%60, 0, 0, loc)
+	end = quietBoundary(y, m, ed, t, loc)
 	return start, end, end.After(start)
+}
+
+// quietBoundary resolves a wall-clock boundary without letting time.Date shift
+// nonexistent times backward or forward by an arbitrary fraction of the gap.
+func quietBoundary(y int, m time.Month, d, minutes int, loc *time.Location) time.Time {
+	w := time.Date(y, m, d, minutes/60, minutes%60, 0, 0, time.UTC)
+	if end, ok := gapEnd(w, loc); ok {
+		return end.In(loc)
+	}
+	return time.Date(y, m, d, minutes/60, minutes%60, 0, 0, loc)
 }
 
 // At reports whether t falls in a quiet window ([start, end)) and when that window ends.
