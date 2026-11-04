@@ -287,6 +287,10 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, sql.ErrNoRows) {
 		b = cost.Budget{Scope: body.Scope, ScopeID: body.ScopeID, Period: body.Period, Bucket: body.Bucket, Action: "pause_notify", WarnAtPct: 80}
 	}
+	if b.Scope == "global" {
+		// A legacy restored row must not obstruct editing the remaining money cap.
+		b.MaxTokens = sql.NullInt64{}
+	}
 	if b.Action == "" {
 		b.Action = "pause_notify"
 	}

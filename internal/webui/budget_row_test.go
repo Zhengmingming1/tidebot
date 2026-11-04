@@ -33,6 +33,10 @@ func TestBudgetPartialUpdate(t *testing.T) {
 	if code := post(map[string]any{"scope": "global", "period": "day", "max_usd": 5, "action": "block_notify", "warn_at_pct": 90}); code != 200 {
 		t.Fatal(code)
 	}
+	// Editing a restored legacy row also removes its obsolete global token field.
+	if _, err := c.s.deps.Cost.DB.Exec(`UPDATE budgets SET max_tokens=200 WHERE scope='global'`); err != nil {
+		t.Fatal(err)
+	}
 	if code := post(map[string]any{"scope": "global", "period": "day", "max_usd": 7.5}); code != 200 {
 		t.Fatal(code)
 	}
