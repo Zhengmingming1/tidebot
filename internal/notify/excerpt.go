@@ -37,7 +37,7 @@ var (
 func AnswerExcerpt(md string) (text string, cut bool) {
 	md = strings.ReplaceAll(strings.ReplaceAll(md, "\r\n", "\n"), "\r", "\n")
 	var out []string
-	runes, fence, blank := 0, false, false
+	runes, nonEmptyLines, fence, blank := 0, 0, false, false
 	lines := strings.Split(strings.TrimSpace(md), "\n")
 	for _, ln := range lines {
 		t := strings.TrimRight(ln, " \t")
@@ -54,7 +54,7 @@ func AnswerExcerpt(md string) (text string, cut bool) {
 			blank = len(out) > 0
 			continue
 		}
-		if len(out) == ExcerptLines {
+		if nonEmptyLines >= ExcerptLines {
 			return strings.Join(out, "\n"), true
 		}
 		n := utf8.RuneCountInString(t)
@@ -72,6 +72,7 @@ func AnswerExcerpt(md string) (text string, cut bool) {
 		blank = false
 		out = append(out, t)
 		runes += n
+		nonEmptyLines++
 	}
 	return strings.Join(out, "\n"), false
 }
