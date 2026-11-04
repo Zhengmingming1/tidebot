@@ -292,11 +292,29 @@ func Client(timeout time.Duration) *http.Client {
 
 // Redact hides user:password in a proxy URL.
 func Redact(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
+	// Environment proxy values can omit the scheme. Parse them as an
+	// authority so userinfo is recognized instead of treated as an opaque URL.
+	value := raw
+	schemeless := !strings.Contains(value, "://")
+	if schemeless {
+		value = "http://" + value
+	}
+	u, err := url.Parse(value)
+	if err != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		// Invalid URLs can still contain credentials. Never echo the input or
+		// the parse error (which includes the input) into the settings display.
+		return "[invalid proxy URL]"
+	}
+	if u.User == nil {
+		if strings.Contains(raw, "@") {
+			return "[invalid proxy URL]"
+		}
 		return raw
 	}
 	u.User = url.User("***")
+	if schemeless {
+		return strings.TrimPrefix(u.String(), "http://")
+	}
 	return u.String()
 }
 
