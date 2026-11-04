@@ -405,12 +405,24 @@ func sendMail(cfg map[string]string, password string, m Message) error {
 	if u := cfg["username"]; u != "" {
 		auth = smtp.PlainAuth("", u, password, host)
 	}
-	rcpt := splitAddrs(to)
-	msg := BuildMail(from, to, m)
-	env := from // envelope sender: the bare address of "Name <me@x.com>"
-	if a, err := mail.ParseAddress(from); err == nil {
-		env = a.Address
+	addresses, err := parseRecipients(to)
+	if err != nil {
+		return err
 	}
+	if strings.ContainsAny(from, "\r\n") {
+		return errors.New("invalid email sender")
+	}
+	sender, err := mail.ParseAddress(from)
+	if err != nil {
+		return errors.New("invalid email sender")
+	}
+	var rcpt, headers []string
+	for _, address := range addresses {
+		rcpt = append(rcpt, envelopeAddress(address))
+		headers = append(headers, address.String())
+	}
+	msg := BuildMail(sender.String(), strings.Join(headers, ", "), m)
+	env := envelopeAddress(sender)
 	if port != "465" {
 		return smtp.SendMail(net.JoinHostPort(host, port), auth, env, rcpt, msg)
 	}
@@ -452,15 +464,71 @@ func sendMail(cfg map[string]string, password string, m Message) error {
 	return c.Quit()
 }
 
-func splitAddrs(to string) []string {
-	var out []string
-	for _, a := range strings.FieldsFunc(to, func(r rune) bool { return r == ',' || r == ';' }) {
-		if a = strings.TrimSpace(a); a != "" {
-			if p, err := mail.ParseAddress(a); err == nil {
-				a = p.Address
-			}
-			out = append(out, a)
-		}
+// envelopeAddress removes display names without losing required local-part
+// quoting. smtp adds the surrounding angle brackets itself.
+func envelopeAddress(address *mail.Address) string {
+	formatted := (&mail.Address{Address: address.Address}).String()
+	return formatted[1 : len(formatted)-1]
+}
+
+// parseRecipients accepts RFC address lists and the UI's legacy semicolon
+// separators. Only separators outside quoted strings, comments, address literals
+// and RFC groups are normalized; net/mail remains the syntax validator.
+func parseRecipients(to string) ([]*mail.Address, error) {
+	if strings.ContainsAny(to, "\r\n") {
+		return nil, errors.New("invalid email recipients")
 	}
-	return out
+	var normalized strings.Builder
+	quoted, escaped, group := false, false, false
+	comments, angle, literal := 0, 0, 0
+	for _, r := range to {
+		if escaped {
+			normalized.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && (quoted || comments > 0) {
+			escaped = true
+		} else if comments > 0 {
+			switch r {
+			case '(':
+				comments++
+			case ')':
+				comments--
+			}
+		} else if r == '"' {
+			quoted = !quoted
+		} else if !quoted {
+			switch r {
+			case '(':
+				comments++
+			case '<':
+				angle++
+			case '>':
+				angle--
+			case '[':
+				literal++
+			case ']':
+				literal--
+			case ':':
+				if angle == 0 && literal == 0 {
+					group = true
+				}
+			case ';':
+				if angle == 0 && literal == 0 {
+					if group {
+						group = false
+					} else {
+						r = ','
+					}
+				}
+			}
+		}
+		normalized.WriteRune(r)
+	}
+	addresses, err := mail.ParseAddressList(normalized.String())
+	if err != nil || len(addresses) == 0 {
+		return nil, errors.New("invalid email recipients")
+	}
+	return addresses, nil
 }
