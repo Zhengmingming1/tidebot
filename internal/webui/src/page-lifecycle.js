@@ -12,6 +12,11 @@
     var pg = page();
     pg.removeAttribute("aria-busy");
     pg.innerHTML = html;
+    // Section navigation occupies the same first row on every list/detail page.
+    var sectionNav = Array.prototype.find.call(pg.children, function (el) { return el.classList.contains("section-tabs"); });
+    if (sectionNav) pg.insertBefore(sectionNav, pg.firstChild);
+    pg.setAttribute("data-section", navSection(nav));
+
     applySizes(pg);
     if (pendingRestore !== null) { var y = pendingRestore; pendingRestore = null; window.scrollTo(0, y); pg.scrollTop = y; }
   }

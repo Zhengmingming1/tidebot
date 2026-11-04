@@ -773,7 +773,23 @@
     paintChannelDot();
     var tag = document.querySelector("#shell .brand-text small"); if (tag) tag.textContent = T("brand.tagline");
   }
-  function setNav(name) { $$("#nav a").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-nav") === name); }); }
+  function navSection(name) {
+    return { "skill-repositories": "skills", "skill-sets": "skills", "workflow-runs": "workflows" }[name] || name;
+  }
+  function setNav(name) {
+    name = navSection(name);
+    $$("#nav a").forEach(function (a) {
+      var active = a.getAttribute("data-nav") === name;
+      a.classList.toggle("active", active);
+      if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+  }
+  function sectionTabs(className, label, items) {
+    return '<nav class="section-tabs ' + esc(className) + '" aria-label="' + esc(label) + '">' + items.map(function (item) {
+      return '<a class="btn sm ' + (item.active ? 'primary' : 'ghost') + '" href="' + esc(item.href) + '"' +
+        (item.active ? ' aria-current="page"' : '') + '>' + esc(item.label) + '</a>';
+    }).join('') + '</nav>';
+  }
 
   function renderTopbar(crumbs) {
     // A single crumb repeats the page title right below it: only detail pages get a trail.
@@ -1932,6 +1948,11 @@
     var pg = page();
     pg.removeAttribute("aria-busy");
     pg.innerHTML = html;
+    // Section navigation occupies the same first row on every list/detail page.
+    var sectionNav = Array.prototype.find.call(pg.children, function (el) { return el.classList.contains("section-tabs"); });
+    if (sectionNav) pg.insertBefore(sectionNav, pg.firstChild);
+    pg.setAttribute("data-section", navSection(nav));
+
     applySizes(pg);
     if (pendingRestore !== null) { var y = pendingRestore; pendingRestore = null; window.scrollTo(0, y); pg.scrollTop = y; }
   }
@@ -3277,7 +3298,7 @@
         ((t.tags || []).length ? '<span class="td-tags">' + ic("tag", "sm") + t.tags.map(function (g) { return '<a class="ttag h' + tagHue(g) + '" href="#/tasks?tag=' + enc(g) + '" data-tip="' + esc(T("tg.filter_tip", { t: g })) + '">' + esc(g) + "</a>"; }).join("") + "</span>" : "") + "</div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">' + ic("pause", "sm") + esc(T("td.pause")) + ic("chevDown", "sm") + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" + pauseNotice(t) +
-        '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
+        '<nav class="tabs" aria-label="' + esc(T("nav.tasks")) + '">' + tabs.map(function (x) { return '<a data-tab="' + x[0] + '" href="#/tasks/' + enc(id) + '/' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '"' + (x[0] === tab ? ' aria-current="page"' : '') + '>' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</a>"; }).join("") + "</nav>" +
         taskTab(tab, t, items, vers, runs) + "</section>" +
         '<div class="stack task-secondary">' + '<section class="card"><h3>' + esc(T("costmode.title")) + '</h3>' + costModeBadge(t.cost_control_mode) + '<p>' + esc(T("costmode." + (t.cost_control_mode === "bypass" ? "warning" : "global_hint"))) + '</p><p class="hint">' + esc(T("costmode.next_start")) + '</p></section>' + '<section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("runs") + '</span><h3>' + esc(T("home.recent")) + '</h3><a class="link" href="#/runs?task=' + enc(t.id) + '">' + esc(T("td.view_all")) + "</a></div>" + mini + "</section></div></div></div></div>",
@@ -3319,7 +3340,6 @@
         });
       });
       wireRows();
-      $$("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { var tb = b.getAttribute("data-tab"); history.replaceState(null, "", "#/tasks/" + enc(id) + "/" + tb); lastHash = location.hash; renderTaskDetail(id, tb); }); });
       var depButton=document.createElement("button");depButton.className="btn";depButton.textContent=T("dep.check");depButton.id="t-dependencies";
       $("#t-run").parentNode.insertBefore(depButton,$("#t-run"));depButton.onclick=function(){dependencyCheck({kind:"task",id:id});};
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(fail); });
@@ -3441,7 +3461,9 @@
   // ---------- reusable skill compositions ----------
   var skillEditorSeq = 0;
   function skillTabs(active) {
-    return '<nav class="ss-tabs" aria-label="' + esc(T("ss.tabs")) + '">' + [["skills", "nav.skills"], ["skill-repositories", "sr.title"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) { return '<a class="btn sm ' + (active === x[0] ? "primary" : "ghost") + '" href="#/' + x[0] + '"' + (active === x[0] ? ' aria-current="page"' : "") + '>' + esc(T(x[1])) + '</a>'; }).join("") + '</nav>';
+    return sectionTabs("ss-tabs", T("ss.tabs"), [["skills", "nav.skills"], ["skill-repositories", "sr.title"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) {
+      return { href: "#/" + x[0], label: T(x[1]), active: active === x[0] };
+    }));
   }
   function skillBindingEditor(box, skills, initial, onChange, options) {
     options = options || {}; var source = cleanSetSource(options.source);
@@ -3685,7 +3707,7 @@
   }
   function renderWorkflows() {
     return api('/api/workflows').then(function(items){
-      mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div>'+skillTabs('workflows')+
+      mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><div class="actions"><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div></div>'+skillTabs('workflows')+
         (items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
       $$('[data-wf-run]').forEach(function(b){b.onclick=function(){workflowRunModal(b.dataset.wfRun);};});
       $$('[data-wf-deps]').forEach(function(b){b.onclick=function(){dependencyCheck({kind:'workflow',id:b.dataset.wfDeps});};});
@@ -3706,7 +3728,7 @@
       var skills=r[0],sets=r[1],saved=r[2],def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:30,nodes:[]};
       if(def.nodes.some(function(n){return !n.position;}))wfArrange(def);
       var selected=def.nodes.length?def.nodes[0].id:'',zoom=0.85,drag=null,link=null,baseline=JSON.stringify(def);
-      mount('<div class="page-head wf-page-head"><div><a href="#/workflows">← '+esc(T('nav.workflows'))+'</a><h1>'+esc(creating?T('wf.create'):saved.name)+'</h1></div><div class="row-actions"><button class="btn" id="wf-check">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" id="wf-save">'+ic('check','sm')+esc(T('btn.save'))+'</button>'+(creating?'':'<button class="btn" id="wf-run">'+ic('play','sm')+esc(T('btn.run'))+'</button>')+'</div></div>'+
+      mount('<div class="page-head wf-page-head"><div><a href="#/workflows">← '+esc(T('nav.workflows'))+'</a><h1>'+esc(creating?T('wf.create'):saved.name)+'</h1></div><div class="row-actions actions"><button class="btn" id="wf-check">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" id="wf-save">'+ic('check','sm')+esc(T('btn.save'))+'</button>'+(creating?'':'<button class="btn" id="wf-run">'+ic('play','sm')+esc(T('btn.run'))+'</button>')+'</div></div>'+
         '<form id="wf-meta" class="card"><div class="form-row">'+fieldHtml(T('tf.name'),'<input name="name" required maxlength="80" value="'+esc(def.name)+'">')+fieldHtml(T('wf.parallel'),'<input name="max_parallel" type="number" min="1" max="4" value="'+def.max_parallel+'">')+fieldHtml(T('tf.timeout'),'<input name="timeout_minutes" type="number" min="1" max="1440" value="'+def.timeout_minutes+'">')+'</div>'+fieldHtml(T('sk.desc'),'<input name="description" maxlength="4096" value="'+esc(def.description||'')+'">')+'</form>'+
         '<div class="wf-designer"><aside class="card wf-palette"><h2>'+esc(T('wf.palette'))+'</h2><p class="hint">'+esc(T('wf.drag_hint'))+'</p><div id="wf-palette-skills">'+skills.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="skill" data-palette-index="'+i+'">'+ic('skills','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+(skills.length?'':'<a href="#/skills">'+esc(T('wf.need_skill'))+'</a>')+'</div><h3>'+esc(T('ss.title'))+'</h3>'+sets.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="set" data-palette-index="'+i+'">'+ic('layers','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+'<h3>'+esc(T('wf.control'))+'</h3><button type="button" class="wf-palette-item" draggable="true" data-palette="condition">'+ic('branch','sm')+esc(T('wf.condition'))+'</button></aside>'+
         '<section class="card wf-canvas-panel"><div class="wf-canvas-toolbar"><button class="btn sm" id="wf-arrange">'+esc(T('wf.arrange'))+'</button><button class="btn sm" id="wf-example">'+esc(T('wf.example'))+'</button><span class="grow"></span><label>'+esc(T('wf.zoom'))+' <select id="wf-zoom">'+[50,75,85,100,125].map(function(n){return opt(n,n+'%',n===85);}).join('')+'</select></label></div><p class="hint" id="wf-canvas-hint">'+esc(T('wf.connect_hint'))+'</p><div class="wf-canvas-scroll" id="wf-canvas-scroll"><svg id="wf-canvas" role="group" aria-label="'+esc(T('wf.graph'))+'" tabindex="0"></svg></div></section>'+
@@ -3775,7 +3797,7 @@
   function renderWorkflowRun(id) {
     return api('/api/workflow-runs/'+enc(id)).then(function(r){
       var active=r.status==='queued'||r.status==='running',byID=Object.create(null),order=Object.create(null);r.snapshot.nodes.forEach(function(n,i){byID[n.id]=n;order[n.id]=i;});var ordered=r.nodes.slice().sort(function(a,b){return order[a.node_id]-order[b.node_id];});
-      mount('<div class="page-head wf-page-head"><div><a href="#/workflows/'+enc(r.workflow_id)+'">← '+esc(r.snapshot.name)+'</a><h1>'+esc(T('wf.execution'))+'</h1></div><div class="row-actions">'+wfStatus(r.status)+(active?'<button class="btn danger" id="wf-stop">'+esc(T('btn.stop'))+'</button>':'')+'</div></div><section class="card"><div class="row-actions"><span class="tag">v'+esc(r.workflow_version)+'</span><span class="muted">'+esc(fmtTime(r.created_at))+'</span><span>'+esc(r.provider)+'</span></div><p class="hint">'+esc(T('wf.snapshot_hint'))+'</p><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(r.input)+'</pre></details>'+(r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+wfDiagram(r.snapshot,r.nodes)+'</section><div class="wf-execution">'+ordered.map(function(n){var step=byID[n.node_id]||{};return '<article class="card"><div class="card-head"><strong>'+esc(step.name||n.node_id)+'</strong><code>'+esc(n.node_id)+'</code><span class="grow"></span>'+wfStatus(n.status)+'</div>'+(n.child_run_id?'<a class="btn sm" href="#/runs/'+enc(n.child_run_id)+'">'+ic('terminal','sm')+esc(T('wf.open_log'))+'</a>':'')+(n.branch?'<p>'+esc(T('wf.branch_result'))+' '+esc(T('wf.branch_'+n.branch))+'</p>':'')+(n.error?'<p class="notice bad">'+esc(errInfoText(n.error_info,n.error))+'</p>':'')+(n.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(n.output)+'</pre></details>':'')+((step.skill_bindings||[]).length?'<details><summary>'+esc(T('wf.skill_snapshot'))+'</summary><ul class="list-plain">'+step.skill_bindings.map(function(b){return '<li>'+esc(b.skill_name||b.skill_id)+' · '+esc(T(b.role==='primary'?'ss.primary':'ss.auxiliary'))+' · <code>'+esc(b.version_id)+'</code></li>';}).join('')+'</ul></details>':'')+'</article>';}).join('')+'</div>','workflows',[[T('nav.workflows'),'#/workflows'],[r.snapshot.name,'#/workflows/'+enc(r.workflow_id)],[T('wf.execution')]]);
+      mount('<div class="page-head wf-page-head"><div><a href="#/workflows/'+enc(r.workflow_id)+'">← '+esc(r.snapshot.name)+'</a><h1>'+esc(T('wf.execution'))+'</h1></div><div class="row-actions actions">'+wfStatus(r.status)+(active?'<button class="btn danger" id="wf-stop">'+esc(T('btn.stop'))+'</button>':'')+'</div></div><section class="card"><div class="row-actions"><span class="tag">v'+esc(r.workflow_version)+'</span><span class="muted">'+esc(fmtTime(r.created_at))+'</span><span>'+esc(r.provider)+'</span></div><p class="hint">'+esc(T('wf.snapshot_hint'))+'</p><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(r.input)+'</pre></details>'+(r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+wfDiagram(r.snapshot,r.nodes)+'</section><div class="wf-execution">'+ordered.map(function(n){var step=byID[n.node_id]||{};return '<article class="card"><div class="card-head"><strong>'+esc(step.name||n.node_id)+'</strong><code>'+esc(n.node_id)+'</code><span class="grow"></span>'+wfStatus(n.status)+'</div>'+(n.child_run_id?'<a class="btn sm" href="#/runs/'+enc(n.child_run_id)+'">'+ic('terminal','sm')+esc(T('wf.open_log'))+'</a>':'')+(n.branch?'<p>'+esc(T('wf.branch_result'))+' '+esc(T('wf.branch_'+n.branch))+'</p>':'')+(n.error?'<p class="notice bad">'+esc(errInfoText(n.error_info,n.error))+'</p>':'')+(n.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(n.output)+'</pre></details>':'')+((step.skill_bindings||[]).length?'<details><summary>'+esc(T('wf.skill_snapshot'))+'</summary><ul class="list-plain">'+step.skill_bindings.map(function(b){return '<li>'+esc(b.skill_name||b.skill_id)+' · '+esc(T(b.role==='primary'?'ss.primary':'ss.auxiliary'))+' · <code>'+esc(b.version_id)+'</code></li>';}).join('')+'</ul></details>':'')+'</article>';}).join('')+'</div>','workflows',[[T('nav.workflows'),'#/workflows'],[r.snapshot.name,'#/workflows/'+enc(r.workflow_id)],[T('wf.execution')]]);
       if(active){$('#wf-stop').onclick=function(){var b=this;b.disabled=true;api('/api/workflow-runs/'+enc(id)+'/stop',{method:'POST',body:{}}).then(function(){return renderWorkflowRun(id);}).catch(function(e){b.disabled=false;fail(e);});};livePoll(function(){return api('/api/workflow-runs/'+enc(id)).then(function(next){if(JSON.stringify(next)!==JSON.stringify(r))return renderWorkflowRun(id);});},2000);}
     });
   }
@@ -4116,6 +4138,17 @@
   }
   // ---------- skill repositories ----------
   var repositoryScan = null;
+  function repositoryInExtensions() { return typeof location !== "undefined" && /^#\/plugins\/sources(?:\/|$)/.test(location.hash); }
+  function repositoryHref(id, extension) {
+    if (extension === undefined) extension = repositoryInExtensions();
+    return (extension ? "#/plugins/sources" : "#/skill-repositories") + (id ? "/" + enc(id) : "");
+  }
+  function repositoryCrumbs(repo, extension) {
+    var crumbs = extension ? [[T("nav.plugins"), "#/plugins"], [T("cap.tab_sources"), repositoryHref(null, true)]] :
+      [[T("nav.skills"), "#/skills"], [T("sr.title"), repositoryHref(null, false)]];
+    if (repo) crumbs.push([repo.name || repo.url]); else crumbs[crumbs.length - 1].pop();
+    return crumbs;
+  }
   function stopRepositoryScan() {
     if (repositoryScan) { repositoryScan.abort(); repositoryScan = null; }
   }
@@ -4154,7 +4187,7 @@
   function repositorySourceHtml(s) {
     if (!s) return "";
     return '<section class="card sr-source"><h3>' + esc(T("sr.source")) + '</h3><dl class="kv"><dt>' + esc(T("sr.url")) + '</dt><dd><code>' + esc(s.url) + '</code></dd><dt>' + esc(T("sr.path")) + '</dt><dd><code>' + esc(s.path || ".") + '</code></dd><dt>' + esc(T("sr.ref")) + '</dt><dd>' + esc(s.ref || T("sr.default_ref")) + '</dd><dt>' + esc(T("sr.commit")) + '</dt><dd><code>' + esc(s.commit || "—") + '</code></dd></dl>' +
-      (!s.repository_id || s.source_removed ? '<p class="notice">' + esc(T("sr.source_removed")) + '</p>' : '<a class="btn sm" href="#/skill-repositories/' + enc(s.repository_id) + '">' + esc(T("sr.open")) + '</a>') +
+      (!s.repository_id || s.source_removed ? '<p class="notice">' + esc(T("sr.source_removed")) + '</p>' : '<a class="btn sm" href="' + repositoryHref(s.repository_id) + '">' + esc(T("sr.open")) + '</a>') +
       (s.local_modified ? '<p class="notice">' + esc(T("sr.local_modified")) + '</p>' : '') +
       (repositoryNeedsAdoption(s) ? '<p class="notice">' + esc(T("sr.pending_hint")) + '</p><div class="row-actions"><a class="btn sm" href="#/skills/' + enc(s.skill_id) + '?a=' + enc(s.current_version_id) + '&b=' + enc(s.latest_version_id) + '">' + esc(T("diff.compare")) + '</a>' + repositoryButton("sr.apply", 'data-repository-apply', true) + '</div>' : '') + '</section>';
   }
@@ -4194,7 +4227,7 @@
     return '<section class="card sr-presets" aria-labelledby="sr-presets-title"><div class="card-head"><h2 id="sr-presets-title">' + esc(T('sr.presets')) + '</h2></div><p class="hint">' + esc(T('sr.presets_hint')) + '</p><div class="sr-preset-grid">' + repositoryPresets.map(function (p, i) {
       var existing = repositoryPresetMatch(repos, p);
       return '<article class="sr-preset"><small>' + esc(p.owner) + '</small><h3>' + esc(p.name) + '</h3><p>' + esc(T('sr.preset_' + p.id)) + '</p><div class="row-actions"><a class="btn sm ghost" href="' + esc(p.page) + '" target="_blank" rel="noopener noreferrer">' + esc(T('sr.source_page')) + '</a>' +
-        (existing ? '<a class="btn sm" href="#/skill-repositories/' + enc(existing.id) + '">' + esc(T('sr.browse_added')) + '</a>' : repositoryButton('sr.add_scan', 'data-sr-preset="' + i + '"', true)) + '</div></article>';
+        (existing ? '<a class="btn sm" href="' + repositoryHref(existing.id) + '">' + esc(T('sr.browse_added')) + '</a>' : repositoryButton('sr.add_scan', 'data-sr-preset="' + i + '"', true)) + '</div></article>';
     }).join('') + '</div></section>';
   }
   async function ensureRepositoryPreset(preset, signal) {
@@ -4229,10 +4262,10 @@
           await api('/api/skill-repositories/' + enc(saved.id) + '/refresh', {method:'POST',signal:ac.signal});
           if (!alive()) return;
           if (repositoryScan === ac) repositoryScan = null;
-          navigating = true; close(); location.hash = '#/skill-repositories/' + enc(saved.id);
+          navigating = true; close(); location.hash = repositoryHref(saved.id);
         } catch (e) {
           if (!alive()) return;
-          progress.innerHTML = '<p class="notice bad">' + esc(e.message) + '</p>' + (saved ? '<p>' + esc(T('sr.preset_saved')) + '</p><a class="btn" href="#/skill-repositories/' + enc(saved.id) + '">' + esc(T('sr.open')) + '</a>' : '');
+          progress.innerHTML = '<p class="notice bad">' + esc(e.message) + '</p>' + (saved ? '<p>' + esc(T('sr.preset_saved')) + '</p><a class="btn" href="' + repositoryHref(saved.id) + '">' + esc(T('sr.open')) + '</a>' : '');
         } finally {
           if (repositoryPresetPending[preset.id] === ac) delete repositoryPresetPending[preset.id];
           // Keep the page stable while the result dialog remains open.
@@ -4244,19 +4277,19 @@
       if (saved && !navigating && seq === routeSeq) refresh();
     });
   }
-  function renderSkillRepositories(id) {
+  function renderSkillRepositories(id, extension) {
     var seq = routeSeq;
     if (id) return api('/api/skill-repositories/' + enc(id) + '/skills', { fresh: true }).then(function (data) {
       if (seq !== routeSeq) return;
-      renderRepositoryContents(data.repository, data.candidates || []);
+      renderRepositoryContents(data.repository, data.candidates || [], extension);
     });
     return api('/api/skill-repositories', { fresh: true }).then(function (repos) {
       if (seq !== routeSeq) return;
       repos = repos || [];
-      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true) + '</div></div>' + skillTabs('skill-repositories') +
+      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
         repositoryPresetsHtml(repos) + '<p class="hint">' + esc(T('sr.transport_hint')) + '</p><div class="stack">' + (repos.length ? repos.map(function (r, i) {
-          return '<section class="card"><div class="card-head"><span class="ico">' + ic('git') + '</span><div class="grow"><h2><a href="#/skill-repositories/' + enc(r.id) + '">' + esc(r.name || r.url) + '</a></h2><small class="sr-path">' + esc(r.url) + '</small></div><div class="row-actions"><a class="btn sm" href="#/skill-repositories/' + enc(r.id) + '">' + esc(T('sr.open')) + '</a>' + repositoryButton('btn.edit', 'data-sr-edit="' + i + '"') + repositoryButton('sr.remove', 'data-sr-remove="' + i + '"') + '</div></div><p class="muted">' + esc(T('sr.count', {n: Array.isArray(r.candidates) ? r.candidates.length : 0})) + ' · ' + esc(r.ref || T('sr.default_ref')) + ' · <code>' + esc(r.root || '.') + '</code> · ' + esc(r.last_scanned_at ? T('sr.scanned_at', { t: fullTime(r.last_scanned_at) }) : T('sr.not_scanned')) + '</p>' + (r.last_error || r.last_error_code ? '<p class="notice bad">' + esc(repositoryLastError(r)) + '</p>' : '') + '</section>';
-        }).join('') : emptyState('git', T('sr.empty'), T('sr.empty_hint'))) + '</div>', 'skills', [[T('nav.skills'), '#/skills'], [T('sr.title')]]);
+          return '<section class="card"><div class="card-head"><span class="ico">' + ic('git') + '</span><div class="grow"><h2><a href="' + repositoryHref(r.id) + '">' + esc(r.name || r.url) + '</a></h2><small class="sr-path">' + esc(r.url) + '</small></div><div class="row-actions"><a class="btn sm" href="' + repositoryHref(r.id) + '">' + esc(T('sr.open')) + '</a>' + repositoryButton('btn.edit', 'data-sr-edit="' + i + '"') + repositoryButton('sr.remove', 'data-sr-remove="' + i + '"') + '</div></div><p class="muted">' + esc(T('sr.count', {n: Array.isArray(r.candidates) ? r.candidates.length : 0})) + ' · ' + esc(r.ref || T('sr.default_ref')) + ' · <code>' + esc(r.root || '.') + '</code> · ' + esc(r.last_scanned_at ? T('sr.scanned_at', { t: fullTime(r.last_scanned_at) }) : T('sr.not_scanned')) + '</p>' + (r.last_error || r.last_error_code ? '<p class="notice bad">' + esc(repositoryLastError(r)) + '</p>' : '') + '</section>';
+        }).join('') : emptyState('git', T('sr.empty'), T('sr.empty_hint'))) + '</div>', extension ? 'plugins' : 'skills', repositoryCrumbs(null, extension));
       $('#sr-add').onclick = function () { repositoryEditModal(null); };
       $$('[data-sr-preset]').forEach(function (b) { b.onclick = function () { repositoryAddPreset(repositoryPresets[+b.getAttribute('data-sr-preset')]); }; });
       $$('[data-sr-edit]').forEach(function (b) { b.onclick = function () { repositoryEditModal(repos[+b.getAttribute('data-sr-edit')]); }; });
@@ -4275,22 +4308,22 @@
         ev.preventDefault(); if (!f.reportValidity()) return;
         var b = $('button[type=submit]', f); b.disabled = true;
         api('/api/skill-repositories' + (repo ? '/' + enc(repo.id) : ''), { method: repo ? 'PUT' : 'POST', body: { name: f.name.value.trim(), url: f.url.value.trim(), ref: f.ref.value.trim(), root: f.root.value.trim(), revision: r.revision || 0 } }).then(function (saved) {
-          close(); if (location.hash === '#/skill-repositories/' + enc(saved.id)) refresh(); else location.hash = '#/skill-repositories/' + enc(saved.id);
+          close(); if (location.hash === repositoryHref(saved.id)) refresh(); else location.hash = repositoryHref(saved.id);
         }).catch(function (e) { if (!document.contains(f)) return; b.disabled = false; $('#sr-save-error', root).textContent = e.message; });
       };
     });
   }
   function repositoryRemove(repo) {
     confirmDialog({ title: T('sr.remove'), body: T('sr.remove_hint', { name: repo.name || repo.url }), ok: T('sr.remove'), danger: true }).then(function (yes) {
-      if (yes) api('/api/skill-repositories/' + enc(repo.id), { method: 'DELETE' }).then(function () { toast(T('sr.removed')); if (location.hash === '#/skill-repositories') refresh(); else location.hash = '#/skill-repositories'; }).catch(fail);
+      if (yes) api('/api/skill-repositories/' + enc(repo.id), { method: 'DELETE' }).then(function () { toast(T('sr.removed')); if (location.hash === repositoryHref()) refresh(); else location.hash = repositoryHref(); }).catch(fail);
     });
   }
-  function renderRepositoryContents(repo, candidates) {
+  function renderRepositoryContents(repo, candidates, extension) {
     var selected = Object.create(null), query = '', filter = '';
-    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true) + repositoryButton('btn.edit', 'id="sr-edit"') + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"') + repositoryButton('sr.remove', 'id="sr-remove"') + '</div></div>' + skillTabs('skill-repositories') +
+    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true) + repositoryButton('btn.edit', 'id="sr-edit"') + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"') + repositoryButton('sr.remove', 'id="sr-remove"') + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
       '<p class="muted">' + esc(repo.ref || T('sr.default_ref')) + ' · <code>' + esc(repo.root || '.') + '</code> · ' + esc(repo.last_scanned_at ? T('sr.scanned_at', { t: fullTime(repo.last_scanned_at) }) : T('sr.not_scanned')) + '</p><div id="sr-progress" role="status" aria-live="polite"></div>' +
       (repo.last_error || repo.last_error_code ? '<p class="notice bad">' + esc(T('sr.scan_failed')) + ' ' + esc(repositoryLastError(repo)) + '</p>' : '') +
-      '<section class="card flush"><div class="toolbar"><input id="sr-search" type="search" class="grow" placeholder="' + esc(T('sr.search')) + '" aria-label="' + esc(T('sr.search')) + '"><select id="sr-filter" aria-label="' + esc(T('sr.filter')) + '">' + opt('', T('sr.all'), true) + ['new','installed','update','pending','modified','unsupported','removed'].map(function (st) { return opt(st, T('sr.st_' + st)); }).join('') + '</select>' + repositoryButton('sr.select_visible', 'id="sr-select"') + repositoryButton('sr.batch', 'id="sr-batch" disabled', true) + '</div><div id="sr-candidates" class="sr-table"></div></section><p class="hint">' + esc(T('sr.scan_hint')) + '</p>', 'skills', [[T('nav.skills'), '#/skills'], [T('sr.title'), '#/skill-repositories'], [repo.name || repo.url]]);
+      '<section class="card flush"><div class="toolbar"><input id="sr-search" type="search" class="grow" placeholder="' + esc(T('sr.search')) + '" aria-label="' + esc(T('sr.search')) + '"><select id="sr-filter" aria-label="' + esc(T('sr.filter')) + '">' + opt('', T('sr.all'), true) + ['new','installed','update','pending','modified','unsupported','removed'].map(function (st) { return opt(st, T('sr.st_' + st)); }).join('') + '</select>' + repositoryButton('sr.select_visible', 'id="sr-select"') + repositoryButton('sr.batch', 'id="sr-batch" disabled', true) + '</div><div id="sr-candidates" class="sr-table"></div></section><p class="hint">' + esc(T('sr.scan_hint')) + '</p>', extension ? 'plugins' : 'skills', repositoryCrumbs(repo, extension));
     var scope = $('#sr-candidates');
     function visible() { return candidates.filter(function (c) { return (!filter || repositoryStates(c).indexOf(filter) >= 0) && (!query || [c.name,c.description,c.path].join(' ').toLowerCase().indexOf(query) >= 0); }); }
     function draw() {
@@ -6413,7 +6446,9 @@
   // For a method that reads or writes depending on its params (e.g. skills.optimize_settings).
   function rpcRead(method, params) { return rpcCall(method, params, undefined, true); }
   function renderPlugins() {
+    var seq = routeSeq;
     return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; }), rpc("plugins.catalog").catch(function () { return []; })]).then(function (res) {
+      if (seq !== routeSeq) return;
       var d = res[0] || {}, plugins = res[1] || [], trig = res[2] || [], baks = res[3] || [], tname = {}, cat = res[5] || [];
       (res[4] || []).forEach(function (t) { tname[t.id] = t.name; });
       var stat = function (label, v) { return '<div class="stat"><span class="muted">' + esc(label) + "</span><strong>" + esc(v) + "</strong></div>"; };
@@ -6434,11 +6469,11 @@
       }).join("") + "</div>" : emptyState("plugins", T("pl.empty"), T("pl.empty_sub"));
       var trow = trig.length ? '<div class="grid g2 trig-cards">' + trig.map(function (t) { return triggerCard(t, tname); }).join("") + "</div>" : '<p class="muted">' + esc(T("pl.no_triggers")) + "</p>";
       var brow = '<p class="muted">' + esc(baks.length ? T("pl.backups_n", { n: baks.length }) : T("pl.no_backups")) + "</p>";
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn ghost" id="bk-now">' + ic("download", "sm") + esc(T("pl.backup_now")) + '</button><button class="btn" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + '</button><button class="btn primary" id="pl-ai">' + ic("sparkle", "sm") + esc(T("ai.title")) + "</button></div></div>" +
+      mount(capTabs("plugins") + '<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + "</h1><p>" + esc(T("pl.sub")) + '</p></div><div class="actions"><button class="btn ghost" id="bk-now">' + ic("download", "sm") + esc(T("pl.backup_now")) + '</button><button class="btn" id="pl-add">' + ic("upload", "sm") + esc(T("pl.install")) + '</button><button class="btn primary" id="pl-ai">' + ic("sparkle", "sm") + esc(T("ai.title")) + "</button></div></div>" +
         '<h2 class="sec-h">' + ic("star") + esc(T("of.title")) + '<span class="muted sec-sub">' + esc(T("of.sub")) + "</span></h2>" + catalogWall(cat) +
         '<h2 class="sec-h">' + ic("plugins") + esc(T("pl.installed")) + "</h2>" + prow +
         '<h2 class="sec-h">' + ic("globe") + esc(T("pl.triggers")) + '<span class="grow"></span><button class="btn sm" id="tr-add">' + ic("plus", "sm") + esc(T("tr.new")) + "</button></h2>" + trow +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section>", "plugins", [[T("nav.plugins")]]);
+        '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + "</span><h2>" + esc(T("pl.backups")) + "</h2></div>" + brow + "</section>", "plugins", [[T("nav.plugins"), "#/plugins"], [T("cap.tab_plugins")]]);
       $$("[data-pl-uninstall]").forEach(function (b) { b.addEventListener("click", function () {
         var pid = b.getAttribute("data-pl-uninstall");
         confirmDialog({ title: T("pl.uninstall_title"), body: T("pl.uninstall_confirm"), ok: T("pl.uninstall"), danger: true, typeName: pid }).then(function (y) {
@@ -7700,9 +7735,9 @@
   function capLock(c) { return c.lock || c; }
   function capText(k) { return state.dict["cap." + k] ? T("cap." + k) : k; }
   function capTabs(tab) {
-    return '<nav class="cap-tabs" aria-label="' + esc(T("nav.plugins")) + '">' + ["installed", "discover", "tools", "sources", "plugins"].map(function (t) {
-      return '<a class="btn sm' + (t === tab ? ' primary' : ' ghost') + '" href="#/plugins/' + t + '"' + (t === tab ? ' aria-current="page"' : '') + '>' + esc(T("cap.tab_" + t)) + '</a>';
-    }).join("") + '</nav>';
+    return sectionTabs("cap-tabs", T("nav.plugins"), ["installed", "discover", "tools", "sources", "plugins"].map(function (t) {
+      return { href: "#/plugins/" + t, label: T("cap.tab_" + t), active: t === tab };
+    }));
   }
   function capCanConnect(component) {
     return !component.disabled && component.type === "mcp" && component.mcp && ["http", "streamable-http", "sse"].indexOf(component.mcp.type) >= 0;
@@ -7784,19 +7819,24 @@
       return api("/api/capabilities/proposals", { method: "POST", body: { session_id: s.id, source: source } }).then(function () { location.hash = "#/chat/" + enc(s.id); });
     });
   }
-  function renderExtensions(tab) {
+  function renderExtensions(tab, id) {
+    var seq = routeSeq;
     tab = ["installed", "discover", "tools", "sources", "plugins"].indexOf(tab) >= 0 ? tab : "installed";
     if (tab === "tools") return renderCapabilityStorage();
     if (tab === "plugins" || tab === "sources") {
-      return (tab === "plugins" ? renderPlugins() : renderSkillRepositories()).then(function () { var pg = page(); if (pg) pg.insertAdjacentHTML("afterbegin", capTabs(tab)); setNav("plugins"); if(tab === "sources") return capSourceManager(pg); });
+      return (tab === "plugins" ? renderPlugins() : renderSkillRepositories(id, true)).then(function () {
+        if (seq !== routeSeq) return;
+        if (tab === "sources" && !id) return capSourceManager(page());
+      });
     }
     var fetch = tab === "discover" ? api("/api/capabilities/search?q=", { fresh: true }).then(function (r) { return r.results || []; }) : capList();
     if (tab === "tools") fetch = fetch.then(function (rows) { return Promise.all(rows.map(function (c) { return api("/api/capabilities/check", { method: "POST", body: { source: c.id } }).then(function (r) { c.lock.resolved = r.resolved || {}; return c; }); })); });
     return fetch.then(function (rows) {
+      if (seq !== routeSeq) return;
       var body = '<p id="cap-search-warnings" class="muted sm" role="status"></p><div id="cap-results"></div>';
       if (tab === "installed") body = '<label class="btn sm cap-import">' + esc(T("cap.import")) + '<input type="file" id="cap-import" accept=".json,application/json" class="sr-only"></label>' + body;
       if (tab === "discover") body = '<form id="cap-search" class="cap-search"><label class="sr-only" for="cap-query">' + esc(T("cap.search")) + '</label><input id="cap-query" maxlength="200" placeholder="' + esc(T("cap.search")) + '"><button class="btn" type="submit">' + esc(T("cap.search_btn")) + '</button><button class="btn ghost" type="button" id="cap-registry-search">' + esc(T("cap.search_registry")) + '</button><button class="btn ghost" type="button" id="cap-source-preview">' + esc(T("cap.source_preview")) + '</button><button class="btn ghost" type="button" id="cap-marketplace">' + esc(T("cap.marketplace")) + '</button><label class="cap-check"><input type="checkbox" id="cap-public-search"> '+esc(T('cap.public_search'))+'</label></form>' + body;
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + '</h1><p>' + esc(T("cap.subtitle")) + '</p></div></div>' + capTabs(tab) + body, "plugins", [[T("nav.plugins")]]);
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + '</h1><p>' + esc(T("cap.subtitle")) + '</p></div></div>' + capTabs(tab) + body, "plugins", [[T("nav.plugins"), "#/plugins"], [T("cap.tab_" + tab)]]);
       var results = $("#cap-results"), seq = 0;
       var paint = function (items) {
         if (!document.contains(results)) return;
@@ -7966,13 +8006,15 @@
 
   function capStorageBytes(n) { return (Number(n || 0) / (1024 * 1024)).toFixed(1) + " MiB"; }
   function renderCapabilityStorage() {
+    var seq = routeSeq;
     return api("/api/capabilities/storage", { fresh: true }).then(function (s) {
+      if (seq !== routeSeq) return;
       var usage = s.usage || {}, limits = s.limits || {}, envs = usage.environments || {};
       var envBytes = Object.keys(envs).reduce(function (sum, key) { return sum + Number(envs[key] || 0); }, 0);
-      mount('<div class="page-head"><h1>' + esc(T("nav.plugins")) + '</h1></div>' + capTabs("tools") + '<button type="button" class="btn" id="cap-dependency-preferences">'+esc(T('cap.dependency_preferences'))+'</button>' +
+      mount(capTabs("tools") + '<div class="page-head"><div><h1>' + esc(T("cap.tab_tools")) + '</h1><p>' + esc(T("cap.subtitle")) + '</p></div><div class="actions"><button type="button" class="btn" id="cap-dependency-preferences">'+esc(T('cap.dependency_preferences'))+'</button></div></div>' +
         '<section class="card cap-result"><h2>' + esc(T("cap.storage")) + '</h2><dl class="cap-meta"><div><dt>' + esc(T("cap.managed_tools")) + '</dt><dd>' + esc(capStorageBytes(usage.tools_and_runtimes) + " / " + capStorageBytes(limits.tools_and_runtimes)) + '</dd></div><div><dt>' + esc(T("cap.cache")) + '</dt><dd>' + esc(capStorageBytes(usage.cache) + " / " + capStorageBytes(limits.cache)) + '</dd></div><div><dt>' + esc(T("cap.environments")) + '</dt><dd>' + esc(capStorageBytes(envBytes)) + '</dd></div><div><dt>' + esc(T("cap.snapshots")) + '</dt><dd>' + esc(capStorageBytes(s.snapshot_bytes)) + '</dd></div></dl>' +
         ((s.warnings || []).length ? '<p class="field-err">' + esc(T("cap.quota_warning")) + '</p>' : '') + '<p class="muted sm">' + esc(T("cap.gc_note")) + '</p><button type="button" class="btn" id="cap-storage-gc">' + esc(T("cap.clean_storage")) + '</button><p id="cap-storage-result" role="status"></p></section>' +
-        (s.tools || []).map(function (tool) { return '<section class="card cap-result"><h3>' + esc(tool.name) + '</h3><p>' + esc([tool.source, tool.version, capStorageBytes(tool.bytes)].filter(Boolean).join(' · ')) + '</p><p class="muted sm">' + esc(tool.path || '') + '</p></section>'; }).join(''), "plugins", [[T("nav.plugins")]]);
+        (s.tools || []).map(function (tool) { return '<section class="card cap-result"><h3>' + esc(tool.name) + '</h3><p>' + esc([tool.source, tool.version, capStorageBytes(tool.bytes)].filter(Boolean).join(' · ')) + '</p><p class="muted sm">' + esc(tool.path || '') + '</p></section>'; }).join(''), "plugins", [[T("nav.plugins"), "#/plugins"], [T("cap.tab_tools")]]);
       $("#cap-dependency-preferences").addEventListener("click",function(){capDependencyPreferences().catch(fail);});
       $("#cap-storage-gc").addEventListener("click", function (e) { var b = e.currentTarget, result = $("#cap-storage-result");
         confirmDialog({ title: T("cap.clean_storage"), body: T("cap.gc_note"), ok: T("cap.clean_storage") }).then(function (yes) { if (!yes) return; b.disabled = true;
@@ -8054,7 +8096,7 @@
     });
   }
   // ---------- 会话 page (P0) ----------
-  // Sessions on the left (168 px, most recent first), the open session's thread and message
+  // Existing sessions on the left, the open session's thread and message
   // box on the right, the thread scrolling between them. #/chat is a new blank session: the
   // first message creates it (origin "chat", its own empty folder) and the page moves to
   // #/chat/<id>; a blank session whose first message could not start is dropped again. A
@@ -8110,18 +8152,21 @@
     });
   }
   function csHeadHtml(s) {
-    if (!s) return '<header class="cs-head"><h2 class="ell">' + esc(T("cs.new")) + "</h2></header>";
+    if (!s) return '<header class="cs-head sr-only"><h2>' + esc(T("cs.new")) + "</h2></header>";
     var from = s.origin === "run" && CS_ID.test(s.origin_run_id || "") ? '<a class="pill plain sm rc-of" href="#/runs/' + enc(s.origin_run_id) + '" data-tip="' + esc(T("cs.from_run_tip")) + '">' + ic("runs", "sm") + esc(T("cs.from_run")) + "</a>" : "";
     return '<header class="cs-head"><h2 class="ell" data-tip="' + esc(T("cs.created_tip", { t: when(s.created_at) })) + '">' + esc(csTitle(s)) + "</h2>" + from + '<span class="rc-sp"></span>' +
       '<button type="button" class="icon-btn sm danger-text" id="cs-del" aria-label="' + esc(T("cs.del")) + '" data-tip="' + esc(T("cs.del")) + '">' + ic("trash", "sm") + "</button></header>";
   }
   function csPageHtml(list, s) {
-    var cur = s ? s.id : "";
+    var cur = s ? s.id : "", hasHistory = list.length > 0;
     var items = list.length ? list.map(function (x) { return csItemHtml(x, cur); }).join("") : '<p class="cs-none">' + esc(T("cs.none")) + "</p>";
     var thread = s ? csAll(s).map(rcTurnHtml).join("") :
       '<div class="cs-empty">' + ic("chat") + "<strong>" + esc(T("cs.empty")) + "</strong><span>" + esc(T("cs.empty_sub")) + "</span></div>";
-    return '<h1 class="sr-only">' + esc(T("nav.chat")) + '</h1><div class="cs" id="cs"><aside class="cs-side" aria-label="' + esc(T("cs.list")) + '">' +
-      '<a class="btn sm cs-new' + (s ? "" : " active") + '" href="#/chat">' + ic("plus", "sm") + esc(T("cs.new")) + '</a><nav class="cs-list" id="cs-list">' + items + "</nav></aside>" +
+    // An empty history column shifts the first-use welcome and composer off center.
+    // Keep the history accessible when it exists, without reserving space for an empty list.
+    var side = hasHistory ? '<aside class="cs-side" aria-label="' + esc(T("cs.list")) + '">' +
+      '<a class="btn sm cs-new' + (s ? "" : " active") + '" href="#/chat"' + (s ? "" : ' aria-current="page"') + '>' + ic("plus", "sm") + esc(T("cs.new")) + '</a><nav class="cs-list" id="cs-list" aria-label="' + esc(T("cs.list")) + '">' + items + "</nav></aside>" : "";
+    return '<h1 class="sr-only">' + esc(T("nav.chat")) + '</h1><div class="cs' + (!s ? " cs-blank" : "") + (!hasHistory ? " cs-no-history" : "") + '" id="cs">' + side +
       '<section class="cs-main" id="rc" aria-label="' + esc(csTitle(s)) + '">' + csHeadHtml(s) +
       '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">' + thread + "</div>" +
       rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s) }) + "</section></div>";
@@ -9744,7 +9789,7 @@
       case "workflows": p = parts[1] ? renderWorkflowEditor(parts[1]) : renderWorkflows(); break;
       case "workflow-runs": p = renderWorkflowRun(parts[1]); break;
       case "buttons": p = renderButtons(); break;
-      case "plugins": p = renderExtensions(parts[1]); break;
+      case "plugins": p = renderExtensions(parts[1], parts[2]); break;
       case "runs": p = parts[1] ? renderRunDetail(parts[1]) : renderRuns(params); break;
       case "spend": p = renderSpend(params); break;
       case "settings": p = renderSettings(parts[1], parts[2]); break;

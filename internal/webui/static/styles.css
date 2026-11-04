@@ -3756,3 +3756,64 @@ button.rc-tag:hover { color: var(--text); }
   .search-in:focus-within { outline: 2px solid Highlight; }
   .select-popup-option.active { outline: 2px solid Highlight; outline-offset: -2px; }
 }
+
+/* Shared navigation language: section links and local views use the same
+   density, active marker and focus treatment without changing their semantics. */
+.section-tabs, .rw-tabs {
+  display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;
+  min-width: 0; max-width: 100%; overflow-x: auto;
+  padding: 0 0 8px; margin: 0; border: 0; border-bottom: 1px solid var(--border);
+  border-radius: 0; background: transparent;
+}
+.section-tabs > a.btn, .rw-tabs > button, .tabs > a {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; min-height: 36px; height: auto; padding: 7px 12px;
+  border: 0; border-radius: 7px; background: transparent; box-shadow: none;
+  color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500;
+  line-height: 20px; text-decoration: none; white-space: nowrap;
+}
+.section-tabs > a.btn:hover, .rw-tabs > button:hover:not(:disabled), .tabs > a:hover { background: var(--row-hover); color: var(--text); }
+.section-tabs > a[aria-current="page"], .rw-tabs > button.active, .tabs > a.active {
+  background: var(--accent-50); color: var(--accent); font-weight: 600;
+}
+.section-tabs > a:focus-visible, .tabs > a:focus-visible, .set-nav > a:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: -2px;
+}
+.rw-tabs { margin-bottom: 16px; }
+.tabs { gap: 4px; padding-bottom: 8px; }
+.tabs > a { margin-bottom: 0; }
+.set-nav a.active { background: var(--accent-50); color: var(--accent); }
+.cap-search { flex-wrap: wrap; align-items: center; margin: 0; }
+.cap-search input { flex: 1 1 220px; }
+.cap-search .cap-check { margin: 0; }
+.cap-meta>div { grid-template-columns: minmax(112px, 160px) minmax(0, 1fr); }
+.cap-meta dt, .cap-meta small { color: var(--text-3); }
+.content > .cap-result { margin-bottom: 0; }
+.cap-empty { padding: 40px 24px; border: 1px dashed var(--border); border-radius: 12px; text-align: center; }
+.sr-preset { display: flex; flex-direction: column; min-width: 0; }
+.sr-preset .row-actions { margin-top: auto; padding-top: 12px; flex-wrap: wrap; }
+@media (max-width: 860px) {
+  .set-nav { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .set-nav a { flex: 0 0 auto; white-space: nowrap; }
+}
+@media (max-width: 600px) {
+  .cap-meta>div { grid-template-columns: 1fr; gap: 3px; margin: 12px 0; }
+  .page-head .actions { margin-left: 0; }
+}
+
+/* Balance new conversations within the app content, without an empty history rail. */
+.cs.cs-no-history { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.cs-main { width: 100%; max-width: 960px; justify-self: center; }
+.cs.cs-blank .cs-main { max-width: 800px; justify-content: center; padding-bottom: clamp(16px, 6vh, 64px); }
+.cs.cs-blank .cs-thread { flex: 0 1 auto; padding: 0; }
+.cs.cs-blank .cs-empty { flex: none; padding: 32px 24px; }
+.cs.cs-blank .cs-empty span { max-width: 480px; }
+.cs-head { flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .cs.cs-blank .cs-main { padding-bottom: 16px; }
+  .cs.cs-blank .cs-empty { padding: 24px 12px; }
+}
+@media (max-height: 600px) {
+  .cs.cs-blank .cs-main { justify-content: flex-start; padding-bottom: 0; }
+  .cs.cs-blank .cs-empty { padding: 12px; }
+}

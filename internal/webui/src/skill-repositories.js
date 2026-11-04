@@ -1,5 +1,16 @@
   // ---------- skill repositories ----------
   var repositoryScan = null;
+  function repositoryInExtensions() { return typeof location !== "undefined" && /^#\/plugins\/sources(?:\/|$)/.test(location.hash); }
+  function repositoryHref(id, extension) {
+    if (extension === undefined) extension = repositoryInExtensions();
+    return (extension ? "#/plugins/sources" : "#/skill-repositories") + (id ? "/" + enc(id) : "");
+  }
+  function repositoryCrumbs(repo, extension) {
+    var crumbs = extension ? [[T("nav.plugins"), "#/plugins"], [T("cap.tab_sources"), repositoryHref(null, true)]] :
+      [[T("nav.skills"), "#/skills"], [T("sr.title"), repositoryHref(null, false)]];
+    if (repo) crumbs.push([repo.name || repo.url]); else crumbs[crumbs.length - 1].pop();
+    return crumbs;
+  }
   function stopRepositoryScan() {
     if (repositoryScan) { repositoryScan.abort(); repositoryScan = null; }
   }
@@ -38,7 +49,7 @@
   function repositorySourceHtml(s) {
     if (!s) return "";
     return '<section class="card sr-source"><h3>' + esc(T("sr.source")) + '</h3><dl class="kv"><dt>' + esc(T("sr.url")) + '</dt><dd><code>' + esc(s.url) + '</code></dd><dt>' + esc(T("sr.path")) + '</dt><dd><code>' + esc(s.path || ".") + '</code></dd><dt>' + esc(T("sr.ref")) + '</dt><dd>' + esc(s.ref || T("sr.default_ref")) + '</dd><dt>' + esc(T("sr.commit")) + '</dt><dd><code>' + esc(s.commit || "—") + '</code></dd></dl>' +
-      (!s.repository_id || s.source_removed ? '<p class="notice">' + esc(T("sr.source_removed")) + '</p>' : '<a class="btn sm" href="#/skill-repositories/' + enc(s.repository_id) + '">' + esc(T("sr.open")) + '</a>') +
+      (!s.repository_id || s.source_removed ? '<p class="notice">' + esc(T("sr.source_removed")) + '</p>' : '<a class="btn sm" href="' + repositoryHref(s.repository_id) + '">' + esc(T("sr.open")) + '</a>') +
       (s.local_modified ? '<p class="notice">' + esc(T("sr.local_modified")) + '</p>' : '') +
       (repositoryNeedsAdoption(s) ? '<p class="notice">' + esc(T("sr.pending_hint")) + '</p><div class="row-actions"><a class="btn sm" href="#/skills/' + enc(s.skill_id) + '?a=' + enc(s.current_version_id) + '&b=' + enc(s.latest_version_id) + '">' + esc(T("diff.compare")) + '</a>' + repositoryButton("sr.apply", 'data-repository-apply', true) + '</div>' : '') + '</section>';
   }
@@ -78,7 +89,7 @@
     return '<section class="card sr-presets" aria-labelledby="sr-presets-title"><div class="card-head"><h2 id="sr-presets-title">' + esc(T('sr.presets')) + '</h2></div><p class="hint">' + esc(T('sr.presets_hint')) + '</p><div class="sr-preset-grid">' + repositoryPresets.map(function (p, i) {
       var existing = repositoryPresetMatch(repos, p);
       return '<article class="sr-preset"><small>' + esc(p.owner) + '</small><h3>' + esc(p.name) + '</h3><p>' + esc(T('sr.preset_' + p.id)) + '</p><div class="row-actions"><a class="btn sm ghost" href="' + esc(p.page) + '" target="_blank" rel="noopener noreferrer">' + esc(T('sr.source_page')) + '</a>' +
-        (existing ? '<a class="btn sm" href="#/skill-repositories/' + enc(existing.id) + '">' + esc(T('sr.browse_added')) + '</a>' : repositoryButton('sr.add_scan', 'data-sr-preset="' + i + '"', true)) + '</div></article>';
+        (existing ? '<a class="btn sm" href="' + repositoryHref(existing.id) + '">' + esc(T('sr.browse_added')) + '</a>' : repositoryButton('sr.add_scan', 'data-sr-preset="' + i + '"', true)) + '</div></article>';
     }).join('') + '</div></section>';
   }
   async function ensureRepositoryPreset(preset, signal) {
@@ -113,10 +124,10 @@
           await api('/api/skill-repositories/' + enc(saved.id) + '/refresh', {method:'POST',signal:ac.signal});
           if (!alive()) return;
           if (repositoryScan === ac) repositoryScan = null;
-          navigating = true; close(); location.hash = '#/skill-repositories/' + enc(saved.id);
+          navigating = true; close(); location.hash = repositoryHref(saved.id);
         } catch (e) {
           if (!alive()) return;
-          progress.innerHTML = '<p class="notice bad">' + esc(e.message) + '</p>' + (saved ? '<p>' + esc(T('sr.preset_saved')) + '</p><a class="btn" href="#/skill-repositories/' + enc(saved.id) + '">' + esc(T('sr.open')) + '</a>' : '');
+          progress.innerHTML = '<p class="notice bad">' + esc(e.message) + '</p>' + (saved ? '<p>' + esc(T('sr.preset_saved')) + '</p><a class="btn" href="' + repositoryHref(saved.id) + '">' + esc(T('sr.open')) + '</a>' : '');
         } finally {
           if (repositoryPresetPending[preset.id] === ac) delete repositoryPresetPending[preset.id];
           // Keep the page stable while the result dialog remains open.
@@ -128,19 +139,19 @@
       if (saved && !navigating && seq === routeSeq) refresh();
     });
   }
-  function renderSkillRepositories(id) {
+  function renderSkillRepositories(id, extension) {
     var seq = routeSeq;
     if (id) return api('/api/skill-repositories/' + enc(id) + '/skills', { fresh: true }).then(function (data) {
       if (seq !== routeSeq) return;
-      renderRepositoryContents(data.repository, data.candidates || []);
+      renderRepositoryContents(data.repository, data.candidates || [], extension);
     });
     return api('/api/skill-repositories', { fresh: true }).then(function (repos) {
       if (seq !== routeSeq) return;
       repos = repos || [];
-      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true) + '</div></div>' + skillTabs('skill-repositories') +
+      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
         repositoryPresetsHtml(repos) + '<p class="hint">' + esc(T('sr.transport_hint')) + '</p><div class="stack">' + (repos.length ? repos.map(function (r, i) {
-          return '<section class="card"><div class="card-head"><span class="ico">' + ic('git') + '</span><div class="grow"><h2><a href="#/skill-repositories/' + enc(r.id) + '">' + esc(r.name || r.url) + '</a></h2><small class="sr-path">' + esc(r.url) + '</small></div><div class="row-actions"><a class="btn sm" href="#/skill-repositories/' + enc(r.id) + '">' + esc(T('sr.open')) + '</a>' + repositoryButton('btn.edit', 'data-sr-edit="' + i + '"') + repositoryButton('sr.remove', 'data-sr-remove="' + i + '"') + '</div></div><p class="muted">' + esc(T('sr.count', {n: Array.isArray(r.candidates) ? r.candidates.length : 0})) + ' · ' + esc(r.ref || T('sr.default_ref')) + ' · <code>' + esc(r.root || '.') + '</code> · ' + esc(r.last_scanned_at ? T('sr.scanned_at', { t: fullTime(r.last_scanned_at) }) : T('sr.not_scanned')) + '</p>' + (r.last_error || r.last_error_code ? '<p class="notice bad">' + esc(repositoryLastError(r)) + '</p>' : '') + '</section>';
-        }).join('') : emptyState('git', T('sr.empty'), T('sr.empty_hint'))) + '</div>', 'skills', [[T('nav.skills'), '#/skills'], [T('sr.title')]]);
+          return '<section class="card"><div class="card-head"><span class="ico">' + ic('git') + '</span><div class="grow"><h2><a href="' + repositoryHref(r.id) + '">' + esc(r.name || r.url) + '</a></h2><small class="sr-path">' + esc(r.url) + '</small></div><div class="row-actions"><a class="btn sm" href="' + repositoryHref(r.id) + '">' + esc(T('sr.open')) + '</a>' + repositoryButton('btn.edit', 'data-sr-edit="' + i + '"') + repositoryButton('sr.remove', 'data-sr-remove="' + i + '"') + '</div></div><p class="muted">' + esc(T('sr.count', {n: Array.isArray(r.candidates) ? r.candidates.length : 0})) + ' · ' + esc(r.ref || T('sr.default_ref')) + ' · <code>' + esc(r.root || '.') + '</code> · ' + esc(r.last_scanned_at ? T('sr.scanned_at', { t: fullTime(r.last_scanned_at) }) : T('sr.not_scanned')) + '</p>' + (r.last_error || r.last_error_code ? '<p class="notice bad">' + esc(repositoryLastError(r)) + '</p>' : '') + '</section>';
+        }).join('') : emptyState('git', T('sr.empty'), T('sr.empty_hint'))) + '</div>', extension ? 'plugins' : 'skills', repositoryCrumbs(null, extension));
       $('#sr-add').onclick = function () { repositoryEditModal(null); };
       $$('[data-sr-preset]').forEach(function (b) { b.onclick = function () { repositoryAddPreset(repositoryPresets[+b.getAttribute('data-sr-preset')]); }; });
       $$('[data-sr-edit]').forEach(function (b) { b.onclick = function () { repositoryEditModal(repos[+b.getAttribute('data-sr-edit')]); }; });
@@ -159,22 +170,22 @@
         ev.preventDefault(); if (!f.reportValidity()) return;
         var b = $('button[type=submit]', f); b.disabled = true;
         api('/api/skill-repositories' + (repo ? '/' + enc(repo.id) : ''), { method: repo ? 'PUT' : 'POST', body: { name: f.name.value.trim(), url: f.url.value.trim(), ref: f.ref.value.trim(), root: f.root.value.trim(), revision: r.revision || 0 } }).then(function (saved) {
-          close(); if (location.hash === '#/skill-repositories/' + enc(saved.id)) refresh(); else location.hash = '#/skill-repositories/' + enc(saved.id);
+          close(); if (location.hash === repositoryHref(saved.id)) refresh(); else location.hash = repositoryHref(saved.id);
         }).catch(function (e) { if (!document.contains(f)) return; b.disabled = false; $('#sr-save-error', root).textContent = e.message; });
       };
     });
   }
   function repositoryRemove(repo) {
     confirmDialog({ title: T('sr.remove'), body: T('sr.remove_hint', { name: repo.name || repo.url }), ok: T('sr.remove'), danger: true }).then(function (yes) {
-      if (yes) api('/api/skill-repositories/' + enc(repo.id), { method: 'DELETE' }).then(function () { toast(T('sr.removed')); if (location.hash === '#/skill-repositories') refresh(); else location.hash = '#/skill-repositories'; }).catch(fail);
+      if (yes) api('/api/skill-repositories/' + enc(repo.id), { method: 'DELETE' }).then(function () { toast(T('sr.removed')); if (location.hash === repositoryHref()) refresh(); else location.hash = repositoryHref(); }).catch(fail);
     });
   }
-  function renderRepositoryContents(repo, candidates) {
+  function renderRepositoryContents(repo, candidates, extension) {
     var selected = Object.create(null), query = '', filter = '';
-    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true) + repositoryButton('btn.edit', 'id="sr-edit"') + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"') + repositoryButton('sr.remove', 'id="sr-remove"') + '</div></div>' + skillTabs('skill-repositories') +
+    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true) + repositoryButton('btn.edit', 'id="sr-edit"') + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"') + repositoryButton('sr.remove', 'id="sr-remove"') + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
       '<p class="muted">' + esc(repo.ref || T('sr.default_ref')) + ' · <code>' + esc(repo.root || '.') + '</code> · ' + esc(repo.last_scanned_at ? T('sr.scanned_at', { t: fullTime(repo.last_scanned_at) }) : T('sr.not_scanned')) + '</p><div id="sr-progress" role="status" aria-live="polite"></div>' +
       (repo.last_error || repo.last_error_code ? '<p class="notice bad">' + esc(T('sr.scan_failed')) + ' ' + esc(repositoryLastError(repo)) + '</p>' : '') +
-      '<section class="card flush"><div class="toolbar"><input id="sr-search" type="search" class="grow" placeholder="' + esc(T('sr.search')) + '" aria-label="' + esc(T('sr.search')) + '"><select id="sr-filter" aria-label="' + esc(T('sr.filter')) + '">' + opt('', T('sr.all'), true) + ['new','installed','update','pending','modified','unsupported','removed'].map(function (st) { return opt(st, T('sr.st_' + st)); }).join('') + '</select>' + repositoryButton('sr.select_visible', 'id="sr-select"') + repositoryButton('sr.batch', 'id="sr-batch" disabled', true) + '</div><div id="sr-candidates" class="sr-table"></div></section><p class="hint">' + esc(T('sr.scan_hint')) + '</p>', 'skills', [[T('nav.skills'), '#/skills'], [T('sr.title'), '#/skill-repositories'], [repo.name || repo.url]]);
+      '<section class="card flush"><div class="toolbar"><input id="sr-search" type="search" class="grow" placeholder="' + esc(T('sr.search')) + '" aria-label="' + esc(T('sr.search')) + '"><select id="sr-filter" aria-label="' + esc(T('sr.filter')) + '">' + opt('', T('sr.all'), true) + ['new','installed','update','pending','modified','unsupported','removed'].map(function (st) { return opt(st, T('sr.st_' + st)); }).join('') + '</select>' + repositoryButton('sr.select_visible', 'id="sr-select"') + repositoryButton('sr.batch', 'id="sr-batch" disabled', true) + '</div><div id="sr-candidates" class="sr-table"></div></section><p class="hint">' + esc(T('sr.scan_hint')) + '</p>', extension ? 'plugins' : 'skills', repositoryCrumbs(repo, extension));
     var scope = $('#sr-candidates');
     function visible() { return candidates.filter(function (c) { return (!filter || repositoryStates(c).indexOf(filter) >= 0) && (!query || [c.name,c.description,c.path].join(' ').toLowerCase().indexOf(query) >= 0); }); }
     function draw() {

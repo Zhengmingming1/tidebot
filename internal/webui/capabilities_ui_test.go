@@ -18,7 +18,7 @@ func TestCapabilityUI(t *testing.T) {
 		}
 	}
 	app := appJS(t)
-	for _, want := range []string{`case "plugins": p = renderExtensions(parts[1]); break;`, `capRefreshSession(sec, s.id)`, `secondary_confirm:`, `session_id: p.session_id`, `textContent = v.text`, `capAutoTest(v.id)`, `/api/capabilities/storage/gc`, `/credentials_clear`, `reviewed: true`, `default_enabled:value`, `capLoadSkillBadges(page())`, `T("cap.smoke_prompt")`, `(r.cli_auth || [])`, `local_choices:localChoices`, `data-cap-local-choice`, `/api/capabilities/sources`, `/api/capabilities/dependency-preferences`, `providers=skills.sh,github`, `capLoadLegacyInventory(results)`} {
+	for _, want := range []string{`case "plugins": p = renderExtensions(parts[1], parts[2]); break;`, `capRefreshSession(sec, s.id)`, `secondary_confirm:`, `session_id: p.session_id`, `textContent = v.text`, `capAutoTest(v.id)`, `/api/capabilities/storage/gc`, `/credentials_clear`, `reviewed: true`, `default_enabled:value`, `capLoadSkillBadges(page())`, `T("cap.smoke_prompt")`, `(r.cli_auth || [])`, `local_choices:localChoices`, `data-cap-local-choice`, `/api/capabilities/sources`, `/api/capabilities/dependency-preferences`, `providers=skills.sh,github`, `capLoadLegacyInventory(results)`} {
 		if !strings.Contains(app, want) {
 			t.Errorf("missing capability UI integration %s", want)
 		}
@@ -29,7 +29,7 @@ function T(s){return s;}
 function esc(s){return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function enc(s){return encodeURIComponent(s);}
 function ic(s){return '<i>'+s+'</i>';}
-`+src+`
+`+regexpFunc(t, app, "function sectionTabs(")+src+`
 var bad=[];function ok(b,m){if(!b)bad.push(m);}
 ok(capCanConnect({type:'mcp',mcp:{type:'http',url:'https://example.com/mcp'}}),'registry remotes can connect without an upstream OAuth flag');
 ok(!capCanConnect({type:'mcp',disabled:true,mcp:{type:'http'}}),'disabled remote cannot connect');

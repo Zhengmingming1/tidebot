@@ -134,7 +134,23 @@
     paintChannelDot();
     var tag = document.querySelector("#shell .brand-text small"); if (tag) tag.textContent = T("brand.tagline");
   }
-  function setNav(name) { $$("#nav a").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-nav") === name); }); }
+  function navSection(name) {
+    return { "skill-repositories": "skills", "skill-sets": "skills", "workflow-runs": "workflows" }[name] || name;
+  }
+  function setNav(name) {
+    name = navSection(name);
+    $$("#nav a").forEach(function (a) {
+      var active = a.getAttribute("data-nav") === name;
+      a.classList.toggle("active", active);
+      if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+  }
+  function sectionTabs(className, label, items) {
+    return '<nav class="section-tabs ' + esc(className) + '" aria-label="' + esc(label) + '">' + items.map(function (item) {
+      return '<a class="btn sm ' + (item.active ? 'primary' : 'ghost') + '" href="' + esc(item.href) + '"' +
+        (item.active ? ' aria-current="page"' : '') + '>' + esc(item.label) + '</a>';
+    }).join('') + '</nav>';
+  }
 
   function renderTopbar(crumbs) {
     // A single crumb repeats the page title right below it: only detail pages get a trail.

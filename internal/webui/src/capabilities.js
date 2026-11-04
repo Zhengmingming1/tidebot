@@ -3,9 +3,9 @@
   function capLock(c) { return c.lock || c; }
   function capText(k) { return state.dict["cap." + k] ? T("cap." + k) : k; }
   function capTabs(tab) {
-    return '<nav class="cap-tabs" aria-label="' + esc(T("nav.plugins")) + '">' + ["installed", "discover", "tools", "sources", "plugins"].map(function (t) {
-      return '<a class="btn sm' + (t === tab ? ' primary' : ' ghost') + '" href="#/plugins/' + t + '"' + (t === tab ? ' aria-current="page"' : '') + '>' + esc(T("cap.tab_" + t)) + '</a>';
-    }).join("") + '</nav>';
+    return sectionTabs("cap-tabs", T("nav.plugins"), ["installed", "discover", "tools", "sources", "plugins"].map(function (t) {
+      return { href: "#/plugins/" + t, label: T("cap.tab_" + t), active: t === tab };
+    }));
   }
   function capCanConnect(component) {
     return !component.disabled && component.type === "mcp" && component.mcp && ["http", "streamable-http", "sse"].indexOf(component.mcp.type) >= 0;
@@ -87,19 +87,24 @@
       return api("/api/capabilities/proposals", { method: "POST", body: { session_id: s.id, source: source } }).then(function () { location.hash = "#/chat/" + enc(s.id); });
     });
   }
-  function renderExtensions(tab) {
+  function renderExtensions(tab, id) {
+    var seq = routeSeq;
     tab = ["installed", "discover", "tools", "sources", "plugins"].indexOf(tab) >= 0 ? tab : "installed";
     if (tab === "tools") return renderCapabilityStorage();
     if (tab === "plugins" || tab === "sources") {
-      return (tab === "plugins" ? renderPlugins() : renderSkillRepositories()).then(function () { var pg = page(); if (pg) pg.insertAdjacentHTML("afterbegin", capTabs(tab)); setNav("plugins"); if(tab === "sources") return capSourceManager(pg); });
+      return (tab === "plugins" ? renderPlugins() : renderSkillRepositories(id, true)).then(function () {
+        if (seq !== routeSeq) return;
+        if (tab === "sources" && !id) return capSourceManager(page());
+      });
     }
     var fetch = tab === "discover" ? api("/api/capabilities/search?q=", { fresh: true }).then(function (r) { return r.results || []; }) : capList();
     if (tab === "tools") fetch = fetch.then(function (rows) { return Promise.all(rows.map(function (c) { return api("/api/capabilities/check", { method: "POST", body: { source: c.id } }).then(function (r) { c.lock.resolved = r.resolved || {}; return c; }); })); });
     return fetch.then(function (rows) {
+      if (seq !== routeSeq) return;
       var body = '<p id="cap-search-warnings" class="muted sm" role="status"></p><div id="cap-results"></div>';
       if (tab === "installed") body = '<label class="btn sm cap-import">' + esc(T("cap.import")) + '<input type="file" id="cap-import" accept=".json,application/json" class="sr-only"></label>' + body;
       if (tab === "discover") body = '<form id="cap-search" class="cap-search"><label class="sr-only" for="cap-query">' + esc(T("cap.search")) + '</label><input id="cap-query" maxlength="200" placeholder="' + esc(T("cap.search")) + '"><button class="btn" type="submit">' + esc(T("cap.search_btn")) + '</button><button class="btn ghost" type="button" id="cap-registry-search">' + esc(T("cap.search_registry")) + '</button><button class="btn ghost" type="button" id="cap-source-preview">' + esc(T("cap.source_preview")) + '</button><button class="btn ghost" type="button" id="cap-marketplace">' + esc(T("cap.marketplace")) + '</button><label class="cap-check"><input type="checkbox" id="cap-public-search"> '+esc(T('cap.public_search'))+'</label></form>' + body;
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + '</h1><p>' + esc(T("cap.subtitle")) + '</p></div></div>' + capTabs(tab) + body, "plugins", [[T("nav.plugins")]]);
+      mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + '</h1><p>' + esc(T("cap.subtitle")) + '</p></div></div>' + capTabs(tab) + body, "plugins", [[T("nav.plugins"), "#/plugins"], [T("cap.tab_" + tab)]]);
       var results = $("#cap-results"), seq = 0;
       var paint = function (items) {
         if (!document.contains(results)) return;
@@ -269,13 +274,15 @@
 
   function capStorageBytes(n) { return (Number(n || 0) / (1024 * 1024)).toFixed(1) + " MiB"; }
   function renderCapabilityStorage() {
+    var seq = routeSeq;
     return api("/api/capabilities/storage", { fresh: true }).then(function (s) {
+      if (seq !== routeSeq) return;
       var usage = s.usage || {}, limits = s.limits || {}, envs = usage.environments || {};
       var envBytes = Object.keys(envs).reduce(function (sum, key) { return sum + Number(envs[key] || 0); }, 0);
-      mount('<div class="page-head"><h1>' + esc(T("nav.plugins")) + '</h1></div>' + capTabs("tools") + '<button type="button" class="btn" id="cap-dependency-preferences">'+esc(T('cap.dependency_preferences'))+'</button>' +
+      mount(capTabs("tools") + '<div class="page-head"><div><h1>' + esc(T("cap.tab_tools")) + '</h1><p>' + esc(T("cap.subtitle")) + '</p></div><div class="actions"><button type="button" class="btn" id="cap-dependency-preferences">'+esc(T('cap.dependency_preferences'))+'</button></div></div>' +
         '<section class="card cap-result"><h2>' + esc(T("cap.storage")) + '</h2><dl class="cap-meta"><div><dt>' + esc(T("cap.managed_tools")) + '</dt><dd>' + esc(capStorageBytes(usage.tools_and_runtimes) + " / " + capStorageBytes(limits.tools_and_runtimes)) + '</dd></div><div><dt>' + esc(T("cap.cache")) + '</dt><dd>' + esc(capStorageBytes(usage.cache) + " / " + capStorageBytes(limits.cache)) + '</dd></div><div><dt>' + esc(T("cap.environments")) + '</dt><dd>' + esc(capStorageBytes(envBytes)) + '</dd></div><div><dt>' + esc(T("cap.snapshots")) + '</dt><dd>' + esc(capStorageBytes(s.snapshot_bytes)) + '</dd></div></dl>' +
         ((s.warnings || []).length ? '<p class="field-err">' + esc(T("cap.quota_warning")) + '</p>' : '') + '<p class="muted sm">' + esc(T("cap.gc_note")) + '</p><button type="button" class="btn" id="cap-storage-gc">' + esc(T("cap.clean_storage")) + '</button><p id="cap-storage-result" role="status"></p></section>' +
-        (s.tools || []).map(function (tool) { return '<section class="card cap-result"><h3>' + esc(tool.name) + '</h3><p>' + esc([tool.source, tool.version, capStorageBytes(tool.bytes)].filter(Boolean).join(' · ')) + '</p><p class="muted sm">' + esc(tool.path || '') + '</p></section>'; }).join(''), "plugins", [[T("nav.plugins")]]);
+        (s.tools || []).map(function (tool) { return '<section class="card cap-result"><h3>' + esc(tool.name) + '</h3><p>' + esc([tool.source, tool.version, capStorageBytes(tool.bytes)].filter(Boolean).join(' · ')) + '</p><p class="muted sm">' + esc(tool.path || '') + '</p></section>'; }).join(''), "plugins", [[T("nav.plugins"), "#/plugins"], [T("cap.tab_tools")]]);
       $("#cap-dependency-preferences").addEventListener("click",function(){capDependencyPreferences().catch(fail);});
       $("#cap-storage-gc").addEventListener("click", function (e) { var b = e.currentTarget, result = $("#cap-storage-result");
         confirmDialog({ title: T("cap.clean_storage"), body: T("cap.gc_note"), ok: T("cap.clean_storage") }).then(function (yes) { if (!yes) return; b.disabled = true;

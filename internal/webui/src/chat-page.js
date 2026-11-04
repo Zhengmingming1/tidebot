@@ -1,5 +1,5 @@
   // ---------- 会话 page (P0) ----------
-  // Sessions on the left (168 px, most recent first), the open session's thread and message
+  // Existing sessions on the left, the open session's thread and message
   // box on the right, the thread scrolling between them. #/chat is a new blank session: the
   // first message creates it (origin "chat", its own empty folder) and the page moves to
   // #/chat/<id>; a blank session whose first message could not start is dropped again. A
@@ -55,18 +55,21 @@
     });
   }
   function csHeadHtml(s) {
-    if (!s) return '<header class="cs-head"><h2 class="ell">' + esc(T("cs.new")) + "</h2></header>";
+    if (!s) return '<header class="cs-head sr-only"><h2>' + esc(T("cs.new")) + "</h2></header>";
     var from = s.origin === "run" && CS_ID.test(s.origin_run_id || "") ? '<a class="pill plain sm rc-of" href="#/runs/' + enc(s.origin_run_id) + '" data-tip="' + esc(T("cs.from_run_tip")) + '">' + ic("runs", "sm") + esc(T("cs.from_run")) + "</a>" : "";
     return '<header class="cs-head"><h2 class="ell" data-tip="' + esc(T("cs.created_tip", { t: when(s.created_at) })) + '">' + esc(csTitle(s)) + "</h2>" + from + '<span class="rc-sp"></span>' +
       '<button type="button" class="icon-btn sm danger-text" id="cs-del" aria-label="' + esc(T("cs.del")) + '" data-tip="' + esc(T("cs.del")) + '">' + ic("trash", "sm") + "</button></header>";
   }
   function csPageHtml(list, s) {
-    var cur = s ? s.id : "";
+    var cur = s ? s.id : "", hasHistory = list.length > 0;
     var items = list.length ? list.map(function (x) { return csItemHtml(x, cur); }).join("") : '<p class="cs-none">' + esc(T("cs.none")) + "</p>";
     var thread = s ? csAll(s).map(rcTurnHtml).join("") :
       '<div class="cs-empty">' + ic("chat") + "<strong>" + esc(T("cs.empty")) + "</strong><span>" + esc(T("cs.empty_sub")) + "</span></div>";
-    return '<h1 class="sr-only">' + esc(T("nav.chat")) + '</h1><div class="cs" id="cs"><aside class="cs-side" aria-label="' + esc(T("cs.list")) + '">' +
-      '<a class="btn sm cs-new' + (s ? "" : " active") + '" href="#/chat">' + ic("plus", "sm") + esc(T("cs.new")) + '</a><nav class="cs-list" id="cs-list">' + items + "</nav></aside>" +
+    // An empty history column shifts the first-use welcome and composer off center.
+    // Keep the history accessible when it exists, without reserving space for an empty list.
+    var side = hasHistory ? '<aside class="cs-side" aria-label="' + esc(T("cs.list")) + '">' +
+      '<a class="btn sm cs-new' + (s ? "" : " active") + '" href="#/chat"' + (s ? "" : ' aria-current="page"') + '>' + ic("plus", "sm") + esc(T("cs.new")) + '</a><nav class="cs-list" id="cs-list" aria-label="' + esc(T("cs.list")) + '">' + items + "</nav></aside>" : "";
+    return '<h1 class="sr-only">' + esc(T("nav.chat")) + '</h1><div class="cs' + (!s ? " cs-blank" : "") + (!hasHistory ? " cs-no-history" : "") + '" id="cs">' + side +
       '<section class="cs-main" id="rc" aria-label="' + esc(csTitle(s)) + '">' + csHeadHtml(s) +
       '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">' + thread + "</div>" +
       rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s) }) + "</section></div>";

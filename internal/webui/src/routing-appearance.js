@@ -112,7 +112,7 @@
       case "workflows": p = parts[1] ? renderWorkflowEditor(parts[1]) : renderWorkflows(); break;
       case "workflow-runs": p = renderWorkflowRun(parts[1]); break;
       case "buttons": p = renderButtons(); break;
-      case "plugins": p = renderExtensions(parts[1]); break;
+      case "plugins": p = renderExtensions(parts[1], parts[2]); break;
       case "runs": p = parts[1] ? renderRunDetail(parts[1]) : renderRuns(params); break;
       case "spend": p = renderSpend(params); break;
       case "settings": p = renderSettings(parts[1], parts[2]); break;
