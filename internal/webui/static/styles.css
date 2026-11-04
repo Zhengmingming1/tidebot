@@ -3820,3 +3820,28 @@ button.rc-tag:hover { color: var(--text); }
 
 /* Align mixed icon/text network controls without inline baseline offsets. */
 .network-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s1); margin-block: 1em; }
+/* External-tool authorization: readable prose, bounded rows, explicit empty state. */
+.modal.cap-grants-modal { width: min(640px, 100%); overflow-wrap: anywhere; }
+.cap-grant-body { min-width: 0; line-height: 1.6; }
+.cap-grant-intro { margin: 0 0 18px; color: var(--text-2); }
+.cap-grant-warning { padding: 14px 16px; border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 10px; background: var(--warn-50); }
+.cap-grant-warning strong { color: var(--warn); }
+.cap-grant-warning p { margin: 6px 0 0; white-space: normal; }
+.cap-grant-empty { margin-top: 20px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-sunk); }
+.cap-grant-empty h3, .cap-grant-group h3 { margin: 0; }
+.cap-grant-empty p { margin: 8px 0; color: var(--text-2); }
+.cap-grant-empty ol { padding-left: 22px; margin: 12px 0 18px; }
+.cap-grant-empty li + li { margin-top: 8px; }
+.cap-grant-group { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+.cap-grant-version { margin: 6px 0 12px; font-size: 12px; color: var(--text-2); }
+.cap-grant-version summary { cursor: pointer; }
+.cap-grant-version p { margin: 6px 0; }
+.cap-grant-tools { display: grid; gap: 8px; }
+.cap-grant-tool { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.cap-grant-tool:hover { background: var(--bg-sunk); }
+.cap-grant-tool:focus-within { outline: 2px solid var(--accent-600); outline-offset: 2px; }
+.cap-grant-tool input { flex: none; margin-top: 4px; }
+.cap-grant-tool > span { min-width: 0; }
+.cap-grant-description { display: block; margin-top: 4px; color: var(--text-2); font-size: 13px; white-space: pre-wrap; }
+.cap-grant-group .actions { flex-wrap: wrap; margin-top: 14px; }
+.cap-grant-group .field-err:empty { display: none; }

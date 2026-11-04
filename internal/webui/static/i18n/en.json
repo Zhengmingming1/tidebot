@@ -2907,7 +2907,7 @@
   "cap.secret_set": "Configured",
   "cap.credentials_saved": "Credentials saved",
   "cap.external_tools": "External tool access",
-  "cap.external_warning": "File access remains read-only. Selected external tools may change service data. Review before granting access; provider read-only hints are not guarantees. Grants apply only to this session and version.",
+  "cap.external_warning": "Local files remain read-only, but external tools may change service data. Review each tool description; a service’s “read-only” claim is not a safety guarantee. Access applies only to this conversation and version.",
   "cap.save_grant": "Grant selected tools",
   "cap.revoke_grant": "Revoke access",
   "cap.grant_empty": "Run the free self-test for a bound MCP capability in Extensions, then return to select tools.",
@@ -2981,5 +2981,16 @@
   "set.bud_scope": "One shared daily money budget covers sessions, tasks, assistance, optimization and canary runs. Set individual task limits in each task. Explicitly bypassed tasks remain exempt.",
   "sp.tokens_usage": "Usage statistics only",
   "tf.timeout_hint": "1–1440 minutes per run, starting when a run slot is acquired. Queue time is excluded. A timeout stops only that run. Leave the limit off for unlimited execution.",
-  "tf.timeout_enabled": "Limit maximum execution time"
+  "tf.timeout_enabled": "Limit maximum execution time",
+  "cap.grant_purpose": "Choose which external service tools AI may use in this conversation, such as looking up information or working with connected services. Ordinary chat needs no authorization.",
+  "cap.grant_review": "Review before granting access",
+  "cap.grant_select": "Select only the tools you need, then save access. Change or revoke access while the conversation is idle.",
+  "cap.grant_version": "Capability and version",
+  "cap.grant_no_description": "No description provided by the service. Verify its purpose before granting access.",
+  "cap.grant_empty_title": "No tools available to authorize",
+  "cap.grant_optional": "You can close this dialog to chat or read local files. To use external tools:",
+  "cap.grant_step_bind": "Bind the MCP extension you need using this conversation’s capabilities control.",
+  "cap.grant_step_test": "Open Extensions and run the capability’s free self-test to discover its tools.",
+  "cap.grant_step_select": "Return to this conversation to select and authorize individual tools.",
+  "cap.grant_open_extensions": "Open Extensions"
 }

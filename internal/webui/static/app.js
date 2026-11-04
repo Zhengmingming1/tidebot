@@ -7983,16 +7983,43 @@
       });
     });
   }
+  function capGrantsHtml(groups) {
+    return '<div class="card-head"><span class="ico">' + ic("box") + '</span><h2>' + esc(T("cap.external_tools")) + '</h2></div>' +
+      '<div class="cap-grant-body"><p class="cap-grant-intro" id="cap-grant-intro">' + esc(T("cap.grant_purpose")) + '</p>' +
+      '<aside class="cap-grant-warning"><strong>' + esc(T("cap.grant_review")) + '</strong><p>' + esc(T("cap.external_warning")) + '</p></aside>' +
+      (groups.length ? '<p class="muted sm">' + esc(T("cap.grant_select")) + '</p>' + groups.map(function (g, i) {
+        return '<section class="cap-grant-group" data-cap-grant="' + i + '" aria-labelledby="cap-grant-title-' + i + '"><h3 id="cap-grant-title-' + i + '">' + esc(g.component) + '</h3>' +
+          '<details class="cap-grant-version"><summary>' + esc(T("cap.grant_version")) + '</summary><p>' + esc(g.capability_id + ' · ' + g.version_id) + '</p></details>' +
+          '<div class="cap-grant-tools">' + (g.tools || []).map(function (tool, j) {
+            var description = 'cap-tool-description-' + i + '-' + j;
+            return '<label class="cap-grant-tool"><input type="checkbox" data-cap-tool value="' + esc(tool.name) + '" aria-describedby="' + description + '"' + ((g.granted_tools || []).indexOf(tool.name) >= 0 ? ' checked' : '') + '><span><strong>' + esc(tool.name) + '</strong><span class="cap-grant-description" id="' + description + '">' + esc(tool.description || T("cap.grant_no_description")) + '</span></span></label>';
+          }).join('') + '</div><div class="actions"><button type="button" class="btn sm primary" data-cap-grant-save>' + esc(T("cap.save_grant")) + '</button><button type="button" class="btn sm ghost" data-cap-grant-revoke>' + esc(T("cap.revoke_grant")) + '</button></div><p class="field-err" data-cap-grant-error role="alert"></p></section>';
+      }).join('') : '<section class="cap-grant-empty"><h3>' + esc(T("cap.grant_empty_title")) + '</h3><p>' + esc(T("cap.grant_optional")) + '</p><ol><li>' + esc(T("cap.grant_step_bind")) + '</li><li>' + esc(T("cap.grant_step_test")) + '</li><li>' + esc(T("cap.grant_step_select")) + '</li></ol><button type="button" class="btn" data-cap-open-extensions>' + esc(T("cap.grant_open_extensions")) + '</button></section>') +
+      '</div><div class="actions"><button type="button" class="btn" data-close>' + esc(T("btn.close")) + '</button></div>';
+  }
   function capGrantsDialog(sid) {
-    return api("/api/capability-grants?session_id="+enc(sid),{fresh:true}).then(function(groups){
-      modal('<div class="card-head"><h2>'+esc(T("cap.external_tools"))+'</h2></div><p class="pill warn">'+esc(T("cap.external_warning"))+'</p>'+(groups.length?groups.map(function(g,i){return '<section class="card cap-result" data-cap-grant="'+i+'"><h3>'+esc(g.component)+'</h3><p class="muted sm">'+esc(g.capability_id+' · '+g.version_id)+'</p>'+(g.tools||[]).map(function(tool){return '<label class="cap-check"><input type="checkbox" data-cap-tool value="'+esc(tool.name)+'"'+((g.granted_tools||[]).indexOf(tool.name)>=0?' checked':'')+'> <strong>'+esc(tool.name)+'</strong></label><p class="muted sm">'+esc(tool.description||'')+'</p>';}).join('')+'<div class="actions"><button class="btn sm primary" data-cap-grant-save>'+esc(T("cap.save_grant"))+'</button><button class="btn sm ghost" data-cap-grant-revoke>'+esc(T("cap.revoke_grant"))+'</button></div><p class="field-err" data-cap-grant-error></p></section>';}).join(''):'<p>'+esc(T("cap.grant_empty"))+'</p>')+'<div class="actions"><button class="btn" data-close>'+esc(T("btn.close"))+'</button></div>',function(root){
-        $$("[data-cap-grant]",root).forEach(function(section){
-          var g=groups[Number(section.getAttribute("data-cap-grant"))],busy=false;
-          var write=function(revoke){if(busy)return;busy=true;$$("button",section).forEach(function(b){b.disabled=true;});
-            var body={session_id:sid,capability_id:g.capability_id,version_id:g.version_id,component:g.component,discovery_hash:g.discovery_hash,tools:$$("[data-cap-tool]",section).filter(function(t){return !revoke&&t.checked;}).map(function(t){return t.value;})};
-            api("/api/capability-grants",{method:revoke?"DELETE":"PUT",body:body}).then(function(){toast(T("cap.grants_saved"));if(revoke)$$("[data-cap-tool]",section).forEach(function(t){t.checked=false;});}).catch(function(e){$("[data-cap-grant-error]",section).textContent=e.message;}).finally(function(){busy=false;$$("button",section).forEach(function(b){b.disabled=false;});});
+    return api("/api/capability-grants?session_id=" + enc(sid), { fresh: true }).then(function (groups) {
+      modal(capGrantsHtml(groups), function (root, close) {
+        var box = $(".modal", root), open = $("[data-cap-open-extensions]", root);
+        box.classList.add("cap-grants-modal"); box.setAttribute("aria-describedby", "cap-grant-intro");
+        if (open) open.addEventListener("click", function () { close(); location.hash = "#/plugins/installed"; });
+        $$("[data-cap-grant]", root).forEach(function (section) {
+          var g = groups[Number(section.getAttribute("data-cap-grant"))], busy = false;
+          var write = function (revoke) {
+            if (busy) return;
+            busy = true; section.setAttribute("aria-busy", "true");
+            $("[data-cap-grant-error]", section).textContent = "";
+            $$("button,input", section).forEach(function (b) { b.disabled = true; });
+            var body = { session_id: sid, capability_id: g.capability_id, version_id: g.version_id, component: g.component, discovery_hash: g.discovery_hash, tools: $$("[data-cap-tool]", section).filter(function (t) { return !revoke && t.checked; }).map(function (t) { return t.value; }) };
+            api("/api/capability-grants", { method: revoke ? "DELETE" : "PUT", body: body }).then(function () {
+              toast(T("cap.grants_saved"));
+              if (revoke) $$("[data-cap-tool]", section).forEach(function (t) { t.checked = false; });
+            }).catch(function (e) { $("[data-cap-grant-error]", section).textContent = e.message; }).finally(function () {
+              busy = false; section.removeAttribute("aria-busy"); $$("button,input", section).forEach(function (b) { b.disabled = false; });
+            });
           };
-          $("[data-cap-grant-save]",section).addEventListener("click",function(){write(false);});$("[data-cap-grant-revoke]",section).addEventListener("click",function(){write(true);});
+          $("[data-cap-grant-save]", section).addEventListener("click", function () { write(false); });
+          $("[data-cap-grant-revoke]", section).addEventListener("click", function () { write(true); });
         });
       });
     });

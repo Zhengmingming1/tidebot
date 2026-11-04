@@ -2907,7 +2907,7 @@
   "cap.secret_set": "已填写",
   "cap.credentials_saved": "凭据已保存",
   "cap.external_tools": "外部工具授权",
-  "cap.external_warning": "文件操作仍只读。勾选的外部工具可能修改服务端数据，请阅读说明后明确授权；服务声明的只读提示不是保证。授权仅对本会话和当前版本有效。",
+  "cap.external_warning": "本地文件仍为只读，但外部工具可能修改服务端数据。请逐项阅读工具说明；服务声明的“只读”不代表安全保证。授权仅对当前会话和当前版本有效。",
   "cap.save_grant": "授权勾选工具",
   "cap.revoke_grant": "撤销授权",
   "cap.grant_empty": "先在扩展页对已绑定的 MCP 能力运行免费自测，再返回选择工具。",
@@ -2981,5 +2981,16 @@
   "set.bud_scope": "会话、任务、辅助、优化和灰度运行共用一个每日金额预算。单个任务的限制在任务中设置；明确设为跳过预算的任务仍不受限制。",
   "sp.tokens_usage": "仅统计用量",
   "tf.timeout_hint": "每次运行获得槽后开始计时，不含排队时间；超时只停止本次运行。可设置 1–1440 分钟。不勾选则不限制时间。",
-  "tf.timeout_enabled": "限制最长执行时间"
+  "tf.timeout_enabled": "限制最长执行时间",
+  "cap.grant_purpose": "选择允许 AI 在当前会话中使用的外部服务工具，例如查询资料或操作已连接的服务。普通聊天不需要授权。",
+  "cap.grant_review": "授权前请确认",
+  "cap.grant_select": "仅勾选需要的工具，然后保存授权。请在会话空闲时更改或撤销授权。",
+  "cap.grant_version": "查看能力与版本",
+  "cap.grant_no_description": "服务未提供工具说明，请确认用途后再授权。",
+  "cap.grant_empty_title": "暂无可授权的工具",
+  "cap.grant_optional": "如果只想聊天或读取本地文件，可以直接关闭。需要外部工具时：",
+  "cap.grant_step_bind": "在当前会话的“能力”中绑定需要的 MCP 扩展。",
+  "cap.grant_step_test": "前往“扩展”，对该能力运行“免费自测”以发现工具。",
+  "cap.grant_step_select": "返回当前会话，在此逐项选择并授权。",
+  "cap.grant_open_extensions": "前往扩展"
 }
