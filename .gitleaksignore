@@ -6,3 +6,6 @@ internal/webui/prefill_test.go:generic-api-key:17
 
 # Synthetic context-audit prompt fixture, not a credential; variable renamed next commit.
 68bde4a83c88fef25379402471e96321b438cfaf:internal/app/contextplan_test.go:generic-api-key:22
+
+# Go budget assertion expression (MaxTokens.Valid || MaxUSD...), not credential data.
+8b426026cb199ebaa688f4d7070aa0e9775d4832:internal/cost/simplified_test.go:generic-api-key:48

@@ -45,7 +45,10 @@ func TestRemovedBudgetCapsIgnoredAndMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := s.FindBudget(ctx, "global", "", "day", "")
-	if err != nil || b.MaxTokens.Valid || b.MaxUSD.Float64 != 7 || b.Action != "skip" || b.WarnAtPct != 60 {
+	if err != nil || b.MaxTokens.Valid {
+		t.Fatalf("global token cap was not removed: %+v %v", b, err)
+	}
+	if b.MaxUSD.Float64 != 7 || b.Action != "skip" || b.WarnAtPct != 60 {
 		t.Fatalf("global settings lost: %+v %v", b, err)
 	}
 	if _, err := s.FindBudget(ctx, "bucket", BucketAssist, "day", BucketAssist); err != sql.ErrNoRows {
