@@ -117,6 +117,8 @@ if (fails) process.exitCode = 1;
 // regexpFunc returns the one-line-bodied function starting at head up to its closing "  }".
 func regexpFunc(t *testing.T, src, head string) string {
 	t.Helper()
+	// Source files checked out on Windows can contain CRLF line endings.
+	src = strings.ReplaceAll(src, "\r\n", "\n")
 	i := strings.Index(src, head)
 	if i < 0 {
 		t.Fatalf("%s not found", head)
@@ -126,4 +128,16 @@ func regexpFunc(t *testing.T, src, head string) string {
 		t.Fatalf("%s: end not found", head)
 	}
 	return src[i:i+j+5] + "\n"
+}
+
+func TestRegexpFuncLineEndings(t *testing.T) {
+	const source = "  function example() {\n    return true;\n  }\n"
+	for _, ending := range []string{"\n", "\r\n"} {
+		t.Run(map[string]string{"\n": "LF", "\r\n": "CRLF"}[ending], func(t *testing.T) {
+			got := regexpFunc(t, strings.ReplaceAll(source, "\n", ending), "  function example() {")
+			if got != source+"\n" {
+				t.Fatalf("function body = %q, want %q", got, source+"\n")
+			}
+		})
+	}
 }
