@@ -88,24 +88,24 @@
     });
   }
   function renderExtensions(tab, id) {
-    var seq = routeSeq;
+    var routeVersion = routeSeq;
     tab = ["installed", "discover", "tools", "sources", "plugins"].indexOf(tab) >= 0 ? tab : "installed";
     if (tab === "tools") return renderCapabilityStorage();
     if (tab === "plugins" || tab === "sources") {
       return (tab === "plugins" ? renderPlugins() : renderSkillRepositories(id, true)).then(function () {
-        if (seq !== routeSeq) return;
+        if (routeVersion !== routeSeq) return;
         if (tab === "sources" && !id) return capSourceManager(page());
       });
     }
     var fetch = tab === "discover" ? api("/api/capabilities/search?q=", { fresh: true }).then(function (r) { return r.results || []; }) : capList();
     if (tab === "tools") fetch = fetch.then(function (rows) { return Promise.all(rows.map(function (c) { return api("/api/capabilities/check", { method: "POST", body: { source: c.id } }).then(function (r) { c.lock.resolved = r.resolved || {}; return c; }); })); });
     return fetch.then(function (rows) {
-      if (seq !== routeSeq) return;
+      if (routeVersion !== routeSeq) return;
       var body = '<p id="cap-search-warnings" class="muted sm" role="status"></p><div id="cap-results"></div>';
       if (tab === "installed") body = '<label class="btn sm cap-import">' + esc(T("cap.import")) + '<input type="file" id="cap-import" accept=".json,application/json" class="sr-only"></label>' + body;
       if (tab === "discover") body = '<form id="cap-search" class="cap-search"><label class="sr-only" for="cap-query">' + esc(T("cap.search")) + '</label><input id="cap-query" maxlength="200" placeholder="' + esc(T("cap.search")) + '"><button class="btn" type="submit">' + esc(T("cap.search_btn")) + '</button><button class="btn ghost" type="button" id="cap-registry-search">' + esc(T("cap.search_registry")) + '</button><button class="btn ghost" type="button" id="cap-source-preview">' + esc(T("cap.source_preview")) + '</button><button class="btn ghost" type="button" id="cap-marketplace">' + esc(T("cap.marketplace")) + '</button><label class="cap-check"><input type="checkbox" id="cap-public-search"> '+esc(T('cap.public_search'))+'</label></form>' + body;
       mount('<div class="page-head"><div><h1>' + esc(T("nav.plugins")) + '</h1><p>' + esc(T("cap.subtitle")) + '</p></div></div>' + capTabs(tab) + body, "plugins", [[T("nav.plugins"), "#/plugins"], [T("cap.tab_" + tab)]]);
-      var results = $("#cap-results"), seq = 0;
+      var results = $("#cap-results"), searchSeq = 0;
       var paint = function (items) {
         if (!document.contains(results)) return;
         results.innerHTML = items.length ? items.map(function (c) {
@@ -129,11 +129,11 @@
       paint(rows); if(tab === "installed") capLoadLegacyInventory(results);
       if (tab === "installed") $("#cap-import").addEventListener("change", function (e) { capImportFile(e.target.files[0]).catch(fail); });
       if (tab === "discover") $("#cap-source-preview").addEventListener("click",function(e){var b=e.currentTarget,source=$("#cap-query").value.trim();if(!source)return;b.disabled=true;capPropose(source).catch(fail).finally(function(){b.disabled=false;});});
-      if (tab === "discover") $("#cap-marketplace").addEventListener("click",function(e){var b=e.currentTarget,n=++seq,source=$("#cap-query").value.trim();if(!source)return;b.disabled=true;api("/api/capabilities/marketplace",{method:"POST",body:{source:source}}).then(function(r){if(n===seq)paint((r.entries||[]).map(function(entry){return {id:entry.source,title:entry.name,description:[entry.trust,entry.commit||entry.ref,entry.path].filter(Boolean).join(' · '),url:entry.repository};}));}).catch(fail).finally(function(){b.disabled=false;});});
-      if (tab === "discover") $("#cap-registry-search").addEventListener("click", function(e){var b=e.currentTarget,n=++seq;b.disabled=true;api("/api/capabilities/registry/search?q="+enc($("#cap-query").value),{fresh:true}).then(function(r){if(n===seq)paint(r.results||[]);}).catch(fail).finally(function(){b.disabled=false;});});
+      if (tab === "discover") $("#cap-marketplace").addEventListener("click",function(e){var b=e.currentTarget,n=++searchSeq,source=$("#cap-query").value.trim();if(!source)return;b.disabled=true;api("/api/capabilities/marketplace",{method:"POST",body:{source:source}}).then(function(r){if(n===searchSeq)paint((r.entries||[]).map(function(entry){return {id:entry.source,title:entry.name,description:[entry.trust,entry.commit||entry.ref,entry.path].filter(Boolean).join(' · '),url:entry.repository};}));}).catch(fail).finally(function(){b.disabled=false;});});
+      if (tab === "discover") $("#cap-registry-search").addEventListener("click", function(e){var b=e.currentTarget,n=++searchSeq;b.disabled=true;api("/api/capabilities/registry/search?q="+enc($("#cap-query").value),{fresh:true}).then(function(r){if(n===searchSeq)paint(r.results||[]);}).catch(fail).finally(function(){b.disabled=false;});});
       if (tab === "discover") $("#cap-search").addEventListener("submit", function (e) {
-        e.preventDefault(); var n = ++seq;
-        api("/api/capabilities/search?q=" + enc($("#cap-query").value) + ($("#cap-public-search").checked ? "&providers=skills.sh,github" : ""), { fresh: true }).then(function (r) { if (n === seq) {paint(r.results || []);$("#cap-search-warnings").textContent=(r.warnings || []).join(" · ");} }).catch(fail);
+        e.preventDefault(); var n = ++searchSeq;
+        api("/api/capabilities/search?q=" + enc($("#cap-query").value) + ($("#cap-public-search").checked ? "&providers=skills.sh,github" : ""), { fresh: true }).then(function (r) { if (n === searchSeq) {paint(r.results || []);$("#cap-search-warnings").textContent=(r.warnings || []).join(" · ");} }).catch(fail);
       });
     });
   }
