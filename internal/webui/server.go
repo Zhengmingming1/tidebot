@@ -32,6 +32,9 @@ import (
 
 // Deps are services the HTTP layer needs.
 type Deps struct {
+	CapabilitySecrets     CapabilitySecretAPI
+	CapabilityBindings    CapabilityBindingAPI
+	RunCapabilityButton   func(id, taskID, prompt, provider, skillID, versionID string) (string, error)
 	StartSkillSetEval     func(SkillSetEvalRequest) (SkillSetEvaluation, error)
 	GetSkillSetEval       func(context.Context, string) (SkillSetEvaluation, error)
 	ListSkillSetEvals     func(context.Context, string) ([]SkillSetEvaluation, error)
@@ -83,6 +86,7 @@ type Deps struct {
 	// ChatSessions (optional) backs /api/chat-sessions: continue a finished run as
 	// a session, one read-only `claude -p --resume` per turn. No page uses it yet.
 	ChatSessions ChatSessionAPI
+	Capabilities CapabilityAPI
 
 	// Public handlers mounted without session auth (they authenticate themselves),
 	// e.g. /hooks/ (webhook token/HMAC) and /metrics (bearer token).

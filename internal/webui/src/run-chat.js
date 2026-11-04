@@ -118,6 +118,10 @@
   function bindRunChat(r) {
     var sec = $("#rc");
     if (!sec) return;
+    if (r.status === "failed" || r.status === "timeout") {
+      var fix = document.createElement("button"); fix.type = "button"; fix.className = "btn sm ghost"; fix.textContent = T("cap.fix_session"); sec.insertBefore(fix, sec.firstChild);
+      fix.addEventListener("click", function () { fix.disabled = true; api("/api/capabilities/recover", {method:"POST",body:{run_id:r.id}}).then(function (v) { draftSave("cs_"+v.session.id,v.draft_prompt); draftFlush(); location.hash="#/chat/"+enc(v.session.id); }).catch(function(e){fix.disabled=false;fail(e);}); });
+    }
     bindChat(sec, {
       id: r.chat_session ? r.chat_session.id : "", key: rcDraftKey(r.id), pre: r._chat, turns: rcTurns,
       create: function () { return api("/api/chat-sessions", { method: "POST", body: { run_id: r.id } }); },
@@ -172,6 +176,7 @@
       var sep = $("#rc-sep", sec);
       if (sep) sep.hidden = !turns.length;
       if (o.onPaint) o.onPaint(s);
+      if (typeof capRefreshSession === "function") capRefreshSession(sec, s.id);
       rcElapsed();
       sync();
       if (busy()) livePoll(load, RC_POLL_MS); else if (st.polling) stopPoll();

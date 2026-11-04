@@ -3719,3 +3719,22 @@ button.rc-tag:hover { color: var(--text); }
 .cs-cap-row small { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .cost-policy{border:1px solid var(--border);border-radius:12px;padding:16px;margin:16px 0}.cost-choices{border:0;padding:0;margin:12px 0}.cost-choice{display:flex;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;margin:8px 0;cursor:pointer}.cost-choice small{display:block;margin-top:4px}.cost-choice input{flex:none}.cost-policy input:disabled{opacity:.55}.cost-policy [hidden]{display:none}
+
+/* Server-generated capability confirmations, both in sessions and extensions. */
+.cap-tabs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 18px; }
+.cap-search { display:flex; gap:8px; margin-bottom:16px; }
+.cap-search input { flex:1; min-width:0; }
+.cap-result,.cap-proposal { margin-bottom:14px; padding:16px; overflow-wrap:anywhere; }
+.cap-meta { margin:10px 0; font-size:12px; }
+.cap-meta>div { display:grid; grid-template-columns:72px minmax(0,1fr); gap:10px; margin:7px 0; }
+.cap-meta dt { color:var(--muted); }
+.cap-meta dd { margin:0; min-width:0; overflow-wrap:anywhere; }
+.cap-meta small { display:block; color:var(--muted); }
+.cap-check { display:block; font-size:12px; margin:9px 0; }
+.cap-findings { padding-left:20px; font-size:12px; max-height:160px; overflow:auto; }
+.cap-file { white-space:pre-wrap; overflow-wrap:anywhere; max-height:50vh; overflow:auto; font-size:12px; }
+.cap-session-proposals { max-height:40%; flex-shrink:0; overflow:auto; padding:0 16px; }
+.cap-session-proposals:empty { display:none; }
+.cap-empty { padding:24px 0; }
+@media(max-width:600px) { .cap-meta>div { grid-template-columns:55px minmax(0,1fr); } .cap-session-proposals { padding:0 8px; } }
+.cap-bound-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; font-size:12px; }

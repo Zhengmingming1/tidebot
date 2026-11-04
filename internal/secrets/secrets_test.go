@@ -1,6 +1,10 @@
 package secrets
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
 
 func TestEnvBackend(t *testing.T) {
 	var b EnvBackend
@@ -22,5 +26,22 @@ func TestMemoryAndMask(t *testing.T) {
 	got, err := chain.Get("a")
 	if err != nil || got != "abcdefghij" {
 		t.Fatal(got, err)
+	}
+}
+
+type unavailableBackend struct{ Backend }
+
+func (unavailableBackend) Get(string) (string, error) {
+	return "", fmt.Errorf("fixture storage failure")
+}
+func TestMissingSecretIsDistinctFromStoreFailure(t *testing.T) {
+	for _, b := range []Backend{NewMemory(), EnvBackend{}, NewFileBackend(t.TempDir()), Chain{NewMemory(), EnvBackend{}}} {
+		if _, err := b.Get("nonexistent_fixture_secret"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("missing credential error = %v", err)
+		}
+	}
+	chain := Chain{unavailableBackend{}, NewMemory()}
+	if _, err := chain.Get("nonexistent_fixture_secret"); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatal("store failure hidden by missing fallback", err)
 	}
 }

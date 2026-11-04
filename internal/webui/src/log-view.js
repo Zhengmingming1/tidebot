@@ -269,6 +269,7 @@
       if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
       if ($("#rd-chg")) bindRunChanges($("#rd-chg"), r);
       bindRunWorkspace(r, live);
+      capLoadRunBindings(id, $("#rd-inspector"));
       // opened from a list row's change badge: bring the card into view
       if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });
       state.chgJump = null;

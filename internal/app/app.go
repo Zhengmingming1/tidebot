@@ -78,6 +78,7 @@ type App struct {
 	power powerWatch
 	loc   atomic.Pointer[time.Location] // scheduling timezone (see timezone.go)
 
+	capState   capabilityState
 	skillEvals skillEvalState
 	policyRuns policyRunState
 
@@ -191,7 +192,7 @@ func Open(cfg config.Config) (*App, error) {
 		StartDependencyCheck: a.startDependencyCheck, DependencyCheckStatus: a.dependencyCheckStatus,
 		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Workflows: a.Workflows, Ver: ver, Reg: reg, Log: log,
-		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync,
+		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync, CapabilityBindings: a, CapabilitySecrets: a, RunCapabilityButton: a.startCapabilityButton,
 		StopRun:  func(id string) (string, error) { return a.StopRun(context.Background(), id) },
 		QueuePos: a.Runner.QueuePos,
 		LogPath:  a.Runner.LogPath, LogWait: a.Runner.LogWait, Location: cfg.Location(), LocFn: a.Loc,
@@ -205,7 +206,7 @@ func Open(cfg config.Config) (*App, error) {
 		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
 		QuietAt:       a.QuietAt,
 		QuickRunSkill: a.startQuickRunSkill, StartRun: a.startRun, UndoRunChanges: a.undoRunChanges, CheckRunUndo: a.checkRunUndo,
-		Providers: providerAdmin{a}, ChatSessions: a,
+		Providers: providerAdmin{a}, ChatSessions: a, Capabilities: a,
 		Public: map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},
 	})
 	return a, nil
@@ -213,6 +214,7 @@ func Open(cfg config.Config) (*App, error) {
 
 // Close releases DB resources.
 func (a *App) Close() error {
+	a.cancelCapabilityDeviceLogins()
 	a.closeFreePool()
 	if a.Sched != nil {
 		a.Sched.Stop()
@@ -325,6 +327,11 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	if err := a.applyGuard(ctx, &opts); err != nil {
 		return runner.Result{}, err
 	}
+	capCleanup, capErr := a.applyCapabilityRuntime(ctx, &opts)
+	if capErr != nil {
+		return runner.Result{}, capErr
+	}
+	defer capCleanup()
 	defer a.applyRunMCP(ctx, &opts, bucket)()
 	// Keep Claude Code from self-updating mid-run; version is recorded per run.
 	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")

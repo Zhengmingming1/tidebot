@@ -1,0 +1,310 @@
+package capability
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"sort"
+)
+
+// UninstallResult distinguishes removed registrations from retained immutable
+// data. Uninstall never deletes credentials, user files, or snapshot bytes.
+type UninstallResult struct {
+	OK            bool                 `json:"ok"`
+	RemovedSkills []string             `json:"removed_skills"`
+	Retained      []UninstallRetention `json:"retained"`
+}
+type UninstallRetention struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
+func (s *Store) UninstallWithReport(ctx context.Context, capID, actor string) (UninstallResult, error) {
+	out := UninstallResult{RemovedSkills: []string{}, Retained: []UninstallRetention{}}
+	err := s.uninstall(ctx, capID, actor, &out)
+	if err != nil {
+		return UninstallResult{RemovedSkills: []string{}, Retained: []UninstallRetention{}}, err
+	}
+	out.OK = true
+	return out, nil
+}
+
+// cleanupSkillRegistrations runs under the uninstall transaction's writer lock.
+// Immutable skill versions/blobs remain available to retained snapshots. Only
+// skills whose complete provenance belongs to this capability can be removed.
+func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, out *UninstallResult, preview bool) error {
+	own := map[string]map[string]bool{}
+	shared := map[string]bool{}
+	rows, err := tx.QueryContext(ctx, `SELECT capability_id,lock_json,lock_sha256 FROM capability_versions`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid, raw, digest string
+		if err = rows.Scan(&cid, &raw, &digest); err != nil {
+			rows.Close()
+			return err
+		}
+		sum := sha256.Sum256([]byte(raw))
+		if hex.EncodeToString(sum[:]) != digest {
+			rows.Close()
+			return errors.New("capability lock integrity mismatch; uninstall cleanup refused")
+		}
+		var l Lock
+		if err = json.Unmarshal([]byte(raw), &l); err != nil {
+			rows.Close()
+			return err
+		}
+		for _, c := range l.Components {
+			if c.SkillID == "" {
+				continue
+			}
+			if cid != capID {
+				shared[c.SkillID] = true
+				continue
+			}
+			if own[c.SkillID] == nil {
+				own[c.SkillID] = map[string]bool{}
+			}
+			own[c.SkillID][c.VersionID] = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(own))
+	for sid := range own {
+		ids = append(ids, sid)
+	}
+	sort.Strings(ids)
+	for _, sid := range ids {
+		var present int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM skills WHERE id=?`, sid).Scan(&present); err != nil {
+			return err
+		}
+		if present == 0 {
+			continue
+		}
+		reason := ""
+		var runPins int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM capability_run_bindings WHERE capability_id=?`, capID).Scan(&runPins); err != nil {
+			return err
+		}
+		if runPins > 0 {
+			reason = "retained by capability run history"
+		}
+		if shared[sid] {
+			reason = "referenced by another capability snapshot"
+		}
+		if reason == "" {
+			reason, err = skillRegistrationRetention(ctx, tx, sid, own[sid])
+			if err != nil {
+				return err
+			}
+		}
+		if reason != "" {
+			out.Retained = append(out.Retained, UninstallRetention{"skill", sid, reason})
+			continue
+		}
+		if preview {
+			out.RemovedSkills = append(out.RemovedSkills, sid)
+			continue
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM pointers WHERE entity_type='skill' AND entity_id=?`, sid); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM skills WHERE id=?`, sid); err != nil {
+			return err
+		}
+		out.RemovedSkills = append(out.RemovedSkills, sid)
+	}
+	out.Retained = append(out.Retained,
+		UninstallRetention{"snapshots", capID, "immutable capability and skill versions retained for audit; snapshot cleanup requires explicit confirmation"},
+		UninstallRetention{"managed_dependencies", capID, "tools and environments remain referenced by retained snapshots; use reviewed storage cleanup after snapshot cleanup"},
+		UninstallRetention{"credentials", capID, "credentials require separate explicit revoke and clear confirmation"})
+	return nil
+}
+
+func skillRegistrationRetention(ctx context.Context, tx *sql.Tx, sid string, ownedVersions map[string]bool) (string, error) {
+	var count int
+	var registeredName string
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM skills WHERE id=?`, sid).Scan(&registeredName); err != nil {
+		return "", err
+	}
+	// A provenance marker alone is insufficient: all versions must also occur in
+	// this capability's immutable locks. User edits and optimized versions survive.
+	rows, err := tx.QueryContext(ctx, `SELECT id,content_json FROM versions WHERE entity_type='skill' AND entity_id=?`, sid)
+	if err != nil {
+		return "", err
+	}
+	versions := 0
+	foreign := false
+	for rows.Next() {
+		var vid, raw string
+		if err = rows.Scan(&vid, &raw); err != nil {
+			rows.Close()
+			return "", err
+		}
+		var manifest struct {
+			Name string `json:"name"`
+		}
+		if err = json.Unmarshal([]byte(raw), &manifest); err != nil {
+			rows.Close()
+			return "", err
+		}
+		if manifest.Name != registeredName {
+			foreign = true
+		}
+		versions++
+		if !ownedVersions[vid] {
+			foreign = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return "", err
+	}
+	if foreign || versions == 0 {
+		return "skill has independent or modified versions", nil
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM operation_log WHERE entity_type='skill' AND entity_id=? AND actor='capability:ui'`, sid).Scan(&count); err != nil {
+		return "", err
+	}
+	if count == 0 {
+		return "capability ownership cannot be established", nil
+	}
+	checks := []struct{ query, reason string }{
+		{`SELECT count(*) FROM skills WHERE id=? AND (optimize_mode<>'off' OR canary_ratio<>0.2 OR canary_runs<>10 OR trust_level<>'local' OR last_analyzed_at IS NOT NULL)`, "skill has customized settings"},
+		{`SELECT count(*) FROM operation_log WHERE entity_type='skill' AND entity_id=? AND actor<>'capability:ui'`, "skill has independent user changes"},
+		{`SELECT count(*) FROM run_skill_bindings WHERE skill_id=?`, "retained by run history"},
+		{`SELECT count(*) FROM canary_runs WHERE skill_id=?`, "retained by canary history"},
+		{`SELECT count(*) FROM skill_proposals WHERE skill_id=?`, "retained by skill proposals"},
+		{`SELECT count(*) FROM skill_repository_bindings WHERE skill_id=?`, "retained by a repository binding"},
+		{`SELECT count(*) FROM version_tags WHERE entity_type='skill' AND entity_id=?`, "retained by an explicit version tag"},
+		{`SELECT count(*) FROM pointers WHERE entity_type='skill' AND entity_id=? AND name<>'current'`, "retained by an explicit version pointer"},
+	}
+	for _, check := range checks {
+		if err = tx.QueryRowContext(ctx, check.query, sid).Scan(&count); err != nil {
+			return "", err
+		}
+		if count > 0 {
+			return check.reason, nil
+		}
+	}
+	// Include historical task/workflow versions, not only currently active pointers.
+	for _, query := range []string{
+		`SELECT content_json FROM versions WHERE entity_type IN ('task','skill_set')`,
+		`SELECT definition_json FROM workflow_versions`,
+		`SELECT snapshot_json FROM workflow_runs`,
+		`SELECT bindings_json FROM chat_sessions`,
+		`SELECT payload_json FROM capability_proposals WHERE status IN ('pending','applying')`,
+	} {
+		rows, err := tx.QueryContext(ctx, query)
+		if err != nil {
+			return "", err
+		}
+		found := false
+		for rows.Next() {
+			var raw sql.NullString
+			if err = rows.Scan(&raw); err != nil {
+				rows.Close()
+				return "", err
+			}
+			if references(raw.String, "", map[string]bool{sid: true}) {
+				found = true
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return "", err
+		}
+		if found {
+			return "retained by task, workflow, session or proposal history", nil
+		}
+	}
+	return "", nil
+}
+
+// Rollback after reinstall can rehydrate exclusive registrations removed during
+// uninstall. Content remains immutable; conflicting names fail the transaction.
+func restoreSnapshotSkills(ctx context.Context, tx *sql.Tx, lock Lock) error {
+	for _, c := range lock.Components {
+		if c.SkillID == "" || c.VersionID == "" {
+			continue
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM skills WHERE id=?`, c.SkillID).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		var raw, created string
+		err := tx.QueryRowContext(ctx, `SELECT content_json,created_at FROM versions WHERE id=? AND entity_type='skill' AND entity_id=?`, c.VersionID, c.SkillID).Scan(&raw, &created)
+		// Legacy snapshots may reference externally supplied skills that were never
+		// registered here. They are not ours to fabricate.
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM operation_log WHERE entity_type='skill' AND entity_id=? AND actor='capability:ui'`, c.SkillID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return errors.New("missing skill registration has no capability ownership provenance")
+		}
+		var manifest struct {
+			Name string `json:"name"`
+		}
+		if err = json.Unmarshal([]byte(raw), &manifest); err != nil {
+			return err
+		}
+		if manifest.Name == "" {
+			return errors.New("retained skill manifest has no name")
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO skills(id,user_id,name,optimize_mode,canary_ratio,canary_runs,trust_level,created_at) VALUES(?,'owner',?,'off',0.2,10,'local',?)`, c.SkillID, manifest.Name, created); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO pointers(entity_type,entity_id,name,version_id,updated_at) VALUES('skill',?,'current',?,?)`, c.SkillID, c.VersionID, created); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PreviewUninstall computes the same reference-safe cleanup without deleting or
+// changing registrations. The transaction is always rolled back.
+func (s *Store) PreviewUninstall(ctx context.Context, capID, versionID string) (UninstallResult, error) {
+	out := UninstallResult{RemovedSkills: []string{}, Retained: []UninstallRetention{}}
+	if versionID == "" {
+		return out, errors.New("exact version required")
+	}
+	err := s.uninstallPinned(ctx, capID, versionID, "preview", &out, true, nil)
+	return out, err
+}
+
+// UninstallVersionWithReport refuses a stale owner-reviewed version under the
+// same writer lock used for reference checks and removal.
+func (s *Store) UninstallVersionWithReport(ctx context.Context, capID, versionID, actor string, reviewed ...UninstallResult) (UninstallResult, error) {
+	out := UninstallResult{RemovedSkills: []string{}, Retained: []UninstallRetention{}}
+	if versionID == "" {
+		return out, errors.New("exact version required")
+	}
+	var expected *UninstallResult
+	if len(reviewed) > 0 {
+		expected = &reviewed[0]
+	}
+	err := s.uninstallPinned(ctx, capID, versionID, actor, &out, false, expected)
+	out.OK = err == nil
+	return out, err
+}

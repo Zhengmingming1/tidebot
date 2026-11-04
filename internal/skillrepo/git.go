@@ -481,7 +481,9 @@ func (c *Client) readBlobs(ctx context.Context, dir string, list []entry, each f
 }
 
 // ReadSkill accepts only a previously scanned immutable commit, never a moving branch.
-func (c *Client) ReadSkill(ctx context.Context, id, commit, root string) (map[string][]byte, error) {
+// ReadSnapshot reads an inert, bounded directory at an already pinned commit.
+// It retains the same path, symlink, submodule and LFS checks as skill imports.
+func (c *Client) ReadSnapshot(ctx context.Context, id, commit, root string) (map[string][]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, OperationTimeout)
 	defer cancel()
 	if !objectID.MatchString(commit) {
@@ -528,6 +530,15 @@ func (c *Client) ReadSkill(ctx context.Context, id, commit, root string) (map[st
 	if err != nil {
 		return nil, err
 	}
+	return files, nil
+}
+
+func (c *Client) ReadSkill(ctx context.Context, id, commit, root string) (map[string][]byte, error) {
+	files, err := c.ReadSnapshot(ctx, id, commit, root)
+	if err != nil {
+		return nil, err
+	}
+
 	if _, ok := files["SKILL.md"]; !ok {
 		return nil, fail("skill_missing", "directory does not contain SKILL.md")
 	}

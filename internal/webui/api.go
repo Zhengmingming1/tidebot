@@ -12,6 +12,11 @@ import (
 var Version = buildinfo.Version
 
 func (s *Server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("/api/capabilities/dependency-preferences", s.withAuthCSRF(s.handleCapabilityDependencyPreferences))
+	mux.HandleFunc("/api/capability-secrets", s.withAuthCSRF(s.handleCapabilitySecrets))
+	mux.HandleFunc("/api/capability-grants", s.withAuthCSRF(s.handleCapabilityGrants))
+	mux.HandleFunc("/api/capability-bindings", s.withAuthCSRF(s.handleCapabilityBindings))
+	mux.HandleFunc("/api/capability-bindings/", s.withAuthCSRF(s.handleCapabilityBindings))
 	mux.HandleFunc("/api/skill-repositories", s.withAuthCSRF(s.handleSkillRepositories))
 	mux.HandleFunc("/api/skill-repositories/", s.withAuthCSRF(s.handleSkillRepositorySub))
 	mux.HandleFunc("/api/dependencies/preflight", s.withAuthCSRF(s.handleDependencyPreflight))
@@ -23,6 +28,8 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/workflow-runs/", s.withAuthCSRF(s.handleWorkflowRunSub))
 	mux.HandleFunc("/api/dependencies/check", s.withAuthCSRF(s.handleDependencyCheck))
 	mux.HandleFunc("/api/dependencies/check/", s.withAuthCSRF(s.handleDependencyCheckStatus))
+	mux.HandleFunc("/api/capabilities", s.withAuthCSRF(s.handleCapabilities))
+	mux.HandleFunc("/api/capabilities/", s.handleCapabilityRoute)
 	mux.HandleFunc("/api/chat-sessions", s.withAuthCSRF(s.handleChatSessions))
 	mux.HandleFunc("/api/chat-sessions/", s.withAuthCSRF(s.handleChatSessionSub))
 	mux.HandleFunc("/api/login", s.handleLogin)

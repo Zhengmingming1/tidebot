@@ -180,6 +180,8 @@ var finishedRun = map[string]bool{"succeeded": true, "failed": true, "timeout": 
 // or a blank one (origin "chat"). A run that already belongs to a session gives
 // that session back.
 func (a *App) CreateChatSession(ctx context.Context, req webui.ChatSessionCreate) (webui.ChatSession, error) {
+	a.capState.sessionCreateMu.Lock()
+	defer a.capState.sessionCreateMu.Unlock()
 	rid := strings.TrimSpace(req.RunID)
 	if rid == "" && req.Origin == "chat" {
 		return a.createBlankChat(ctx, req)
@@ -231,6 +233,9 @@ func (a *App) CreateChatSession(ctx context.Context, req webui.ChatSessionCreate
 	if _, err := tx.ExecContext(ctx, `INSERT INTO chat_session_turns(session_id, turn_index, run_id, created_at) VALUES(?,?,?,?)`, sid, 0, rid, now); err != nil {
 		return webui.ChatSession{}, err
 	}
+	if err := applyCapabilityDefaults(ctx, tx, sid); err != nil {
+		return webui.ChatSession{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return webui.ChatSession{}, err
 	}
@@ -253,9 +258,20 @@ func (a *App) createBlankChat(ctx context.Context, req webui.ChatSessionCreate) 
 		web = 1
 	}
 	now := nowUTC()
-	if _, err := a.DB.ExecContext(ctx, `INSERT INTO chat_sessions(id, title, origin, origin_run_id, workspace_dir, permission_mode, provider,
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return webui.ChatSession{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO chat_sessions(id, title, origin, origin_run_id, workspace_dir, permission_mode, provider,
   web_access, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		sid, title, "chat", "", "", "read", prov, web, "idle", now, now); err != nil {
+		return webui.ChatSession{}, err
+	}
+	if err := applyCapabilityDefaults(ctx, tx, sid); err != nil {
+		return webui.ChatSession{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return webui.ChatSession{}, err
 	}
 	c, err := a.chatSession(ctx, sid)
@@ -345,6 +361,9 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	if err != nil {
 		return webui.ChatTurnStarted{}, err
 	}
+	if err := a.verifySessionCapabilities(ctx, c); err != nil {
+		return webui.ChatTurnStarted{}, err
+	}
 	if c.Status == "closed" {
 		return webui.ChatTurnStarted{}, fmt.Errorf("%w: session closed", webui.ErrChatInvalid)
 	}
@@ -355,8 +374,8 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		return webui.ChatTurnStarted{}, err
 	}
 	// an untitled session (a blank one) is named after its first message
-	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='running', updated_at=?, title=CASE WHEN title='' THEN ? ELSE title END WHERE id=? AND status='idle'`,
-		nowUTC(), textclip.Ellipsis(strings.Join(strings.Fields(message), " "), chatTitleMax), sid)
+	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='running', updated_at=?, title=CASE WHEN title='' THEN ? ELSE title END WHERE id=? AND status='idle' AND bindings_json=?`,
+		nowUTC(), textclip.Ellipsis(strings.Join(strings.Fields(message), " "), chatTitleMax), sid, c.bindingsRaw)
 	if err != nil {
 		return webui.ChatTurnStarted{}, err
 	}
@@ -426,7 +445,8 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		started := ""
 		opts := runner.Options{
 			Prompt: prompt, DisplayPrompt: message, WorkspaceDir: ws, TriggerKind: "session",
-			CostBucket: cost.BucketProduction, RunMode: "read", KeepSession: true, ContextArgs: args, MCPServers: mcp,
+			CostBucket: cost.BucketProduction, RunMode: "read", KeepSession: true, NoPluginMCP: true, ContextArgs: args, MCPServers: mcp,
+			ContextRequest: st.contextRequest(a.modernClaude(), false),
 			OnStart: a.skillStart(st, func(rid string) {
 				started = rid
 				wctx, done := context.WithTimeout(context.Background(), 3*time.Second)
@@ -438,7 +458,10 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 				onStart(rid)
 			}),
 		}
-		r, err := a.RunPromptEx(context.Background(), opts, c.Provider, 0)
+		// Resolve all session capabilities inside RunPromptEx, after its base
+		// environment and guard are initialized. This also pins skill-only bindings.
+		runCtx := context.WithValue(context.Background(), capabilityOwnerKey{}, capabilityOwner{"session", sid})
+		r, err := a.RunPromptEx(runCtx, opts, c.Provider, 0)
 		if started == "" {
 			started = r.RunID
 		}

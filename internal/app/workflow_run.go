@@ -81,6 +81,13 @@ func (a *App) executeWorkflowNode(ctx context.Context, n workflow.Node, prompt, 
 		return "", err
 	}
 	primary := n.SkillBindings[0]
+	if n.ContextRunID != "" {
+		var workflowID string
+		if e := a.DB.QueryRowContext(ctx, `SELECT workflow_id FROM workflow_runs WHERE id=?`, n.ContextRunID).Scan(&workflowID); e != nil {
+			return "", e
+		}
+		ctx = context.WithValue(ctx, capabilityOwnerKey{}, capabilityOwner{"workflow_node", workflowID + ":" + n.ID})
+	}
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var recordErr error

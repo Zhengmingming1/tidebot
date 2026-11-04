@@ -22,6 +22,7 @@
   "runs.js",
   "log-view.js",
   "run-chat.js",
+  "capabilities.js",
   "chat-page.js",
   "spend.js",
   "settings-general.js",

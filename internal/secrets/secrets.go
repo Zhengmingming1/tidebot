@@ -3,11 +3,15 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 )
+
+// ErrNotFound distinguishes absent credentials from an unavailable or corrupt store.
+var ErrNotFound = errors.New("secret not found")
 
 // Backend retrieves secrets by logical name (e.g. "provider:kimi").
 type Backend interface {
@@ -32,7 +36,7 @@ func (e EnvBackend) Get(name string) (string, error) {
 	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 		return v, nil
 	}
-	return "", fmt.Errorf("secret %q not found in env %s", name, k)
+	return "", fmt.Errorf("%w: %q in env %s", ErrNotFound, name, k)
 }
 
 func (e EnvBackend) Set(name, value string) error {
@@ -58,7 +62,7 @@ func (m *MemoryBackend) Get(name string) (string, error) {
 	defer m.mu.RUnlock()
 	v, ok := m.m[name]
 	if !ok || v == "" {
-		return "", fmt.Errorf("secret %q not found", name)
+		return "", fmt.Errorf("%w: %q", ErrNotFound, name)
 	}
 	return v, nil
 }
@@ -87,10 +91,12 @@ func (c Chain) Get(name string) (string, error) {
 		if err == nil && v != "" {
 			return v, nil
 		}
-		last = err
+		if err != nil && (last == nil || !errors.Is(err, ErrNotFound)) {
+			last = err
+		}
 	}
 	if last == nil {
-		last = fmt.Errorf("secret %q not found", name)
+		last = fmt.Errorf("%w: %q", ErrNotFound, name)
 	}
 	return "", last
 }

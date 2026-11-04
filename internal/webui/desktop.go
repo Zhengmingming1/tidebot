@@ -54,6 +54,8 @@ func (s *Server) runButton(ctx context.Context, id string) (label, runID string,
 			continue
 		}
 		switch {
+		case s.deps.RunCapabilityButton != nil:
+			runID, err = s.deps.RunCapabilityButton(b.ID, b.TaskID, expandParams(b.Prompt, b.Params), b.Provider, b.SkillID, b.SkillVerID)
 		case b.TaskID != "" && s.deps.RunTask != nil:
 			runID, err = s.deps.RunTask(b.TaskID, cost.BucketProduction)
 		case b.Prompt != "" && b.SkillID != "" && s.deps.QuickRunSkill != nil:

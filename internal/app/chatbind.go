@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Zhengmingming1/tidebot/internal/capability"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
 	"github.com/Zhengmingming1/tidebot/internal/sessiontools"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
@@ -66,7 +67,7 @@ func (a *App) chatBindingViews(ctx context.Context, raw string) []webui.ChatBind
 }
 
 // SetChatBindings replaces what a session is bound to; it applies from the
-// next turn (a turn being answered keeps what it started with).
+// next turn. Changes require an idle session so grant revocations are effective.
 func (a *App) SetChatBindings(ctx context.Context, sid string, in webui.ChatBindingsInput) (webui.ChatSession, error) {
 	if _, err := a.chatSession(ctx, sid); err != nil {
 		return webui.ChatSession{}, err
@@ -102,8 +103,43 @@ func (a *App) SetChatBindings(ctx context.Context, sid string, in webui.ChatBind
 	if len(b.Skills) > chatBindMax || len(b.Capabilities) > chatBindMax {
 		return webui.ChatSession{}, fmt.Errorf("%w: too many bindings", webui.ErrChatInvalid)
 	}
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return webui.ChatSession{}, err
+	}
+	defer tx.Rollback()
+	var status string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM chat_sessions WHERE id=?`, sid).Scan(&status); err != nil {
+		return webui.ChatSession{}, err
+	}
+	if status != "idle" {
+		return webui.ChatSession{}, capError(409, "session_busy", "change bindings when the session is idle")
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM capability_bindings WHERE owner_kind='session' AND owner_id=?`, sid); err != nil {
+		return webui.ChatSession{}, err
+	}
+	for _, capID := range b.Capabilities {
+		result, e := tx.ExecContext(ctx, `INSERT INTO capability_bindings(owner_kind,owner_id,capability_id,version_id,created_at) SELECT 'session',?,id,'',? FROM capabilities WHERE id=? AND status='installed'`, sid, nowUTC(), capID)
+		if e != nil {
+			return webui.ChatSession{}, e
+		}
+		n, e := result.RowsAffected()
+		if e != nil {
+			return webui.ChatSession{}, e
+		}
+		if n != 1 {
+			return webui.ChatSession{}, fmt.Errorf("%w: unknown capability", webui.ErrChatInvalid)
+		}
+	}
+	// Removed bindings revoke their grants permanently; re-binding needs review.
+	if _, err = tx.ExecContext(ctx, `DELETE FROM capability_tool_grants WHERE session_id=? AND capability_id NOT IN (SELECT capability_id FROM capability_bindings WHERE owner_kind='session' AND owner_id=?)`, sid, sid); err != nil {
+		return webui.ChatSession{}, err
+	}
 	raw, _ := json.Marshal(b)
-	if _, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET bindings_json=?, updated_at=? WHERE id=?`, string(raw), nowUTC(), sid); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE chat_sessions SET bindings_json=?, updated_at=? WHERE id=?`, string(raw), nowUTC(), sid); err != nil {
+		return webui.ChatSession{}, err
+	}
+	if err = tx.Commit(); err != nil {
 		return webui.ChatSession{}, err
 	}
 	c, err := a.chatSession(ctx, sid)
@@ -132,11 +168,28 @@ func (a *App) chatTurnSkills(ctx context.Context, c chatRow) []tasksvc.SkillBind
 		}
 	}
 	for _, id := range parseChatBindings(c.bindingsRaw).Capabilities {
-		for _, sk := range a.capabilitySkills(ctx, id) {
-			if !seen[sk] {
-				seen[sk] = true
-				out = append(out, tasksvc.SkillBinding{SkillID: sk, Mode: "follow"})
+		rec, err := a.caps().Get(ctx, id)
+		if err != nil || a.caps().Verify(ctx, id, rec.VersionID) != nil {
+			continue
+		}
+		for _, component := range rec.Lock.Components {
+			if component.Disabled || component.Type != "skill" && component.Type != "command" || seen[component.SkillID] {
+				continue
 			}
+			files, e := a.Skills.Files(ctx, component.VersionID)
+			if e != nil {
+				continue
+			}
+			_, hash, e := capability.HashFiles(files)
+			want := component.FilesSHA256
+			if want == "" && rec.Lock.Source.Adapter == "skill-dir" {
+				want = rec.Lock.FilesSHA256
+			}
+			if e != nil || want == "" || hash != want {
+				continue
+			}
+			seen[component.SkillID] = true
+			out = append(out, tasksvc.SkillBinding{SkillID: component.SkillID, Mode: "pinned", VersionID: component.VersionID})
 		}
 	}
 	if len(out) > chatBindMax {

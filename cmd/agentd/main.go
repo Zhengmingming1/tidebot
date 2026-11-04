@@ -31,6 +31,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == plugin.BuiltinArg {
 		os.Exit(official.Main(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == sessiontools.HeadersArg {
+		os.Exit(sessiontools.HeadersMain(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == sessiontools.Arg {
 		os.Exit(sessiontools.Main(os.Args[2:]))
 	}

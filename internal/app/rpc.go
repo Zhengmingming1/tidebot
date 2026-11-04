@@ -21,6 +21,8 @@ import (
 
 // RegisterRPC wires JSON-RPC methods onto the IPC server.
 func (a *App) RegisterRPC(srv *ipc.Server) {
+	srv.Register("capability.headers", a.rpcCapabilityHeaders)
+	srv.Register("session.tool", a.rpcSessionTool)
 	srv.Register("status", a.rpcStatus)
 	srv.Register("ping", a.rpcPing)
 	srv.Register("providers.list", a.rpcProvidersList)

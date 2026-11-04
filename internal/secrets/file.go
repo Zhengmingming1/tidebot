@@ -102,7 +102,7 @@ func (f *FileBackend) Get(name string) (string, error) {
 	}
 	v, ok := m[name]
 	if !ok {
-		return "", fmt.Errorf("secret %q not found", name)
+		return "", fmt.Errorf("%w: %q", ErrNotFound, name)
 	}
 	return v, nil
 }
