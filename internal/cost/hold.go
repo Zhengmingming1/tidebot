@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
 )
@@ -25,6 +26,10 @@ type hold struct {
 	taskID, bucket, day string
 	cap, spent          float64 // in currency
 	currency            string
+	mode                Mode
+	tokens, spentTokens int64
+	accountingAt        time.Time
+	fx                  *pricing.FX // launch valuation for policy holds
 }
 
 // Hold is one admitted run's reservation. The zero / nil Hold is a no-op.
@@ -65,7 +70,11 @@ func (h *Hold) SetSpent(amount float64, currency string) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 	if x := hs.m[h.id]; x != nil {
-		x.spent = h.s.GetFX().Convert(amount, currency, x.currency)
+		f := h.s.GetFX()
+		if x.fx != nil {
+			f = *x.fx
+		}
+		x.spent = f.Convert(amount, currency, x.currency)
 	}
 }
 
@@ -96,6 +105,9 @@ func (s *Service) Held(scope, scopeID, bucket, cur string) (float64, int) {
 	var sum float64
 	n := 0
 	for _, x := range hs.m {
+		if x.mode != "" && !x.mode.allows(scope) {
+			continue
+		}
 		if x.day != day {
 			continue // a run from before midnight is charged to the day it started
 		}
@@ -106,7 +118,17 @@ func (s *Service) Held(scope, scopeID, bucket, cur string) (float64, int) {
 			continue
 		}
 		if left := x.cap - x.spent; left > 0 {
-			sum += f.Convert(left, x.currency, cur)
+			reserved := f.Convert(left, x.currency, cur)
+			// A running provider can price natively in USD or CNY. After an FX
+			// change, keep the larger valuation so neither denomination can free
+			// shared budget while the run retains its launch-time allowance.
+			if x.fx != nil {
+				nativeCNY := x.fx.Convert(left, x.currency, pricing.CNY)
+				if alt := f.Convert(nativeCNY, pricing.CNY, cur); alt > reserved {
+					reserved = alt
+				}
+			}
+			sum += reserved
 			n++
 		}
 	}

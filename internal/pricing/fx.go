@@ -1,6 +1,9 @@
 package pricing
 
-import "errors"
+import (
+	"errors"
+	"math"
+)
 
 // FX is the user's display currency and a fixed USD→CNY rate they set.
 // tidebot never fetches exchange rates.
@@ -17,7 +20,7 @@ func (f FX) Validate() error {
 	if f.Display != USD && f.Display != CNY {
 		return errors.New("display currency must be USD or CNY")
 	}
-	if f.USDCNY < 0.1 || f.USDCNY > 100 {
+	if math.IsNaN(f.USDCNY) || math.IsInf(f.USDCNY, 0) || f.USDCNY < 0.1 || f.USDCNY > 100 {
 		return errors.New("exchange rate must be between 0.1 and 100")
 	}
 	return nil

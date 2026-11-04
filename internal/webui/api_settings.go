@@ -209,6 +209,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"default_provider": s.deps.Cfg.DefaultProvider,
 		"budgets":          sum.Budgets,
 		"fx":               s.fx(),
+		"fx_revision":      func() string { b, _ := json.Marshal(s.fx()); return string(b) }(),
 		"totp_enabled":     totp,
 		"timezone":         s.loc().String(),
 		"tz_offset":        tzOffsetMin(s.loc(), time.Now()),

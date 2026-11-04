@@ -2718,7 +2718,7 @@
   }
 
   // ---------- TASKS ----------
-  var taskView = { q: "", status: "", skill: "", tag: "", sort: "name", dir: 1, sel: {} };
+  var taskView = { costMode: "", q: "", status: "", skill: "", tag: "", sort: "name", dir: 1, sel: {} };
   // TASK_FILTERS: [value, label key, tooltip key]. "failing" = the newest run with a result failed.
   var TASK_FILTERS = [["", "runs.all_f"], ["active", "task.active"], ["paused", "task.paused"], ["failing", "tl.f_failing", "tl.f_failing_tip"]];
   function taskMatchesStatus(t, st) { return !st || (st === "failing" ? !!t.failing : t.status === st); }
@@ -2751,6 +2751,7 @@
       mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn ghost" id="t-import" data-tip="' + esc(T("tx.import_tip")) + '">' + ic("upload", "sm") + esc(T("tx.import")) + '</button><button class="btn ghost" id="t-export" data-tip="' + esc(T("tx.export_tip")) + '"' + (tasks.length ? "" : " disabled") + ">" + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
         '<section class="card flush"><div class="toolbar task-tb"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters task-f" role="group">' + TASK_FILTERS.map(function (x) { return '<button data-st="' + x[0] + '" aria-pressed="' + (x[0] === v.status) + '" class="' + (x[0] === v.status ? "active" : "") + '"' + (x[2] ? ' data-tip="' + esc(T(x[2])) + '"' : "") + ">" + esc(T(x[1])) + ' <span class="cnt" data-c="' + x[0] + '"></span></button>'; }).join("") + "</div>" +
+        '<select id="tcost" aria-label="' + esc(T("costmode.title")) + '"><option value="">' + esc(T("costmode.all")) + '</option>' + ['task','global','bypass'].map(function(m){return opt(m,costModeLabel(m),v.costMode===m);}).join('') + '</select>' +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
         (tagList.length ? '<select id="ttag" aria-label="' + esc(T("tg.label")) + '"><option value="">' + esc(T("tg.any")) + "</option>" + tagList.map(function (g) { return opt(g, g + " · " + tagN[g], g === v.tag); }).join("") + '</select><a class="icon-btn sm" id="tgm-link" href="#/settings/tags" data-tip="' + esc(T("tgm.manage")) + '" aria-label="' + esc(T("tgm.manage")) + '">' + ic("settings", "sm") + "</a>" : "") +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
@@ -2761,7 +2762,7 @@
         var q = v.q.trim().toLowerCase(), key = sorters[v.sort];
         // Counts on the chips follow the search and skill filter, not the chip itself (like the runs list).
         var base = tasks.filter(function (t) {
-          return (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!v.tag || (t.tags || []).indexOf(v.tag) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt + " " + (t.tags || []).join(" ")).toLowerCase().indexOf(q) >= 0);
+          return (!v.costMode || (t.cost_control_mode || "task") === v.costMode) && (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!v.tag || (t.tags || []).indexOf(v.tag) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt + " " + (t.tags || []).join(" ")).toLowerCase().indexOf(q) >= 0);
         });
         TASK_FILTERS.forEach(function (x) {
           var n = base.filter(function (t) { return taskMatchesStatus(t, x[0]); }).length, c = $('.task-f [data-c="' + x[0] + '"]');
@@ -2770,7 +2771,7 @@
         var list = base.filter(function (t) { return taskMatchesStatus(t, v.status); }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
-          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
+          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + costModeBadge(t.cost_control_mode) + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
             '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + ((t.skip_runs || []).length ? '<span class="nx-skip" data-tip="' + esc(T("skip.chip_tip", { l: t.skip_runs.map(when).join(T("list.sep")) })) + '">' + ic("skipFwd", "sm") + "</span>" : "") + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
@@ -2796,6 +2797,7 @@
         history.replaceState(null, "", tasksHash(v.status));
         rows();
       }); });
+      $("#tcost").addEventListener("change", function(e){v.costMode=e.target.value;rows();});
       $("#tsk").addEventListener("change", function (e) { v.skill = e.target.value; rows(); });
       // A tag chip in a row or the tag menu filters the list; the address keeps it.
       function setTag(g) {
@@ -2900,7 +2902,7 @@
         z.classList.add("compact");
         prev.innerHTML = '<p class="muted tx-meta" data-tip="' + esc((r.app || "") + (r.exported_at ? " · " + fullTime(r.exported_at) : "")) + '">' + esc(T("tx.found", { n: rows.length, ok: ok })) + "</p>" +
           '<ul class="tx-list">' + rows.map(function (x) {
-            var notes = (x.notes || []).map(function (n) { return TX_NOTES[n] ? '<span class="tag sm warn" data-tip="' + esc(T(TX_NOTES[n] + "_tip", { n: x.from || "" })) + '">' + esc(T(TX_NOTES[n])) + "</span>" : ""; }).join("");
+            var notes = (x.notes || []).indexOf("cost_bypass") >= 0 ? costModeBadge("bypass") : ""; notes += (x.notes || []).map(function (n) { return TX_NOTES[n] ? '<span class="tag sm warn" data-tip="' + esc(T(TX_NOTES[n] + "_tip", { n: x.from || "" })) + '">' + esc(T(TX_NOTES[n])) + "</span>" : ""; }).join("");
             return '<li class="' + (x.error ? "bad" : "") + '"><label class="check"><input type="checkbox" data-noguard data-tx="' + x.index + '"' + (x.error ? " disabled" : " checked") + ' aria-label="' + esc(x.name) + '"></label><div class="tx-main"><div class="tx-name"><strong class="ell">' + esc(x.name) + "</strong>" + notes + "</div>" +
               '<small class="ell">' + (x.error ? esc(T("tx.cant", { e: x.error })) : esc((x.cron ? cronHuman(x.cron) + " · " : T("tx.no_cron") + " · ") + (x.prompt || ""))) + "</small></div></li>";
           }).join("") + "</ul>" +
@@ -2912,8 +2914,9 @@
         var count = function () { var n = picked().length; go.textContent = T("tx.go", { n: n }); go.disabled = !n; };
         $$("[data-tx]", prev).forEach(function (c) { c.addEventListener("change", count); });
         count();
-        go.addEventListener("click", function () {
+        go.addEventListener("click", async function () {
           var pick = picked(), on = $("#tx-en", prev).checked;
+          if (pick.some(function(i){return doc.tasks[i].cost_control && doc.tasks[i].cost_control.mode === "bypass";}) && !await confirmCostBypass(root,pick.map(function(i){return doc.tasks[i].name;}).join(", "))) return;
           go.disabled = true;
           api("/api/tasks/import", { method: "POST", body: { file: doc, apply: true, pick: pick, enable: on } }).then(function (res) {
             var bad = (res.tasks || []).filter(function (x) { return x.error && pick.indexOf(x.index) >= 0; }).length;
@@ -3174,14 +3177,14 @@
       }).join("") + "</ul>" : emptyState("runs", T("runs.none"), "");
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="task-workspace">' + taskWorkspaceHtml() + '<div class="task-workspace-detail"><div class="grid g-detail">' +
-        '<section class="card task-main-card' + (tab === "thread" ? " task-thread-card" : "") + '"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
+        '<section class="card task-main-card' + (tab === "thread" ? " task-thread-card" : "") + '"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + costModeBadge(t.cost_control_mode) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
         '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span>" +
         ((t.tags || []).length ? '<span class="td-tags">' + ic("tag", "sm") + t.tags.map(function (g) { return '<a class="ttag h' + tagHue(g) + '" href="#/tasks?tag=' + enc(g) + '" data-tip="' + esc(T("tg.filter_tip", { t: g })) + '">' + esc(g) + "</a>"; }).join("") + "</span>" : "") + "</div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">' + ic("pause", "sm") + esc(T("td.pause")) + ic("chevDown", "sm") + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
         '<button class="btn" id="t-edit">' + ic("doc", "sm") + esc(T("btn.edit")) + '</button><button class="icon-btn" id="t-dup" data-tip="' + esc(T("td.dup_tip")) + '" aria-label="' + esc(T("td.dup")) + '">' + ic("copy", "sm") + '</button><button class="icon-btn danger-text" id="t-del" data-tip="' + esc(T("td.delete")) + '" aria-label="' + esc(T("td.delete")) + '">' + ic("trash", "sm") + '</button><button class="btn primary" id="t-run">' + ic("play", "sm") + esc(T("td.run_now")) + "</button></div></div>" + pauseNotice(t) +
         '<nav class="tabs">' + tabs.map(function (x) { return '<button data-tab="' + x[0] + '" class="' + (x[0] === tab ? "active" : "") + '">' + esc(x[1]) + (x[0] === "thread" && items.some(function (i) { return i.status === "pending"; }) ? ' <span class="pill info plain">' + items.filter(function (i) { return i.status === "pending"; }).length + "</span>" : "") + "</button>"; }).join("") + "</nav>" +
         taskTab(tab, t, items, vers, runs) + "</section>" +
-        '<div class="stack task-secondary"><section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
+        '<div class="stack task-secondary">' + '<section class="card"><h3>' + esc(T("costmode.title")) + '</h3>' + costModeBadge(t.cost_control_mode) + '<p>' + esc(T("costmode." + (t.cost_control_mode === "bypass" ? "warning" : "global_hint"))) + '</p><p class="hint">' + esc(T("costmode.next_start")) + '</p></section>' + '<section class="card"><div class="card-head"><span class="ico">' + ic("branch") + '</span><h3>' + esc(T("ver.tree")) + '</h3><span class="link muted">' + esc(T("ver.n_current", { n: t.version_no })) + "</span></div>" + versionTree(vers.versions, vers.current) + '<p class="hint mt">' + esc(T("ver.hint")) + "</p></section>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("runs") + '</span><h3>' + esc(T("home.recent")) + '</h3><a class="link" href="#/runs?task=' + enc(t.id) + '">' + esc(T("td.view_all")) + "</a></div>" + mini + "</section></div></div></div></div>",
         "tasks", [[T("nav.tasks"), "#/tasks"], [t.name]]);
       var refreshTaskRail = wireTaskWorkspace(id, tab);
@@ -3226,7 +3229,8 @@
       $("#t-run").parentNode.insertBefore(depButton,$("#t-run"));depButton.onclick=function(){dependencyCheck({kind:"task",id:id});};
       $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(fail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
-      $("#t-dup").addEventListener("click", function () {
+      $("#t-dup").addEventListener("click", async function () {
+        if (t.cost_control_mode === "bypass" && !await confirmDialog({title:T("costmode.confirm_title"),body:T("costmode.warning"),ok:T("costmode.confirm_ok"),danger:true})) return;
         var b = $("#t-dup"); b.disabled = true;
         api(base + "/duplicate", { method: "POST", body: { name: T("td.dup_name", { n: t.name }) } }).then(function (c) {
           location.hash = "#/tasks/" + enc(c.id);
@@ -5478,12 +5482,17 @@
     };
     var whyAll = function (b) { return why(b) + (b.amount > 0 && b.per_day > 1 ? T("af.b_perday", { n: b.per_day, run: money(b.per_run, b.currency), amt: money(b.amount, b.currency) }) : ""); };
     var setBudget = function (b) {
-      if (!b || b.basis === "none" || budgetMine) return;
+      if (!b || b.basis === "none" || budgetMine || (f.cost_enabled && !f.cost_enabled.checked)) return;
       var v = b.amount > 0 ? String(b.amount) : "";
       bPill.setAttribute("data-tip", whyAll(b));
-      bPill.classList.remove("hidden"); filled.budget = b.amount > 0 ? money(b.amount, b.currency) : T("tf.no_cap");
-      if (f.budget_usd.value !== v) { f.budget_usd.value = v; f.budget_usd.classList.remove("af-flash"); void f.budget_usd.offsetWidth; f.budget_usd.classList.add("af-flash"); }
-      lastBudget = v;
+      bPill.classList.remove("hidden");
+      bPill.innerHTML = '<button type="button" class="btn sm">' + esc(T("costmode.adopt",{amount:b.amount > 0 ? money(b.amount,b.currency) : T("tf.no_cap")})) + '</button>';
+      $("button",bPill).addEventListener("click",function(){
+        if(f.cost_enabled && !f.cost_enabled.checked) return;
+        f.budget_usd.value=v;lastBudget=v;budgetMine=true;
+        filled.budget=b.amount > 0 ? money(b.amount,b.currency) : T("tf.no_cap");
+        bPill.classList.add("hidden");paint(lastCron);
+      });
     };
     var ask = function (delay) {
       clearTimeout(timer);
@@ -5616,6 +5625,35 @@
     ["retry_max", "catchup", "notify_success", "notify_answer", "notify_changed", "priority"].forEach(function (n) { f[n].addEventListener("change", sync); });
     sync();
   }
+  function costModeLabel(mode) { return T("costmode." + (mode || "task")); }
+  function costModeBadge(mode) { return '<span class="pill ' + (mode === "bypass" ? 'warn' : 'plain') + '">' + esc(costModeLabel(mode)) + '</span>'; }
+  function costFieldsHtml(cp, currency, daily, run) {
+    cp = cp || { mode: "task", run_amount: run, daily_amount: daily };
+    var mode = cp.mode || "task", c = cp.currency || currency || "USD";
+    return '<section class="cost-policy"><label class="check"><input type="checkbox" name="cost_enabled"' + (mode === "task" ? ' checked' : '') + '> <strong>' + esc(T("costmode.title")) + '</strong></label>' +
+      '<div class="form-row cost-limits">' + fieldHtml(T("costmode.run", {c:c}), '<input name="run_amount" type="number" min="0" max="10000" step="0.0001" value="' + esc(cp.run_amount == null ? '' : cp.run_amount) + '" placeholder="' + esc(T("tf.no_cap")) + '">') +
+      fieldHtml(T("tf.budget_c", {c:c}), '<input name="budget_usd" type="number" min="0" max="10000" step="0.0001" value="' + esc(cp.daily_amount == null ? '' : cp.daily_amount) + '" placeholder="' + esc(T("tf.no_cap")) + '">', '', '<span class="af-pill hidden" id="af-budget"></span>') + '</div>' +
+      '<p class="hint">' + esc(T("costmode.retained")) + '</p><fieldset class="cost-choices"><legend>' + esc(T("costmode.when_off")) + '</legend>' +
+      ['global','bypass'].map(function(m){return '<label class="cost-choice"><input type="radio" name="cost_off_mode" value="'+m+'"'+((mode===m || (mode==='task' && m==='global'))?' checked':'')+'><span><strong>'+esc(costModeLabel(m))+'</strong><small>'+esc(T("costmode."+m+"_hint"))+'</small></span></label>';}).join('') + '</fieldset>' +
+      '<p class="notice warn cost-warning">' + esc(T("costmode.warning")) + '</p><p class="hint">' + esc(T("costmode.next_start")) + '</p></section>';
+  }
+  // Inline confirmation preserves the form draft; the global modal helper replaces it.
+  function confirmCostBypass(root, name) {
+    return new Promise(function(resolve){
+      var bar=document.createElement("section");bar.className="notice warn";bar.setAttribute("role","alertdialog");bar.setAttribute("aria-label",T("costmode.confirm_title",{name:name}));
+      bar.innerHTML='<h3>'+esc(T("costmode.confirm_title",{name:name}))+'</h3><p>'+esc(T("costmode.warning"))+'</p><div class="actions"><button type="button" class="btn cost-back">'+esc(T("btn.cancel"))+'</button><button type="button" class="btn danger-solid cost-ok">'+esc(T("costmode.confirm_ok"))+'</button></div>';
+      (root.querySelector("form") || root).appendChild(bar);
+      function finish(ok){bar.remove();resolve(ok);}
+      $(".cost-back",bar).addEventListener("click",function(){finish(false);});$(".cost-ok",bar).addEventListener("click",function(){finish(true);});$(".cost-back",bar).focus();
+    });
+  }
+  function wireCostFields(root, f) {
+    var choices = $(".cost-choices",root), warning = $(".cost-warning",root);
+    function mode(){return f.cost_enabled.checked ? "task" : f.cost_off_mode.value;}
+    function sync(){ choices.hidden=f.cost_enabled.checked; f.run_amount.disabled=f.budget_usd.disabled=!f.cost_enabled.checked; warning.hidden=mode()!=="bypass"; }
+    f.cost_enabled.addEventListener("change",function(){if(!f.cost_enabled.checked) f.cost_off_mode.value="global";sync();});
+    $$('[name="cost_off_mode"]',root).forEach(function(x){x.addEventListener("change",sync);});sync();return mode;
+  }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings"), api("/api/tasks/tags").catch(function () { return []; })];
@@ -5635,10 +5673,10 @@
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
         fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
-        '<div class="form-row">' + fieldHtml(T("tf.budget_c", { c: curSym(state.currency || "USD") }), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint"), taskId ? "" : '<span class="af-pill hidden" id="af-budget" data-tip="">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") +
-        fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
+        costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null, (st.fx || {}).display === "CNY" ? 0.05 * st.fx.usd_cny : 0.05) +
+        fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') +
         wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +
-        '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" +
+        '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
         '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
         var initial=tf.skill_bindings||(tf.skill_id?[{skill_id:tf.skill_id,mode:tf.skill_version_id?"pinned":"follow",version_id:tf.skill_version_id||"",role:"primary"}]:[]);
@@ -5651,18 +5689,21 @@
         if (!taskId) wireTaskAutofill(root, f, se, skills);
         var ws = wireWsField(root, f.workspace, taskId);
         wirePolicyFields(root, f);
+        var readCostMode = wireCostFields(root, f);
         f.addEventListener("submit", function (e) {
           e.preventDefault();
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
+          body.cost_control = {mode:readCostMode(), run_amount:f.run_amount.value === "" ? null : Number(f.run_amount.value), daily_amount:f.budget_usd.value === "" ? null : Number(f.budget_usd.value), currency:(tf.cost_control || {}).currency || (st.fx || {}).display || "USD", revision:(tf.cost_control || {}).revision || 0, fx_revision:(tf.cost_control || {}).fx_revision || st.fx_revision || ""};
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
-          api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
+          var consent = body.cost_control.mode === "bypass" && (!tf.cost_control || tf.cost_control.mode !== "bypass") ? confirmCostBypass(root,body.name) : Promise.resolve(true);
+          consent.then(function(ok){ if(!ok){btn.disabled=false;return;} return api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
             if (drafty) draftClear("task");
             close(); toast(T(taskId ? "tf.saved" : "tf.created"));
             if (taskId) refresh(); else location.hash = "#/tasks/" + enc(t.id);
-          }).catch(function (err) { btn.disabled = false; fail(err); });
+          }).catch(function (err) { btn.disabled = false; fail(err); }); });
         });
       });
     }).catch(fail);
@@ -6854,7 +6895,7 @@
         '<button type="button" role="tab" id="rw-tab-diff" data-run-view="diff" aria-controls="rw-answer"' + (!r.result || !r.answer_prev ? ' disabled data-tip="' + esc(T("rw.no_previous")) + '"' : "") + '>' + esc(T("rd.ans_diff")) + '</button></div><div class="rw-panel" id="rw-answer" role="tabpanel" aria-labelledby="rw-tab-answer">' +
         runAnswerHtml(r, ansMode(r)) +
         runChangesHtml(r) +
-        costCalcHtml(r) + contextPlanHtml(r) +
+        costCalcHtml(r) + contextPlanHtml(r) + costPolicySnapshotHtml(r) +
         (!r.result ? '<div class="rw-no-answer">' + emptyState("chat", T("rw.no_answer"), T(live ? "rw.answer_running" : "rw.answer_missing")) + "</div>" : "") + '</div>' +
         '<section class="rw-panel card" id="rw-log" role="tabpanel" aria-labelledby="rw-tab-log"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' + runChatHtml(r) + '</div>' +
         '<aside class="rw-inspector" id="rd-inspector" aria-label="' + esc(T("rw.inspector")) + '" hidden><section><div class="card-head rd-head"><h3>' + esc(T("rw.run_snapshot")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '</div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" : esc(T("run.adhoc"))) + "</dd>" +
@@ -7311,6 +7352,11 @@
     return '<details class="card"><summary>'+esc(T('cp.audit'))+' · '+esc(p.estimated_tokens)+' / '+esc(p.budget_tokens)+'</summary><p class="hint">'+esc(T('cp.estimate'))+'</p><div class="table-wrap"><table><thead><tr><th>'+esc(T('cp.material'))+'</th><th>'+esc(T('cp.tokens'))+'</th><th>'+esc(T('cp.decision'))+'</th></tr></thead><tbody>'+
       (p.materials||[]).map(function(m){return '<tr><td>'+esc(m.id)+'</td><td>'+esc(m.estimated_tokens)+'</td><td>'+esc(T(m.kind==='reservation'?'cp.reserved':'cp.selected'))+(m.mode?' · '+esc(T('cp.mode_'+m.mode)):'')+'</td></tr>';}).join('')+
       (p.omitted||[]).map(function(m){return '<tr><td>'+esc(m.id)+'</td><td>—</td><td>'+esc(m.reason)+'</td></tr>';}).join('')+'</tbody></table></div><details><summary>'+esc(T('cp.details'))+'</summary><pre>'+esc(JSON.stringify(p,null,2))+'</pre></details></details>';
+  }
+
+  function costPolicySnapshotHtml(r) {
+    var p = r.effective_cost_policy;
+    return '<section class="card"><h3>' + esc(T("costmode.snapshot")) + '</h3>' + (p ? costModeBadge(p.mode) + '<p class="muted">' + esc(T(p.mode === "bypass" ? "costmode.warning" : p.mode === "global" ? "costmode.global_hint" : "costmode.task_hint")) + '</p><p>' + esc(T("costmode.run",{c:p.currency}) + ": " + (p.max_amount ? String(p.max_amount) : "∞") + " · " + p.accounting_day + " · " + p.timezone) + '</p>' : '<p class="muted">' + esc(T("costmode.historical")) + '</p>') + '</section>';
   }
   // ---------- run page: continue the conversation (会话 P0) ----------
   // A finished run gets a message box under it. The first message makes the run a session
@@ -7777,8 +7823,8 @@
     var bkKey = spendQuery(spendView);
     var bkP = api("/api/spend/breakdown?" + bkKey).then(function (r) { spendCache[bkKey] = r; }, function () {});
     // "By tag" only appears once some task has a tag (or the address asks for it).
-    var hasTags = spendView.by === "tag";
-    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; if ((t.tags || []).length) hasTags = true; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
+    var hasTags = spendView.by === "tag", hasBypass = false;
+    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; if(t.cost_control_mode === "bypass") hasBypass = true; if ((t.tags || []).length) hasTags = true; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
       var s = d.summary, budgets = s.budgets || [];
       var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0, max_tokens: 0 };
       var runsToday = d.top_tasks.reduce(function (a, t) { return a + t.runs; }, 0);
@@ -7789,7 +7835,7 @@
       var pct = function (u, m) { return m ? Math.min(100, u / m * 100) : 0; };
       var cls = function (p) { return p >= 100 ? " bad" : p >= 80 ? " warn" : ""; };
       var gp = pct(s.total_usd, global.max_usd);
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
+      mount((hasBypass ? '<div class="notice warn">' + esc(T("costmode.spend_notice")) + '</div>' : "") + '<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
         '<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("time.today")) + "</small><strong>" + esc(usd(s.total_usd, 4)) + "</strong><span>" + esc(global.max_usd ? T("sp.pct_of", { p: Math.round(gp), m: usd(global.max_usd) }) : T("sp.no_cap")) + "</span></div>" +
         '<div class="card stat"' + (global.max_usd && global.held_usd > 0 ? ' data-tip="' + esc(T("sp.remaining_held_tip", { cap: usd(global.max_usd), used: usd(s.total_usd, 4), held: usd(global.held_usd, 4) })) + '"' : "") + "><small>" + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd - (global.held_usd || 0))) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +

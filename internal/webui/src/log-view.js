@@ -247,7 +247,7 @@
         '<button type="button" role="tab" id="rw-tab-diff" data-run-view="diff" aria-controls="rw-answer"' + (!r.result || !r.answer_prev ? ' disabled data-tip="' + esc(T("rw.no_previous")) + '"' : "") + '>' + esc(T("rd.ans_diff")) + '</button></div><div class="rw-panel" id="rw-answer" role="tabpanel" aria-labelledby="rw-tab-answer">' +
         runAnswerHtml(r, ansMode(r)) +
         runChangesHtml(r) +
-        costCalcHtml(r) + contextPlanHtml(r) +
+        costCalcHtml(r) + contextPlanHtml(r) + costPolicySnapshotHtml(r) +
         (!r.result ? '<div class="rw-no-answer">' + emptyState("chat", T("rw.no_answer"), T(live ? "rw.answer_running" : "rw.answer_missing")) + "</div>" : "") + '</div>' +
         '<section class="rw-panel card" id="rw-log" role="tabpanel" aria-labelledby="rw-tab-log"><div class="card-head"><span class="ico">' + ic("terminal") + '</span><h2>' + esc(T("rd.log")) + '</h2><span class="link" id="live-ind">' + (live ? '<span class="live">' + esc(T("rd.live")) + "</span>" : '<span class="muted">' + esc(T("rd.finished")) + "</span>") + '</span></div><div id="lv"></div></section>' + runChatHtml(r) + '</div>' +
         '<aside class="rw-inspector" id="rd-inspector" aria-label="' + esc(T("rw.inspector")) + '" hidden><section><div class="card-head rd-head"><h3>' + esc(T("rw.run_snapshot")) + "</h3>" + idChip(T("rd.run_id"), r.id) + '</div><dl class="kv"><dt>' + esc(T("col.task")) + "</dt><dd>" + (r.task_id ? '<a href="#/tasks/' + enc(r.task_id) + '">' + esc(r.task_name) + "</a>" : esc(T("run.adhoc"))) + "</dd>" +
@@ -704,4 +704,9 @@
     return '<details class="card"><summary>'+esc(T('cp.audit'))+' · '+esc(p.estimated_tokens)+' / '+esc(p.budget_tokens)+'</summary><p class="hint">'+esc(T('cp.estimate'))+'</p><div class="table-wrap"><table><thead><tr><th>'+esc(T('cp.material'))+'</th><th>'+esc(T('cp.tokens'))+'</th><th>'+esc(T('cp.decision'))+'</th></tr></thead><tbody>'+
       (p.materials||[]).map(function(m){return '<tr><td>'+esc(m.id)+'</td><td>'+esc(m.estimated_tokens)+'</td><td>'+esc(T(m.kind==='reservation'?'cp.reserved':'cp.selected'))+(m.mode?' · '+esc(T('cp.mode_'+m.mode)):'')+'</td></tr>';}).join('')+
       (p.omitted||[]).map(function(m){return '<tr><td>'+esc(m.id)+'</td><td>—</td><td>'+esc(m.reason)+'</td></tr>';}).join('')+'</tbody></table></div><details><summary>'+esc(T('cp.details'))+'</summary><pre>'+esc(JSON.stringify(p,null,2))+'</pre></details></details>';
+  }
+
+  function costPolicySnapshotHtml(r) {
+    var p = r.effective_cost_policy;
+    return '<section class="card"><h3>' + esc(T("costmode.snapshot")) + '</h3>' + (p ? costModeBadge(p.mode) + '<p class="muted">' + esc(T(p.mode === "bypass" ? "costmode.warning" : p.mode === "global" ? "costmode.global_hint" : "costmode.task_hint")) + '</p><p>' + esc(T("costmode.run",{c:p.currency}) + ": " + (p.max_amount ? String(p.max_amount) : "∞") + " · " + p.accounting_day + " · " + p.timezone) + '</p>' : '<p class="muted">' + esc(T("costmode.historical")) + '</p>') + '</section>';
   }

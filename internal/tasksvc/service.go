@@ -31,6 +31,7 @@ func New(store *db.Store, ver *version.Service, sched *scheduler.Scheduler) *Ser
 
 // CreateInput creates a task with initial v1.
 type CreateInput struct {
+	InitialStatus  string `json:"-"` // empty defaults to active; paused stages editor/import creation
 	Name           string `json:"name"`
 	Prompt         string `json:"prompt"`
 	Goal           string `json:"goal"`
@@ -68,6 +69,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	if in.Goal == "" {
 		in.Goal = in.Prompt
 	}
+	status := in.InitialStatus
+	if status == "" {
+		status = "active"
+	}
+	if status != "active" && status != "paused" {
+		return TaskView{}, fmt.Errorf("initial status must be active or paused")
+	}
 	tid := id.New("task")
 	now := nowUTC()
 	spec := Spec{
@@ -83,7 +91,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 		next = sql.NullString{String: t.UTC().Format(time.RFC3339), Valid: true}
 	}
 	task := db.Task{
-		ID: tid, Name: in.Name, Status: "active", Prompt: in.Prompt,
+		ID: tid, Name: in.Name, Status: status, Prompt: in.Prompt,
 		WorkspaceDir: in.WorkspaceDir, CronExpr: in.CronExpr,
 		OverlapPolicy: in.OverlapPolicy, TimeoutMinutes: in.TimeoutMinutes,
 		NextRunAt: next, CreatedAt: now, UpdatedAt: now,
@@ -91,6 +99,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	if err := s.Store.InsertTask(ctx, task); err != nil {
 		return TaskView{}, err
 	}
+	if err := s.initializeCostPolicy(ctx, tid); err != nil {
+		return TaskView{}, err
+	}
+	task.CostControlMode = "task"
+	task.CostPolicyRevision = 1
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
 		EntityType: version.EntityTask, EntityID: tid,
 		Content: spec, Source: "user_edit", Actor: in.Actor, Reason: "create task", Message: "v1",
@@ -186,7 +199,7 @@ func (s *Service) List(ctx context.Context) ([]TaskView, error) {
 	rows, err := s.Store.DB.QueryContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
   overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
-  pause_kind, pause_detail, paused_at, skip_runs
+  pause_kind, pause_detail, paused_at, skip_runs, cost_control_mode, cost_policy_revision
 FROM tasks ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -197,7 +210,7 @@ FROM tasks ORDER BY created_at DESC`)
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 			&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
 			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
-			&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns); err != nil {
+			&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns, &t.CostControlMode, &t.CostPolicyRevision); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -565,6 +578,11 @@ func (s *Service) Duplicate(ctx context.Context, srcID, name, actor string) (Tas
 	if err := s.Store.InsertTask(ctx, task); err != nil {
 		return TaskView{}, err
 	}
+	if err := s.duplicateCostPolicy(ctx, srcID, task.ID, actor); err != nil {
+		return TaskView{}, err
+	}
+	task.CostControlMode = src.Task.CostControlMode
+	task.CostPolicyRevision = 1
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
 		EntityType: version.EntityTask, EntityID: task.ID,
 		Content: spec, Source: "user_edit", Actor: actor, Reason: "duplicate of " + src.Task.ID, Message: "v1",

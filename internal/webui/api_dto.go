@@ -21,14 +21,16 @@ import (
 // ---------- DTOs ----------
 
 type taskDTO struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Cron      string `json:"cron"`
-	Prompt    string `json:"prompt"`
-	Goal      string `json:"goal"`
-	Provider  string `json:"provider"`
-	Workspace string `json:"workspace"`
+	CostControlMode    string `json:"cost_control_mode"`
+	CostPolicyRevision int64  `json:"cost_policy_revision"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Status             string `json:"status"`
+	Cron               string `json:"cron"`
+	Prompt             string `json:"prompt"`
+	Goal               string `json:"goal"`
+	Provider           string `json:"provider"`
+	Workspace          string `json:"workspace"`
 	// WorkspaceDefault: the task has no folder of its own and runs in the one tidebot
 	// gives it (set on the detail answer only, where Workspace is then that folder).
 	WorkspaceDefault bool     `json:"workspace_default,omitempty"`
@@ -66,7 +68,7 @@ type taskDTO struct {
 
 func toTaskDTO(v tasksvc.TaskView) taskDTO {
 	d := taskDTO{
-		ID: v.Task.ID, Name: v.Task.Name, Status: v.Task.Status, Cron: v.Task.CronExpr,
+		CostControlMode: v.Task.CostControlMode, CostPolicyRevision: v.Task.CostPolicyRevision, ID: v.Task.ID, Name: v.Task.Name, Status: v.Task.Status, Cron: v.Task.CronExpr,
 		Prompt: v.Task.Prompt, Workspace: v.Task.WorkspaceDir,
 		NextRunAt: v.Task.NextRunAt.String, LastFiredAt: v.Task.LastFiredAt.String,
 		CreatedAt: v.Task.CreatedAt, UpdatedAt: v.Task.UpdatedAt,

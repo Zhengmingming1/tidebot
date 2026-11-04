@@ -51,7 +51,7 @@ func TestTaskExportImport(t *testing.T) {
 		t.Fatalf("export leaks local data: %s", raw)
 	}
 	var f taskFile
-	if err := json.Unmarshal(rr.Body.Bytes(), &f); err != nil || f.Kind != taskFileKind || f.Version != 1 || len(f.Tasks) != 1 {
+	if err := json.Unmarshal(rr.Body.Bytes(), &f); err != nil || f.Kind != taskFileKind || f.Version != taskFileVersion || len(f.Tasks) != 1 {
 		t.Fatalf("file %v %+v", err, f)
 	}
 	e := f.Tasks[0]

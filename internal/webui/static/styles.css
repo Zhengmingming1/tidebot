@@ -3717,3 +3717,5 @@ button.rc-tag:hover { color: var(--text); }
 .cs-cap-row > span { display: flex; flex-direction: column; min-width: 0; }
 .cs-cap-row strong { font-size: 13px; font-weight: 500; }
 .cs-cap-row small { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cost-policy{border:1px solid var(--border);border-radius:12px;padding:16px;margin:16px 0}.cost-choices{border:0;padding:0;margin:12px 0}.cost-choice{display:flex;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;margin:8px 0;cursor:pointer}.cost-choice small{display:block;margin-top:4px}.cost-choice input{flex:none}.cost-policy input:disabled{opacity:.55}.cost-policy [hidden]{display:none}

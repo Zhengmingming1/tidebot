@@ -293,21 +293,26 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		_ = s.deps.DB.QueryRowContext(r.Context(), `SELECT cost_detail, result_text, result_truncated, answer_same_as, file_changes, changes_undone_at, changes_undone_files FROM runs WHERE id=?`, id).Scan(&detail, &result, &cut, &sameID, &changes, &undoneAt, &undoneFiles)
 		out := struct {
 			runDTO
-			SkillBindings      []tasksvc.SkillBinding   `json:"skill_bindings"`
-			SkillSetSource     *skillstore.RunSetSource `json:"skill_set_source,omitempty"`
-			SkillEvidence      []skillEvidence          `json:"skill_evidence"`
-			ContextPlan        json.RawMessage          `json:"context_plan,omitempty"`
-			CostDetail         json.RawMessage          `json:"cost_detail"`
-			Currency           string                   `json:"currency"`
-			Result             string                   `json:"result"`
-			ResultTruncated    bool                     `json:"result_truncated,omitempty"`
-			AnswerSame         *answerSameDTO           `json:"answer_same,omitempty"`
-			AnswerPrev         *answerSameDTO           `json:"answer_prev,omitempty"`
-			FileChanges        json.RawMessage          `json:"file_changes,omitempty"`
-			ChangesUndoneAt    string                   `json:"changes_undone_at,omitempty"`
-			ChangesUndoneFiles []string                 `json:"changes_undone_files,omitempty"`
-			ChatSession        *runChatRef              `json:"chat_session,omitempty"`
+			SkillBindings       []tasksvc.SkillBinding   `json:"skill_bindings"`
+			SkillSetSource      *skillstore.RunSetSource `json:"skill_set_source,omitempty"`
+			SkillEvidence       []skillEvidence          `json:"skill_evidence"`
+			ContextPlan         json.RawMessage          `json:"context_plan,omitempty"`
+			EffectiveCostPolicy json.RawMessage          `json:"effective_cost_policy,omitempty"`
+			CostDetail          json.RawMessage          `json:"cost_detail"`
+			Currency            string                   `json:"currency"`
+			Result              string                   `json:"result"`
+			ResultTruncated     bool                     `json:"result_truncated,omitempty"`
+			AnswerSame          *answerSameDTO           `json:"answer_same,omitempty"`
+			AnswerPrev          *answerSameDTO           `json:"answer_prev,omitempty"`
+			FileChanges         json.RawMessage          `json:"file_changes,omitempty"`
+			ChangesUndoneAt     string                   `json:"changes_undone_at,omitempty"`
+			ChangesUndoneFiles  []string                 `json:"changes_undone_files,omitempty"`
+			ChatSession         *runChatRef              `json:"chat_session,omitempty"`
 		}{runDTO: runs[0], Currency: s.fx().Display, Result: result, ResultTruncated: cut != 0, ChangesUndoneAt: undoneAt}
+		var policyJSON string
+		if s.deps.DB.QueryRowContext(r.Context(), `SELECT effective_cost_policy_json FROM runs WHERE id=?`, id).Scan(&policyJSON) == nil && policyJSON != "{}" && json.Valid([]byte(policyJSON)) {
+			out.EffectiveCostPolicy = json.RawMessage(policyJSON)
+		}
 		var contextAudit string
 		if err := s.deps.DB.QueryRowContext(r.Context(), `SELECT detail_json FROM operation_log WHERE entity_type='run' AND entity_id=? AND action='context.plan' ORDER BY id DESC LIMIT 1`, id).Scan(&contextAudit); err == nil && json.Valid([]byte(contextAudit)) {
 			out.ContextPlan = json.RawMessage(contextAudit)

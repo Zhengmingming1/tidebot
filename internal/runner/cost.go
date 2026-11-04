@@ -9,8 +9,9 @@ import (
 
 // CostControl prices a run from its token usage and enforces caps mid-run.
 type CostControl struct {
-	Calc pricing.Calculator
-	FX   pricing.FX
+	BudgetSources []string // applicable budget constraints frozen at launch
+	Calc          pricing.Calculator
+	FX            pricing.FX
 	// Currency is the currency of MaxAmount (the display currency).
 	Currency string
 	// MaxAmount stops the run once its priced cost exceeds it (0 = no cap).

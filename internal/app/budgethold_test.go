@@ -100,14 +100,33 @@ func TestConcurrentRunsShareBudget(t *testing.T) {
 	}
 }
 
-// Subscription runs have no money cap: they hold nothing and never block others.
-func TestSubscriptionRunHoldsNothing(t *testing.T) {
+// Subscription runs do not reserve money, but still reserve applicable token
+// budgets so concurrent subscriptions cannot each consume the same allowance.
+func TestSubscriptionRunHoldsOnlyTokens(t *testing.T) {
 	a := newTestApp(t)
-	o := &runner.Options{Cost: &runner.CostControl{MaxAmount: 0, Currency: pricing.USD}}
-	if h, err := a.holdRunBudget(context.Background(), o, cost.BucketProduction, mustProfile(t, a, "deepseek")); h != nil || err != nil {
-		t.Fatalf("%v %v", h, err)
+	p := provider.Profile{Name: "subscription-test", Billing: &pricing.Billing{Mode: pricing.ModeSubscription}}
+	o := &runner.Options{Cost: &runner.CostControl{Calc: calculator(p), MaxAmount: 0, Currency: pricing.USD}}
+	h, err := a.holdRunBudget(context.Background(), o, cost.BucketProduction, p)
+	if err != nil || h == nil || o.Cost.MaxTokens <= 0 || o.Cost.MaxAmount != 0 {
+		t.Fatalf("subscription reservation: hold=%v cost=%+v err=%v", h, o.Cost, err)
 	}
-	if h, err := a.holdRunBudget(context.Background(), &runner.Options{}, cost.BucketProduction, mustProfile(t, a, "deepseek")); h != nil || err != nil {
+	defer h.Release()
+	if money, n := a.Cost.Held("global", "", "", pricing.USD); money != 0 || n != 0 {
+		t.Fatalf("subscription reserved money: %v (%d)", money, n)
+	}
+	// The initial hold reserves the remaining token room, not a fake dollar cap.
+	other := &runner.Options{Cost: &runner.CostControl{Calc: calculator(p), Currency: pricing.USD}}
+	if h2, err := a.holdRunBudget(context.Background(), other, cost.BucketProduction, p); err == nil {
+		h2.Release()
+		t.Fatal("concurrent subscription received already-reserved token room")
+	}
+	h.Release()
+	h3, err := a.holdRunBudget(context.Background(), other, cost.BucketProduction, p)
+	if err != nil || h3 == nil {
+		t.Fatalf("token room not released: %v %v", h3, err)
+	}
+	h3.Release()
+	if h, err := a.holdRunBudget(context.Background(), &runner.Options{}, cost.BucketProduction, p); h != nil || err != nil {
 		t.Fatalf("no cost control: %v %v", h, err)
 	}
 }

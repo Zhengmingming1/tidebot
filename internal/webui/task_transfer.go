@@ -29,7 +29,7 @@ import (
 
 const (
 	taskFileKind    = "tidebot.tasks"
-	taskFileVersion = 2
+	taskFileVersion = 3
 	maxImportTasks  = 200
 	maxImportBytes  = 4 << 20
 )
@@ -52,21 +52,22 @@ type taskFileSkill struct {
 }
 
 type taskFileEntry struct {
-	Skills         []taskFileSkill `json:"skills,omitempty"`
-	Name           string          `json:"name"`
-	Goal           string          `json:"goal,omitempty"`
-	Prompt         string          `json:"prompt"`
-	Constraints    []string        `json:"constraints,omitempty"`
-	Cron           string          `json:"cron,omitempty"`
-	Enabled        bool            `json:"enabled"`
-	TimeoutMinutes int             `json:"timeout_minutes,omitempty"`
-	BudgetUSD      float64         `json:"budget_usd,omitempty"`    // daily cap of the task
-	MaxRunUSD      float64         `json:"max_run_usd,omitempty"`   // per-run cap in the spec
-	Provider       string          `json:"provider,omitempty"`      // name only, never a key
-	Skill          *taskFileSkill  `json:"skill,omitempty"`         // follows the skill's current version
-	AllowedTools   []string        `json:"allowed_tools,omitempty"` // as the task has them
-	Policy         *taskPolicyForm `json:"policy,omitempty"`        // retries, catch-up, priority
-	Tags           []string        `json:"tags,omitempty"`
+	CostControl    *tasksvc.CostPolicy `json:"cost_control,omitempty"`
+	Skills         []taskFileSkill     `json:"skills,omitempty"`
+	Name           string              `json:"name"`
+	Goal           string              `json:"goal,omitempty"`
+	Prompt         string              `json:"prompt"`
+	Constraints    []string            `json:"constraints,omitempty"`
+	Cron           string              `json:"cron,omitempty"`
+	Enabled        bool                `json:"enabled"`
+	TimeoutMinutes int                 `json:"timeout_minutes,omitempty"`
+	BudgetUSD      float64             `json:"budget_usd,omitempty"`    // daily cap of the task
+	MaxRunUSD      float64             `json:"max_run_usd,omitempty"`   // per-run cap in the spec
+	Provider       string              `json:"provider,omitempty"`      // name only, never a key
+	Skill          *taskFileSkill      `json:"skill,omitempty"`         // follows the skill's current version
+	AllowedTools   []string            `json:"allowed_tools,omitempty"` // as the task has them
+	Policy         *taskPolicyForm     `json:"policy,omitempty"`        // retries, catch-up, priority
+	Tags           []string            `json:"tags,omitempty"`
 }
 
 // exportTasks: GET /api/tasks/export[?ids=a,b] → tidebot-tasks-YYYYMMDD.json (all live
@@ -88,7 +89,7 @@ func (s *Server) exportTasks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	f := taskFile{Kind: taskFileKind, Version: 1, ExportedAt: time.Now().UTC().Format(time.RFC3339), App: "tidebot " + buildinfo.Version, Tasks: []taskFileEntry{}}
+	f := taskFile{Kind: taskFileKind, Version: taskFileVersion, ExportedAt: time.Now().UTC().Format(time.RFC3339), App: "tidebot " + buildinfo.Version, Tasks: []taskFileEntry{}}
 	for _, v := range list {
 		if v.Task.Status == "archived" || v.Spec == nil || (len(want) > 0 && !want[v.Task.ID]) {
 			continue
@@ -118,6 +119,11 @@ func (s *Server) taskEntryOf(ctx context.Context, v tasksvc.TaskView) taskFileEn
 	sp := v.Spec
 	e := taskFileEntry{Name: v.Task.Name, Prompt: sp.Prompt, Cron: v.Task.CronExpr, Enabled: v.Task.Status == "active",
 		TimeoutMinutes: sp.TimeoutMinutes, MaxRunUSD: sp.MaxBudgetUSD, Provider: sp.Provider, AllowedTools: sp.AllowedTools}
+	if cp, err := s.deps.Tasks.GetCostPolicy(ctx, v.Task.ID); err == nil {
+		cp.Revision = 0
+		cp.FXRevision = ""
+		e.CostControl = &cp
+	}
 	if sp.Goal != sp.Prompt {
 		e.Goal = sp.Goal
 	}
@@ -292,6 +298,30 @@ func (s *Server) checkImport(ctx context.Context, i int, e *taskFileEntry, taken
 	}
 	f := taskForm{Name: e.Name, Prompt: e.Prompt, Provider: strings.TrimSpace(e.Provider), Cron: e.Cron,
 		BudgetUSD: e.BudgetUSD, TimeoutMinutes: e.TimeoutMinutes, Policy: e.Policy}
+	if e.CostControl != nil {
+		cp := *e.CostControl
+		fx := s.fx()
+		if cp.Currency != "USD" && cp.Currency != "CNY" {
+			res.Error = "unsupported cost currency"
+			return res, f, tasksvc.Spec{}
+		}
+		if cp.RunAmount != nil {
+			v := fx.Convert(*cp.RunAmount, cp.Currency, fx.Display)
+			cp.RunAmount = &v
+		}
+		if cp.DailyAmount != nil {
+			v := fx.Convert(*cp.DailyAmount, cp.Currency, fx.Display)
+			cp.DailyAmount = &v
+		}
+		cp.Currency = fx.Display
+		cp.Revision = 0
+		encoded, _ := json.Marshal(fx)
+		cp.FXRevision = string(encoded)
+		f.CostControl = &cp
+		if cp.Mode == tasksvc.CostModeBypass {
+			res.Notes = append(res.Notes, "cost_bypass")
+		}
+	}
 	if len(e.Tags) > 0 {
 		tags := e.Tags
 		f.Tags = &tags

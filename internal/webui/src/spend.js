@@ -115,8 +115,8 @@
     var bkKey = spendQuery(spendView);
     var bkP = api("/api/spend/breakdown?" + bkKey).then(function (r) { spendCache[bkKey] = r; }, function () {});
     // "By tag" only appears once some task has a tag (or the address asks for it).
-    var hasTags = spendView.by === "tag";
-    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; if ((t.tags || []).length) hasTags = true; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
+    var hasTags = spendView.by === "tag", hasBypass = false;
+    return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; if(t.cost_control_mode === "bypass") hasBypass = true; if ((t.tags || []).length) hasTags = true; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
       var s = d.summary, budgets = s.budgets || [];
       var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0, max_tokens: 0 };
       var runsToday = d.top_tasks.reduce(function (a, t) { return a + t.runs; }, 0);
@@ -127,7 +127,7 @@
       var pct = function (u, m) { return m ? Math.min(100, u / m * 100) : 0; };
       var cls = function (p) { return p >= 100 ? " bad" : p >= 80 ? " warn" : ""; };
       var gp = pct(s.total_usd, global.max_usd);
-      mount('<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
+      mount((hasBypass ? '<div class="notice warn">' + esc(T("costmode.spend_notice")) + '</div>' : "") + '<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
         '<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("time.today")) + "</small><strong>" + esc(usd(s.total_usd, 4)) + "</strong><span>" + esc(global.max_usd ? T("sp.pct_of", { p: Math.round(gp), m: usd(global.max_usd) }) : T("sp.no_cap")) + "</span></div>" +
         '<div class="card stat"' + (global.max_usd && global.held_usd > 0 ? ' data-tip="' + esc(T("sp.remaining_held_tip", { cap: usd(global.max_usd), used: usd(s.total_usd, 4), held: usd(global.held_usd, 4) })) + '"' : "") + "><small>" + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd - (global.held_usd || 0))) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +

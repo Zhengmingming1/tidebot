@@ -2,10 +2,10 @@ package webui
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +20,7 @@ import (
 
 // taskForm is the WebUI create/edit payload.
 type taskForm struct {
+	CostControl       *tasksvc.CostPolicy     `json:"cost_control,omitempty"`
 	SkillSetSource    json.RawMessage         `json:"skill_set_source,omitempty"`
 	ExpectedVersionID string                  `json:"expected_version_id,omitempty"`
 	SkillBindings     *[]tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
@@ -83,6 +84,35 @@ func policyFormOf(p policy.Policy) taskPolicyForm {
 }
 
 func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID string) error {
+	if p := f.CostControl; p != nil {
+		if p.Mode != "task" && p.Mode != "global" && p.Mode != "bypass" {
+			return errors.New("invalid cost control mode")
+		}
+		if p.Currency != "USD" && p.Currency != "CNY" {
+			return errors.New("invalid budget currency")
+		}
+		for _, a := range []*float64{p.RunAmount, p.DailyAmount} {
+			if a != nil && (math.IsNaN(*a) || math.IsInf(*a, 0) || *a < 0 || *a > 10000) {
+				return errors.New("budget must be between 0 and 10000 in the selected currency")
+			}
+		}
+		if taskID != "" {
+			cur, err := s.deps.Tasks.GetCostPolicy(ctx, taskID)
+			if err != nil {
+				return err
+			}
+			if p.Revision != cur.Revision || p.FXRevision != cur.FXRevision || p.Currency != cur.Currency {
+				return tasksvc.ErrCostPolicyConflict
+			}
+		} else {
+			fx := s.fx()
+			encoded, _ := json.Marshal(fx)
+			if p.Currency != fx.Display || p.FXRevision != string(encoded) {
+				return tasksvc.ErrCostPolicyConflict
+			}
+		}
+	}
+
 	if len(f.SkillSetSource) > 0 {
 		var source *tasksvc.SkillSetSource
 		if err := json.Unmarshal(f.SkillSetSource, &source); err != nil {
@@ -134,8 +164,8 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 			return errors.New("schedule: not a valid 5-field cron expression")
 		}
 	}
-	if f.BudgetUSD < 0 || f.BudgetUSD > 10000 {
-		return errors.New("budget must be between 0 and 10000 USD")
+	if math.IsNaN(f.BudgetUSD) || math.IsInf(f.BudgetUSD, 0) || f.BudgetUSD < 0 || f.BudgetUSD > 10000 {
+		return errors.New("budget must be between 0 and 10000 in the selected currency")
 	}
 	if f.TimeoutMinutes < 0 || f.TimeoutMinutes > 24*60 {
 		return errors.New("timeout must be at most 1440 minutes")
@@ -181,6 +211,16 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 }
 
 func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm) error {
+	if s.deps.Cost != nil {
+		in := tasksvc.CostPolicyUpdate{DailyAmount: &f.BudgetUSD, SetDailyAmount: true, Actor: "webui"}
+		if p := f.CostControl; p != nil {
+			in = tasksvc.CostPolicyUpdate{Mode: &p.Mode, RunAmount: p.RunAmount, DailyAmount: p.DailyAmount, SetRunAmount: true, SetDailyAmount: true, Currency: p.Currency, ExpectedRevision: p.Revision, ExpectedFXRevision: p.FXRevision, Actor: "webui"}
+		}
+		if _, err := s.deps.Tasks.UpdateCostPolicy(ctx, taskID, in); err != nil {
+			return err
+		}
+	}
+
 	if err := s.deps.Tasks.SetSchedule(ctx, taskID, f.Cron); err != nil {
 		return err
 	}
@@ -213,10 +253,7 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 			return err
 		}
 	}
-	if s.deps.Cost != nil {
-		return s.deps.Cost.UpsertBudget(ctx, cost.Budget{Scope: "task", ScopeID: taskID, Period: "day", Bucket: "",
-			MaxUSD: sql.NullFloat64{Float64: f.BudgetUSD, Valid: f.BudgetUSD > 0}, Action: "pause_notify", WarnAtPct: 80})
-	}
+
 	return nil
 }
 
@@ -258,6 +295,13 @@ func specFromForm(spec tasksvc.Spec, f taskForm) tasksvc.Spec {
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
+	_ = s.deps.Tasks.WithCostPolicyLock(r.Context(), func(ctx context.Context) error {
+		s.createTaskLocked(w, r.WithContext(ctx))
+		return nil
+	})
+}
+
+func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 	var f taskForm
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&f); err != nil {
 		writeErr(w, 400, "bad json")
@@ -265,7 +309,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	if err := s.validateTaskForm(ctx, &f, ""); err != nil {
-		writeErr(w, 400, err.Error())
+		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
+			writeErr(w, 409, err.Error())
+		} else {
+			writeErr(w, 400, err.Error())
+		}
 		return
 	}
 	ws := ""
@@ -275,9 +323,20 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	tv, err := s.deps.Tasks.Create(ctx, tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, ProviderName: f.Provider, WorkspaceDir: ws,
 		TimeoutMinutes: f.TimeoutMinutes, OverlapPolicy: "skip", Actor: "user"})
 	if err != nil {
-		writeErr(w, 400, err.Error())
+		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
+			writeErr(w, 409, err.Error())
+		} else {
+			writeErr(w, 400, err.Error())
+		}
 		return
 	}
+	complete := false
+	defer func() {
+		if !complete {
+			_ = s.deps.Tasks.SetStatus(context.WithoutCancel(ctx), tv.Task.ID, "archived", "incomplete WebUI creation")
+			_ = s.deps.Tasks.SetSchedule(context.WithoutCancel(ctx), tv.Task.ID, "")
+		}
+	}()
 	if f.SkillID != "" || f.SkillBindings != nil || len(f.SkillSetSource) > 0 {
 		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, specFromForm(*tv.Spec, f), "user", "bind skill"); err != nil {
 			writeErr(w, 500, err.Error())
@@ -285,14 +344,26 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.applyTaskExtras(ctx, tv.Task.ID, f); err != nil {
-		writeErr(w, 400, err.Error())
+		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
+			writeErr(w, 409, err.Error())
+		} else {
+			writeErr(w, 400, err.Error())
+		}
 		return
 	}
 	v, _ := s.deps.Tasks.Get(ctx, tv.Task.ID)
+	complete = true
 	writeJSON(w, 201, toTaskDTO(v))
 }
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request, id string) {
+	_ = s.deps.Tasks.WithCostPolicyLock(r.Context(), func(ctx context.Context) error {
+		s.updateTaskLocked(w, r.WithContext(ctx), id)
+		return nil
+	})
+}
+
+func (s *Server) updateTaskLocked(w http.ResponseWriter, r *http.Request, id string) {
 	var f taskForm
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&f); err != nil {
 		writeErr(w, 400, "bad json")
@@ -305,7 +376,11 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	if err := s.validateTaskForm(ctx, &f, id); err != nil {
-		writeErr(w, 400, err.Error())
+		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
+			writeErr(w, 409, err.Error())
+		} else {
+			writeErr(w, 400, err.Error())
+		}
 		return
 	}
 	next := specFromForm(*cur.Spec, f)
@@ -328,7 +403,11 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 	if err := s.applyTaskExtras(ctx, id, f); err != nil {
-		writeErr(w, 400, err.Error())
+		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
+			writeErr(w, 409, err.Error())
+		} else {
+			writeErr(w, 400, err.Error())
+		}
 		return
 	}
 	v, _ := s.deps.Tasks.Get(ctx, id)
@@ -341,7 +420,11 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 	if err != nil || v.Spec == nil {
 		return nil, errors.New("task not found")
 	}
-	f := taskForm{Name: v.Task.Name, Prompt: v.Spec.Prompt, Provider: v.Spec.Provider, Cron: v.Task.CronExpr,
+	cp, err := s.deps.Tasks.GetCostPolicy(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	f := taskForm{CostControl: &cp, Name: v.Task.Name, Prompt: v.Spec.Prompt, Provider: v.Spec.Provider, Cron: v.Task.CronExpr,
 		Enabled: v.Task.Status == "active", TimeoutMinutes: v.Spec.TimeoutMinutes}
 	ws := v.Spec.WorkspaceDir
 	if ws == "" {
@@ -363,7 +446,9 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 			f.SkillVersionID = bindings[0].VersionID
 		}
 	}
-	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(max_usd,0) FROM budgets WHERE scope='task' AND scope_id=? AND period='day' AND bucket=''`, id).Scan(&f.BudgetUSD)
+	if cp.DailyAmount != nil {
+		f.BudgetUSD = *cp.DailyAmount
+	}
 	p := (&policy.Store{DB: s.deps.DB}).Get(ctx, id)
 	pf := policyFormOf(p)
 	f.Policy = &pf
@@ -451,7 +536,11 @@ func (s *Server) handleTaskBatch(w http.ResponseWriter, r *http.Request) {
 	if b.Action == "add_tag" || b.Action == "remove_tag" {
 		t, err := s.batchTagArg(ctx, b.Tag)
 		if err != nil {
-			writeErr(w, 400, err.Error())
+			if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
+				writeErr(w, 409, err.Error())
+			} else {
+				writeErr(w, 400, err.Error())
+			}
 			return
 		}
 		b.Tag = t

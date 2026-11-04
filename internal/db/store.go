@@ -37,33 +37,36 @@ type Task struct {
 	PausedAt    sql.NullString
 	// SkipRuns: upcoming fire times skipped by hand ("skip next run"), a JSON array of
 	// RFC 3339 UTC strings ('' = none); next_run_at already points past them.
-	SkipRuns string
+	SkipRuns           string
+	CostControlMode    string
+	CostPolicyRevision int64
 }
 
 // Run is one execution of a task (or ad-hoc prompt).
 type Run struct {
-	ID              string
-	UserID          string
-	TaskID          sql.NullString
-	Status          string
-	TriggerKind     string
-	ProviderID      sql.NullString
-	ProviderName    sql.NullString
-	Model           sql.NullString
-	Prompt          string
-	WorkspaceDir    string
-	SessionID       sql.NullString
-	ExitCode        sql.NullInt64
-	ErrorMessage    sql.NullString
-	TotalCostUSD    sql.NullFloat64
-	InputTokens     sql.NullInt64
-	OutputTokens    sql.NullInt64
-	DurationMS      sql.NullInt64
-	StartedAt       sql.NullString
-	FinishedAt      sql.NullString
-	CreatedAt       string
-	TaskVersionID   sql.NullString
-	HasNextRunItems bool
+	ID                      string
+	UserID                  string
+	TaskID                  sql.NullString
+	Status                  string
+	TriggerKind             string
+	ProviderID              sql.NullString
+	ProviderName            sql.NullString
+	Model                   sql.NullString
+	Prompt                  string
+	WorkspaceDir            string
+	SessionID               sql.NullString
+	ExitCode                sql.NullInt64
+	ErrorMessage            sql.NullString
+	TotalCostUSD            sql.NullFloat64
+	InputTokens             sql.NullInt64
+	OutputTokens            sql.NullInt64
+	DurationMS              sql.NullInt64
+	StartedAt               sql.NullString
+	FinishedAt              sql.NullString
+	CreatedAt               string
+	TaskVersionID           sql.NullString
+	HasNextRunItems         bool
+	EffectiveCostPolicyJSON string
 }
 
 // ProviderRow is a persisted provider profile.
@@ -94,11 +97,11 @@ func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 func (s *Store) InsertTask(ctx context.Context, t Task) error {
 	_, err := s.DB.ExecContext(ctx, `
 INSERT INTO tasks(id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
-  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at, cost_control_mode)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, nullDefault(t.UserID, "owner"), t.Name, nullDefault(t.Status, "active"),
 		t.Prompt, t.WorkspaceDir, t.ProviderID, t.CronExpr, nullDefault(t.OverlapPolicy, "skip"),
-		t.TimeoutMinutes, t.NextRunAt, t.LastFiredAt, t.CreatedAt, t.UpdatedAt,
+		t.TimeoutMinutes, t.NextRunAt, t.LastFiredAt, t.CreatedAt, t.UpdatedAt, nullDefault(t.CostControlMode, "task"),
 	)
 	return err
 }
@@ -115,13 +118,13 @@ func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 	row := s.DB.QueryRowContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
   overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
-  pause_kind, pause_detail, paused_at, skip_runs
+  pause_kind, pause_detail, paused_at, skip_runs, cost_control_mode, cost_policy_revision
 FROM tasks WHERE id = ?`, id)
 	var t Task
 	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 		&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
 		&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
-		&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns); err != nil {
+		&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns, &t.CostControlMode, &t.CostPolicyRevision); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -132,7 +135,7 @@ func (s *Store) ListDueTasks(ctx context.Context, now time.Time) ([]Task, error)
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
   overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at,
-  pause_kind, pause_detail, paused_at, skip_runs
+  pause_kind, pause_detail, paused_at, skip_runs, cost_control_mode, cost_policy_revision
 FROM tasks
 WHERE status = 'active' AND cron_expr != '' AND next_run_at IS NOT NULL AND next_run_at <= ?
 ORDER BY next_run_at ASC`, now.UTC().Format(time.RFC3339))
@@ -146,7 +149,7 @@ ORDER BY next_run_at ASC`, now.UTC().Format(time.RFC3339))
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Status, &t.Prompt, &t.WorkspaceDir,
 			&t.ProviderID, &t.CronExpr, &t.OverlapPolicy, &t.TimeoutMinutes,
 			&t.NextRunAt, &t.LastFiredAt, &t.CreatedAt, &t.UpdatedAt,
-			&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns); err != nil {
+			&t.PauseKind, &t.PauseDetail, &t.PausedAt, &t.SkipRuns, &t.CostControlMode, &t.CostPolicyRevision); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -225,13 +228,13 @@ func (s *Store) ListRuns(ctx context.Context, taskID string, limit int) ([]Run, 
 		rows, err = s.DB.QueryContext(ctx, `
 SELECT id, user_id, task_id, status, trigger_kind, provider_id, provider_name, model,
   prompt, workspace_dir, session_id, exit_code, error_message, total_cost_usd, input_tokens,
-  output_tokens, duration_ms, started_at, finished_at, created_at
+  output_tokens, duration_ms, started_at, finished_at, created_at, effective_cost_policy_json
 FROM runs ORDER BY created_at DESC LIMIT ?`, limit)
 	} else {
 		rows, err = s.DB.QueryContext(ctx, `
 SELECT id, user_id, task_id, status, trigger_kind, provider_id, provider_name, model,
   prompt, workspace_dir, session_id, exit_code, error_message, total_cost_usd, input_tokens,
-  output_tokens, duration_ms, started_at, finished_at, created_at
+  output_tokens, duration_ms, started_at, finished_at, created_at, effective_cost_policy_json
 FROM runs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`, taskID, limit)
 	}
 	if err != nil {
@@ -244,7 +247,7 @@ FROM runs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`, taskID, limit)
 		if err := rows.Scan(&r.ID, &r.UserID, &r.TaskID, &r.Status, &r.TriggerKind,
 			&r.ProviderID, &r.ProviderName, &r.Model, &r.Prompt, &r.WorkspaceDir,
 			&r.SessionID, &r.ExitCode, &r.ErrorMessage, &r.TotalCostUSD, &r.InputTokens,
-			&r.OutputTokens, &r.DurationMS, &r.StartedAt, &r.FinishedAt, &r.CreatedAt); err != nil {
+			&r.OutputTokens, &r.DurationMS, &r.StartedAt, &r.FinishedAt, &r.CreatedAt, &r.EffectiveCostPolicyJSON); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

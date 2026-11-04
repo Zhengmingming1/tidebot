@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
 )
@@ -181,10 +182,13 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 
 // CheckResult is the outcome of a pre-run budget check.
 type CheckResult struct {
+	LimitSources []string // applicable nonzero limits, stable machine-readable labels
+
 	OK           bool
 	Reason       string
 	Warn         bool
 	WarnDetail   string
+	RunMaxTokens int64   // effective remaining token cap; zero means unlimited
 	RunMaxUSD    float64 // per-run cap, in Currency (name kept for compatibility)
 	Currency     string  // display currency of RunMaxUSD
 	BreachScope  string
@@ -295,8 +299,8 @@ func (s *Service) sumDay(ctx context.Context, day, scope, scopeID, bucket, cur s
 	if cur == "" {
 		cur = pricing.USD
 	}
-	q := `SELECT COALESCE(SUM(` + AmountExpr(s.GetFX(), cur, "") + `),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE created_at >= ? AND created_at < ?`
-	args := []any{st, en}
+	q := `SELECT COALESCE(SUM(` + AmountExpr(s.GetFX(), cur, "") + `),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE (accounting_day = ? OR (accounting_day IS NULL AND created_at >= ? AND created_at < ?))`
+	args := []any{day, st, en}
 	if scope == "task" && scopeID != "" {
 		q += ` AND task_id=?`
 		args = append(args, scopeID)
@@ -317,6 +321,9 @@ func (s *Service) Record(ctx context.Context, runID, taskID, bucket string, usd 
 
 // Entry is one run's ledger row.
 type Entry struct {
+	AccountingAt  time.Time // optional launch timestamp; freezes daily accounting
+	AccountingDay string    // optional YYYY-MM-DD in launch timezone
+
 	RunID, TaskID, Bucket string
 	Provider, Model       string
 	Amount                float64
@@ -336,6 +343,12 @@ func EntryFromCost(runID, taskID, bucket, provider, model string, c pricing.Cost
 // RecordEntry writes (or replaces) a run's ledger row. tokens counts every
 // token type, so token caps and subscription quotas see cache traffic too.
 func (s *Service) RecordEntry(ctx context.Context, e Entry) error {
+	s.admitMu.Lock()
+	defer s.admitMu.Unlock()
+	return s.recordEntry(ctx, e)
+}
+
+func (s *Service) recordEntry(ctx context.Context, e Entry) error {
 	if e.Bucket == "" {
 		e.Bucket = BucketProduction
 	}
@@ -344,18 +357,28 @@ func (s *Service) RecordEntry(ctx context.Context, e Entry) error {
 	}
 	usd := s.GetFX().Convert(e.Amount, e.Currency, pricing.USD)
 	tokens := e.Input + e.Output + e.CacheRead + e.CacheWrite
-	now := s.now()
+	now := e.AccountingAt
+	if now.IsZero() {
+		now = s.now()
+	}
+	day := now.In(s.loc()).Format("2006-01-02")
+	if e.AccountingDay != "" {
+		if _, err := time.Parse("2006-01-02", e.AccountingDay); err != nil {
+			return fmt.Errorf("invalid accounting day: %w", err)
+		}
+		day = e.AccountingDay
+	}
 	_, err := s.DB.ExecContext(ctx, `
 INSERT INTO cost_ledger(run_id, bucket, task_id, usd, tokens, input_tokens, output_tokens, day, month, created_at,
-  amount, currency, source, provider, model, cache_read_tokens, cache_write_tokens, requests)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  amount, currency, source, provider, model, cache_read_tokens, cache_write_tokens, requests, accounting_day)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(run_id) DO UPDATE SET usd=excluded.usd, tokens=excluded.tokens,
   input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens, amount=excluded.amount,
   currency=excluded.currency, source=excluded.source, provider=excluded.provider, model=excluded.model,
   cache_read_tokens=excluded.cache_read_tokens, cache_write_tokens=excluded.cache_write_tokens, requests=excluded.requests`,
-		e.RunID, e.Bucket, nullEmpty(e.TaskID), usd, tokens, e.Input, e.Output, now.In(s.loc()).Format("2006-01-02"),
-		now.In(s.loc()).Format("2006-01"), now.UTC().Format(time.RFC3339),
-		e.Amount, e.Currency, e.Source, e.Provider, e.Model, e.CacheRead, e.CacheWrite, e.Requests)
+		e.RunID, e.Bucket, nullEmpty(e.TaskID), usd, tokens, e.Input, e.Output, day,
+		day[:7], now.UTC().Format(time.RFC3339),
+		e.Amount, e.Currency, e.Source, e.Provider, e.Model, e.CacheRead, e.CacheWrite, e.Requests, nullEmpty(e.AccountingDay))
 	return err
 }
 
@@ -463,7 +486,7 @@ func (s *Service) Summary(ctx context.Context, day string) (SpendSummary, error)
 		return out, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT bucket, COALESCE(SUM(`+AmountExpr(f, f.Display, "")+`),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE created_at >= ? AND created_at < ? GROUP BY bucket`, st, en)
+SELECT bucket, COALESCE(SUM(`+AmountExpr(f, f.Display, "")+`),0), COALESCE(SUM(tokens),0) FROM cost_ledger WHERE (accounting_day = ? OR (accounting_day IS NULL AND created_at >= ? AND created_at < ?)) GROUP BY bucket`, day, st, en)
 	if err != nil {
 		return out, err
 	}
@@ -521,30 +544,36 @@ SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens
 // UpsertBudget creates or updates a budget row.
 // MaxUSD is taken in b.Currency (default: the display currency).
 func (s *Service) UpsertBudget(ctx context.Context, b Budget) error {
+	mu := db.CostPolicyMutex(s.DB)
+	mu.Lock()
+	defer mu.Unlock()
+	s.admitMu.Lock()
+	defer s.admitMu.Unlock()
 	now := nowUTC()
 	if b.Currency == "" {
 		b.Currency = s.GetFX().Display
 	}
-	var existing string
-	err := s.DB.QueryRowContext(ctx, `
-SELECT id FROM budgets WHERE scope=? AND scope_id=? AND period=? AND bucket=?`,
-		b.Scope, b.ScopeID, b.Period, b.Bucket).Scan(&existing)
-	if err == sql.ErrNoRows {
-		id0 := id.New("bud")
-		_, err = s.DB.ExecContext(ctx, `
-INSERT INTO budgets(id, scope, scope_id, period, max_usd, max_tokens, action, warn_at_pct, bucket, created_at, updated_at, currency)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			id0, b.Scope, b.ScopeID, b.Period, b.MaxUSD, b.MaxTokens, nullDefault(b.Action, "pause_notify"),
-			nullInt(b.WarnAtPct, 80), b.Bucket, now, now, b.Currency)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return err
+	}
+	defer tx.Rollback()
+	var existing string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM budgets WHERE scope=? AND scope_id=? AND period=? AND bucket=?`, b.Scope, b.ScopeID, b.Period, b.Bucket).Scan(&existing)
+	if err == sql.ErrNoRows {
+		_, err = tx.ExecContext(ctx, `INSERT INTO budgets(id,scope,scope_id,period,max_usd,max_tokens,action,warn_at_pct,bucket,created_at,updated_at,currency) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id.New("bud"), b.Scope, b.ScopeID, b.Period, b.MaxUSD, b.MaxTokens, nullDefault(b.Action, "pause_notify"), nullInt(b.WarnAtPct, 80), b.Bucket, now, now, b.Currency)
+	} else if err == nil {
+		_, err = tx.ExecContext(ctx, `UPDATE budgets SET max_usd=?,max_tokens=?,action=?,warn_at_pct=?,updated_at=?,currency=? WHERE id=?`, b.MaxUSD, b.MaxTokens, nullDefault(b.Action, "pause_notify"), nullInt(b.WarnAtPct, 80), now, b.Currency, existing)
 	}
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.ExecContext(ctx, `
-UPDATE budgets SET max_usd=?, max_tokens=?, action=?, warn_at_pct=?, updated_at=?, currency=? WHERE id=?`,
-		b.MaxUSD, b.MaxTokens, nullDefault(b.Action, "pause_notify"), nullInt(b.WarnAtPct, 80), now, b.Currency, existing)
-	return err
+	if b.Scope == "task" {
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET cost_policy_revision=cost_policy_revision+1 WHERE id=?`, b.ScopeID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func nullDefault(s, d string) string {

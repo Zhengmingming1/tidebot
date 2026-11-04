@@ -44,32 +44,34 @@ import (
 
 // App is the core runtime shared by daemon and CLI.
 type App struct {
-	Cfg        config.Config
-	Log        *slog.Logger
-	DB         *sql.DB
-	suOnce     sync.Once
-	fxCache    atomic.Pointer[pricing.FX]
-	suState    *selfUpdate
-	Store      *db.Store
-	Registry   *provider.Registry
-	Secrets    secrets.Backend
-	Runner     *runner.Runner
-	Sched      *scheduler.Scheduler
-	Ver        *version.Service
-	Tasks      *tasksvc.Service
-	Amend      *amend.Service
-	Skills     *skillstore.Service
-	Workflows  *workflow.Service
-	Cost       *cost.Service
-	Auth       *auth.Service
-	WebUI      *webui.Server
-	Events     *Bus
-	Policy     *policy.Store
-	Notify     *notify.Service
-	Optimize   *optimize.Service
-	Plugins    *plugin.Store
-	PluginHost *plugin.Host
-	freePool   freePoolState
+	Cfg               config.Config
+	Log               *slog.Logger
+	DB                *sql.DB
+	suOnce            sync.Once
+	fxCache           atomic.Pointer[pricing.FX]
+	quotaHolds        map[string]*quotaReservation // guarded by db.CostPolicyMutex
+	accountingFailure atomic.Pointer[string]       // fail closed after lost ledger persistence
+	suState           *selfUpdate
+	Store             *db.Store
+	Registry          *provider.Registry
+	Secrets           secrets.Backend
+	Runner            *runner.Runner
+	Sched             *scheduler.Scheduler
+	Ver               *version.Service
+	Tasks             *tasksvc.Service
+	Amend             *amend.Service
+	Skills            *skillstore.Service
+	Workflows         *workflow.Service
+	Cost              *cost.Service
+	Auth              *auth.Service
+	WebUI             *webui.Server
+	Events            *Bus
+	Policy            *policy.Store
+	Notify            *notify.Service
+	Optimize          *optimize.Service
+	Plugins           *plugin.Store
+	PluginHost        *plugin.Host
+	freePool          freePoolState
 
 	trig  *triggerState
 	disk  diskWatch
@@ -345,24 +347,72 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	// The run's cap is held against the daily budgets from its start until it ends
 	// (see cost.ReserveRun), so runs going at the same time share what is left.
 	var hold atomic.Pointer[cost.Hold]
-	defer func() { hold.Load().Release() }()
+	var accountingAt time.Time
+	var accountingDay string
+	retainReservation := false
+	var launchedID string
+	policyMu := db.CostPolicyMutex(a.Store.DB)
+	defer func() {
+		policyMu.Lock()
+		defer policyMu.Unlock()
+		if !retainReservation {
+			hold.Load().Release()
+			delete(a.quotaHolds, launchedID)
+		}
+	}()
 	if a.Cost != nil {
 		// Keep the ledger current while the run goes, so budgets and the spend page
 		// see a long run's cost before it ends, and a crash doesn't lose it.
 		opts.OnUsage = func(runID string, c pricing.Cost) {
 			wctx, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			defer done()
-			_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(runID, opts.TaskID, bucket, prof.Name, prof.Model, c))
-			hold.Load().SetSpent(c.Amount, c.Currency)
+			policyMu.Lock()
+			defer policyMu.Unlock()
+			e := cost.EntryFromCost(runID, opts.TaskID, bucket, prof.Name, prof.Model, c)
+			e.AccountingAt = accountingAt
+			e.AccountingDay = accountingDay
+			if err := a.Cost.RecordEntryHeld(wctx, e, hold.Load()); err != nil {
+				a.Log.Error("cost ledger update failed", "run_id", runID, "error", err)
+				return
+			}
+			if h := a.quotaHolds[runID]; h != nil {
+				h.SpentTokens = c.Totals.Total()
+				h.SpentRequests = c.Totals.Requests
+			}
 		}
 		callerAt := opts.AtStart // e.g. the Run dialog's "before" snapshot of the folder
 		opts.AtStart = func(sctx context.Context, o *runner.Options) error {
-			h, err := a.holdRunBudget(sctx, o, bucket, prof)
-			hold.Store(h)
-			if err == nil && callerAt != nil {
-				err = callerAt(sctx, o)
+			if callerAt != nil {
+				if err := callerAt(sctx, o); err != nil {
+					return err
+				}
 			}
-			return err
+			policyMu.Lock()
+			defer policyMu.Unlock()
+			rm, ncc, err := a.admitRun(sctx, o.TaskID, bucket, prof, callerCap)
+			if err != nil {
+				return err
+			}
+			o.Cost = ncc
+			o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, rm)
+			h, err := a.holdRunBudget(sctx, o, bucket, prof)
+			if err != nil {
+				return err
+			}
+			hold.Store(h)
+			accountingAt = time.Now()
+			if h != nil {
+				accountingAt = h.AccountingAt()
+			}
+			accountingDay = accountingAt.In(a.Loc()).Format("2006-01-02")
+			launchedID = o.RunID
+			if err = a.reserveProviderQuota(sctx, o, prof); err != nil {
+				return err
+			}
+			if err = a.saveCostSnapshot(sctx, o, bucket, accountingAt); err != nil {
+				return err
+			}
+			return nil
 		}
 	}
 	// A run that waited for a slot is checked again before it starts: runs ahead
@@ -402,7 +452,21 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	// context may already be canceled (quit, user stop), so don't write under it.
 	if res.RunID != "" && a.Cost != nil {
 		wctx, done := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
+		policyMu.Lock()
+		e := cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost)
+		e.AccountingAt = accountingAt
+		e.AccountingDay = accountingDay
+		if e.AccountingAt.IsZero() {
+			e.AccountingAt = time.Now()
+		}
+		if writeErr := a.Cost.RecordEntry(wctx, e); writeErr != nil {
+			a.Log.Error("final cost ledger update failed", "error", writeErr)
+			message := fmt.Sprintf("cost ledger persistence failed for %s: %v", res.RunID, writeErr)
+			a.accountingFailure.Store(&message)
+			retainReservation = true
+			err = errors.Join(err, errors.New(message))
+		}
+		policyMu.Unlock()
 		done()
 	}
 	if opts.TriggerKind == "session" && res.DurationMS < chatNotifyAfter.Milliseconds() && err == nil {
@@ -456,9 +520,23 @@ func (a *App) taskStillRunnable(ctx context.Context, taskID, trigger string) boo
 // A breach is logged, notified and (per the budget's action) pauses the task.
 // It runs when a run is asked for and again when a queued run gets its slot.
 func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider.Profile, callerCap float64) (float64, *runner.CostControl, error) {
-	runMax := 0.05
+	if failure := a.accountingFailure.Load(); failure != nil {
+		return 0, nil, fmt.Errorf("accounting unavailable: %s", *failure)
+	}
+	mode, _, err := a.taskCostMode(ctx, taskID)
+	if err != nil {
+		return 0, nil, err
+	}
+	runMax := float64(0)
+	var tokenMax int64
+	var sources []string
 	if a.Cost != nil {
-		chk, err := a.Cost.CheckBeforeRun(ctx, taskID, bucket, runMax)
+		var chk cost.CheckResult
+		if taskID == "" {
+			chk, err = a.Cost.CheckBeforeRun(ctx, taskID, bucket, 0.05)
+		} else {
+			chk, err = a.Cost.CheckBeforeRunPolicy(ctx, taskID, bucket, 0, mode)
+		}
 		if err != nil {
 			return 0, nil, err
 		}
@@ -469,23 +547,17 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 			a.Log.Warn("budget warning", "detail", chk.WarnDetail)
 			a.warnOnce(chk.WarnDetail)
 		}
-		runMax = chk.RunMaxUSD // display currency
-		f := a.cachedFX()
-		if runMax <= 0 {
-			runMax = f.Convert(0.01, pricing.USD, f.Display)
-		}
-		if dr := f.Convert(DryRunBudgetUSD, pricing.USD, f.Display); bucket == cost.BucketDryRun && runMax > dr {
-			runMax = dr
-		}
-	} else {
-		f := a.cachedFX()
-		runMax = f.Convert(runMax, pricing.USD, f.Display)
+		runMax, tokenMax = chk.RunMaxUSD, chk.RunMaxTokens
+		sources = chk.LimitSources
+	} else if taskID == "" {
+		runMax = a.cachedFX().Convert(0.05, pricing.USD, a.cachedFX().Display)
 	}
-	if c := callerCap; c > 0 {
-		f := a.cachedFX()
-		if v := f.Convert(c, pricing.USD, f.Display); v < runMax {
-			runMax = v
-		}
+	f := a.cachedFX()
+	if bucket == cost.BucketDryRun {
+		runMax = minPositiveAmount(runMax, f.Convert(DryRunBudgetUSD, pricing.USD, f.Display))
+	}
+	if callerCap > 0 {
+		runMax = minPositiveAmount(runMax, f.Convert(callerCap, pricing.USD, f.Display))
 	}
 	cc, err := a.costControl(ctx, prof, runMax)
 	if err != nil {
@@ -495,6 +567,8 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 		a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: taskID, TaskName: a.taskName(taskID), Detail: err.Error()})
 		return 0, nil, fmt.Errorf("budget blocked: %w", err)
 	}
+	cc.MaxTokens = minPositiveInt(cc.MaxTokens, tokenMax)
+	cc.BudgetSources = sources
 	return runMax, cc, nil
 }
 
@@ -520,25 +594,34 @@ func (a *App) budgetBreach(ctx context.Context, taskID, bucket string, chk cost.
 
 // holdRunBudget runs right before a run launches: it holds the run's money cap
 // against the daily budgets and lowers it to what runs already going left over.
-// Runs without a money cap (subscriptions) hold nothing.
+// Non-metered runs reserve only tokens; bypass runs reserve neither budget scope.
 func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket string, prof provider.Profile) (*cost.Hold, error) {
-	if o.Cost == nil || o.Cost.MaxAmount <= 0 {
+	if o.Cost == nil {
 		return nil, nil
 	}
-	h, capAmt, chk, err := a.Cost.ReserveRun(ctx, o.TaskID, bucket, o.Cost.MaxAmount, o.Cost.Currency)
+	mode, _, err := a.taskCostMode(ctx, o.TaskID)
 	if err != nil {
-		a.Log.Warn("budget hold", "error", err) // a read error must not drop the run
-		return nil, nil
+		return nil, err
+	}
+	var h *cost.Hold
+	var capAmt float64
+	var chk cost.CheckResult
+	h, capAmt, chk, err = a.Cost.ReserveRunPolicy(ctx, o.TaskID, bucket, o.Cost.MaxAmount, o.Cost.Currency, mode, o.Cost.Calc.Billing.Mode == pricing.ModeMetered)
+	if err != nil {
+		return nil, fmt.Errorf("budget reservation: %w", err)
 	}
 	if !chk.OK {
 		return nil, a.budgetBreach(ctx, o.TaskID, bucket, chk)
 	}
-	if capAmt < o.Cost.MaxAmount {
-		cc := *o.Cost
+	cc := *o.Cost
+	if cc.Calc.Billing.Mode == pricing.ModeMetered {
 		cc.MaxAmount = capAmt
-		o.Cost = &cc
-		o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, a.cachedFX().Convert(capAmt, cc.Currency, a.cachedFX().Display))
 	}
+	cc.MaxTokens = minPositiveInt(cc.MaxTokens, chk.RunMaxTokens)
+	cc.BudgetSources = chk.LimitSources
+	o.Cost = &cc
+	o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, cc.FX.Convert(cc.MaxAmount, cc.Currency, cc.FX.Display))
+
 	return h, nil
 }
 

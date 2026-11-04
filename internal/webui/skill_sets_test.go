@@ -90,7 +90,7 @@ func TestTaskCompositionEditAndTransfer(t *testing.T) {
 	}
 	rr := c.do(http.MethodGet, "/api/tasks/export?ids="+id, "", nil)
 	var file taskFile
-	if json.Unmarshal(rr.Body.Bytes(), &file) != nil || file.Version != 2 || len(file.Tasks[0].Skills) != 2 {
+	if json.Unmarshal(rr.Body.Bytes(), &file) != nil || file.Version != taskFileVersion || len(file.Tasks[0].Skills) != 2 {
 		t.Fatal("composition not portable", rr.Body.String())
 	}
 	code, out := c.json(http.MethodPost, "/api/tasks/import", map[string]any{"file": file, "apply": true})

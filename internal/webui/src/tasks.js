@@ -93,7 +93,7 @@
   }
 
   // ---------- TASKS ----------
-  var taskView = { q: "", status: "", skill: "", tag: "", sort: "name", dir: 1, sel: {} };
+  var taskView = { costMode: "", q: "", status: "", skill: "", tag: "", sort: "name", dir: 1, sel: {} };
   // TASK_FILTERS: [value, label key, tooltip key]. "failing" = the newest run with a result failed.
   var TASK_FILTERS = [["", "runs.all_f"], ["active", "task.active"], ["paused", "task.paused"], ["failing", "tl.f_failing", "tl.f_failing_tip"]];
   function taskMatchesStatus(t, st) { return !st || (st === "failing" ? !!t.failing : t.status === st); }
@@ -126,6 +126,7 @@
       mount('<div class="page-head"><div><h1>' + esc(T("nav.tasks")) + "</h1><p>" + esc(plural(tasks.length, "tasks.count_one", "tasks.count_many")) + '</p></div><div class="actions"><button class="btn ghost" id="t-import" data-tip="' + esc(T("tx.import_tip")) + '">' + ic("upload", "sm") + esc(T("tx.import")) + '</button><button class="btn ghost" id="t-export" data-tip="' + esc(T("tx.export_tip")) + '"' + (tasks.length ? "" : " disabled") + ">" + ic("download", "sm") + esc(T("tx.export")) + '</button><button class="btn primary" id="t-new">' + ic("plus", "sm") + esc(T("tf.new")) + "</button></div></div>" +
         '<section class="card flush"><div class="toolbar task-tb"><label class="search-in">' + ic("search", "sm") + '<input id="tq" type="search" maxlength="100" placeholder="' + esc(T("tl.search")) + '" value="' + esc(v.q) + '">' + KB_SLASH + '</label>' +
         '<div class="filters task-f" role="group">' + TASK_FILTERS.map(function (x) { return '<button data-st="' + x[0] + '" aria-pressed="' + (x[0] === v.status) + '" class="' + (x[0] === v.status ? "active" : "") + '"' + (x[2] ? ' data-tip="' + esc(T(x[2])) + '"' : "") + ">" + esc(T(x[1])) + ' <span class="cnt" data-c="' + x[0] + '"></span></button>'; }).join("") + "</div>" +
+        '<select id="tcost" aria-label="' + esc(T("costmode.title")) + '"><option value="">' + esc(T("costmode.all")) + '</option>' + ['task','global','bypass'].map(function(m){return opt(m,costModeLabel(m),v.costMode===m);}).join('') + '</select>' +
         '<select id="tsk" aria-label="' + esc(T("bt.skill")) + '"><option value="">' + esc(T("tl.any_skill")) + "</option>" + Object.keys(skills).sort().map(function (k) { return opt(k, k, k === v.skill); }).join("") + "</select>" +
         (tagList.length ? '<select id="ttag" aria-label="' + esc(T("tg.label")) + '"><option value="">' + esc(T("tg.any")) + "</option>" + tagList.map(function (g) { return opt(g, g + " · " + tagN[g], g === v.tag); }).join("") + '</select><a class="icon-btn sm" id="tgm-link" href="#/settings/tags" data-tip="' + esc(T("tgm.manage")) + '" aria-label="' + esc(T("tgm.manage")) + '">' + ic("settings", "sm") + "</a>" : "") +
         '<span class="grow"></span><span class="muted" id="tcount"></span></div>' +
@@ -136,7 +137,7 @@
         var q = v.q.trim().toLowerCase(), key = sorters[v.sort];
         // Counts on the chips follow the search and skill filter, not the chip itself (like the runs list).
         var base = tasks.filter(function (t) {
-          return (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!v.tag || (t.tags || []).indexOf(v.tag) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt + " " + (t.tags || []).join(" ")).toLowerCase().indexOf(q) >= 0);
+          return (!v.costMode || (t.cost_control_mode || "task") === v.costMode) && (!v.skill || (t.skills || []).indexOf(v.skill) >= 0) && (!v.tag || (t.tags || []).indexOf(v.tag) >= 0) && (!q || (t.name + " " + (t.goal || "") + " " + t.prompt + " " + (t.tags || []).join(" ")).toLowerCase().indexOf(q) >= 0);
         });
         TASK_FILTERS.forEach(function (x) {
           var n = base.filter(function (t) { return taskMatchesStatus(t, x[0]); }).length, c = $('.task-f [data-c="' + x[0] + '"]');
@@ -145,7 +146,7 @@
         var list = base.filter(function (t) { return taskMatchesStatus(t, v.status); }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
-          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
+          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + costModeBadge(t.cost_control_mode) + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
             '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + ((t.skip_runs || []).length ? '<span class="nx-skip" data-tip="' + esc(T("skip.chip_tip", { l: t.skip_runs.map(when).join(T("list.sep")) })) + '">' + ic("skipFwd", "sm") + "</span>" : "") + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
@@ -171,6 +172,7 @@
         history.replaceState(null, "", tasksHash(v.status));
         rows();
       }); });
+      $("#tcost").addEventListener("change", function(e){v.costMode=e.target.value;rows();});
       $("#tsk").addEventListener("change", function (e) { v.skill = e.target.value; rows(); });
       // A tag chip in a row or the tag menu filters the list; the address keeps it.
       function setTag(g) {
@@ -275,7 +277,7 @@
         z.classList.add("compact");
         prev.innerHTML = '<p class="muted tx-meta" data-tip="' + esc((r.app || "") + (r.exported_at ? " · " + fullTime(r.exported_at) : "")) + '">' + esc(T("tx.found", { n: rows.length, ok: ok })) + "</p>" +
           '<ul class="tx-list">' + rows.map(function (x) {
-            var notes = (x.notes || []).map(function (n) { return TX_NOTES[n] ? '<span class="tag sm warn" data-tip="' + esc(T(TX_NOTES[n] + "_tip", { n: x.from || "" })) + '">' + esc(T(TX_NOTES[n])) + "</span>" : ""; }).join("");
+            var notes = (x.notes || []).indexOf("cost_bypass") >= 0 ? costModeBadge("bypass") : ""; notes += (x.notes || []).map(function (n) { return TX_NOTES[n] ? '<span class="tag sm warn" data-tip="' + esc(T(TX_NOTES[n] + "_tip", { n: x.from || "" })) + '">' + esc(T(TX_NOTES[n])) + "</span>" : ""; }).join("");
             return '<li class="' + (x.error ? "bad" : "") + '"><label class="check"><input type="checkbox" data-noguard data-tx="' + x.index + '"' + (x.error ? " disabled" : " checked") + ' aria-label="' + esc(x.name) + '"></label><div class="tx-main"><div class="tx-name"><strong class="ell">' + esc(x.name) + "</strong>" + notes + "</div>" +
               '<small class="ell">' + (x.error ? esc(T("tx.cant", { e: x.error })) : esc((x.cron ? cronHuman(x.cron) + " · " : T("tx.no_cron") + " · ") + (x.prompt || ""))) + "</small></div></li>";
           }).join("") + "</ul>" +
@@ -287,8 +289,9 @@
         var count = function () { var n = picked().length; go.textContent = T("tx.go", { n: n }); go.disabled = !n; };
         $$("[data-tx]", prev).forEach(function (c) { c.addEventListener("change", count); });
         count();
-        go.addEventListener("click", function () {
+        go.addEventListener("click", async function () {
           var pick = picked(), on = $("#tx-en", prev).checked;
+          if (pick.some(function(i){return doc.tasks[i].cost_control && doc.tasks[i].cost_control.mode === "bypass";}) && !await confirmCostBypass(root,pick.map(function(i){return doc.tasks[i].name;}).join(", "))) return;
           go.disabled = true;
           api("/api/tasks/import", { method: "POST", body: { file: doc, apply: true, pick: pick, enable: on } }).then(function (res) {
             var bad = (res.tasks || []).filter(function (x) { return x.error && pick.indexOf(x.index) >= 0; }).length;

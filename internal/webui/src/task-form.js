@@ -166,12 +166,17 @@
     };
     var whyAll = function (b) { return why(b) + (b.amount > 0 && b.per_day > 1 ? T("af.b_perday", { n: b.per_day, run: money(b.per_run, b.currency), amt: money(b.amount, b.currency) }) : ""); };
     var setBudget = function (b) {
-      if (!b || b.basis === "none" || budgetMine) return;
+      if (!b || b.basis === "none" || budgetMine || (f.cost_enabled && !f.cost_enabled.checked)) return;
       var v = b.amount > 0 ? String(b.amount) : "";
       bPill.setAttribute("data-tip", whyAll(b));
-      bPill.classList.remove("hidden"); filled.budget = b.amount > 0 ? money(b.amount, b.currency) : T("tf.no_cap");
-      if (f.budget_usd.value !== v) { f.budget_usd.value = v; f.budget_usd.classList.remove("af-flash"); void f.budget_usd.offsetWidth; f.budget_usd.classList.add("af-flash"); }
-      lastBudget = v;
+      bPill.classList.remove("hidden");
+      bPill.innerHTML = '<button type="button" class="btn sm">' + esc(T("costmode.adopt",{amount:b.amount > 0 ? money(b.amount,b.currency) : T("tf.no_cap")})) + '</button>';
+      $("button",bPill).addEventListener("click",function(){
+        if(f.cost_enabled && !f.cost_enabled.checked) return;
+        f.budget_usd.value=v;lastBudget=v;budgetMine=true;
+        filled.budget=b.amount > 0 ? money(b.amount,b.currency) : T("tf.no_cap");
+        bPill.classList.add("hidden");paint(lastCron);
+      });
     };
     var ask = function (delay) {
       clearTimeout(timer);
@@ -304,6 +309,35 @@
     ["retry_max", "catchup", "notify_success", "notify_answer", "notify_changed", "priority"].forEach(function (n) { f[n].addEventListener("change", sync); });
     sync();
   }
+  function costModeLabel(mode) { return T("costmode." + (mode || "task")); }
+  function costModeBadge(mode) { return '<span class="pill ' + (mode === "bypass" ? 'warn' : 'plain') + '">' + esc(costModeLabel(mode)) + '</span>'; }
+  function costFieldsHtml(cp, currency, daily, run) {
+    cp = cp || { mode: "task", run_amount: run, daily_amount: daily };
+    var mode = cp.mode || "task", c = cp.currency || currency || "USD";
+    return '<section class="cost-policy"><label class="check"><input type="checkbox" name="cost_enabled"' + (mode === "task" ? ' checked' : '') + '> <strong>' + esc(T("costmode.title")) + '</strong></label>' +
+      '<div class="form-row cost-limits">' + fieldHtml(T("costmode.run", {c:c}), '<input name="run_amount" type="number" min="0" max="10000" step="0.0001" value="' + esc(cp.run_amount == null ? '' : cp.run_amount) + '" placeholder="' + esc(T("tf.no_cap")) + '">') +
+      fieldHtml(T("tf.budget_c", {c:c}), '<input name="budget_usd" type="number" min="0" max="10000" step="0.0001" value="' + esc(cp.daily_amount == null ? '' : cp.daily_amount) + '" placeholder="' + esc(T("tf.no_cap")) + '">', '', '<span class="af-pill hidden" id="af-budget"></span>') + '</div>' +
+      '<p class="hint">' + esc(T("costmode.retained")) + '</p><fieldset class="cost-choices"><legend>' + esc(T("costmode.when_off")) + '</legend>' +
+      ['global','bypass'].map(function(m){return '<label class="cost-choice"><input type="radio" name="cost_off_mode" value="'+m+'"'+((mode===m || (mode==='task' && m==='global'))?' checked':'')+'><span><strong>'+esc(costModeLabel(m))+'</strong><small>'+esc(T("costmode."+m+"_hint"))+'</small></span></label>';}).join('') + '</fieldset>' +
+      '<p class="notice warn cost-warning">' + esc(T("costmode.warning")) + '</p><p class="hint">' + esc(T("costmode.next_start")) + '</p></section>';
+  }
+  // Inline confirmation preserves the form draft; the global modal helper replaces it.
+  function confirmCostBypass(root, name) {
+    return new Promise(function(resolve){
+      var bar=document.createElement("section");bar.className="notice warn";bar.setAttribute("role","alertdialog");bar.setAttribute("aria-label",T("costmode.confirm_title",{name:name}));
+      bar.innerHTML='<h3>'+esc(T("costmode.confirm_title",{name:name}))+'</h3><p>'+esc(T("costmode.warning"))+'</p><div class="actions"><button type="button" class="btn cost-back">'+esc(T("btn.cancel"))+'</button><button type="button" class="btn danger-solid cost-ok">'+esc(T("costmode.confirm_ok"))+'</button></div>';
+      (root.querySelector("form") || root).appendChild(bar);
+      function finish(ok){bar.remove();resolve(ok);}
+      $(".cost-back",bar).addEventListener("click",function(){finish(false);});$(".cost-ok",bar).addEventListener("click",function(){finish(true);});$(".cost-back",bar).focus();
+    });
+  }
+  function wireCostFields(root, f) {
+    var choices = $(".cost-choices",root), warning = $(".cost-warning",root);
+    function mode(){return f.cost_enabled.checked ? "task" : f.cost_off_mode.value;}
+    function sync(){ choices.hidden=f.cost_enabled.checked; f.run_amount.disabled=f.budget_usd.disabled=!f.cost_enabled.checked; warning.hidden=mode()!=="bypass"; }
+    f.cost_enabled.addEventListener("change",function(){if(!f.cost_enabled.checked) f.cost_off_mode.value="global";sync();});
+    $$('[name="cost_off_mode"]',root).forEach(function(x){x.addEventListener("change",sync);});sync();return mode;
+  }
   // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings"), api("/api/tasks/tags").catch(function () { return []; })];
@@ -323,10 +357,10 @@
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
         fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
-        '<div class="form-row">' + fieldHtml(T("tf.budget_c", { c: curSym(state.currency || "USD") }), '<input name="budget_usd" type="number" min="0" max="10000" step="0.01" value="' + esc(tf.budget_usd || "") + '" placeholder="' + esc(T("tf.no_cap")) + '">', T("tf.budget_hint"), taskId ? "" : '<span class="af-pill hidden" id="af-budget" data-tip="">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>") +
-        fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') + "</div>" +
+        costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null, (st.fx || {}).display === "CNY" ? 0.05 * st.fx.usd_cny : 0.05) +
+        fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') +
         wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +
-        '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" +
+        '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
         '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
         var initial=tf.skill_bindings||(tf.skill_id?[{skill_id:tf.skill_id,mode:tf.skill_version_id?"pinned":"follow",version_id:tf.skill_version_id||"",role:"primary"}]:[]);
@@ -339,18 +373,21 @@
         if (!taskId) wireTaskAutofill(root, f, se, skills);
         var ws = wireWsField(root, f.workspace, taskId);
         wirePolicyFields(root, f);
+        var readCostMode = wireCostFields(root, f);
         f.addEventListener("submit", function (e) {
           e.preventDefault();
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
+          body.cost_control = {mode:readCostMode(), run_amount:f.run_amount.value === "" ? null : Number(f.run_amount.value), daily_amount:f.budget_usd.value === "" ? null : Number(f.budget_usd.value), currency:(tf.cost_control || {}).currency || (st.fx || {}).display || "USD", revision:(tf.cost_control || {}).revision || 0, fx_revision:(tf.cost_control || {}).fx_revision || st.fx_revision || ""};
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
-          api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
+          var consent = body.cost_control.mode === "bypass" && (!tf.cost_control || tf.cost_control.mode !== "bypass") ? confirmCostBypass(root,body.name) : Promise.resolve(true);
+          consent.then(function(ok){ if(!ok){btn.disabled=false;return;} return api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
             if (drafty) draftClear("task");
             close(); toast(T(taskId ? "tf.saved" : "tf.created"));
             if (taskId) refresh(); else location.hash = "#/tasks/" + enc(t.id);
-          }).catch(function (err) { btn.disabled = false; fail(err); });
+          }).catch(function (err) { btn.disabled = false; fail(err); }); });
         });
       });
     }).catch(fail);

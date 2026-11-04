@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
 	"github.com/Zhengmingming1/tidebot/internal/pricing/catalog"
 	"github.com/Zhengmingming1/tidebot/internal/provider"
@@ -37,13 +39,34 @@ func (a *App) SetFX(ctx context.Context, f pricing.FX) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
-	if err := a.saveJSONSetting(ctx, setPricingFX, f); err != nil {
+	mu := db.CostPolicyMutex(a.Store.DB)
+	mu.Lock()
+	defer mu.Unlock()
+	tx, err := a.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	raw, err := json.Marshal(f)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(user_id,key,value_json,updated_at) VALUES('owner',?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`, setPricingFX, string(raw), now); err != nil {
+		return err
+	}
+	for _, from := range []string{pricing.USD, pricing.CNY} {
+		if from == f.Display {
+			continue
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE budgets SET max_usd=max_usd*?,currency=?,updated_at=? WHERE currency=?`, f.Factor(from, f.Display), f.Display, now, from); err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 	a.fxCache.Store(&f)
-	if a.Cost != nil {
-		return a.Cost.ConvertBudgets(ctx, f, f.Display)
-	}
 	return nil
 }
 
@@ -115,18 +138,15 @@ func (a *App) budgetArgs(args []string, p provider.Profile, runMax float64) []st
 			if i+1 < len(args) {
 				i++
 			}
-			if keep && runMax > 0 {
-				out = append(out, "--max-budget-usd", fmt.Sprintf("%.4f", f.Convert(runMax, f.Display, pricing.USD)))
-			}
 			continue
 		}
 		if strings.HasPrefix(args[i], "--max-budget-usd=") {
-			if keep && runMax > 0 {
-				out = append(out, fmt.Sprintf("--max-budget-usd=%.4f", f.Convert(runMax, f.Display, pricing.USD)))
-			}
 			continue
 		}
 		out = append(out, args[i])
+	}
+	if keep && runMax > 0 {
+		out = append(out, "--max-budget-usd", strconv.FormatFloat(f.Convert(runMax, f.Display, pricing.USD), 'g', -1, 64))
 	}
 	return out
 }
