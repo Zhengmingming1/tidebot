@@ -51,12 +51,12 @@ func TestRollbackRestoreFailurePreservesExecutable(t *testing.T) {
 		t.Run(map[bool]string{false: "recover current", true: "retain recovery copy"}[failRecovery], func(t *testing.T) {
 			s := rollbackFixture(t)
 			injected := errors.New("injected rename failure")
-			err := rollbackSwapWithRename(s, func(from, to string) error {
+			err := rollbackSwapWithFileOps(s, func(from, to string) error {
 				if from == s.Prev || (failRecovery && from == s.Path+".failed") {
 					return injected
 				}
 				return os.Rename(from, to)
-			})
+			}, os.RemoveAll)
 			if !errors.Is(err, injected) {
 				t.Fatalf("expected restore failure, got %v", err)
 			}
@@ -129,13 +129,31 @@ func TestBootMissingBackupReportsFailure(t *testing.T) {
 func TestRollbackStagingFailurePreservesBothExecutables(t *testing.T) {
 	s := rollbackFixture(t)
 	calls := 0
-	err := rollbackSwapWithRename(s, func(from, to string) error {
+	err := rollbackSwapWithFileOps(s, func(from, to string) error {
 		calls++
 		return os.ErrPermission
-	})
+	}, os.RemoveAll)
 	if !errors.Is(err, os.ErrPermission) || calls != 1 {
 		t.Fatalf("err = %v, rename calls = %d", err, calls)
 	}
 	assertBytes(t, s.Path, "new")
 	assertBytes(t, s.Prev, "old")
+}
+
+func TestRollbackCleanupFailureStillReportsSuccess(t *testing.T) {
+	s := rollbackFixture(t)
+	calls := 0
+	err := rollbackSwapWithFileOps(s, os.Rename, func(path string) error {
+		calls++
+		if path != s.Path+".failed" {
+			t.Fatalf("unexpected cleanup path: %s", path)
+		}
+		assertBytes(t, s.Path, "old")
+		return os.ErrPermission // A running Windows executable cannot be deleted.
+	})
+	if err != nil || calls != 1 {
+		t.Fatalf("successful rollback reported err = %v, cleanup calls = %d", err, calls)
+	}
+	assertBytes(t, s.Path, "old")
+	assertBytes(t, s.Path+".failed", "new")
 }

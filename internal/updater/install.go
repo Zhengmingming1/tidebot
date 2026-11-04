@@ -471,10 +471,10 @@ func rollbackSwaps(swaps []Swap) error {
 }
 
 func rollbackSwap(s Swap) error {
-	return rollbackSwapWithRename(s, os.Rename)
+	return rollbackSwapWithFileOps(s, os.Rename, os.RemoveAll)
 }
 
-func rollbackSwapWithRename(s Swap, rename func(string, string) error) error {
+func rollbackSwapWithFileOps(s Swap, rename func(string, string) error, removeAll func(string) error) error {
 	if s.Prev == "" {
 		return nil
 	}
@@ -505,7 +505,9 @@ func rollbackSwapWithRename(s Swap, rename func(string, string) error) error {
 		return err
 	}
 	if moved {
-		return os.RemoveAll(bad)
+		// Windows may keep the running executable locked after renaming it.
+		// The backup is already restored: cleanup must not prevent relaunch.
+		_ = removeAll(bad)
 	}
 	return nil
 }
