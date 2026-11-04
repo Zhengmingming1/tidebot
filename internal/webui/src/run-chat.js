@@ -36,15 +36,25 @@
     var cs = r.chat_session;
     if ((cs && cs.turn > 0) || r.trigger === "session" || !rcDone(r.status)) return "";
     var pre = rcTurns(r._chat);
-    return '<section class="rc" id="rc" aria-label="' + esc(T("rc.title")) + '"><div class="rc-sep" id="rc-sep"' + (pre.length || (cs && !r._chat) ? "" : " hidden") + "><span>" + esc(T("rc.title")) + '</span></div><div class="rc-thread" id="rc-thread" aria-live="polite">' +
+    return '<section class="rc" id="rc" aria-label="' + esc(T("rc.title")) + '"><div class="rc-sep" id="rc-sep"' + (pre.length || (cs && !r._chat) ? "" : " hidden") + "><span>" + esc(T("rc.title")) + '</span>' + rcOpenHtml(cs && cs.id) + '</div><div class="rc-thread" id="rc-thread" aria-live="polite">' +
       (r._chat ? pre.map(rcTurnHtml).join("") : cs ? skeleton("list") : "") + "</div>" +
-      '<form class="rc-box" id="rc-form" novalidate><label class="sr-only" for="rc-in">' + esc(T("rc.label")) + "</label>" +
-      '<textarea id="rc-in" rows="1" maxlength="16384" data-noguard placeholder="' + esc(T("rc.ph")) + '"></textarea>' +
-      '<div class="rc-bar"><span class="rc-tags"><span class="rc-tag" tabindex="0" data-tip="' + esc(T("rc.read_tip")) + '">' + ic("eye", "sm") + esc(T("rc.read")) + "</span>" +
-      '<span class="rc-tag" id="rc-noweb" tabindex="0" data-tip="' + esc(T("rc.noweb_tip")) + '">' + ic("offline", "sm") + esc(T("rc.noweb")) + "</span></span>" +
+      rcBoxHtml({}) + "</section>";
+  }
+  // The message box (run page and session page). o.ph / o.label / o.read_tip: other words;
+  // o.tags: extra tags before 只读 (the session page's folder).
+  function rcBoxHtml(o) {
+    return '<form class="rc-box" id="rc-form" novalidate><label class="sr-only" for="rc-in">' + esc(T(o.label || "rc.label")) + "</label>" +
+      '<textarea id="rc-in" rows="1" maxlength="16384" data-noguard placeholder="' + esc(T(o.ph || "rc.ph")) + '"></textarea>' +
+      '<div class="rc-bar"><span class="rc-tags">' + (o.tags || "") + '<span class="rc-tag rc-read" tabindex="0" data-tip="' + esc(T(o.read_tip || "rc.read_tip")) + '">' + ic("eye", "sm") + esc(T("rc.read")) + "</span>" +
+      '<span class="rc-tag rc-noweb" id="rc-noweb" tabindex="0" data-tip="' + esc(T("rc.noweb_tip")) + '">' + ic("offline", "sm") + esc(T("rc.noweb")) + "</span></span>" +
       '<span class="rc-meta" id="rc-meta"></span>' +
       '<button type="submit" class="btn primary sm" id="rc-send">' + ic("send", "sm") + esc(T("rc.send")) + "</button></div>" +
-      '<p class="field-err" id="rc-err" role="alert"></p></form></section>';
+      '<p class="field-err" id="rc-err" role="alert"></p></form>';
+  }
+  // "Open in 会话" beside the run page's divider: the same thread on the session page.
+  function rcOpenHtml(id) {
+    var okId = /^[\w-]{1,64}$/.test(id || "");
+    return '<a class="rc-open" id="rc-open" href="' + (okId ? "#/chat/" + enc(id) : "#/chat") + '"' + (okId ? "" : " hidden") + ">" + ic("chat", "sm") + esc(T("rc.open_session")) + "</a>";
   }
   function rcTurnHtml(t) {
     var busy = rcBusy(t.status), ok = /^[\w-]{1,64}$/.test(t.run_id || "");
@@ -108,9 +118,20 @@
   function bindRunChat(r) {
     var sec = $("#rc");
     if (!sec) return;
+    bindChat(sec, {
+      id: r.chat_session ? r.chat_session.id : "", key: rcDraftKey(r.id), pre: r._chat, turns: rcTurns,
+      create: function () { return api("/api/chat-sessions", { method: "POST", body: { run_id: r.id } }); },
+      onPaint: function (s) { var a = $("#rc-open", sec); if (a && s && /^[\w-]{1,64}$/.test(s.id || "")) { a.href = "#/chat/" + enc(s.id); a.hidden = false; } }
+    });
+  }
+  // bindChat wires a thread + message box (#rc-thread, #rc-form… inside sec) to one session.
+  // o.id: the session (or "" until o.create() makes one on the first send); o.key: draft key;
+  // o.pre: the session already fetched; o.turns(s): the turns to show; o.onPaint(s), o.onGone(),
+  // o.onSent(s): page hooks.
+  function bindChat(sec, o) {
     var thread = $("#rc-thread", sec), form = $("#rc-form", sec), ta = $("#rc-in", sec), send = $("#rc-send", sec), meta = $("#rc-meta", sec), err = $("#rc-err", sec);
-    var st = { id: r.chat_session ? r.chat_session.id : "", ses: null, sending: false, painted: {} };
-    var key = rcDraftKey(r.id), d = draftLoad(key);
+    var st = { id: o.id || "", ses: null, sending: false, painted: {} }, turnsOf = o.turns || rcTurns;
+    var key = o.key, d = draftLoad(key);
     if (d) ta.value = d.text;
     var fit = function () { ta.style.height = ""; ta.style.height = Math.min(Math.round(window.innerHeight * 0.4), ta.scrollHeight) + "px"; };
     fit();
@@ -120,8 +141,8 @@
       var b = busy(), f = full(), empty = !ta.value.trim();
       send.disabled = b || f || empty;
       ta.disabled = f;
-      ta.placeholder = T(f ? "rc.limit_ph" : "rc.ph");
-      send.setAttribute("data-tip", T(f ? "rc.limit_tip" : b ? "rc.busy_tip" : "rc.send_tip"));
+      ta.placeholder = T(f ? "rc.limit_ph" : o.ph || "rc.ph");
+      send.setAttribute("data-tip", T(f ? "rc.limit_tip" : b ? "rc.busy_tip" : o.send_tip || "rc.send_tip"));
       var s = st.ses, html = "";
       if (s) html = (f ? '<span class="pill warn sm">' + esc(T("rc.limit")) + "</span>" : "") +
         '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), m: num(s.turn_max), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns), m: num(s.turn_max) })) + "</span>";
@@ -132,7 +153,7 @@
     // lines of the turn being answered are kept)
     var paint = function (s) {
       st.ses = s;
-      var turns = rcTurns(s), seen = {};
+      var turns = turnsOf(s), seen = {};
       if (thread.firstElementChild && !thread.firstElementChild.classList.contains("rc-turn")) thread.innerHTML = "";
       turns.forEach(function (t) {
         var html = rcTurnHtml(t), el = $('.rc-turn[data-turn="' + t.index + '"]', thread);
@@ -148,7 +169,9 @@
       if (live && live.status === "running" && /^[\w-]{1,64}$/.test(live.run_id)) rcStream(thread, live.run_id, function () { load(); });
       else if (!live) stopChatStream();
       if ($(".rc-el[data-since]", thread) && !rcTick) { rcTick = setInterval(rcElapsed, 1000); }
-      $("#rc-sep", sec).hidden = !turns.length;
+      var sep = $("#rc-sep", sec);
+      if (sep) sep.hidden = !turns.length;
+      if (o.onPaint) o.onPaint(s);
       rcElapsed();
       sync();
       if (busy()) livePoll(load, RC_POLL_MS); else if (st.polling) stopPoll();
@@ -158,7 +181,10 @@
       if (!st.id) return Promise.resolve();
       return api("/api/chat-sessions/" + enc(st.id), { fresh: true }).then(function (s) { if (document.contains(sec)) paint(s); }).catch(function (e) {
         if (!document.contains(sec)) return;
-        if (e.status === 404) { st.id = ""; st.ses = null; thread.innerHTML = ""; st.painted = {}; $("#rc-sep", sec).hidden = true; sync(); return; }
+        if (e.status === 404) {
+          if (o.onGone) { o.onGone(); return; }
+          st.id = ""; st.ses = null; thread.innerHTML = ""; st.painted = {}; if ($("#rc-sep", sec)) $("#rc-sep", sec).hidden = true; sync(); return;
+        }
         if (!st.ses) thread.innerHTML = errorState(rcErrText(e));
       });
     };
@@ -169,13 +195,16 @@
       if (!v || busy() || full()) return;
       if (new Blob([v]).size > 16384) { showErr(T("rc.err_too_long")); return; }
       showErr(""); st.sending = true; sync();
-      (st.id ? Promise.resolve({ id: st.id }) : api("/api/chat-sessions", { method: "POST", body: { run_id: r.id } })).then(function (s) {
+      var made = null;
+      (st.id ? Promise.resolve({ id: st.id }) : o.create().then(function (s) { made = s; return s; })).then(function (s) {
         st.id = s.id;
         return api("/api/chat-sessions/" + enc(s.id) + "/turns", { method: "POST", body: { message: v } });
       }).then(function () {
         ta.value = ""; draftClear(key); fit();
+        if (o.onSent && o.onSent({ id: st.id })) return;
         return load().then(function () { var last = thread.lastElementChild; if (last && last.scrollIntoView) last.scrollIntoView({ block: "nearest" }); });
       }).catch(function (e) {
+        if (made && o.dropEmpty) { api("/api/chat-sessions/" + enc(made.id), { method: "DELETE" }).catch(function () {}); st.id = ""; }
         if (e.auth || !document.contains(sec)) return;
         showErr(rcErrText(e));
         if (e.data && (e.data.code === "busy" || e.data.code === "turn_limit")) load();
@@ -188,5 +217,6 @@
       if (s) { s.disabled = true; stopRun(s.getAttribute("data-rc-stop"), s.getAttribute("data-st")).then(function () { load(); }).catch(function (x) { s.disabled = false; fail(x); }); }
     });
     sync();
-    if (r._chat) { rcTurns(r._chat).forEach(function (t) { st.painted[t.index] = rcTurnHtml(t); }); paint(r._chat); } else load();
+    if (o.pre) { turnsOf(o.pre).forEach(function (t) { st.painted[t.index] = rcTurnHtml(t); }); paint(o.pre); } else load();
+    return { load: load };
   }

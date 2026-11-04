@@ -52,6 +52,15 @@ func TestChatSessionAPI(t *testing.T) {
 	if code, out := c.json(http.MethodPost, "/api/chat-sessions", map[string]string{}); code != 400 || out["code"] != "invalid" {
 		t.Fatalf("no run id %d %v", code, out)
 	}
+	// a blank session: origin "chat" and no run; other origins are refused
+	if code, _ := c.json(http.MethodPost, "/api/chat-sessions", map[string]string{"origin": "chat"}); code != 201 || f.created.Origin != "chat" || f.created.RunID != "" {
+		t.Fatalf("blank %d %+v", code, f.created)
+	}
+	for _, body := range []map[string]string{{"origin": "run"}, {"origin": "run_fix", "run_id": "run_a"}, {"origin": "x"}} {
+		if code, out := c.json(http.MethodPost, "/api/chat-sessions", body); code != 400 || out["code"] != "invalid" {
+			t.Fatalf("%v: %d %v", body, code, out)
+		}
+	}
 	if rr := c.do(http.MethodGet, "/api/chat-sessions/chat_1", "", nil); rr.Code != 200 || strings.Contains(rr.Body.String(), "<b>") {
 		t.Fatalf("get %d %s", rr.Code, rr.Body)
 	}

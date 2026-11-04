@@ -106,7 +106,7 @@
   }
   function emptyState(icon, title, sub) { return '<div class="empty">' + ic(icon) + "<strong>" + esc(title) + "</strong>" + esc(sub || "") + "</div>"; }
   // ---------- shell ----------
-  var NAV = [["home", "#/"], ["tasks", "#/tasks"], ["skills", "#/skills"], ["workflows", "#/workflows"], ["buttons", "#/buttons"], ["plugins", "#/plugins"], ["runs", "#/runs"], ["spend", "#/spend"], ["settings", "#/settings"]];
+  var NAV = [["home", "#/"], ["chat", "#/chat"], ["tasks", "#/tasks"], ["skills", "#/skills"], ["workflows", "#/workflows"], ["buttons", "#/buttons"], ["plugins", "#/plugins"], ["runs", "#/runs"], ["spend", "#/spend"], ["settings", "#/settings"]];
   var shellNavChoice = null, shellNavOff = null;
   function syncShellNav() {
     var shell = $("#shell"), toggle = $("#nav-toggle");

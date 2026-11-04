@@ -309,3 +309,67 @@ func TestChatSessionCostInDisplayCurrency(t *testing.T) {
 		t.Fatalf("list %+v", list)
 	}
 }
+
+func TestChatSessionBlank(t *testing.T) {
+	home := chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", argsFile)
+
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{Origin: "chat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ses.Origin != "chat" || ses.OriginRunID != "" || ses.Title != "" || ses.WorkspaceDir != "" || ses.PermissionMode != "read" || ses.Provider != a.Cfg.DefaultProvider || ses.WebAccess {
+		t.Fatalf("blank session %+v", ses)
+	}
+	// A blank session is never handed back for a run, and two blanks are two sessions.
+	if other, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{Origin: "chat"}); err != nil || other.ID == ses.ID {
+		t.Fatalf("second blank %v %+v", err, other)
+	}
+
+	if _, err := a.SendChatTurn(ctx, ses.ID, "  what   can you do?\n"); err != nil {
+		t.Fatal(err)
+	}
+	d := waitTurn(t, a, ses.ID, 1)
+	args := readArgs(t, argsFile)
+	csid := argAfter(args, "--session-id")
+	if !isUUID(csid) || args[1] != "what   can you do?" || contains(args, "--no-session-persistence") {
+		t.Fatalf("first blank turn args %q", args)
+	}
+	joined := strings.Join(args, "\n")
+	if strings.Contains(joined, "previous_run") || strings.Contains(joined, "earlier tidebot run") {
+		t.Fatalf("blank session got a run record: %q", args)
+	}
+	deny := argAfter(args, "--disallowedTools")
+	for _, w := range []string{"Edit,", "Bash", "WebFetch", "Edit(//**/.claude/**)"} {
+		if !strings.Contains(deny, w) {
+			t.Errorf("deny lacks %s: %s", w, deny)
+		}
+	}
+	if d.Title != "what can you do?" || len(d.TurnList) != 1 || d.TurnList[0].Index != 1 {
+		t.Fatalf("after first turn %+v", d)
+	}
+	if fi, err := os.Stat(a.chatScratchDir(ses.ID)); err != nil || !fi.IsDir() {
+		t.Fatalf("blank session should read its own folder: %v", err)
+	}
+
+	// Later turns resume it; the title stays the first message.
+	if _, err := a.SendChatTurn(ctx, ses.ID, "and more"); err != nil {
+		t.Fatal(err)
+	}
+	d = waitTurn(t, a, ses.ID, 2)
+	if argAfter(readArgs(t, argsFile), "--resume") != csid || d.Title != "what can you do?" {
+		t.Fatalf("second blank turn %+v", d)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
+		t.Fatal(".claude written under HOME")
+	}
+	if err := a.DeleteChatSession(ctx, ses.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(a.chatSessionsDir(), ses.ID)); !os.IsNotExist(err) {
+		t.Fatal("blank session folder kept after delete")
+	}
+}

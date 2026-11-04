@@ -104,6 +104,7 @@
     try {
     switch (parts[0]) {
       case undefined: p = renderHome(); break;
+      case "chat": p = renderChat(parts[1]); break;
       case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(params); break;
       case "skill-sets": p = renderSkillSets(); break;
       case "skill-repositories": p = renderSkillRepositories(parts[1]); break;

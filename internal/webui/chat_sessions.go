@@ -14,7 +14,7 @@ import (
 type ChatSession struct {
 	ID             string  `json:"id"`
 	Title          string  `json:"title"`
-	Origin         string  `json:"origin"` // run (chat, run_fix later)
+	Origin         string  `json:"origin"` // run | chat (run_fix later)
 	OriginRunID    string  `json:"origin_run_id"`
 	WorkspaceDir   string  `json:"workspace_dir"`
 	PermissionMode string  `json:"permission_mode"` // read
@@ -47,9 +47,11 @@ type ChatSessionDetail struct {
 	TurnList []ChatTurn `json:"turn_list"`
 }
 
-// ChatSessionCreate starts a session from a finished run.
+// ChatSessionCreate starts a session from a finished run, or a blank one
+// (Origin "chat", no run).
 type ChatSessionCreate struct {
 	RunID     string `json:"run_id"`
+	Origin    string `json:"origin,omitempty"`
 	Title     string `json:"title"`
 	WebAccess bool   `json:"web_access"`
 }
@@ -149,7 +151,7 @@ func (s *Server) handleChatSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"sessions": list})
 	case http.MethodPost:
 		var body ChatSessionCreate
-		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || strings.TrimSpace(body.RunID) == "" {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || strings.TrimSpace(body.RunID) == "" && body.Origin != "chat" || body.Origin != "" && body.Origin != "chat" && body.Origin != "run" {
 			writeJSON(w, 400, map[string]string{"error": "run_id required", "code": "invalid"})
 			return
 		}
