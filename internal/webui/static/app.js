@@ -3663,10 +3663,12 @@
   function renderSkillSets() {
     return Promise.all([api("/api/skill-sets"), api("/api/skills")]).then(function (r) {
       var sets = r[0], skills = r[1];
-      mount('<div class="page-head"><div><h1>' + esc(T("ss.title")) + '</h1><p>' + esc(T("ss.subtitle")) + '</p></div><div class="actions"><label class="btn">' + ic("upload", "sm") + esc(T("ss.import")) + '<input type="file" id="ss-import" class="hidden" accept=".zip"></label><button class="btn primary" id="ss-new">' + ic("plus", "sm") + esc(T("ss.new")) + '</button></div></div>' + skillTabs("skill-sets") +
+      mount('<div class="page-head"><div><h1>' + esc(T("ss.title")) + '</h1><p>' + esc(T("ss.subtitle")) + '</p></div><div class="actions"><button type="button" class="btn" id="ss-import-open">' + ic("upload", "sm") + esc(T("ss.import")) + '</button><input type="file" id="ss-import" class="hidden" accept=".zip"><button class="btn primary" id="ss-new">' + ic("plus", "sm") + esc(T("ss.new")) + '</button></div></div>' + skillTabs("skill-sets") +
         (sets.length ? '<div class="ss-grid">' + sets.map(function (set) { return '<section class="card" data-set-card="' + esc(set.id) + '"><div class="card-head"><span class="ico">' + ic("skills") + '</span><h2>' + esc(set.name) + '</h2><span class="tag perm">v' + esc(set.version_no) + '</span></div>' + (set.details && set.details.description ? '<p class="ss-description">' + esc(set.details.description) + '</p>' : '') + '<ul class="list-plain">' + set.skill_bindings.map(function (b) { return '<li><strong>' + esc(T(b.role === "primary" ? "ss.primary" : "ss.auxiliary")) + '</strong> · ' + esc(b.skill_name || b.skill_id) + '</li>'; }).join("") + '</ul><div class="row-actions ss-card-actions"><button class="btn primary sm" data-set-run>' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="btn sm" data-set-edit>' + esc(T("ss.edit")) + '</button><button class="btn sm" data-set-usage>' + esc(T("ss.usage")) + '</button><button class="btn sm" data-set-eval>' + esc(T("ss.evaluate")) + '</button><button class="btn sm" data-set-check>' + esc(T("ss.dependencies")) + '</button><button class="icon-btn sm" data-set-export aria-label="' + esc(T("ss.export")) + '">' + ic("download", "sm") + '</button><button class="icon-btn sm" data-set-delete aria-label="' + esc(T("ss.delete")) + '">' + ic("trash", "sm") + '</button></div></section>'; }).join("") + '</div>' : emptyState("skills", T("ss.empty"), T("ss.subtitle"))), "skills", [[T("ss.title")]]);
       $('#ss-new').addEventListener("click", function () { skillSetModal(null, skills); });
-      $('#ss-import').addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var fd = new FormData(); fd.append("file", f); e.target.disabled = true; upload("/api/skill-sets/import", fd).then(function () { toast(T("ss.imported")); renderSkillSets(); }).catch(function (err) { e.target.disabled = false; e.target.value = ""; if(err.data&&err.data.partial)toast(T("ss.import_partial",{n:(err.data.imported_skill_ids||[]).length})+" "+err.message,true);else fail(err); }); });
+      var importInput = $('#ss-import'), importButton = $('#ss-import-open');
+      importButton.onclick = function () { importInput.click(); };
+      $('#ss-import').addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var fd = new FormData(); fd.append("file", f); e.target.disabled = true; importButton.disabled = true; upload("/api/skill-sets/import", fd).then(function () { toast(T("ss.imported")); renderSkillSets(); }).catch(function (err) { e.target.disabled = false; importButton.disabled = false; e.target.value = ""; if(err.data&&err.data.partial)toast(T("ss.import_partial",{n:(err.data.imported_skill_ids||[]).length})+" "+err.message,true);else fail(err); }); });
       $$('[data-set-card]').forEach(function (card) { var set = sets.filter(function (s) { return s.id === card.getAttribute("data-set-card"); })[0];
         $('[data-set-run]', card).addEventListener("click", function () { quickRunModal({ skill_bindings: set.skill_bindings, skill_set_source: {set_id:set.id,version_id:set.version_id} }); });
         $('[data-set-usage]', card).onclick=function(){skillSetUsage(set);};
@@ -4181,8 +4183,9 @@
   function repositoryBadges(c) {
     return repositoryStates(c).map(function (st) { return '<span class="pill sm ' + (st === "installed" ? "ok" : st === "new" ? "info" : "warn") + '">' + esc(T("sr.st_" + st)) + '</span>'; }).join(" ");
   }
-  function repositoryButton(key, attr, primary) {
-    return '<button type="button" class="btn sm' + (primary ? ' primary' : '') + '" ' + attr + '>' + esc(T(key)) + '</button>';
+  function repositoryButton(key, attr, primary, options) {
+    options = options || {};
+    return '<button type="button" class="btn' + (options.regular ? '' : ' sm') + (primary ? ' primary' : '') + '" ' + attr + '>' + (options.icon ? ic(options.icon, 'sm') : '') + esc(T(key)) + '</button>';
   }
   function repositorySourceHtml(s) {
     if (!s) return "";
@@ -4286,7 +4289,7 @@
     return api('/api/skill-repositories', { fresh: true }).then(function (repos) {
       if (seq !== routeSeq) return;
       repos = repos || [];
-      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
+      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true, {regular: true, icon: 'plus'}) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
         repositoryPresetsHtml(repos) + '<p class="hint">' + esc(T('sr.transport_hint')) + '</p><div class="stack">' + (repos.length ? repos.map(function (r, i) {
           return '<section class="card"><div class="card-head"><span class="ico">' + ic('git') + '</span><div class="grow"><h2><a href="' + repositoryHref(r.id) + '">' + esc(r.name || r.url) + '</a></h2><small class="sr-path">' + esc(r.url) + '</small></div><div class="row-actions"><a class="btn sm" href="' + repositoryHref(r.id) + '">' + esc(T('sr.open')) + '</a>' + repositoryButton('btn.edit', 'data-sr-edit="' + i + '"') + repositoryButton('sr.remove', 'data-sr-remove="' + i + '"') + '</div></div><p class="muted">' + esc(T('sr.count', {n: Array.isArray(r.candidates) ? r.candidates.length : 0})) + ' · ' + esc(r.ref || T('sr.default_ref')) + ' · <code>' + esc(r.root || '.') + '</code> · ' + esc(r.last_scanned_at ? T('sr.scanned_at', { t: fullTime(r.last_scanned_at) }) : T('sr.not_scanned')) + '</p>' + (r.last_error || r.last_error_code ? '<p class="notice bad">' + esc(repositoryLastError(r)) + '</p>' : '') + '</section>';
         }).join('') : emptyState('git', T('sr.empty'), T('sr.empty_hint'))) + '</div>', extension ? 'plugins' : 'skills', repositoryCrumbs(null, extension));
@@ -4320,7 +4323,7 @@
   }
   function renderRepositoryContents(repo, candidates, extension) {
     var selected = Object.create(null), query = '', filter = '';
-    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true) + repositoryButton('btn.edit', 'id="sr-edit"') + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"') + repositoryButton('sr.remove', 'id="sr-remove"') + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
+    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true, {regular: true, icon: 'refresh'}) + repositoryButton('btn.edit', 'id="sr-edit"', false, {regular: true}) + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"', false, {regular: true}) + repositoryButton('sr.remove', 'id="sr-remove"', false, {regular: true}) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
       '<p class="muted">' + esc(repo.ref || T('sr.default_ref')) + ' · <code>' + esc(repo.root || '.') + '</code> · ' + esc(repo.last_scanned_at ? T('sr.scanned_at', { t: fullTime(repo.last_scanned_at) }) : T('sr.not_scanned')) + '</p><div id="sr-progress" role="status" aria-live="polite"></div>' +
       (repo.last_error || repo.last_error_code ? '<p class="notice bad">' + esc(T('sr.scan_failed')) + ' ' + esc(repositoryLastError(repo)) + '</p>' : '') +
       '<section class="card flush"><div class="toolbar"><input id="sr-search" type="search" class="grow" placeholder="' + esc(T('sr.search')) + '" aria-label="' + esc(T('sr.search')) + '"><select id="sr-filter" aria-label="' + esc(T('sr.filter')) + '">' + opt('', T('sr.all'), true) + ['new','installed','update','pending','modified','unsupported','removed'].map(function (st) { return opt(st, T('sr.st_' + st)); }).join('') + '</select>' + repositoryButton('sr.select_visible', 'id="sr-select"') + repositoryButton('sr.batch', 'id="sr-batch" disabled', true) + '</div><div id="sr-candidates" class="sr-table"></div></section><p class="hint">' + esc(T('sr.scan_hint')) + '</p>', extension ? 'plugins' : 'skills', repositoryCrumbs(repo, extension));
@@ -4374,7 +4377,7 @@
   }
   function repositoryPreviewModal(repo, candidates) {
     var ac = new AbortController(), rows = [], changed = false;
-    modal('<div class="card-head"><h2>' + esc(T('sr.preview')) + '</h2></div><p class="hint">' + esc(T('sr.install_hint')) + '</p><div id="sr-previews" class="stack" aria-live="polite">' + esc(T('up.reading')) + '</div><div class="actions"><button class="btn ghost" data-close>' + esc(T('btn.close')) + '</button>' + repositoryButton('sr.install_selected', 'id="sr-install" disabled', true) + '</div>', function (root) {
+    modal('<div class="card-head"><h2>' + esc(T('sr.preview')) + '</h2></div><p class="hint">' + esc(T('sr.install_hint')) + '</p><div id="sr-previews" class="stack" aria-live="polite">' + esc(T('up.reading')) + '</div><div class="actions"><button class="btn ghost" data-close>' + esc(T('btn.close')) + '</button>' + repositoryButton('sr.install_selected', 'id="sr-install" disabled', true, {regular: true}) + '</div>', function (root) {
       var host = $('#sr-previews', root), install = $('#sr-install', root);
       function alive() { return document.contains(host) && !ac.signal.aborted; }
       function draw() {

@@ -43,8 +43,9 @@
   function repositoryBadges(c) {
     return repositoryStates(c).map(function (st) { return '<span class="pill sm ' + (st === "installed" ? "ok" : st === "new" ? "info" : "warn") + '">' + esc(T("sr.st_" + st)) + '</span>'; }).join(" ");
   }
-  function repositoryButton(key, attr, primary) {
-    return '<button type="button" class="btn sm' + (primary ? ' primary' : '') + '" ' + attr + '>' + esc(T(key)) + '</button>';
+  function repositoryButton(key, attr, primary, options) {
+    options = options || {};
+    return '<button type="button" class="btn' + (options.regular ? '' : ' sm') + (primary ? ' primary' : '') + '" ' + attr + '>' + (options.icon ? ic(options.icon, 'sm') : '') + esc(T(key)) + '</button>';
   }
   function repositorySourceHtml(s) {
     if (!s) return "";
@@ -148,7 +149,7 @@
     return api('/api/skill-repositories', { fresh: true }).then(function (repos) {
       if (seq !== routeSeq) return;
       repos = repos || [];
-      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
+      mount('<div class="page-head"><div><h1>' + esc(T("sr.title")) + '</h1><p>' + esc(T("sr.subtitle")) + '</p></div><div class="actions">' + repositoryButton('sr.add', 'id="sr-add"', true, {regular: true, icon: 'plus'}) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
         repositoryPresetsHtml(repos) + '<p class="hint">' + esc(T('sr.transport_hint')) + '</p><div class="stack">' + (repos.length ? repos.map(function (r, i) {
           return '<section class="card"><div class="card-head"><span class="ico">' + ic('git') + '</span><div class="grow"><h2><a href="' + repositoryHref(r.id) + '">' + esc(r.name || r.url) + '</a></h2><small class="sr-path">' + esc(r.url) + '</small></div><div class="row-actions"><a class="btn sm" href="' + repositoryHref(r.id) + '">' + esc(T('sr.open')) + '</a>' + repositoryButton('btn.edit', 'data-sr-edit="' + i + '"') + repositoryButton('sr.remove', 'data-sr-remove="' + i + '"') + '</div></div><p class="muted">' + esc(T('sr.count', {n: Array.isArray(r.candidates) ? r.candidates.length : 0})) + ' · ' + esc(r.ref || T('sr.default_ref')) + ' · <code>' + esc(r.root || '.') + '</code> · ' + esc(r.last_scanned_at ? T('sr.scanned_at', { t: fullTime(r.last_scanned_at) }) : T('sr.not_scanned')) + '</p>' + (r.last_error || r.last_error_code ? '<p class="notice bad">' + esc(repositoryLastError(r)) + '</p>' : '') + '</section>';
         }).join('') : emptyState('git', T('sr.empty'), T('sr.empty_hint'))) + '</div>', extension ? 'plugins' : 'skills', repositoryCrumbs(null, extension));
@@ -182,7 +183,7 @@
   }
   function renderRepositoryContents(repo, candidates, extension) {
     var selected = Object.create(null), query = '', filter = '';
-    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true) + repositoryButton('btn.edit', 'id="sr-edit"') + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"') + repositoryButton('sr.remove', 'id="sr-remove"') + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
+    mount('<div class="page-head"><div><h1>' + esc(repo.name || T('sr.title')) + '</h1><p class="sr-path">' + esc(repo.url) + '</p></div><div class="actions">' + repositoryButton('sr.scan', 'id="sr-scan"', true, {regular: true, icon: 'refresh'}) + repositoryButton('btn.edit', 'id="sr-edit"', false, {regular: true}) + repositoryButton('sr.clear_cache', 'id="sr-clear-cache"', false, {regular: true}) + repositoryButton('sr.remove', 'id="sr-remove"', false, {regular: true}) + '</div></div>' + (extension ? capTabs('sources') : skillTabs('skill-repositories')) +
       '<p class="muted">' + esc(repo.ref || T('sr.default_ref')) + ' · <code>' + esc(repo.root || '.') + '</code> · ' + esc(repo.last_scanned_at ? T('sr.scanned_at', { t: fullTime(repo.last_scanned_at) }) : T('sr.not_scanned')) + '</p><div id="sr-progress" role="status" aria-live="polite"></div>' +
       (repo.last_error || repo.last_error_code ? '<p class="notice bad">' + esc(T('sr.scan_failed')) + ' ' + esc(repositoryLastError(repo)) + '</p>' : '') +
       '<section class="card flush"><div class="toolbar"><input id="sr-search" type="search" class="grow" placeholder="' + esc(T('sr.search')) + '" aria-label="' + esc(T('sr.search')) + '"><select id="sr-filter" aria-label="' + esc(T('sr.filter')) + '">' + opt('', T('sr.all'), true) + ['new','installed','update','pending','modified','unsupported','removed'].map(function (st) { return opt(st, T('sr.st_' + st)); }).join('') + '</select>' + repositoryButton('sr.select_visible', 'id="sr-select"') + repositoryButton('sr.batch', 'id="sr-batch" disabled', true) + '</div><div id="sr-candidates" class="sr-table"></div></section><p class="hint">' + esc(T('sr.scan_hint')) + '</p>', extension ? 'plugins' : 'skills', repositoryCrumbs(repo, extension));
@@ -236,7 +237,7 @@
   }
   function repositoryPreviewModal(repo, candidates) {
     var ac = new AbortController(), rows = [], changed = false;
-    modal('<div class="card-head"><h2>' + esc(T('sr.preview')) + '</h2></div><p class="hint">' + esc(T('sr.install_hint')) + '</p><div id="sr-previews" class="stack" aria-live="polite">' + esc(T('up.reading')) + '</div><div class="actions"><button class="btn ghost" data-close>' + esc(T('btn.close')) + '</button>' + repositoryButton('sr.install_selected', 'id="sr-install" disabled', true) + '</div>', function (root) {
+    modal('<div class="card-head"><h2>' + esc(T('sr.preview')) + '</h2></div><p class="hint">' + esc(T('sr.install_hint')) + '</p><div id="sr-previews" class="stack" aria-live="polite">' + esc(T('up.reading')) + '</div><div class="actions"><button class="btn ghost" data-close>' + esc(T('btn.close')) + '</button>' + repositoryButton('sr.install_selected', 'id="sr-install" disabled', true, {regular: true}) + '</div>', function (root) {
       var host = $('#sr-previews', root), install = $('#sr-install', root);
       function alive() { return document.contains(host) && !ac.signal.aborted; }
       function draw() {

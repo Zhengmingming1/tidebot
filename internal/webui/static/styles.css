@@ -3845,3 +3845,27 @@ button.rc-tag:hover { color: var(--text); }
 .cap-grant-description { display: block; margin-top: 4px; color: var(--text-2); font-size: 13px; white-space: pre-wrap; }
 .cap-grant-group .actions { flex-wrap: wrap; margin-top: 14px; }
 .cap-grant-group .field-err:empty { display: none; }
+
+/* Action controls: regular page/dialog actions, compact row actions.
+   Links and native buttons share text metrics; icons never squeeze the label. */
+.btn { line-height: 20px; vertical-align: middle; text-decoration: none; }
+.btn > .i { flex: none; }
+.btn:hover { text-decoration: none; }
+.page-head .actions > .btn, .modal > .actions > .btn, .modal form > .actions > .btn {
+  height: var(--ctl-h); padding: 0 14px; gap: 6px; font-size: 13px;
+}
+.btn:focus-visible, .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.page-head .actions, .modal .actions, .drawer .actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+}
+.page-head .actions > .btn, .modal .actions > .btn, .drawer .actions > .btn { flex: 0 1 auto; }
+@media (max-width: 600px) {
+  .page-head .actions, .modal .actions, .drawer .actions { max-width: 100%; }
+  .page-head .actions > .btn, .modal .actions > .btn, .modal form > .actions > .btn, .drawer .actions > .btn {
+    min-height: var(--ctl-h); height: auto; max-width: 100%; padding-block: 7px;
+    white-space: normal; overflow-wrap: anywhere; text-align: center;
+  }
+}
+@media (forced-colors: active) {
+  .btn:focus-visible, .icon-btn:focus-visible { outline-color: Highlight; }
+}
