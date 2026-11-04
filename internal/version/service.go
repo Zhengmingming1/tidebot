@@ -197,11 +197,30 @@ SELECT version_id FROM pointers WHERE entity_type=? AND entity_id=? AND name=?`,
 	return v, err
 }
 
-// MovePointer sets a pointer (rollback = move current). Writes operation_log.
+// MovePointer atomically sets a pointer (rollback = move current) and writes operation_log.
 func (s *Service) MovePointer(ctx context.Context, entityType, entityID, pointerName, toVersionID, actor, reason, batchID string) error {
-	from, _ := s.GetPointer(ctx, entityType, entityID, pointerName)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Acquire the SQLite write lock before reading the old pointer. Otherwise a
+	// concurrent writer can invalidate this transaction's WAL read snapshot.
+	// No rows are changed, so this also works when the pointer does not exist.
+	if _, err := tx.ExecContext(ctx, `UPDATE pointers SET updated_at=updated_at WHERE 0`); err != nil {
+		return err
+	}
+
+	var from sql.NullString
+	err = tx.QueryRowContext(ctx, `
+SELECT version_id FROM pointers WHERE entity_type=? AND entity_id=? AND name=?`,
+		entityType, entityID, pointerName).Scan(&from)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
 	now := nowUTC()
-	_, err := s.DB.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO pointers(entity_type, entity_id, name, version_id, updated_at)
 VALUES(?,?,?,?,?)
 ON CONFLICT(entity_type, entity_id, name) DO UPDATE SET version_id=excluded.version_id, updated_at=excluded.updated_at`,
@@ -214,7 +233,10 @@ ON CONFLICT(entity_type, entity_id, name) DO UPDATE SET version_id=excluded.vers
 	if from.Valid {
 		fromID = from.String
 	}
-	return s.appendOp(ctx, entityType, entityID, "pointer_move", pointerName, fromID, toVersionID, actor, reason, batchID, nil)
+	if err := appendOp(ctx, tx, entityType, entityID, "pointer_move", pointerName, fromID, toVersionID, actor, reason, batchID, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetTag moves/creates a tag pointing at a version.
@@ -307,7 +329,15 @@ FROM operation_log WHERE entity_type=? AND entity_id=? ORDER BY id DESC LIMIT ?`
 	return out, rows.Err()
 }
 
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func (s *Service) appendOp(ctx context.Context, entityType, entityID, action, pointer, fromID, toID, actor, reason, batchID string, detail any) error {
+	return appendOp(ctx, s.DB, entityType, entityID, action, pointer, fromID, toID, actor, reason, batchID, detail)
+}
+
+func appendOp(ctx context.Context, executor execer, entityType, entityID, action, pointer, fromID, toID, actor, reason, batchID string, detail any) error {
 	var detailJSON sql.NullString
 	if detail != nil {
 		b, err := json.Marshal(detail)
@@ -316,7 +346,7 @@ func (s *Service) appendOp(ctx context.Context, entityType, entityID, action, po
 		}
 		detailJSON = sql.NullString{String: string(b), Valid: true}
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := executor.ExecContext(ctx, `
 INSERT INTO operation_log(user_id, at, batch_id, entity_type, entity_id, action, pointer, from_version_id, to_version_id, actor, reason, detail_json)
 VALUES('owner',?,?,?,?,?,?,?,?,?,?,?)`,
 		nowUTC(), nullStr(batchID), entityType, entityID, action, nullStr(pointer), nullStr(fromID), nullStr(toID), actor, nullStr(reason), detailJSON,
