@@ -1,10 +1,18 @@
 # Changelog
 
-本文件记录版本变更。完整说明见 [v0.2.2 发布说明](docs/release-notes/v0.2.2.md)及 [release-notes](docs/release-notes/)。
+本文件记录版本变更。完整说明见 [v0.2.3 发布说明](docs/release-notes/v0.2.3.md)及 [release-notes](docs/release-notes/)。
 
 ## Unreleased
 
 暂无待发布改动。
+
+## v0.2.3 — 2026-11-04
+
+- 新增只读会话与运行续聊、技能和能力包绑定。
+- 完善能力包发现、审查、安装、更新、回退、导出与卸载，以及按组件隔离的 MCP 授权。
+- 增加任务预算策略、币种显示与并发预算保护；升级前请备份数据库。
+- 改善工作流小窗口布局与品牌图标，修复跨平台路径保护。
+- 完整变更、升级和验证边界见 [v0.2.3 发布说明](docs/release-notes/v0.2.3.md)。
 
 ## v0.2.2 — 2026-11-03
 
