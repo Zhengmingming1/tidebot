@@ -5985,6 +5985,12 @@
       }).join("") + "</div>";
     }).join("");
   }
+  function schemaEnumEqual(a, b) {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+    var keys = Object.keys(a), other = Object.keys(b);
+    return keys.length === other.length && keys.every(function (k) { return Object.prototype.hasOwnProperty.call(b, k) && schemaEnumEqual(a[k], b[k]); });
+  }
   function schemaForm(fields, values, secretsSet, ns) {
     return fields.map(function (f) {
       var v = values[f.key] !== undefined ? values[f.key] : f.default, nm = ' name="' + esc(f.key) + '" data-f="' + esc(f.key) + '" data-t="' + esc(f.type) + '"';
@@ -5992,7 +5998,7 @@
       var hk = lk + "_h";
       if (ns && state.dict[hk]) f = Object.assign({}, f, { description: state.dict[hk] });
       if (f.type === "boolean") return '<label class="check field-check"><input type="checkbox"' + nm + (v ? " checked" : "") + "> " + esc(lab) + (f.description ? '<small class="hint">' + esc(f.description) + "</small>" : "") + "</label>";
-      if (f.type === "array") inner = '<div class="multi">' + f.items_enum.map(function (x) { return '<label class="check"><input type="checkbox" data-arr="' + esc(f.key) + '" value="' + esc(x) + '"' + ((v || []).map(String).indexOf(String(x)) >= 0 ? " checked" : "") + "> " + esc(x) + "</label>"; }).join("") + "</div>";
+      if (f.type === "array") inner = '<div class="multi">' + f.items_enum.map(function (x, index) { return '<label class="check"><input type="checkbox" data-arr="' + esc(f.key) + '" value="' + index + '"' + ((v || []).some(function (selected) { return schemaEnumEqual(selected, x); }) ? " checked" : "") + "> " + esc(x) + "</label>"; }).join("") + "</div>";
       else if (f.enum && f.enum.length) inner = "<select" + nm + ">" + (f.required ? "" : opt("", "—", v == null)) + f.enum.map(function (x) { return opt(x, state.dict["pf.e." + x] || x, String(x) === String(v)); }).join("") + "</select>";
       else if (f.type === "string" && f.max_length >= 2000 && !/url$/.test(f.key)) inner = '<textarea rows="4"' + nm + ' maxlength="' + f.max_length + '"' + (f.required ? " required" : "") + ">" + esc(v == null ? "" : v) + "</textarea>";
       else if (f.write_only) inner = '<input type="password" autocomplete="new-password"' + nm + ' placeholder="' + esc(T(secretsSet[f.key] ? "cfg.secret_keep" : "cfg.secret_new")) + '"' + (f.max_length ? ' maxlength="' + f.max_length + '"' : "") + ">";
@@ -6004,7 +6010,7 @@
   function readSchemaForm(root, fields) {
     var out = {};
     fields.forEach(function (f) {
-      if (f.type === "array") { out[f.key] = $$('[data-arr="' + f.key + '"]', root).filter(function (c) { return c.checked; }).map(function (c) { var n = Number(c.value); return f.items_enum.some(function (x) { return typeof x === "number"; }) && !isNaN(n) ? n : c.value; }); return; }
+      if (f.type === "array") { out[f.key] = $$('[data-arr="' + f.key + '"]', root).filter(function (c) { return c.checked; }).map(function (c) { return f.items_enum[Number(c.value)]; }); return; }
       var el = $('[data-f="' + f.key + '"]', root); if (!el) return;
       if (f.type === "boolean") { out[f.key] = el.checked; return; }
       if (el.value === "") return;
