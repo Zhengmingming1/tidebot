@@ -2253,6 +2253,7 @@
   "wf.input": "Run input",
   "wf.input_hint": "Enter the goal or material. Steps reference it with {{input}}.",
   "wf.run_notice": "Each skill step runs read-only in its own folder, sharing global concurrency and budgets. A failure stops the workflow and keeps completed results.",
+  "wf.options": "Workflow settings",
   "wf.parallel": "Maximum parallel steps",
   "wf.palette": "Skill library",
   "wf.drag_hint": "Drag onto the canvas to create a step, or click to add.",

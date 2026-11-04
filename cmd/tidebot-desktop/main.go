@@ -229,15 +229,22 @@ func main() {
 	// Paint the window in the saved theme's background so it doesn't flash white (or dark)
 	// before the page's first frame.
 	bgR, bgG, bgB := core.WebUI.WindowBackground(ctx, sh.app.Env.IsDarkMode())
-	sh.win = sh.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name: "main", Title: "Tidebot", Width: 1180, Height: 780, URL: startURL, Hidden: *hidden,
+	// Add without running yet: native display information is only available once
+	// the app starts. Keep the window hidden until its initial size fits that display.
+	sh.win = application.NewWindow(application.WebviewWindowOptions{
+		Name: "main", Title: "Tidebot", Width: defaultWindowWidth, Height: defaultWindowHeight, URL: startURL, Hidden: true,
 		BackgroundColour: application.NewRGB(bgR, bgG, bgB),
 	})
-	// The OS light/dark setting is only readable once the app runs: repaint for "system".
-	sh.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+	sh.app.Window.Add(sh.win)
+	startWindow := initialWindowStart(*hidden, sh.win.Run, func() {
+		// The OS light/dark setting is only readable once the app runs: repaint for "system".
 		if r, g, b := core.WebUI.WindowBackground(ctx, sh.app.Env.IsDarkMode()); r != bgR || g != bgG || b != bgB {
 			sh.win.SetBackgroundColour(application.NewRGB(r, g, b))
 		}
+		fitInitialWindow(sh.win, sh.app.Screen.GetAll())
+	}, sh.open)
+	sh.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		startWindow()
 	})
 	sh.win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel() // close = hide; scheduler keeps running

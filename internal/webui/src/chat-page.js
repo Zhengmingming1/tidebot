@@ -15,7 +15,7 @@
     // a session answering its first turn has 0 turns done: say what it is doing instead
     var on = s.id === cur, sub = relDay(s.updated_at) + " · " + (s.status === "running" ? T("rc.answering") : plural(s.turns, "cs.turns_one", "cs.turns_many"));
     var tip = T(s.origin === "run" ? "cs.item_tip_run" : "cs.item_tip", { t: when(s.updated_at), n: num(s.turns), c: usd(s.cost_usd, 4) });
-    return '<a class="cs-item' + (on ? " active" : "") + '" href="#/chat/' + enc(s.id) + '" data-cs="' + esc(s.id) + '"' + (on ? ' aria-current="page"' : "") + ' data-tip="' + esc(tip) + '">' +
+    return '<a class="cs-item' + (on ? " active" : "") + '" href="#/chat/' + enc(s.id) + '" data-cs="' + esc(s.id) + '"' + (on ? ' aria-current="page"' : "") + ' title="' + esc(tip) + '">' +
       '<strong class="ell">' + esc(csTitle(s)) + "</strong><small class=\"ell\">" + (s.status === "running" ? '<span class="rc-dot" aria-hidden="true"></span>' : s.origin === "run" ? ic("runs", "sm") : "") + esc(sub) + "</small></a>";
   }
   // The folder the session reads: the run's folder, or its own empty one.
