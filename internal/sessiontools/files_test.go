@@ -1,6 +1,7 @@
 package sessiontools
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -90,5 +91,195 @@ func TestRootsRoundTrip(t *testing.T) {
 	rs := ParseRoots(FormatRoots([]Root{{"work", a}, {"skills", b}}) + string(filepath.ListSeparator) + "bad=relative")
 	if len(rs) != 2 || rs[0].Dir != a || rs[1].Dir != b {
 		t.Fatalf("%+v", rs)
+	}
+}
+
+func TestSubpathDoesNotFollowDirectoryLinks(t *testing.T) {
+	d := tree(t)
+	outside := tree(t)
+	testLink(t, outside, filepath.Join(d, "outside"))
+	testLink(t, filepath.Join(d, "docs"), filepath.Join(d, "inside"))
+	roots := []Root{{Label: "work", Dir: d}}
+	for _, sub := range []string{"outside/docs", "outside/docs/a.md", "inside/deep", filepath.Join(d, "outside", "docs"), filepath.Join(d, "inside", "deep")} {
+		t.Run(sub, func(t *testing.T) {
+			if got, err := FindFiles(roots, "*", sub); err != nil || got != "No files match." {
+				t.Errorf("find followed a link: %q, %v", got, err)
+			}
+			if got, err := SearchFiles(roots, "TODO", sub, "*", true); err != nil || got != "No matches." {
+				t.Errorf("search followed a link: %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestWalkRootRejectsDirectoryReplacement(t *testing.T) {
+	d := tree(t)
+	outside := tree(t)
+	testLink(t, outside, filepath.Join(d, "probe"))
+	roots := []Root{{Label: "work", Dir: d}}
+	visited := false
+	err := walk(roots, "docs", "docs/a.md", func(_ Root, root *os.Root, rel string, _ int64) error {
+		visited = true
+		if err := os.Rename(filepath.Join(d, "docs"), filepath.Join(d, "saved")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "docs"), filepath.Join(d, "docs")); err != nil {
+			t.Fatal(err)
+		}
+		if f, err := root.Open(filepath.FromSlash(rel)); err == nil {
+			f.Close()
+			t.Fatal("read escaped through replacement directory")
+		}
+		return nil
+	})
+	if err != nil || !visited {
+		t.Fatalf("walk: visited=%v err=%v", visited, err)
+	}
+}
+
+func TestFindAndSearchExplicitFilesAndDotNames(t *testing.T) {
+	d := tree(t)
+	if err := os.WriteFile(filepath.Join(d, "..notes.md"), []byte("TODO dot name"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	roots := []Root{{Label: "work", Dir: d}}
+	for _, sub := range []string{"docs/a.md", filepath.Join(d, "docs", "a.md"), "..notes.md"} {
+		if got, err := FindFiles(roots, "*.md", sub); err != nil || !strings.Contains(got, filepath.Base(sub)) {
+			t.Fatalf("find %q: %s, %v", sub, got, err)
+		}
+		if got, err := SearchFiles(roots, "TODO", sub, "*.md", false); err != nil || !strings.Contains(got, "TODO") {
+			t.Fatalf("search %q: %s, %v", sub, got, err)
+		}
+	}
+}
+
+func TestFindAndSearchRejectLinkedRoot(t *testing.T) {
+	target := tree(t)
+	link := filepath.Join(t.TempDir(), "root")
+	testLink(t, target, link)
+	roots := []Root{{Label: "work", Dir: link}}
+	if got, err := FindFiles(roots, "*", ""); err != nil || got != "No files match." {
+		t.Errorf("find followed linked root: %q, %v", got, err)
+	}
+	if got, err := SearchFiles(roots, "TODO", "", "*", false); err != nil || got != "No matches." {
+		t.Errorf("search followed linked root: %q, %v", got, err)
+	}
+}
+
+func testLink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+}
+
+func TestRelativeDirectoryLink(t *testing.T) {
+	d := tree(t)
+	testLink(t, "docs", filepath.Join(d, "relative"))
+	roots := []Root{{Label: "work", Dir: d}}
+	if got, err := FindFiles(roots, "*", "relative/deep"); err != nil || got != "No files match." {
+		t.Errorf("find: %q, %v", got, err)
+	}
+	if got, err := SearchFiles(roots, "TODO", "relative/deep", "*", true); err != nil || got != "No matches." {
+		t.Errorf("search: %q, %v", got, err)
+	}
+}
+
+func TestWalkRootRejectsFileReplacement(t *testing.T) {
+	d := tree(t)
+	outside := tree(t)
+	// Probe privileges before entering the callback.
+	testLink(t, outside, filepath.Join(d, "probe"))
+	visited := false
+	err := walk([]Root{{Label: "work", Dir: d}}, "docs/a.md", "*", func(_ Root, root *os.Root, rel string, _ int64) error {
+		visited = true
+		name := filepath.Join(d, filepath.FromSlash(rel))
+		if err := os.Remove(name); err != nil {
+			t.Fatal(err)
+		}
+		testLink(t, filepath.Join(outside, "docs", "a.md"), name)
+		if f, err := root.Open(filepath.FromSlash(rel)); err == nil {
+			f.Close()
+			t.Fatal("read escaped through replacement file")
+		}
+		return nil
+	})
+	if err != nil || !visited {
+		t.Fatalf("walk: visited=%v err=%v", visited, err)
+	}
+}
+
+func TestWalkKeepsOpenedRootAfterReplacement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows may prevent renaming an open directory")
+	}
+	parent := t.TempDir()
+	d := filepath.Join(parent, "root")
+	if err := os.Mkdir(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "a.md"), []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := tree(t)
+	visited := false
+	err := walk([]Root{{Label: "work", Dir: d}}, "a.md", "*", func(_ Root, root *os.Root, rel string, _ int64) error {
+		visited = true
+		if err := os.Rename(d, filepath.Join(parent, "saved")); err != nil {
+			t.Fatal(err)
+		}
+		testLink(t, outside, d)
+		b, err := root.ReadFile(filepath.FromSlash(rel))
+		if err != nil || string(b) != "original" {
+			t.Fatalf("lost original root: %q, %v", b, err)
+		}
+		return nil
+	})
+	if err != nil || !visited {
+		t.Fatalf("walk: visited=%v err=%v", visited, err)
+	}
+}
+
+func TestSearchFileAndTotalByteLimits(t *testing.T) {
+	d := t.TempDir()
+	roots := []Root{{Label: "work", Dir: d}}
+	// Binary files count against the read budget even though their contents are skipped.
+	b := make([]byte, maxFileBytes)
+	for i := 0; i < maxTotalBytes/maxFileBytes; i++ {
+		if err := os.WriteFile(filepath.Join(d, fmt.Sprintf("%02d.bin", i)), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(d, "zz.md"), []byte("needle"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SearchFiles(roots, "needle", "", "*", false); err != nil || got != "No matches." {
+		t.Fatalf("total budget: %q, %v", got, err)
+	}
+	if err := os.Remove(filepath.Join(d, "00.bin")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SearchFiles(roots, "needle", "", "*", false); err != nil || !strings.Contains(got, "zz.md:1: needle") {
+		t.Fatalf("below total budget: %q, %v", got, err)
+	}
+	// The exact per-file boundary remains readable; one more byte must be skipped.
+	text := strings.Repeat("a\n", maxFileBytes/2-4) + "needle\n!"
+	if len(text) != maxFileBytes {
+		t.Fatalf("fixture size %d", len(text))
+	}
+	if err := os.WriteFile(filepath.Join(d, "limit.md"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SearchFiles(roots, "needle", "limit.md", "*", false); err != nil || !strings.Contains(got, "needle") {
+		t.Fatalf("file at limit: %q, %v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "limit.md"), []byte(text+"x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SearchFiles(roots, "needle", "limit.md", "*", false); err != nil || got != "No matches." {
+		t.Fatalf("file above limit: %q, %v", got, err)
 	}
 }
