@@ -97,7 +97,11 @@ jobs:
       - name: Go race detector
         run: |
           chmod +x testdata/mock-claude/claude
-          CGO_ENABLED=1 go test -race -count=1 ./...
+          # The expanded app suite exceeds Go's default 10-minute package budget
+          # under race instrumentation. Keep every test and retain the 30m job
+          # bound; verbose timings make stalled tests distinguishable from total
+          # suite growth (the pre-capability race stage already took >8 minutes).
+          CGO_ENABLED=1 go test -race -count=1 -timeout=25m -v ./...
 
   benchmarks:
     runs-on: ubuntu-latest
