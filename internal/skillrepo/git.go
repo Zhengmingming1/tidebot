@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Zhengmingming1/tidebot/internal/netproxy"
 	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
@@ -381,7 +382,12 @@ func relative(p, root string) string {
 func summarize(entries []entry, root string) Candidate {
 	c := Candidate{Path: root}
 	h := sha256.New()
-	folded := map[string]bool{}
+	type pathEntry struct {
+		name      string
+		directory bool
+		children  map[string]*pathEntry
+	}
+	folded := map[string]*pathEntry{}
 	for _, e := range entries {
 		if !within(e.Path, root) || e.Kind == "tree" {
 			continue
@@ -403,11 +409,30 @@ func summarize(entries []entry, root string) Candidate {
 				c.Error = "unsafe_path"
 			}
 		}
-		lower := strings.ToLower(p)
-		if folded[lower] {
-			c.Error = "path_collision"
+		// Check every component, not only complete filenames: Refs/a and
+		// refs/b merge directories on case-insensitive filesystems, and a
+		// file named Refs prevents creating refs/b altogether.
+		components := strings.Split(p, "/")
+		level := folded
+		for i, name := range components {
+			directory := i < len(components)-1
+			key := foldPath(name)
+			previous, exists := level[key]
+			if exists {
+				if previous.name != name || !previous.directory || !directory {
+					c.Error = "path_collision"
+				}
+			} else {
+				previous = &pathEntry{name: name, directory: directory}
+				level[key] = previous
+			}
+			if directory {
+				if previous.children == nil {
+					previous.children = map[string]*pathEntry{}
+				}
+				level = previous.children
+			}
 		}
-		folded[lower] = true
 		if e.Size > skillpkg.MaxFileBytes || c.Size > skillpkg.MaxTotalBytes || c.Files > skillpkg.MaxEntries {
 			c.Error = "skill_size_limit"
 		}
@@ -415,6 +440,22 @@ func summarize(entries []entry, root string) Candidate {
 	c.TreeHash = hex.EncodeToString(h.Sum(nil))
 	return c
 }
+
+// foldPath gives Unicode simple-fold equivalents the same key, including
+// variants such as Greek final sigma that strings.ToLower does not unify.
+// It deliberately does not perform Unicode normalization.
+func foldPath(s string) string {
+	return strings.Map(func(r rune) rune {
+		lowest := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < lowest {
+				lowest = next
+			}
+		}
+		return lowest
+	}, s)
+}
+
 func isLFS(b []byte) bool {
 	return bytes.HasPrefix(b, []byte("version https://git-lfs.github.com/spec/v1\n"))
 }
