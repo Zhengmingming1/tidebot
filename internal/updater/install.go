@@ -463,19 +463,51 @@ func swapAppBundle(app string, data []byte) (Swap, error) {
 func rollbackSwaps(swaps []Swap) error {
 	var first error
 	for i := len(swaps) - 1; i >= 0; i-- {
-		s := swaps[i]
-		if s.Prev == "" {
-			continue
-		}
-		bad := s.Path + ".failed"
-		_ = os.RemoveAll(bad)
-		_ = os.Rename(s.Path, bad)
-		if err := os.Rename(s.Prev, s.Path); err != nil && first == nil {
+		if err := rollbackSwap(swaps[i]); err != nil && first == nil {
 			first = err
 		}
-		_ = os.RemoveAll(bad)
 	}
 	return first
+}
+
+func rollbackSwap(s Swap) error {
+	return rollbackSwapWithRename(s, os.Rename)
+}
+
+func rollbackSwapWithRename(s Swap, rename func(string, string) error) error {
+	if s.Prev == "" {
+		return nil
+	}
+	// Check the backup before moving the installed executable out of the way.
+	if _, err := os.Lstat(s.Prev); err != nil {
+		return err
+	}
+	bad := s.Path + ".failed"
+	// Never overwrite an earlier recovery copy.
+	if _, err := os.Lstat(bad); err == nil {
+		return fmt.Errorf("rollback recovery path already exists: %s", bad)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	moved := false
+	if err := rename(s.Path, bad); err == nil {
+		moved = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := rename(s.Prev, s.Path); err != nil {
+		if moved {
+			// If restoration also fails, leave .failed available for recovery.
+			if restoreErr := rename(bad, s.Path); restoreErr != nil {
+				return errors.Join(err, fmt.Errorf("restore current executable: %w", restoreErr))
+			}
+		}
+		return err
+	}
+	if moved {
+		return os.RemoveAll(bad)
+	}
+	return nil
 }
 
 // BootState is what a starting process should do about a pending update.
