@@ -115,8 +115,8 @@ func Discover(ctx context.Context, raw string, allowPrivate bool) (*Discovery, e
 	if len(d.Feeds) > 0 {
 		return d, nil
 	}
-	for i, p := range commonFeedPaths {
-		if i >= 5 || ctx.Err() != nil {
+	for _, p := range commonFeedPaths {
+		if ctx.Err() != nil {
 			break
 		}
 		ref := &url.URL{Scheme: final.Scheme, Host: final.Host, Path: p}
