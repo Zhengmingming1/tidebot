@@ -39,7 +39,7 @@ type PackTask struct {
 	Constraints    []tasksvc.SpecConstraint `json:"constraints,omitempty"`
 	CronExpr       string                   `json:"cron_expr,omitempty"`
 	OverlapPolicy  string                   `json:"overlap_policy,omitempty"`
-	TimeoutMinutes int                      `json:"timeout_minutes,omitempty"`
+	TimeoutMinutes int                      `json:"timeout_minutes"`
 	AllowedTools   []string                 `json:"allowed_tools,omitempty"`
 	Skills         []string                 `json:"skills,omitempty"`
 }

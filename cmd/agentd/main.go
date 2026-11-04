@@ -6,36 +6,23 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Zhengmingming1/tidebot/internal/plugin"
-	"github.com/Zhengmingming1/tidebot/internal/plugin/official"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
-	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
-	"github.com/Zhengmingming1/tidebot/internal/sessiontools"
 	"github.com/Zhengmingming1/tidebot/internal/updater"
 
 	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
+	"github.com/Zhengmingming1/tidebot/internal/desktophelper"
 )
 
 func main() {
-	if guard.IsHookInvocation(os.Args[1:]) {
-		guard.HookMain(os.Stdin, os.Stdout)
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == plugin.BuiltinArg {
-		os.Exit(official.Main(os.Args[2:]))
-	}
-	if len(os.Args) > 1 && os.Args[1] == sessiontools.HeadersArg {
-		os.Exit(sessiontools.HeadersMain(os.Args[2:]))
-	}
-	if len(os.Args) > 1 && os.Args[1] == sessiontools.Arg {
-		os.Exit(sessiontools.Main(os.Args[2:]))
+	if code, handled := desktophelper.Dispatch(os.Args[1:]); handled {
+		os.Exit(code)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Println("tidebot agentd", buildinfo.Version, buildinfo.Commit)

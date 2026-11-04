@@ -15,14 +15,22 @@ export CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=11.0
 GOARCH=arm64 CC="clang -arch arm64" go build -trimpath -ldflags "$LDF" -o "$B/arm64" .
 GOARCH=amd64 CC="clang -arch x86_64" go build -trimpath -ldflags "$LDF" -o "$B/amd64" .
 APP="$B/tidebot.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 lipo -create -output "$APP/Contents/MacOS/tidebot-desktop" "$B/arm64" "$B/amd64"
 lipo -info "$APP/Contents/MacOS/tidebot-desktop"
+# Pure-Go subprocess entry point: do not relaunch the Cocoa-linked app for hooks
+# or plugin/session MCP workers. Helpers live outside Contents/MacOS and have no app plist.
+(cd "$ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$LDF" -o "$B/helper-arm64" ./cmd/tidebot-helper)
+(cd "$ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$LDF" -o "$B/helper-amd64" ./cmd/tidebot-helper)
+lipo -create -output "$APP/Contents/Helpers/tidebot-helper" "$B/helper-arm64" "$B/helper-amd64"
+lipo -info "$APP/Contents/Helpers/tidebot-helper"
 sed "s/@VERSION@/$VER/g" "$ROOT/packaging/macos/Info.plist" > "$APP/Contents/Info.plist"
 cp "$ROOT/packaging/macos/tidebot.icns" "$APP/Contents/Resources/tidebot.icns"  # from branding/icon.svg (scripts/gen-icons.py)
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$APP/Contents/Helpers/tidebot-helper"
   codesign --force --deep --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$APP"
 else
+  codesign --force --sign - "$APP/Contents/Helpers/tidebot-helper"
   codesign --force --deep --sign - "$APP"   # ad-hoc; Gatekeeper will still warn
 fi
 DMG="$OUT/tidebot-desktop-${VER}-macOS-AppleSilicon-Intel.dmg"

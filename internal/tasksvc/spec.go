@@ -15,7 +15,7 @@ type Spec struct {
 	SkillBindings  []SkillBinding   `json:"skill_bindings,omitempty"`
 	Provider       string           `json:"provider,omitempty"`
 	WorkspaceDir   string           `json:"workspace_dir,omitempty"`
-	TimeoutMinutes int              `json:"timeout_minutes,omitempty"`
+	TimeoutMinutes int              `json:"timeout_minutes"`
 	AllowedTools   []string         `json:"allowed_tools,omitempty"`
 	MaxBudgetUSD   float64          `json:"max_budget_usd,omitempty"`
 }

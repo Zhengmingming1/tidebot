@@ -48,24 +48,24 @@ func TestPolicyModesAccountingAndNoHiddenCap(t *testing.T) {
 func TestPolicyTokenReservationAndScopeFiltering(t *testing.T) {
 	s := holdService(t)
 	ctx := context.Background()
-	if err := s.UpsertBudget(ctx, Budget{Scope: "global", Period: "day", MaxTokens: sql.NullInt64{Int64: 100, Valid: true}, Currency: pricing.USD, Action: "skip"}); err != nil {
+	if err := s.UpsertBudget(ctx, Budget{Scope: "task", ScopeID: "t", Period: "day", MaxTokens: sql.NullInt64{Int64: 100, Valid: true}, Currency: pricing.USD, Action: "skip"}); err != nil {
 		t.Fatal(err)
 	}
-	h, _, chk, err := s.ReserveRunPolicy(ctx, "a", BucketProduction, 0, pricing.USD, ModeGlobal)
+	h, _, chk, err := s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeTask)
 	if err != nil || !chk.OK || chk.RunMaxTokens != 100 {
 		t.Fatalf("first: %+v %v", chk, err)
 	}
-	_, _, chk, err = s.ReserveRunPolicy(ctx, "b", BucketProduction, 0, pricing.USD, ModeGlobal)
+	_, _, chk, err = s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeTask)
 	if err != nil || chk.OK || !chk.Held {
 		t.Fatalf("tokens double reserved: %+v %v", chk, err)
 	}
-	b, _, chk, err := s.ReserveRunPolicy(ctx, "b", BucketProduction, 0, pricing.USD, ModeBypass)
+	b, _, chk, err := s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeBypass)
 	if err != nil || !chk.OK || chk.RunMaxTokens != 0 {
 		t.Fatalf("bypass tokens: %+v %v", chk, err)
 	}
 	b.Release()
 	h.Release()
-	h, _, chk, err = s.ReserveRunPolicy(ctx, "b", BucketProduction, 0, pricing.USD, ModeGlobal)
+	h, _, chk, err = s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeTask)
 	if err != nil || !chk.OK {
 		t.Fatalf("release: %+v %v", chk, err)
 	}
@@ -76,7 +76,7 @@ func TestPolicyCurrencyAndCategory(t *testing.T) {
 	s := holdService(t)
 	ctx := context.Background()
 	s.FX = func() pricing.FX { return pricing.FX{Display: pricing.CNY, USDCNY: 7.1} }
-	setDayCap(t, s, "bucket", BucketAssist, BucketAssist, .2, pricing.USD)
+	setDayCap(t, s, "global", "", "", .2, pricing.USD)
 	chk, err := s.CheckBeforeRunPolicy(ctx, "t", BucketAssist, 0, ModeGlobal)
 	if err != nil || !chk.OK || chk.Currency != pricing.CNY || !near(chk.RunMaxUSD, 1.42) {
 		t.Fatalf("CNY: %+v %v", chk, err)
@@ -111,7 +111,7 @@ func TestPolicyAccountingAtSurvivesMidnight(t *testing.T) {
 func TestPolicyConcurrentTokensAndDurableUsage(t *testing.T) {
 	s := holdService(t)
 	ctx := context.Background()
-	if err := s.UpsertBudget(ctx, Budget{Scope: "global", Period: "day", MaxTokens: sql.NullInt64{Int64: 100, Valid: true}, Currency: pricing.USD}); err != nil {
+	if err := s.UpsertBudget(ctx, Budget{Scope: "task", ScopeID: "t", Period: "day", MaxTokens: sql.NullInt64{Int64: 100, Valid: true}, Currency: pricing.USD}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -121,7 +121,7 @@ func TestPolicyConcurrentTokensAndDurableUsage(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			h, _, chk, err := s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeGlobal)
+			h, _, chk, err := s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeTask)
 			if err != nil {
 				t.Error(err)
 			}
@@ -142,15 +142,15 @@ func TestPolicyConcurrentTokensAndDurableUsage(t *testing.T) {
 	if err := s.RecordEntryHeld(ctx, e, h); err != nil {
 		t.Fatal(err)
 	}
-	if held := s.heldTokens("global", "", ""); held != 80 {
+	if held := s.heldTokens("task", "t", ""); held != 80 {
 		t.Fatalf("held tokens %d", held)
 	}
-	_, _, chk, err := s.ReserveRunPolicy(ctx, "other", BucketProduction, 0, pricing.USD, ModeGlobal)
+	_, _, chk, err := s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeTask)
 	if err != nil || chk.OK {
 		t.Fatalf("ledger + hold should exhaust capacity: %+v %v", chk, err)
 	}
 	h.Release()
-	h2, _, chk, err := s.ReserveRunPolicy(ctx, "other", BucketProduction, 0, pricing.USD, ModeGlobal)
+	h2, _, chk, err := s.ReserveRunPolicy(ctx, "t", BucketProduction, 0, pricing.USD, ModeTask)
 	if err != nil || !chk.OK || chk.RunMaxTokens != 80 {
 		t.Fatalf("remaining %v %+v", err, chk)
 	}
@@ -200,15 +200,18 @@ func TestPolicyRejectsInvalidModeAndDatabaseFailure(t *testing.T) {
 func TestPolicyNonMeteredReservesTokensNotMoney(t *testing.T) {
 	s := holdService(t)
 	ctx := context.Background()
+	if err := s.UpsertBudget(ctx, Budget{Scope: "task", ScopeID: "sub", Period: "day", MaxTokens: sql.NullInt64{Int64: 100, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
 	h, cap, chk, err := s.ReserveRunPolicy(ctx, "sub", BucketProduction, 0, pricing.USD, ModeTask, false)
-	if err != nil || !chk.OK || cap != 0 || h == nil || chk.RunMaxTokens != 2_000_000 {
+	if err != nil || !chk.OK || cap != 0 || h == nil || chk.RunMaxTokens != 100 {
 		t.Fatalf("nonmetered: %v %+v %v", cap, chk, err)
 	}
 	defer h.Release()
 	if amount, n := s.Held("global", "", "", pricing.USD); amount != 0 || n != 0 {
 		t.Fatalf("money held %v by %d", amount, n)
 	}
-	if tok := s.heldTokens("global", "", ""); tok != 2_000_000 {
+	if tok := s.heldTokens("task", "sub", ""); tok != 100 {
 		t.Fatalf("tokens held %d", tok)
 	}
 }

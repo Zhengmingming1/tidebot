@@ -288,7 +288,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		}
 		key = ""
 	}
-	if timeout <= 0 {
+	if timeout <= 0 && opts.TaskID == "" {
 		timeout = a.Cfg.DefaultTimeout
 	}
 	if opts.WorkspaceDir == "" {
@@ -522,7 +522,7 @@ func (a *App) taskStillRunnable(ctx context.Context, taskID, trigger string) boo
 	return err != nil || t.Status == "active" // a read error must not drop the run
 }
 
-// admitRun checks the budgets (global, bucket, task) and the provider quota, and
+// admitRun checks the budgets (global and task) and the provider quota, and
 // returns the per-run cap (display currency) with the cost control for the run.
 // A breach is logged, notified and (per the budget's action) pauses the task.
 // It runs when a run is asked for and again when a queued run gets its slot.
@@ -712,11 +712,8 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		}
 	}
 	timeout := time.Duration(task.TimeoutMinutes) * time.Minute
-	if view.Spec != nil && view.Spec.TimeoutMinutes > 0 {
+	if view.Spec != nil {
 		timeout = time.Duration(view.Spec.TimeoutMinutes) * time.Minute
-	}
-	if timeout <= 0 {
-		timeout = a.Cfg.DefaultTimeout
 	}
 	res, err := a.RunPromptEx(ctx, runner.Options{
 		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
@@ -741,7 +738,7 @@ func (a *App) EnsureTask(ctx context.Context, name, prompt, cronExpr, providerNa
 	tv, err := a.Tasks.Create(ctx, tasksvc.CreateInput{
 		Name: name, Prompt: prompt, WorkspaceDir: workspace, ProviderName: providerName,
 		CronExpr: cronExpr, OverlapPolicy: "skip",
-		TimeoutMinutes: int(a.Cfg.DefaultTimeout / time.Minute), Actor: "user",
+		TimeoutMinutes: 0, Actor: "user",
 	})
 	if err != nil {
 		return db.Task{}, err

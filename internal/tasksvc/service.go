@@ -60,8 +60,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	if in.Actor == "" {
 		in.Actor = "user"
 	}
-	if in.TimeoutMinutes <= 0 {
-		in.TimeoutMinutes = 30
+	if in.TimeoutMinutes < 0 || in.TimeoutMinutes > 1440 {
+		return TaskView{}, fmt.Errorf("timeout must be 0 (unlimited) or 1-1440 minutes")
 	}
 	if in.OverlapPolicy == "" {
 		in.OverlapPolicy = "skip"
@@ -122,6 +122,9 @@ func (s *Service) UpdateSpec(ctx context.Context, taskID string, spec Spec, acto
 // UpdateSpecExpected commits only while the expected task version is current.
 // Empty expected keeps compatibility with existing callers.
 func (s *Service) UpdateSpecExpected(ctx context.Context, taskID string, spec Spec, actor, reason, expected string) (TaskView, error) {
+	if spec.TimeoutMinutes < 0 || spec.TimeoutMinutes > 1440 {
+		return TaskView{}, fmt.Errorf("timeout must be 0 (unlimited) or 1-1440 minutes")
+	}
 	specWrites.Lock()
 	defer specWrites.Unlock()
 	if expected != "" {
@@ -159,9 +162,7 @@ func (s *Service) UpdateSpecExpected(ctx context.Context, taskID string, spec Sp
 	// Keep denormalized prompt/workspace in sync for scheduler/runner.
 	task.Prompt = spec.Prompt
 	task.WorkspaceDir = spec.WorkspaceDir // "" = per-task default, as in Rollback
-	if spec.TimeoutMinutes > 0 {
-		task.TimeoutMinutes = spec.TimeoutMinutes
-	}
+	task.TimeoutMinutes = spec.TimeoutMinutes
 	task.UpdatedAt = nowUTC()
 	if _, err := s.Store.DB.ExecContext(ctx, `
 UPDATE tasks SET prompt=?, workspace_dir=?, timeout_minutes=?, updated_at=? WHERE id=?`,
@@ -186,7 +187,9 @@ func (s *Service) Get(ctx context.Context, taskID string) (TaskView, error) {
 		return TaskView{}, err
 	}
 	view.CurrentVersion = ver
-	var spec Spec
+	// Historical versions omitted timeout_minutes. Only absence inherits the
+	// task row; explicit zero in new versions means unlimited.
+	spec := Spec{TimeoutMinutes: task.TimeoutMinutes}
 	if err := json.Unmarshal([]byte(ver.ContentJSON), &spec); err == nil {
 		view.Spec = &spec
 	}
@@ -226,7 +229,7 @@ FROM tasks ORDER BY created_at DESC`)
 		view := TaskView{Task: t}
 		if ver, err := s.Ver.CurrentVersion(ctx, version.EntityTask, t.ID); err == nil {
 			view.CurrentVersion = ver
-			var spec Spec
+			spec := Spec{TimeoutMinutes: t.TimeoutMinutes}
 			if json.Unmarshal([]byte(ver.ContentJSON), &spec) == nil {
 				view.Spec = &spec
 			}
@@ -422,6 +425,10 @@ func (s *Service) Rollback(ctx context.Context, taskID, versionID, actor, reason
 	if ver.EntityType != version.EntityTask || ver.EntityID != taskID {
 		return fmt.Errorf("version does not belong to task")
 	}
+	task, err := s.Store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
 	if actor == "" {
 		actor = "user"
 	}
@@ -432,7 +439,7 @@ func (s *Service) Rollback(ctx context.Context, taskID, versionID, actor, reason
 		return err
 	}
 	// sync denormalized fields
-	var spec Spec
+	spec := Spec{TimeoutMinutes: task.TimeoutMinutes}
 	if err := json.Unmarshal([]byte(ver.ContentJSON), &spec); err == nil {
 		_, _ = s.Store.DB.ExecContext(ctx, `
 UPDATE tasks SET prompt=?, workspace_dir=?, timeout_minutes=?, updated_at=? WHERE id=?`,

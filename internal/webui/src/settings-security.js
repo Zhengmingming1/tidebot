@@ -320,15 +320,14 @@
         };
       } else if (section === "budgets") {
         var g = (st.budgets || []).filter(function (x) { return x.scope === "global" && x.period === "day"; })[0] || {};
-        var buckets = (st.budgets || []).filter(function (x) { return x.scope === "bucket"; });
         var fx = st.fx || { display: "USD", usd_cny: 7.1 };
         body = '<section class="card">' + head.replace("</h2>", "</h2>" + tip(T("set.bud_auto"))) +
           '<div class="grid g3 pad-x" id="set-fx"><label class="field"><span>' + esc(T("set.fx_cur")) + tip(T("set.fx_cur_hint")) + '</span><select id="fx-cur">' + opt("USD", T("set.fx_usd"), fx.display === "USD") + opt("CNY", T("set.fx_cny"), fx.display === "CNY") + '</select></label>' +
           '<label class="field"><span>' + esc(T("set.fx_rate")) + tip(T("set.fx_rate_hint")) + '</span><div class="in-group"><span class="in-pre">1 USD =</span><input id="fx-rate" type="number" step="0.01" min="0.1" max="100" value="' + esc(fx.usd_cny) + '"><span class="in-pre">CNY</span></div></label></div>' +
-          '<div class="grid g3 pad-x" id="bud">' +
-          '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd") + " (" + curSym(fx.display) + ")") + '</span><input data-bud="g_usd" type="number" step="0.01" min="0" value="' + esc(g.max_usd || "") + '"></label>' +
-          '<label class="field" id="set-g_tok"><span>' + esc(T("set.g_tok")) + '</span><input data-bud="g_tok" type="number" step="1000" min="0" value="' + esc(g.max_tokens || "") + '"></label>' +
-          buckets.map(function (x) { return '<label class="field" id="set-b_' + esc(x.scope_id) + '"><span>' + esc(T("set.b_usd", { b: bucketName(x) }) + " (" + curSym(fx.display) + ")") + '</span><input data-bud="b" data-sid="' + esc(x.scope_id) + '" type="number" step="0.01" min="0" value="' + esc(x.max_usd || "") + '"></label>'; }).join("") +
+          '<p class="muted pad-x">' + esc(T("set.bud_scope")) + '</p><div class="grid g3 pad-x" id="bud">' +
+          '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd") + " (" + curSym(fx.display) + ")") + '</span><input data-bud="g_usd" type="number" step="0.0001" min="0" max="1000000" value="' + esc(g.max_usd || "") + '"></label>' +
+          '<label class="field"><span>' + esc(T("sp.on_breach")) + '</span><select data-bud="action">' + opt("pause_notify", T("sp.a_pause"), g.action !== "block_notify") + opt("block_notify", T("sp.a_block"), g.action === "block_notify") + '</select></label>' +
+          '<label class="field"><span>' + esc(T("sp.warn_at")) + '</span><input data-bud="warn_at_pct" type="number" required min="1" max="100" step="1" value="' + esc(g.warn_at_pct || 80) + '"></label>' +
           '</div><p class="pad-x"><a href="#/spend">' + esc(T("set.bud_more")) + " " + ic("arrow", "sm") + "</a></p></section>";
         after = function () {
           var saveFx = function (el) {
@@ -339,13 +338,11 @@
           $$("[data-bud]").forEach(function (inp) {
             inp.addEventListener("change", function () {
               var k = inp.getAttribute("data-bud"), v = inp.value, req;
-              // only the changed cap: the server keeps the others and "on breach" / "warn at"
-              if (k === "g_usd") req = { scope: "global", period: "day", max_usd: Math.max(0, parseFloat(v) || 0) };
-              else if (k === "g_tok") req = { scope: "global", period: "day", max_tokens: Math.max(0, parseInt(v, 10) || 0) };
-              else {
-                var sid = inp.getAttribute("data-sid");
-                req = { scope: "bucket", scope_id: sid, bucket: sid, period: "day", max_usd: Math.max(0, parseFloat(v) || 0) };
-              }
+              if (!inp.checkValidity()) { inp.reportValidity(); return; }
+              req = { scope: "global", period: "day" };
+              if (k === "g_usd") req.max_usd = v === "" ? 0 : Number(v);
+              else if (k === "action") req.action = v;
+              else req.warn_at_pct = Number(v);
               api("/api/budgets", { method: "POST", body: req }).then(function () { savedMark(inp); }).catch(fail);
             });
           });
@@ -455,7 +452,7 @@
           row("proxy", T("net.proxy"), T("net.proxy_sub"), '<div class="seg" id="net-mode" role="radiogroup" aria-label="' + esc(T("net.proxy")) + '">' + [["auto", T("net.m_auto")], ["manual", T("net.m_manual")], ["off", T("net.m_off")]].map(function (m) { return '<button type="button" role="radio" data-m="' + m[0] + '">' + esc(m[1]) + "</button>"; }).join("") + "</div>") +
           '<div class="pad-x net-manual hidden" id="net-man">' + fieldHtml(T("net.url"), '<input id="net-url" class="mono" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:7890">', T("net.url_hint")) +
           fieldHtml(T("net.bypass"), '<input id="net-bypass" class="mono" autocomplete="off" spellcheck="false" placeholder="localhost, 127.0.0.1, .corp.example">', T("net.bypass_hint")) + "</div>" +
-          '<div class="pad-x"><p class="muted" id="net-eff"></p><p><button class="btn" id="net-test">' + ic("pulse", "sm") + esc(T("net.test")) + '</button> <button class="btn primary" id="net-save">' + esc(T("btn.save")) + '</button></p><div id="net-out" aria-live="polite"></div></div></section>' +
+          '<div class="pad-x"><p class="muted" id="net-eff"></p><div class="network-actions"><button type="button" class="btn" id="net-test">' + ic("pulse", "sm") + esc(T("net.test")) + '</button><button type="button" class="btn primary" id="net-save">' + esc(T("btn.save")) + '</button></div><div id="net-out" aria-live="polite"></div></div></section>' +
           '<section class="card" id="set-mirrors"><div class="card-head"><span class="ico">' + ic("download") + "</span><h2>" + esc(T("net.mirrors")) + '</h2></div><div class="pad-x"><p class="muted">' + esc(T("net.mirrors_sub")) + '</p><div id="net-mlist"></div>' +
           '<p class="net-presets" id="net-presets"></p><p><button class="btn sm" id="net-madd">' + ic("plus", "sm") + esc(T("net.m_add")) + "</button></p></div></section>";
         after = function () {

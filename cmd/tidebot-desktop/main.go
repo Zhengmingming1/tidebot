@@ -10,7 +10,6 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
-	"github.com/Zhengmingming1/tidebot/internal/plugin/official"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,7 +23,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/app"
 	"github.com/Zhengmingming1/tidebot/internal/config"
-	"github.com/Zhengmingming1/tidebot/internal/guard"
+	"github.com/Zhengmingming1/tidebot/internal/desktophelper"
 	"github.com/Zhengmingming1/tidebot/internal/i18n"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
 	"github.com/Zhengmingming1/tidebot/internal/notify"
@@ -67,12 +66,8 @@ func (s *shell) setTrayIcon(colored, template []byte) {
 }
 
 func main() {
-	if guard.IsHookInvocation(os.Args[1:]) {
-		guard.HookMain(os.Stdin, os.Stdout)
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == plugin.BuiltinArg {
-		os.Exit(official.Main(os.Args[2:]))
+	if code, handled := desktophelper.Dispatch(os.Args[1:]); handled {
+		os.Exit(code)
 	}
 	configPath := flag.String("config", "", "path to config.yaml/json")
 	hidden := flag.Bool("hidden", false, "start minimized to tray (used by autostart)")
@@ -136,11 +131,24 @@ func main() {
 		return
 	}
 
+	// Resolve before opening the core: plugin initialization captures its worker.
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "desktop executable:", err)
+		os.Exit(1)
+	}
+	helper, err := desktophelper.Executable(exe, runtime.GOOS)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	plugin.BuiltinExe = helper
 	core, err := app.Open(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "open core:", err)
 		os.Exit(1)
 	}
+	core.HookExe = helper
 	defer core.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -137,8 +137,7 @@ func (s *Service) Held(scope, scopeID, bucket, cur string) (float64, int) {
 
 // ReserveRun is the last budget step before a run starts. Under one lock (so
 // two runs starting together can't both take the same remainder) it looks at
-// every daily money budget the run counts against (global, its bucket, its
-// task): if the cap is reached it refuses like CheckBeforeRun; if less than a
+// every daily money budget the run counts against (global and its task): if the cap is reached it refuses like CheckBeforeRun; if less than a
 // cent is left once the runs already going are counted at their caps, it
 // refuses with Held set; otherwise it lowers capAmt (in cur) to the room left
 // and holds that much until the returned Hold is released.
@@ -199,7 +198,7 @@ type dayCheck struct{ scope, scopeID, buck string }
 
 // dayChecks lists the daily budgets a run of taskID in bucket counts against.
 func dayChecks(taskID, bucket string) []dayCheck {
-	out := []dayCheck{{"global", "", ""}, {"bucket", bucket, bucket}}
+	out := []dayCheck{{"global", "", ""}}
 	if taskID != "" {
 		out = append(out, dayCheck{"task", taskID, ""})
 	}

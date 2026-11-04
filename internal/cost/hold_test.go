@@ -93,7 +93,7 @@ func TestReserveRunScopesAndCurrency(t *testing.T) {
 	s := holdService(t)
 	ctx := context.Background()
 	setDayCap(t, s, "task", "task_a", "", 0.3, pricing.USD)
-	setDayCap(t, s, "bucket", BucketCanary, BucketCanary, 7.1, pricing.CNY) // = $1
+	setDayCap(t, s, "task", "task_c", "", 7.1, pricing.CNY) // = $1
 	ha, ca, chk, _ := s.ReserveRun(ctx, "task_a", BucketProduction, 0.25, pricing.USD)
 	if !chk.OK || !near(ca, 0.25) {
 		t.Fatalf("task a: %v %+v", ca, chk)
@@ -116,7 +116,7 @@ func TestReserveRunScopesAndCurrency(t *testing.T) {
 	if held, n := s.Held("bucket", BucketCanary, BucketCanary, pricing.USD); n != 1 || math.Abs(held-5/7.1) > 1e-6 {
 		t.Fatalf("canary held in USD %v by %d", held, n)
 	}
-	if _, cc2, chk, _ := s.ReserveRun(ctx, "task_d", BucketCanary, 5, pricing.CNY); !chk.OK || math.Abs(cc2-2.1) > 1e-6 {
+	if _, cc2, chk, _ := s.ReserveRun(ctx, "task_c", BucketCanary, 5, pricing.CNY); !chk.OK || math.Abs(cc2-2.1) > 1e-6 {
 		t.Fatalf("canary second: %v %+v", cc2, chk)
 	}
 	// subscription runs (no money cap) hold nothing

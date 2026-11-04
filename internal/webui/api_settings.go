@@ -264,13 +264,19 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 		body.Period = "day"
 	}
 	switch body.Scope {
-	case "global", "task", "bucket":
+	case "global", "task":
 	default:
 		writeErr(w, 400, "bad scope")
 		return
 	}
 	if body.Period != "day" && body.Period != "run" {
 		writeErr(w, 400, "bad period")
+		return
+	}
+	// Only one global daily money budget exists. Reject legacy clients rather
+	// than silently storing caps that no longer have an effect.
+	if body.Bucket != "" || (body.Scope == "global" && (body.ScopeID != "" || body.Period != "day" || body.MaxTokens != nil)) || (body.Scope == "task" && body.ScopeID == "") {
+		writeErr(w, 400, "use the global daily money budget or task-level controls")
 		return
 	}
 	b, err := s.deps.Cost.FindBudget(r.Context(), body.Scope, body.ScopeID, body.Period, body.Bucket)

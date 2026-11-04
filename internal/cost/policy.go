@@ -133,7 +133,7 @@ func (s *Service) checkPolicy(ctx context.Context, taskID, bucket string, capAmt
 				out.WarnDetail = fmt.Sprintf("%s spend approaching daily cap", c.scope)
 			}
 		}
-		if b.MaxTokens.Valid && b.MaxTokens.Int64 > 0 {
+		if c.scope == "task" && b.MaxTokens.Valid && b.MaxTokens.Int64 > 0 {
 			out.LimitSources = append(out.LimitSources, c.scope+"/day/tokens")
 			if tokens >= b.MaxTokens.Int64 {
 				return breach(fmt.Sprintf("%s/%s daily token cap reached", c.scope, c.scopeID), false)

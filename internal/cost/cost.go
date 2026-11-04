@@ -148,13 +148,10 @@ func (s *Service) dayRange(day string) (string, string, error) {
 // DayRange is the exported form of dayRange.
 func (s *Service) DayRange(day string) (string, string, error) { return s.dayRange(day) }
 
-// EnsureDefaults seeds global daily and assist/optimization daily budgets if missing.
+// EnsureDefaults seeds the single global daily monetary budget if missing.
 func (s *Service) EnsureDefaults(ctx context.Context) error {
 	defaults := []Budget{
-		{Scope: "global", Period: "day", MaxUSD: sql.NullFloat64{Float64: 5, Valid: true}, MaxTokens: sql.NullInt64{Int64: 2_000_000, Valid: true}, Action: "pause_notify", WarnAtPct: 80},
-		{Scope: "bucket", ScopeID: BucketAssist, Period: "day", MaxUSD: sql.NullFloat64{Float64: 1, Valid: true}, Action: "pause_notify", WarnAtPct: 80, Bucket: BucketAssist},
-		{Scope: "bucket", ScopeID: BucketOptimization, Period: "day", MaxUSD: sql.NullFloat64{Float64: 1, Valid: true}, Action: "pause_notify", WarnAtPct: 80, Bucket: BucketOptimization},
-		{Scope: "bucket", ScopeID: BucketCanary, Period: "day", MaxUSD: sql.NullFloat64{Float64: 2, Valid: true}, Action: "pause_notify", WarnAtPct: 80, Bucket: BucketCanary},
+		{Scope: "global", Period: "day", MaxUSD: sql.NullFloat64{Float64: 5, Valid: true}, Action: "pause_notify", WarnAtPct: 80},
 	}
 	f := s.GetFX()
 	for _, b := range defaults {
@@ -198,7 +195,7 @@ type CheckResult struct {
 	Held bool
 }
 
-// CheckBeforeRun validates global/task/bucket daily caps and returns per-run max.
+// CheckBeforeRun validates global/task daily caps and returns per-run max.
 // runMaxUSD is a USD default (0 = $0.05); the result is in the display currency.
 func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, runMaxUSD float64) (CheckResult, error) {
 	if bucket == "" {
@@ -223,7 +220,6 @@ func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, run
 		scope, scopeID, period, buck string
 	}{
 		{"global", "", "day", ""},
-		{"bucket", bucket, "day", bucket},
 	}
 	if taskID != "" {
 		checks = append(checks, struct{ scope, scopeID, period, buck string }{"task", taskID, "day", ""})
@@ -260,7 +256,7 @@ func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, run
 				out.RunMaxUSD = remain
 			}
 		}
-		if b.MaxTokens.Valid && b.MaxTokens.Int64 > 0 && usedTok >= b.MaxTokens.Int64 {
+		if c.scope == "task" && b.MaxTokens.Valid && b.MaxTokens.Int64 > 0 && usedTok >= b.MaxTokens.Int64 {
 			out.OK = false
 			out.Reason = fmt.Sprintf("%s/%s daily token cap reached (%d/%d)", c.scope, c.scopeID, usedTok, b.MaxTokens.Int64)
 			out.BreachScope = c.scope
@@ -504,7 +500,7 @@ SELECT bucket, COALESCE(SUM(`+AmountExpr(f, f.Display, "")+`),0), COALESCE(SUM(t
 		out.TotalTokens += t
 	}
 	brows, err := s.DB.QueryContext(ctx, `
-SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens,0), action, warn_at_pct, currency FROM budgets`)
+SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens,0), action, warn_at_pct, currency FROM budgets WHERE scope IN ('global','task')`)
 	if err != nil {
 		return out, err
 	}
@@ -526,6 +522,9 @@ SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens
 	}
 	brows.Close()
 	for _, r := range list {
+		if r.Scope == "global" {
+			r.MaxTokens = 0
+		}
 		usedUSD, usedTok, _ := s.sumDay(ctx, day, r.Scope, r.ScopeID, r.Bucket, f.Display)
 		var held float64
 		var heldN int
@@ -544,6 +543,15 @@ SELECT scope, scope_id, period, bucket, COALESCE(max_usd,0), COALESCE(max_tokens
 // UpsertBudget creates or updates a budget row.
 // MaxUSD is taken in b.Currency (default: the display currency).
 func (s *Service) UpsertBudget(ctx context.Context, b Budget) error {
+	if b.Scope != "global" && b.Scope != "task" {
+		return fmt.Errorf("unsupported budget scope %q: use global or task", b.Scope)
+	}
+	if b.Scope == "global" && (b.Period != "day" || b.ScopeID != "" || b.Bucket != "" || (b.MaxTokens.Valid && b.MaxTokens.Int64 != 0)) {
+		return fmt.Errorf("global budget supports only a daily monetary limit")
+	}
+	if b.Scope == "global" {
+		b.MaxTokens = sql.NullInt64{}
+	}
 	mu := db.CostPolicyMutex(s.DB)
 	mu.Lock()
 	defer mu.Unlock()

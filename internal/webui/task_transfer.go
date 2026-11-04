@@ -60,7 +60,7 @@ type taskFileEntry struct {
 	Constraints    []string            `json:"constraints,omitempty"`
 	Cron           string              `json:"cron,omitempty"`
 	Enabled        bool                `json:"enabled"`
-	TimeoutMinutes int                 `json:"timeout_minutes,omitempty"`
+	TimeoutMinutes int                 `json:"timeout_minutes"`
 	BudgetUSD      float64             `json:"budget_usd,omitempty"`    // daily cap of the task
 	MaxRunUSD      float64             `json:"max_run_usd,omitempty"`   // per-run cap in the spec
 	Provider       string              `json:"provider,omitempty"`      // name only, never a key
@@ -297,7 +297,7 @@ func (s *Server) checkImport(ctx context.Context, i int, e *taskFileEntry, taken
 		e.Policy.Catchup, e.Policy.CatchupGraceMinutes = d.Catchup, d.CatchupGraceMinutes
 	}
 	f := taskForm{Name: e.Name, Prompt: e.Prompt, Provider: strings.TrimSpace(e.Provider), Cron: e.Cron,
-		BudgetUSD: e.BudgetUSD, TimeoutMinutes: e.TimeoutMinutes, Policy: e.Policy}
+		BudgetUSD: e.BudgetUSD, TimeoutMinutes: &e.TimeoutMinutes, Policy: e.Policy}
 	if e.CostControl != nil {
 		cp := *e.CostControl
 		fx := s.fx()
@@ -402,7 +402,7 @@ func firstLine(s string, max int) string {
 func (s *Server) createImported(ctx context.Context, f taskForm, extra tasksvc.Spec) (string, error) {
 	goal := extra.Goal
 	tv, err := s.deps.Tasks.Create(ctx, tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, Goal: goal, ProviderName: f.Provider,
-		TimeoutMinutes: f.TimeoutMinutes, OverlapPolicy: "skip", Actor: "user"})
+		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"})
 	if err != nil {
 		return "", err
 	}

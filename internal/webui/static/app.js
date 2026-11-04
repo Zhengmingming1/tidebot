@@ -5802,7 +5802,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 0 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -5815,11 +5815,20 @@
         fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null, (st.fx || {}).display === "CNY" ? 0.05 * st.fx.usd_cny : 0.05) +
-        fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') +
+        '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
+        fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
         wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
         '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
+        var syncTimeout = function () {
+          var enabled = f.timeout_enabled.checked;
+          $("#tf-timeout", root).classList.toggle("hidden", !enabled);
+          f.timeout_minutes.disabled = !enabled;
+          f.timeout_minutes.required = enabled;
+        };
+        f.timeout_enabled.addEventListener("change", syncTimeout);
+        syncTimeout();
         var initial=tf.skill_bindings||(tf.skill_id?[{skill_id:tf.skill_id,mode:tf.skill_version_id?"pinned":"follow",version_id:tf.skill_version_id||"",role:"primary"}]:[]);
         var editor=skillBindingEditor($("#tf-bindings",root),skills,initial,function(bs){f.skill_id.value=bs.length?bs[0].skill_id:"";f.skill_version_id.value=bs.length?bs[0].version_id:"";f.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:tf.skill_set_source,checkRequest:function(){return {kind:"draft",execution:"task",id:taskId||"",workspace:f.workspace.value.trim(),prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value()};}});
         var first=editor.value()[0];f.skill_id.value=first?first.skill_id:"";f.skill_version_id.value=first?first.version_id:"";
@@ -5837,7 +5846,7 @@
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
-            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: parseInt(f.timeout_minutes.value, 10) || 30, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
+            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: f.timeout_enabled.checked ? Number(f.timeout_minutes.value) : 0, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
           body.cost_control = {mode:readCostMode(), run_amount:f.run_amount.value === "" ? null : Number(f.run_amount.value), daily_amount:f.budget_usd.value === "" ? null : Number(f.budget_usd.value), currency:(tf.cost_control || {}).currency || (st.fx || {}).display || "USD", revision:(tf.cost_control || {}).revision || 0, fx_revision:(tf.cost_control || {}).fx_revision || st.fx_revision || ""};
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           var consent = body.cost_control.mode === "bypass" && (!tf.cost_control || tf.cost_control.mode !== "bypass") ? confirmCostBypass(root,body.name) : Promise.resolve(true);
@@ -8235,6 +8244,7 @@
     var pct = b.max_usd ? Math.min(100, b.used_usd / b.max_usd * 100) : 0, hp = b.held_usd > 0 && b.max_usd ? Math.min(100 - pct, b.held_usd / b.max_usd * 100) : 0;
     var htip = hp > 0 ? ' data-tip="' + esc(T("sp.held_tip", { n: b.held_runs, held: usd(b.held_usd, 4) })) + '"' : "";
     var name = bucketName(b), capTxt = b.max_usd ? usd(b.max_usd) : "∞";
+    if (b.scope === "global") return '<div class="bud-row" role="row"><span role="cell"><strong>' + esc(name) + '</strong><span class="muted"> · ' + esc(T("sp.per_day")) + '</span></span><span role="cell"><a href="#/settings/budgets">' + esc(T("sp.bud_settings")) + '</a></span><span role="cell" class="right">' + esc(usd(b.used_usd, 4)) + ' / ' + esc(capTxt) + '</span><span role="cell">' + esc(T(b.action === "block_notify" ? "sp.a_block" : "sp.a_pause")) + '</span><span role="cell">' + esc(b.warn_at_pct || 80) + '%</span></div>';
     return '<div class="bud-row" role="row" data-brow="' + k + '"><span class="bud-name" role="cell"' + (b.scope === "task" ? ' title="' + esc(name) + '"' : "") + "><strong>" + esc(name) + '</strong><span class="muted"> · ' + esc(T("sp.per_" + b.period)) + "</span></span>" +
       '<span role="cell"><span class="progress' + (pct >= 100 ? " bad" : pct >= 80 ? " warn" : "") + (hp > 0 ? " split" : "") + '" role="progressbar" aria-valuenow="' + Math.round(pct) + '" aria-valuemin="0" aria-valuemax="100"><span data-w="' + pct + '"></span>' + (hp > 0 ? '<span class="held" data-w="' + hp + '"></span>' : "") + "</span></span>" +
       '<span class="bud-amt right" role="cell"><span' + htip + ">" + esc(usd(b.used_usd, 4)) + (hp > 0 ? '<span class="held-mark" aria-hidden="true"> +' + esc(usd(b.held_usd, 2)) + "</span>" : "") + '</span> <span class="muted">/</span> <button type="button" class="cap-edit" data-bcap="' + k + '" data-tip="' + esc(T("sp.cap_tip")) + '" aria-label="' + esc(T("sp.cap_aria", { name: name, v: capTxt })) + '">' + esc(capTxt) + "</button></span>" +
@@ -8347,8 +8357,8 @@
     // "By tag" only appears once some task has a tag (or the address asks for it).
     var hasTags = spendView.by === "tag", hasBypass = false;
     return api("/api/tasks").then(function (ts) { (ts.tasks || ts || []).forEach(function (t) { taskNames[t.id] = t.name; if(t.cost_control_mode === "bypass") hasBypass = true; if ((t.tags || []).length) hasTags = true; }); }, function () {}).then(function () { return bkP; }).then(function () { return spendP; }).then(function (d) {
-      var s = d.summary, budgets = s.budgets || [];
-      var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0, max_tokens: 0 };
+      var s = d.summary, budgets = (s.budgets || []).filter(function (b) { return b.scope === "task" || (b.scope === "global" && b.period === "day"); });
+      var global = budgets.filter(function (b) { return b.scope === "global" && b.period === "day"; })[0] || { max_usd: 0 };
       var runsToday = d.top_tasks.reduce(function (a, t) { return a + t.runs; }, 0);
       var byDay = {}, days = [];
       d.days.forEach(function (x) { byDay[x.day] = x; });
@@ -8361,7 +8371,7 @@
         '<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("time.today")) + "</small><strong>" + esc(usd(s.total_usd, 4)) + "</strong><span>" + esc(global.max_usd ? T("sp.pct_of", { p: Math.round(gp), m: usd(global.max_usd) }) : T("sp.no_cap")) + "</span></div>" +
         '<div class="card stat"' + (global.max_usd && global.held_usd > 0 ? ' data-tip="' + esc(T("sp.remaining_held_tip", { cap: usd(global.max_usd), used: usd(s.total_usd, 4), held: usd(global.held_usd, 4) })) + '"' : "") + "><small>" + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd - (global.held_usd || 0))) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +
-        '<div class="card stat"><small>Tokens</small><strong>' + esc(num(s.total_tokens)) + "</strong><span>" + esc(global.max_tokens ? T("sp.tok_cap", { n: num(global.max_tokens) }) : T("sp.no_tok_cap")) + "</span></div>" +
+        '<div class="card stat"><small>Tokens</small><strong>' + esc(num(s.total_tokens)) + "</strong><span>" + esc(T("sp.tokens_usage")) + "</span></div>" +
         '<div class="card stat"><small>' + esc(T("col.runs_today")) + "</small><strong>" + esc(runsToday) + "</strong><span>" + esc(plural(d.top_tasks.length, "sp.sources_one", "sp.sources_many")) + "</span></div></div>" +
         '<section class="card"><div class="card-head"><span class="ico">' + ic("receipt") + '</span><h2>' + esc(T("sp.breakdown")) + '</h2><div class="seg sm" id="sp-range" role="radiogroup">' + [["7d", T("sp.r7")], ["30d", T("sp.r30")], ["all", T("sp.rall")]].map(function (x) { return '<button type="button" role="radio" data-r="' + x[0] + '" class="' + (x[0] === spendView.range ? "active" : "") + '" aria-checked="' + (x[0] === spendView.range) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>" + '<button class="icon-btn" id="sp-export" data-tip="' + esc(T("sp.export_tip")) + '" aria-label="' + esc(T("sp.export")) + '">' + ic("download", "sm") + "</button></div>" +
         '<nav class="tabs" role="tablist">' + [["task", T("sp.by_task")], ["provider_model", T("sp.by_provider_model")], ["model", T("sp.by_model")], ["provider", T("sp.by_provider")]].concat(hasTags ? [["tag", T("sp.by_tag")]] : []).map(function (x) { return '<button role="tab" data-by="' + x[0] + '" class="' + (x[0] === spendView.by ? "active" : "") + '" aria-selected="' + (x[0] === spendView.by) + '">' + esc(x[1]) + "</button>"; }).join("") + '</nav><div id="sp-body" class="sp-body"></div></section>' +
@@ -9189,15 +9199,14 @@
         };
       } else if (section === "budgets") {
         var g = (st.budgets || []).filter(function (x) { return x.scope === "global" && x.period === "day"; })[0] || {};
-        var buckets = (st.budgets || []).filter(function (x) { return x.scope === "bucket"; });
         var fx = st.fx || { display: "USD", usd_cny: 7.1 };
         body = '<section class="card">' + head.replace("</h2>", "</h2>" + tip(T("set.bud_auto"))) +
           '<div class="grid g3 pad-x" id="set-fx"><label class="field"><span>' + esc(T("set.fx_cur")) + tip(T("set.fx_cur_hint")) + '</span><select id="fx-cur">' + opt("USD", T("set.fx_usd"), fx.display === "USD") + opt("CNY", T("set.fx_cny"), fx.display === "CNY") + '</select></label>' +
           '<label class="field"><span>' + esc(T("set.fx_rate")) + tip(T("set.fx_rate_hint")) + '</span><div class="in-group"><span class="in-pre">1 USD =</span><input id="fx-rate" type="number" step="0.01" min="0.1" max="100" value="' + esc(fx.usd_cny) + '"><span class="in-pre">CNY</span></div></label></div>' +
-          '<div class="grid g3 pad-x" id="bud">' +
-          '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd") + " (" + curSym(fx.display) + ")") + '</span><input data-bud="g_usd" type="number" step="0.01" min="0" value="' + esc(g.max_usd || "") + '"></label>' +
-          '<label class="field" id="set-g_tok"><span>' + esc(T("set.g_tok")) + '</span><input data-bud="g_tok" type="number" step="1000" min="0" value="' + esc(g.max_tokens || "") + '"></label>' +
-          buckets.map(function (x) { return '<label class="field" id="set-b_' + esc(x.scope_id) + '"><span>' + esc(T("set.b_usd", { b: bucketName(x) }) + " (" + curSym(fx.display) + ")") + '</span><input data-bud="b" data-sid="' + esc(x.scope_id) + '" type="number" step="0.01" min="0" value="' + esc(x.max_usd || "") + '"></label>'; }).join("") +
+          '<p class="muted pad-x">' + esc(T("set.bud_scope")) + '</p><div class="grid g3 pad-x" id="bud">' +
+          '<label class="field" id="set-g_usd"><span>' + esc(T("set.g_usd") + " (" + curSym(fx.display) + ")") + '</span><input data-bud="g_usd" type="number" step="0.0001" min="0" max="1000000" value="' + esc(g.max_usd || "") + '"></label>' +
+          '<label class="field"><span>' + esc(T("sp.on_breach")) + '</span><select data-bud="action">' + opt("pause_notify", T("sp.a_pause"), g.action !== "block_notify") + opt("block_notify", T("sp.a_block"), g.action === "block_notify") + '</select></label>' +
+          '<label class="field"><span>' + esc(T("sp.warn_at")) + '</span><input data-bud="warn_at_pct" type="number" required min="1" max="100" step="1" value="' + esc(g.warn_at_pct || 80) + '"></label>' +
           '</div><p class="pad-x"><a href="#/spend">' + esc(T("set.bud_more")) + " " + ic("arrow", "sm") + "</a></p></section>";
         after = function () {
           var saveFx = function (el) {
@@ -9208,13 +9217,11 @@
           $$("[data-bud]").forEach(function (inp) {
             inp.addEventListener("change", function () {
               var k = inp.getAttribute("data-bud"), v = inp.value, req;
-              // only the changed cap: the server keeps the others and "on breach" / "warn at"
-              if (k === "g_usd") req = { scope: "global", period: "day", max_usd: Math.max(0, parseFloat(v) || 0) };
-              else if (k === "g_tok") req = { scope: "global", period: "day", max_tokens: Math.max(0, parseInt(v, 10) || 0) };
-              else {
-                var sid = inp.getAttribute("data-sid");
-                req = { scope: "bucket", scope_id: sid, bucket: sid, period: "day", max_usd: Math.max(0, parseFloat(v) || 0) };
-              }
+              if (!inp.checkValidity()) { inp.reportValidity(); return; }
+              req = { scope: "global", period: "day" };
+              if (k === "g_usd") req.max_usd = v === "" ? 0 : Number(v);
+              else if (k === "action") req.action = v;
+              else req.warn_at_pct = Number(v);
               api("/api/budgets", { method: "POST", body: req }).then(function () { savedMark(inp); }).catch(fail);
             });
           });
@@ -9324,7 +9331,7 @@
           row("proxy", T("net.proxy"), T("net.proxy_sub"), '<div class="seg" id="net-mode" role="radiogroup" aria-label="' + esc(T("net.proxy")) + '">' + [["auto", T("net.m_auto")], ["manual", T("net.m_manual")], ["off", T("net.m_off")]].map(function (m) { return '<button type="button" role="radio" data-m="' + m[0] + '">' + esc(m[1]) + "</button>"; }).join("") + "</div>") +
           '<div class="pad-x net-manual hidden" id="net-man">' + fieldHtml(T("net.url"), '<input id="net-url" class="mono" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:7890">', T("net.url_hint")) +
           fieldHtml(T("net.bypass"), '<input id="net-bypass" class="mono" autocomplete="off" spellcheck="false" placeholder="localhost, 127.0.0.1, .corp.example">', T("net.bypass_hint")) + "</div>" +
-          '<div class="pad-x"><p class="muted" id="net-eff"></p><p><button class="btn" id="net-test">' + ic("pulse", "sm") + esc(T("net.test")) + '</button> <button class="btn primary" id="net-save">' + esc(T("btn.save")) + '</button></p><div id="net-out" aria-live="polite"></div></div></section>' +
+          '<div class="pad-x"><p class="muted" id="net-eff"></p><div class="network-actions"><button type="button" class="btn" id="net-test">' + ic("pulse", "sm") + esc(T("net.test")) + '</button><button type="button" class="btn primary" id="net-save">' + esc(T("btn.save")) + '</button></div><div id="net-out" aria-live="polite"></div></div></section>' +
           '<section class="card" id="set-mirrors"><div class="card-head"><span class="ico">' + ic("download") + "</span><h2>" + esc(T("net.mirrors")) + '</h2></div><div class="pad-x"><p class="muted">' + esc(T("net.mirrors_sub")) + '</p><div id="net-mlist"></div>' +
           '<p class="net-presets" id="net-presets"></p><p><button class="btn sm" id="net-madd">' + ic("plus", "sm") + esc(T("net.m_add")) + "</button></p></div></section>";
         after = function () {

@@ -104,8 +104,12 @@ func TestConcurrentRunsShareBudget(t *testing.T) {
 // budgets so concurrent subscriptions cannot each consume the same allowance.
 func TestSubscriptionRunHoldsOnlyTokens(t *testing.T) {
 	a := newTestApp(t)
+	taskID := costModeTask(t, a, "task")
+	if err := a.Cost.UpsertBudget(context.Background(), cost.Budget{Scope: "task", ScopeID: taskID, Period: "day", MaxTokens: sql.NullInt64{Int64: 100, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
 	p := provider.Profile{Name: "subscription-test", Billing: &pricing.Billing{Mode: pricing.ModeSubscription}}
-	o := &runner.Options{Cost: &runner.CostControl{Calc: calculator(p), MaxAmount: 0, Currency: pricing.USD}}
+	o := &runner.Options{TaskID: taskID, Cost: &runner.CostControl{Calc: calculator(p), MaxAmount: 0, Currency: pricing.USD}}
 	h, err := a.holdRunBudget(context.Background(), o, cost.BucketProduction, p)
 	if err != nil || h == nil || o.Cost.MaxTokens <= 0 || o.Cost.MaxAmount != 0 {
 		t.Fatalf("subscription reservation: hold=%v cost=%+v err=%v", h, o.Cost, err)
@@ -115,7 +119,7 @@ func TestSubscriptionRunHoldsOnlyTokens(t *testing.T) {
 		t.Fatalf("subscription reserved money: %v (%d)", money, n)
 	}
 	// The initial hold reserves the remaining token room, not a fake dollar cap.
-	other := &runner.Options{Cost: &runner.CostControl{Calc: calculator(p), Currency: pricing.USD}}
+	other := &runner.Options{TaskID: taskID, Cost: &runner.CostControl{Calc: calculator(p), Currency: pricing.USD}}
 	if h2, err := a.holdRunBudget(context.Background(), other, cost.BucketProduction, p); err == nil {
 		h2.Release()
 		t.Fatal("concurrent subscription received already-reserved token room")

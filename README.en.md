@@ -48,6 +48,10 @@ Quick run. Recent prompts show up as chips you can click, the provider you used 
 
 Spend. Every model is priced at its own rate; subscription plans count tokens, not money. The daily budget resets at midnight in your own timezone (not UTC). Going over pauses the task and records an event. You can break it down by task, provider, model or tag, click a day in the chart to see just that day, and export the selected range as CSV.
 
+New tasks have no execution time limit by default. Enable “Limit maximum execution time” to set 1–1440 minutes. Timing starts after a run gets its execution slot; a timeout stops only that run. Existing task limits are preserved.
+
+Manage the single global daily monetary limit in Settings → Budget. It covers all run categories; task-level per-run/daily limits and control modes remain available. Token accounting and provider quotas are unchanged.
+
 ![Spend](docs/images/spend.png)
 
 The skill library. Every skill can be downloaded as a .zip and imported on another machine as is.

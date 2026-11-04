@@ -63,17 +63,13 @@ func TestBudgetEnforcementAndLedger(t *testing.T) {
 	if err != nil || !asst.OK {
 		t.Fatalf("assist should be ok under raised global %+v", asst)
 	}
-	// hit assist daily cap
-	if err := s.UpsertBudget(ctx, Budget{
-		Scope: "bucket", ScopeID: BucketAssist, Period: "day", Bucket: BucketAssist,
-		MaxUSD: sql.NullFloat64{Float64: 0.001, Valid: true},
-		Action: "pause_notify",
-	}); err != nil {
-		t.Fatal(err)
+	// Legacy category limits must not be recreated by callers.
+	if err := s.UpsertBudget(ctx, Budget{Scope: "bucket", ScopeID: BucketAssist, Period: "day", Bucket: BucketAssist}); err == nil {
+		t.Fatal("accepted removed category budget")
 	}
 	_ = s.Record(ctx, "run_assist", "", BucketAssist, 0.001, 1, 1)
-	blockedAsst, err := s.CheckBeforeRun(ctx, "", BucketAssist, 0.5)
-	if err != nil || blockedAsst.OK {
-		t.Fatalf("assist bucket cap should block %+v", blockedAsst)
+	allowed, err := s.CheckBeforeRun(ctx, "", BucketAssist, 0.5)
+	if err != nil || !allowed.OK {
+		t.Fatalf("assist uses only shared global cap: %+v %v", allowed, err)
 	}
 }

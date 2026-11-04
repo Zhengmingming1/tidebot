@@ -30,20 +30,14 @@ func budgetRowOf(t *testing.T, c *client, scope, sid string) (usd float64, tok i
 func TestBudgetPartialUpdate(t *testing.T) {
 	c := login(t)
 	post := func(v map[string]any) int { code, _ := c.json(http.MethodPost, "/api/budgets", v); return code }
-	if code := post(map[string]any{"scope": "global", "period": "day", "max_usd": 5, "max_tokens": 200000, "action": "block_notify", "warn_at_pct": 90}); code != 200 {
+	if code := post(map[string]any{"scope": "global", "period": "day", "max_usd": 5, "action": "block_notify", "warn_at_pct": 90}); code != 200 {
 		t.Fatal(code)
 	}
 	if code := post(map[string]any{"scope": "global", "period": "day", "max_usd": 7.5}); code != 200 {
 		t.Fatal(code)
 	}
-	if u, tok, a, w := budgetRowOf(t, c, "global", ""); u != 7.5 || tok != 200000 || a != "block_notify" || w != 90 {
+	if u, tok, a, w := budgetRowOf(t, c, "global", ""); u != 7.5 || tok != 0 || a != "block_notify" || w != 90 {
 		t.Fatalf("cap change reset others: %v %v %v %v", u, tok, a, w)
-	}
-	if code := post(map[string]any{"scope": "global", "period": "day", "max_tokens": 0}); code != 200 {
-		t.Fatal(code)
-	}
-	if u, tok, a, _ := budgetRowOf(t, c, "global", ""); u != 7.5 || tok != 0 || a != "block_notify" {
-		t.Fatalf("token cap off: %v %v %v", u, tok, a)
 	}
 	if code := post(map[string]any{"scope": "global", "period": "day", "warn_at_pct": 70}); code != 200 {
 		t.Fatal(code)
@@ -58,14 +52,22 @@ func TestBudgetPartialUpdate(t *testing.T) {
 	if u, _, a, w := budgetRowOf(t, c, "global", ""); u != 0 || a != "block_notify" || w != 70 {
 		t.Fatalf("cap off: %v %v %v", u, a, w)
 	}
-	// a new bucket budget with only a cap gets the defaults
-	if code := post(map[string]any{"scope": "bucket", "scope_id": "nightly", "bucket": "nightly", "period": "day", "max_usd": 1.23456}); code != 200 {
+	// A task keeps its own money and token controls.
+	if code := post(map[string]any{"scope": "task", "scope_id": "nightly", "period": "day", "max_usd": 1.23456, "max_tokens": 25000}); code != 200 {
 		t.Fatal(code)
 	}
-	if u, _, a, w := budgetRowOf(t, c, "bucket", "nightly"); u != 1.2346 || a != "pause_notify" || w != 80 {
-		t.Fatalf("new bucket: %v %v %v", u, a, w)
+	if u, tok, a, w := budgetRowOf(t, c, "task", "nightly"); u != 1.2346 || tok != 25000 || a != "pause_notify" || w != 80 {
+		t.Fatalf("new task: %v %v %v", u, a, w)
 	}
 	for _, bad := range []map[string]any{
+		{"scope": "bucket", "scope_id": "assist", "bucket": "assist", "max_usd": 1},
+		{"scope": "global", "max_tokens": 200000},
+		{"scope": "global", "max_tokens": 0},
+		{"scope": "global", "period": "run", "max_usd": 1},
+		{"scope": "global", "scope_id": "other", "max_usd": 1},
+		{"scope": "global", "bucket": "assist", "max_usd": 1},
+		{"scope": "task", "max_usd": 1},
+
 		{"scope": "global", "period": "day", "max_usd": -1},
 		{"scope": "global", "period": "day", "max_usd": 2e6},
 		{"scope": "global", "period": "day", "max_tokens": -5},
@@ -97,11 +99,18 @@ func TestBudgetRowsUI(t *testing.T) {
 		`confirmDialog({ title: T("sp.cap_off_title", { name: name })`,
 		`postBudget(k, a ? { action: sel.value } : { warn_at_pct: +sel.value })`,
 		`postBudget(k, { max_usd: v })`,
-		`if (k === "g_usd") req = { scope: "global", period: "day", max_usd: Math.max(0, parseFloat(v) || 0) };`,
-		`else if (k === "g_tok") req = { scope: "global", period: "day", max_tokens: Math.max(0, parseInt(v, 10) || 0) };`,
+		`if (k === "g_usd") req.max_usd = v === "" ? 0 : Number(v);`,
+		`else if (k === "action") req.action = v;`,
+		`else req.warn_at_pct = Number(v);`,
+		`if (b.scope === "global") return`,
 	} {
 		if !strings.Contains(src, s) {
 			t.Errorf("app.js lacks %s", s)
+		}
+	}
+	for _, removed := range []string{`data-bud="g_tok"`, `data-bud="b"`, `global.max_tokens`, `T("set.b_usd"`} {
+		if strings.Contains(src, removed) {
+			t.Errorf("removed global/category control remains: %s", removed)
 		}
 	}
 	if strings.Contains(src, "budget-act") || strings.Contains(src, "budget-row") {
@@ -148,5 +157,37 @@ if (bad.length) { console.log(JSON.stringify(bad)); process.exit(1); }
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("parseCap: %v %s", err, out)
+	}
+}
+
+func TestGlobalBudgetRowHasOneEditingHome(t *testing.T) {
+	js, err := Static.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := regexp.MustCompile(`(?s)  function budgetRow\(b, k\) \{.*?\n  \}\n`).FindString(string(js))
+	if fn == "" {
+		t.Fatal("budgetRow not found")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := `const assert = require("node:assert/strict");
+function esc(s) { return String(s); }
+function T(s) { return s; }
+function usd(n) { return String(n); }
+function bucketName(b) { return b.scope; }
+function opt(v, label, selected) { return '<option>' + label + '</option>'; }
+` + fn + `
+const globalRow = budgetRow({scope:"global",period:"day",max_usd:5,used_usd:1,warn_at_pct:90},0);
+assert.match(globalRow, /href="#\/settings\/budgets"/);
+assert.doesNotMatch(globalRow, /data-bcap|data-bact|data-bwarn/);
+assert.match(globalRow, /90%/);
+const taskRow = budgetRow({scope:"task",period:"day",max_usd:1,used_usd:0.2},1);
+for (const control of ["data-bcap", "data-bact", "data-bwarn"]) assert.ok(taskRow.includes(control));
+`
+	if out, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("budget row rendering: %v %s", err, out)
 	}
 }

@@ -32,7 +32,7 @@ type taskForm struct {
 	Cron              string                  `json:"cron"`
 	BudgetUSD         float64                 `json:"budget_usd"`
 	Enabled           bool                    `json:"enabled"`
-	TimeoutMinutes    int                     `json:"timeout_minutes"`
+	TimeoutMinutes    *int                    `json:"timeout_minutes"`
 	// Workspace: the task's own working folder, "" = the per-task default. nil (field
 	// left out, e.g. an older page) keeps the folder the task has.
 	Workspace *string `json:"workspace,omitempty"`
@@ -40,6 +40,14 @@ type taskForm struct {
 	Policy *taskPolicyForm `json:"policy,omitempty"`
 	// Tags: nil (left out, e.g. an older page or agentctl) keeps the task's tags.
 	Tags *[]string `json:"tags,omitempty"`
+}
+
+// A missing timeout in a legacy edit preserves its value; explicit zero removes it.
+func formTimeout(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // taskPolicyForm is the part of policy.Policy the task form edits. Allowed tools and
@@ -167,8 +175,8 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 	if math.IsNaN(f.BudgetUSD) || math.IsInf(f.BudgetUSD, 0) || f.BudgetUSD < 0 || f.BudgetUSD > 10000 {
 		return errors.New("budget must be between 0 and 10000 in the selected currency")
 	}
-	if f.TimeoutMinutes < 0 || f.TimeoutMinutes > 24*60 {
-		return errors.New("timeout must be at most 1440 minutes")
+	if f.TimeoutMinutes != nil && (*f.TimeoutMinutes < 0 || *f.TimeoutMinutes > 24*60) {
+		return errors.New("timeout must be 0 (unlimited) or 1-1440 minutes")
 	}
 	if f.SkillBindings != nil {
 		normalized, err := tasksvc.NormalizeBindings(*f.SkillBindings)
@@ -268,8 +276,8 @@ func specFromForm(spec tasksvc.Spec, f taskForm) tasksvc.Spec {
 	if f.Workspace != nil {
 		spec.WorkspaceDir = *f.Workspace
 	}
-	if f.TimeoutMinutes > 0 {
-		spec.TimeoutMinutes = f.TimeoutMinutes
+	if f.TimeoutMinutes != nil {
+		spec.TimeoutMinutes = *f.TimeoutMinutes
 	}
 	if f.SkillBindings != nil {
 		spec.SkillBindings = append([]tasksvc.SkillBinding(nil), (*f.SkillBindings)...)
@@ -321,7 +329,7 @@ func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 		ws = *f.Workspace
 	}
 	tv, err := s.deps.Tasks.Create(ctx, tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, ProviderName: f.Provider, WorkspaceDir: ws,
-		TimeoutMinutes: f.TimeoutMinutes, OverlapPolicy: "skip", Actor: "user"})
+		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"})
 	if err != nil {
 		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
 			writeErr(w, 409, err.Error())
@@ -425,7 +433,7 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 		return nil, err
 	}
 	f := taskForm{CostControl: &cp, Name: v.Task.Name, Prompt: v.Spec.Prompt, Provider: v.Spec.Provider, Cron: v.Task.CronExpr,
-		Enabled: v.Task.Status == "active", TimeoutMinutes: v.Spec.TimeoutMinutes}
+		Enabled: v.Task.Status == "active", TimeoutMinutes: &v.Spec.TimeoutMinutes}
 	ws := v.Spec.WorkspaceDir
 	if ws == "" {
 		ws = v.Task.WorkspaceDir

@@ -37,8 +37,8 @@ func modeMeteredProfile() provider.Profile {
 	return provider.Profile{Name: "test-metered", Model: "test-model", Billing: &pricing.Billing{Mode: pricing.ModeMetered}}
 }
 
-// Every scope and dimension uses the same mode selection. Bypass must not
-// accidentally retain the global token check when the money check is skipped.
+// Supported scopes follow the selected mode; obsolete rows from old backups
+// must never restore global token or category enforcement.
 func TestCostModesAdmissionScopes(t *testing.T) {
 	for _, mode := range []string{"task", "global", "bypass"} {
 		for _, scope := range []string{"task", "global", "bucket"} {
@@ -61,14 +61,20 @@ func TestCostModesAdmissionScopes(t *testing.T) {
 						b.MaxTokens = sql.NullInt64{Int64: 10, Valid: true}
 					}
 					ctx := context.Background()
-					if err := a.Cost.UpsertBudget(ctx, b); err != nil {
+					deprecated := scope == "bucket" || (scope == "global" && dimension == "tokens")
+					if deprecated {
+						_, err := a.DB.Exec(`INSERT INTO budgets(id,scope,scope_id,period,max_usd,max_tokens,action,warn_at_pct,bucket,created_at,updated_at,currency) VALUES('legacy',?,?, 'day',?,?,'skip',80,?,'','','USD')`, b.Scope, b.ScopeID, b.MaxUSD, b.MaxTokens, b.Bucket)
+						if err != nil {
+							t.Fatal(err)
+						}
+					} else if err := a.Cost.UpsertBudget(ctx, b); err != nil {
 						t.Fatal(err)
 					}
 					if err := a.Cost.RecordEntry(ctx, cost.Entry{RunID: "already-spent", TaskID: taskID, Bucket: cost.BucketProduction, Amount: 2, Currency: pricing.USD, Source: pricing.SourceClaude, Input: 20}); err != nil {
 						t.Fatal(err)
 					}
 					_, cc, err := a.admitRun(ctx, taskID, cost.BucketProduction, modeMeteredProfile(), 0)
-					blocked := mode != "bypass" && (mode == "task" || scope != "task")
+					blocked := !deprecated && mode != "bypass" && (mode == "task" || scope != "task")
 					if blocked && err == nil {
 						t.Fatal("exhausted applicable budget admitted")
 					}

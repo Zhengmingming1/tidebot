@@ -3817,3 +3817,6 @@ button.rc-tag:hover { color: var(--text); }
   .cs.cs-blank .cs-main { justify-content: flex-start; padding-bottom: 0; }
   .cs.cs-blank .cs-empty { padding: 12px; }
 }
+
+/* Align mixed icon/text network controls without inline baseline offsets. */
+.network-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s1); margin-block: 1em; }
