@@ -315,7 +315,20 @@ func ParseFrontmatter(md []byte) (Meta, error) {
 		return m, nil
 	}
 	rest := s[4:]
-	end := strings.Index(rest, "\n---")
+	// A delimiter occupies its own line. Prefix matching also accepts YAML keys
+	// such as "---extra:" and silently drops all metadata after that key.
+	end := -1
+	for offset := 0; offset < len(rest); {
+		line, _, hasNewline := strings.Cut(rest[offset:], "\n")
+		if strings.TrimRight(line, " \t") == "---" {
+			end = offset
+			break
+		}
+		if !hasNewline {
+			break
+		}
+		offset += len(line) + 1
+	}
 	if end < 0 {
 		return m, errors.New("SKILL.md frontmatter is not closed with ---")
 	}
