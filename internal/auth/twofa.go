@@ -124,20 +124,44 @@ func (s *Service) useRecoveryCode(ctx context.Context, code string) bool {
 	if len(code) != 10 {
 		return false
 	}
-	var h string
-	if err := s.DB.QueryRowContext(ctx, `SELECT recovery_codes_hash FROM users WHERE id='owner'`).Scan(&h); err != nil || h == "" {
-		return false
-	}
 	want := hashRecovery(code)
-	parts := strings.Split(h, ",")
-	for i, p := range parts {
-		if subtle.ConstantTimeCompare([]byte(p), []byte(want)) == 1 {
-			rest := append(append([]string{}, parts[:i]...), parts[i+1:]...)
-			_, err := s.DB.ExecContext(ctx, `UPDATE users SET recovery_codes_hash=?, updated_at=? WHERE id='owner'`, strings.Join(rest, ","), nowUTC())
-			return err == nil
+	for {
+		var h string
+		if err := s.DB.QueryRowContext(ctx, `SELECT recovery_codes_hash FROM users WHERE id='owner'`).Scan(&h); err != nil || h == "" {
+			return false
+		}
+		parts := strings.Split(h, ",")
+		matched := false
+		rest := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if subtle.ConstantTimeCompare([]byte(p), []byte(want)) == 1 {
+				matched = true
+			} else {
+				rest = append(rest, p)
+			}
+		}
+		if !matched {
+			return false
+		}
+		// Only consume the snapshot we checked. A concurrent request may have
+		// consumed this or another code, or replaced/cleared the entire set.
+		res, err := s.DB.ExecContext(ctx, `UPDATE users SET recovery_codes_hash=?, updated_at=? WHERE id='owner' AND recovery_codes_hash=?`, strings.Join(rest, ","), nowUTC(), h)
+		if err != nil {
+			return false
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return false
+		}
+		if n == 1 {
+			return true
+		}
+		// Reload after a conflict so different valid codes can both succeed
+		// without restoring either code. Context cancellation stops the retry.
+		if ctx.Err() != nil {
+			return false
 		}
 	}
-	return false
 }
 
 const recAlphabet = "abcdefghjkmnpqrstuvwxyz23456789"
