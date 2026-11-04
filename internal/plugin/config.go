@@ -1,12 +1,15 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -119,9 +122,48 @@ func num(v any) (float64, bool) {
 	return 0, false
 }
 
+// enumValue normalizes the JSON data model without rounding integers through
+// float64. YAML integer enums and JSON numbers compare by value, while strings,
+// booleans, arrays and objects retain their types and structure.
+func enumValue(v any) (any, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return nil, err
+	}
+	var normalize func(any) any
+	normalize = func(x any) any {
+		switch x := x.(type) {
+		case json.Number:
+			r, _ := new(big.Rat).SetString(string(x))
+			return r
+		case []any:
+			for i := range x {
+				x[i] = normalize(x[i])
+			}
+		case map[string]any:
+			for k, v := range x {
+				x[k] = normalize(v)
+			}
+		}
+		return x
+	}
+	return normalize(value), nil
+}
+
 func inEnum(v any, enum []any) bool {
+	value, err := enumValue(v)
+	if err != nil {
+		return false
+	}
 	for _, e := range enum {
-		if fmt.Sprint(e) == fmt.Sprint(v) {
+		candidate, err := enumValue(e)
+		if err == nil && reflect.DeepEqual(candidate, value) {
 			return true
 		}
 	}
@@ -142,6 +184,9 @@ func ValidateConfig(fields []Field, values map[string]any) (plain map[string]any
 			}
 			continue
 		}
+		if len(f.Enum) > 0 && !inEnum(v, f.Enum) {
+			return nil, nil, fmt.Errorf("%s must be one of the listed values", label(f))
+		}
 		switch f.Type {
 		case "string":
 			s, ok := v.(string)
@@ -154,9 +199,6 @@ func ValidateConfig(fields []Field, values map[string]any) (plain map[string]any
 			}
 			if len(s) > max {
 				return nil, nil, fmt.Errorf("%s is longer than %d characters", label(f), max)
-			}
-			if len(f.Enum) > 0 && !inEnum(s, f.Enum) {
-				return nil, nil, fmt.Errorf("%s must be one of the listed values", label(f))
 			}
 			if f.WriteOnly {
 				secrets[f.Key] = s
@@ -173,9 +215,6 @@ func ValidateConfig(fields []Field, values map[string]any) (plain map[string]any
 			}
 			if (f.Minimum != nil && n < *f.Minimum) || (f.Maximum != nil && n > *f.Maximum) {
 				return nil, nil, fmt.Errorf("%s is out of range", label(f))
-			}
-			if len(f.Enum) > 0 && !inEnum(n, f.Enum) {
-				return nil, nil, fmt.Errorf("%s must be one of the listed values", label(f))
 			}
 			plain[f.Key] = n
 		case "boolean":
