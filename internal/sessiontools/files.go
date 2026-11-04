@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -103,9 +104,9 @@ func globRE(glob string) (*regexp.Regexp, error) {
 
 var errStop = errors.New("stop")
 
-// walk visits regular files under the roots (never following links, skipping
+// walk visits regular files under the roots (rejecting links, skipping
 // .git) whose slash path relative to the root matches glob.
-func walk(roots []Root, sub, glob string, each func(r Root, rel, abs string, size int64) error) error {
+func walk(roots []Root, sub, glob string, each func(r Root, root *os.Root, rel string, size int64) error) error {
 	re, err := globRE(glob)
 	if err != nil {
 		return fmt.Errorf("bad pattern: %v", err)
@@ -130,7 +131,27 @@ func walk(roots []Root, sub, glob string, each func(r Root, rel, abs string, siz
 				start = filepath.Join(r.Dir, clean)
 			}
 		}
-		err := filepath.WalkDir(start, func(p string, d fs.DirEntry, err error) error {
+		info, err := os.Lstat(r.Dir)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		root, err := os.OpenRoot(r.Dir)
+		if err != nil {
+			continue
+		}
+		opened, err := root.Stat(".")
+		if err != nil || !os.SameFile(info, opened) {
+			root.Close()
+			continue // the selected directory changed while it was being opened
+		}
+		relStart, err := filepath.Rel(r.Dir, start)
+		if err != nil || !unlinkedPath(root, relStart) {
+			root.Close()
+			continue
+		}
+		// Walk and read through the same root handle. A directory replaced by a
+		// symlink during traversal cannot redirect a later read outside the root.
+		err = fs.WalkDir(root.FS(), filepath.ToSlash(relStart), func(rel string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
@@ -138,7 +159,7 @@ func walk(roots []Root, sub, glob string, each func(r Root, rel, abs string, siz
 				return errStop
 			}
 			if d.IsDir() {
-				if d.Name() == ".git" && p != start {
+				if d.Name() == ".git" && rel != filepath.ToSlash(relStart) {
 					return filepath.SkipDir
 				}
 				return nil
@@ -146,11 +167,6 @@ func walk(roots []Root, sub, glob string, each func(r Root, rel, abs string, siz
 			if !d.Type().IsRegular() {
 				return nil // links and devices are not followed or read
 			}
-			rel, err := filepath.Rel(r.Dir, p)
-			if err != nil || strings.HasPrefix(rel, "..") {
-				return nil
-			}
-			rel = filepath.ToSlash(rel)
 			if !re.MatchString(rel) {
 				return nil
 			}
@@ -158,13 +174,26 @@ func walk(roots []Root, sub, glob string, each func(r Root, rel, abs string, siz
 			if err != nil {
 				return nil
 			}
-			return each(r, rel, p, info.Size())
+			return each(r, root, rel, info.Size())
 		})
+		root.Close()
 		if errors.Is(err, errStop) {
 			return err
 		}
 	}
 	return nil
+}
+
+// unlinkedPath rejects links in every component of an explicit subpath, not
+// just its final entry. WalkDir does not inspect ancestors of its starting path.
+func unlinkedPath(root *os.Root, rel string) bool {
+	for p := rel; p != "."; p = filepath.Dir(p) {
+		info, err := root.Lstat(p)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // show is the path the model can pass to Read: absolute, in the OS's form.
@@ -174,7 +203,7 @@ func show(r Root, rel string) string { return filepath.Join(r.Dir, filepath.From
 func FindFiles(roots []Root, pattern, path string) (string, error) {
 	var out []string
 	more := false
-	err := walk(roots, path, pattern, func(r Root, rel, _ string, _ int64) error {
+	err := walk(roots, path, pattern, func(r Root, _ *os.Root, rel string, _ int64) error {
 		if len(out) >= maxListed {
 			more = true
 			return errStop
@@ -210,15 +239,26 @@ func SearchFiles(roots []Root, pattern, path, glob string, ignoreCase bool) (str
 	}
 	var out []string
 	total := int64(0)
-	err = walk(roots, path, glob, func(r Root, rel, abs string, size int64) error {
+	err = walk(roots, path, glob, func(r Root, root *os.Root, rel string, size int64) error {
 		if size > maxFileBytes {
 			return nil
 		}
-		if total += size; total > maxTotalBytes {
+		if size > maxTotalBytes-total {
 			return errStop
 		}
-		b, err := os.ReadFile(abs)
-		if err != nil || bytes.IndexByte(b[:min(len(b), 8000)], 0) >= 0 {
+		f, err := root.Open(filepath.FromSlash(rel))
+		if err != nil {
+			return nil
+		}
+		// Enforce the limit on the read as well as the earlier directory entry:
+		// files can grow between stat and open.
+		b, err := io.ReadAll(io.LimitReader(f, min(int64(maxFileBytes), maxTotalBytes-total)+1))
+		f.Close()
+		total += int64(len(b))
+		if total > maxTotalBytes {
+			return errStop
+		}
+		if err != nil || len(b) > maxFileBytes || bytes.IndexByte(b[:min(len(b), 8000)], 0) >= 0 {
 			return nil // unreadable or binary
 		}
 		sc := bufio.NewScanner(bytes.NewReader(b))
