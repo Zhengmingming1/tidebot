@@ -244,6 +244,13 @@ func (s *Service) List(ctx context.Context) ([]SkillView, error) {
 
 // Rollback moves skill current pointer.
 func (s *Service) Rollback(ctx context.Context, skillID, versionID, actor string) error {
+	ver, err := s.Ver.GetVersion(ctx, versionID)
+	if err != nil {
+		return err
+	}
+	if ver.EntityType != version.EntitySkill || ver.EntityID != skillID {
+		return fmt.Errorf("version does not belong to skill")
+	}
 	return s.Ver.MovePointer(ctx, version.EntitySkill, skillID, version.PointerCurrent, versionID, actor, "rollback", "")
 }
 
