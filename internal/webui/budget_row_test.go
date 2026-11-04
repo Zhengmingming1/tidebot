@@ -169,7 +169,7 @@ func TestGlobalBudgetRowHasOneEditingHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fn := regexp.MustCompile(`(?s)  function budgetRow\(b, k\) \{.*?\n  \}\n`).FindString(string(js))
+	fn := regexp.MustCompile(`(?s)  function budgetRow\(b, k\) \{.*?\n  \}\n`).FindString(strings.ReplaceAll(string(js), "\r\n", "\n"))
 	if fn == "" {
 		t.Fatal("budgetRow not found")
 	}
