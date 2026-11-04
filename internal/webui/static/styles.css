@@ -3738,3 +3738,21 @@ button.rc-tag:hover { color: var(--text); }
 .cap-empty { padding:24px 0; }
 @media(max-width:600px) { .cap-meta>div { grid-template-columns:55px minmax(0,1fr); } .cap-session-proposals { padding:0 8px; } }
 .cap-bound-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; font-size:12px; }
+
+/* Compound search fields own one focus ring, rather than framing their inner text twice. */
+.search-in:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.search-in input:focus, .search-in input:focus-visible { outline: none; border: 0 !important; box-shadow: none; }
+
+/* Consistent, quiet select menus in WKWebView, Chromium and Firefox. Native selects
+   remain the form source; multi-select/list controls retain their native interaction. */
+.select-popup { position: fixed; z-index: 10000; overflow-y: auto; overscroll-behavior: contain; padding: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: 0 12px 36px rgba(0, 0, 0, .16), 0 2px 8px rgba(0, 0, 0, .06); font: 13px/1.4 var(--font); }
+.select-popup-option { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 7px 10px 7px 6px; border-radius: 7px; cursor: default; overflow-wrap: anywhere; }
+.select-popup-check { flex: 0 0 16px; color: var(--accent); text-align: center; font-weight: 600; }
+.select-popup-option.active { background: var(--accent-100); color: var(--text); }
+.select-popup-option[aria-selected=true] { font-weight: 600; }
+.select-popup-option[aria-disabled=true] { opacity: .45; }
+.select-popup-group { padding: 8px 10px 4px 30px; color: var(--text-3); font-size: 11px; font-weight: 600; }
+@media (forced-colors: active) {
+  .search-in:focus-within { outline: 2px solid Highlight; }
+  .select-popup-option.active { outline: 2px solid Highlight; outline-offset: -2px; }
+}

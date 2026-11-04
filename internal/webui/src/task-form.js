@@ -113,10 +113,10 @@
         }).catch(function (e) { if (my === seq) { err.textContent = e.message; list.innerHTML = ""; dstEl.classList.add("hidden"); host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); } });
       }, 300);
     }
-    host.addEventListener("input", function (e) { if (e.isTrusted) touched = true; });
-    host.addEventListener("change", function (e) { if (e.isTrusted && e.target.getAttribute("data-k") !== "tz") touched = true; });
+    host.addEventListener("input", function (e) { if (e.isTrusted || e._tbUserSelect) touched = true; });
+    host.addEventListener("change", function (e) { if ((e.isTrusted || e._tbUserSelect) && e.target.getAttribute("data-k") !== "tz") touched = true; });
     $$("[data-mode]", host).forEach(function (b) { b.addEventListener("click", function (e) {
-      if (e.isTrusted) touched = true;
+      if (e.isTrusted || e._tbUserSelect) touched = true;
       var to = b.getAttribute("data-mode");
       if (to === s.mode) return;
       if (to === "simple") {
@@ -142,12 +142,24 @@
     }
     return { value: value, valid: function () { return !err.textContent; }, set: set, touched: function () { return touched; } };
   }
-  // Default provider: the configured default when it has a key, else the first one that does.
+  // key_set includes managed/keyless gateways whose plugin supplies authentication.
+  // Do not infer readiness from a default flag, a model name or a past task.
+  function readyProviders(st) {
+    return (st.providers || []).filter(function (p) { return p.key_set === true; });
+  }
   function smartProvider(st) {
-    var ps = st.providers || [], d = ps.filter(function (p) { return p.name === st.default_provider; })[0];
-    if (d && d.key_set) return d.name;
-    var k = ps.filter(function (p) { return p.key_set; })[0];
-    return (k || d || ps[0] || {}).name || st.default_provider;
+    var ps = readyProviders(st), d = ps.filter(function (p) { return p.name === st.default_provider; })[0];
+    return (d || ps[0] || {}).name || "";
+  }
+  function providerOptions(st, selected, preserve, models) {
+    var ps = readyProviders(st), found = ps.some(function (p) { return p.name === selected; });
+    var unavailable = preserve && !found;
+    if (!found && !preserve) selected = smartProvider(st);
+    // Keep an existing task's exact value, even if deleted or now missing its key.
+    // It remains visible as the current value, but cannot be picked for new work.
+    var head = unavailable ? '<option value="' + esc(selected || "") + '" selected disabled hidden>' + esc(selected ? selected + " " + T("qr.no_key") : T("td.default")) + '</option>' : "";
+    if (!ps.length && !unavailable) head = '<option value="" selected disabled>' + esc(T("cc.no_provider")) + '</option>';
+    return head + ps.map(function (p) { return opt(p.name, p.name + (models && p.model ? " · " + p.model : ""), p.name === selected); }).join("");
   }
   // New-task auto-fill: as the instruction is typed, the server guesses a name and a schedule
   // (POST /api/tasks/infer). A field is only filled while the user hasn't edited it themselves.
@@ -345,7 +357,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -355,7 +367,7 @@
         (taskId ? nameF + promptF : promptF + nameF) +
         '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
-        fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
+        fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null, (st.fx || {}).display === "CNY" ? 0.05 * st.fx.usd_cny : 0.05) +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') +
@@ -376,6 +388,7 @@
         var readCostMode = wireCostFields(root, f);
         f.addEventListener("submit", function (e) {
           e.preventDefault();
+          if (!taskId && !readyProviders(st).some(function (p) { return p.name === f.provider.value; })) { toast(T("cc.no_provider"), true); return; }
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),

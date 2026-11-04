@@ -57,17 +57,19 @@ function submitKey(e) { return e.key==="Enter" && e.metaKey; }
 function quickRunModal() { ctx.modalCalls.push({prompt:draftLoad("qr").text,provider:ctx.store.tb_qr_provider}); ctx.modal.children=[{}]; }
 function openStarted(r, key) { ctx.started.push({r:r,key:key}); }
 function api(path, opt) {
-  if(path==="/api/settings") return Promise.resolve({providers:[{name:"alpha",key_set:true},{name:"beta",key_set:true}],default_provider:"alpha"});
+  if(path==="/api/settings") return Promise.resolve(ctx.settings || {providers:[{name:"alpha",key_set:true},{name:"beta",key_set:true}],default_provider:"alpha"});
   if(path==="/api/runs/recent-prompts") return Promise.resolve({prompts:["Selected recent prompt"]});
   if(path==="/api/overview" || path==="/api/dashboard") return new Promise(()=>{});
   assert.equal(path,"/api/runs/quick");
   assert.equal(opt.method,"POST");
   ctx.posts.push(opt.body); return new Promise((resolve,reject)=>{ctx.reply={resolve:resolve,reject:reject};});
 }
+eval(grab("readyProviders") + "\n" + grab("smartProvider") + "\n" + grab("providerOptions"));
+function opt(v,label,selected) { return '<option value="'+esc(v)+'"'+(selected?' selected':'')+'>'+esc(label)+'</option>'; }
 eval(grab("homePendingHtml") + "\n" + grab("homeQuickHtml") + "\n" + grab("syncHomeQuickDraft") + "\n" + grab("bindHomeQuick") + "\n" + grab("renderHome"));
 const flush=async()=>{await Promise.resolve();await Promise.resolve();await Promise.resolve();};
-async function setup(text) {
-  ctx={nodes:{},drafts:{qr:{text:text}},store:{},posts:[],modalCalls:[],started:[],cleared:0};
+async function setup(text, settings, store) {
+  ctx={nodes:{},drafts:{qr:{text:text}},store:store||{},settings:settings,posts:[],modalCalls:[],started:[],cleared:0};
   for(const q of ["#home-quick","#home-prompt","#home-submit","#home-advanced","#home-run-error","#home-recent-prompts","#modal-root"]) ctx.nodes[q]=new El();
   ctx.form=ctx.nodes["#home-quick"]; ctx.ta=ctx.nodes["#home-prompt"]; ctx.submit=ctx.nodes["#home-submit"]; ctx.advanced=ctx.nodes["#home-advanced"]; ctx.modal=ctx.nodes["#modal-root"];
   ctx.form.provider=new El(); ctx.form.provider.isSelect=true; ctx.form.provider.disabled=true; ctx.submit.disabled=true;
@@ -120,6 +122,17 @@ function userText(text) { ctx.ta.value=text; ctx.ta.dispatchEvent({type:"input",
   assert.equal(c.ta.value,"Selected recent prompt");
   c.advanced.focus(); c.advanced.events.click();
   assert.equal(c.modalCalls[0].prompt,"Selected recent prompt");
+
+  // A missing-key default and stale remembered selection never appear in the picker.
+  c=await setup("draft",{providers:[{name:"missing",key_set:false},{name:"beta",key_set:true}],default_provider:"missing"},{tb_qr_provider:"missing"});
+  assert.equal(c.form.provider.value,"beta");
+  assert.ok(!c.form.provider.innerHTML.includes('value="missing"'));
+  assert.equal(c.submit.disabled,false);
+  // All-unconfigured must not submit an empty provider and silently run the default.
+  c=await setup("draft",{providers:[{name:"missing",key_set:false}],default_provider:"missing"});
+  assert.equal(c.submit.disabled,true); assert.equal(c.form.provider.disabled,true);
+  assert.equal(c.nodes["#home-run-error"].textContent,"cc.no_provider");
+  c.form.requestSubmit(); assert.equal(c.posts.length,0);
 
   // Unknown notification data is visibly different from a verified empty pending list; user text is escaped.
   assert.ok(homePendingHtml(null).includes("home.pending_unavailable"));

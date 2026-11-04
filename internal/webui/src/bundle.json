@@ -7,6 +7,7 @@
   "schedule-controls.js",
   "live-session.js",
   "page-lifecycle.js",
+  "select-controls.js",
   "home.js",
   "tasks.js",
   "task-detail.js",

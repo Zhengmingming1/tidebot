@@ -54,12 +54,10 @@
       if (!document.contains(form)) return;
       var last = "";
       try { last = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
-      var chosen = st.providers.some(function (p) { return p.name === last; }) ? last : st.default_provider;
-      form.provider.innerHTML = st.providers.map(function (p) {
-        return '<option value="' + esc(p.name) + '"' + (p.name === chosen ? " selected" : "") + '>' + esc(p.name) + (p.key_set ? "" : ' ' + esc(T("qr.no_key"))) + '</option>';
-      }).join("");
-      form.provider.disabled = !st.providers.length; submit.disabled = !st.providers.length;
-      if (!st.providers.length) err.textContent = T("cc.no_provider");
+      var ps = readyProviders(st), chosen = ps.some(function (p) { return p.name === last; }) ? last : smartProvider(st);
+      form.provider.innerHTML = providerOptions(st, chosen, false, false);
+      form.provider.disabled = !ps.length; submit.disabled = !ps.length;
+      if (!ps.length) err.textContent = T("cc.no_provider");
     }).catch(function () { if (document.contains(form)) err.textContent = T("home.provider_unavailable"); });
     api("/api/runs/recent-prompts").then(function (d) {
       if (!document.contains(form)) return;
@@ -172,12 +170,12 @@
       var st = res[0], recent = edit ? [] : (res[1] && res[1].prompts) || [], skills = res[2] || [], lastProv = "";
       try { lastProv = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
       if (edit && edit.provider) lastProv = edit.provider;
-      if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
+      if (!edit && !readyProviders(st).some(function (p) { return p.name === lastProv; })) lastProv = smartProvider(st);
 
       modal('<div class="card-head"><span class="ico">' + ic(edit ? "edit" : "play") + "</span><h2>" + esc(T(edit ? "qr.edit_title" : "rn.title")) + "</h2></div>" +
         '<form id="qr" class="rn-form">' +
         '<input type="hidden" name="skill_id" id="rn-skill"><div id="rn-bindings"></div><div class="rn-two">' +
-        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label></div>" +
+        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + providerOptions(st, lastProv, !!(edit && edit.provider), false) + "</select></label></div>" +
         '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">' + esc(T("rn.folder")) + "</span>" + tip(T("rn.folder_tip")) + '<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>' +
           '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '"><label data-tip="' + esc(T("rn.read_tip")) + '"><input type="radio" name="mode" value="read" checked><span>' + ic("eye", "sm") + esc(T("rn.read")) + '</span></label><label data-tip="' + esc(T("rn.edit_tip")) + '"><input type="radio" name="mode" value="edit"><span>' + ic("edit", "sm") + esc(T("rn.edit")) + "</span></label></span></span>" +
           '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="rn-wlbl" placeholder="' + esc(T("rn.folder_ph")) + '">' +
@@ -247,7 +245,7 @@
               var l = d && d.last;
               if (fill && sk && l && !wsTouched && !ws.value.trim()) {
                 setWs(l.workspace); setMode(l.mode); drawDirs();
-                if (l.provider && st.providers.some(function (p) { return p.name === l.provider; })) form.provider.value = l.provider;
+                if (l.provider && readyProviders(st).some(function (p) { return p.name === l.provider; })) form.provider.value = l.provider;
                 paintHint();
               }
             }).catch(function () {});
@@ -294,6 +292,7 @@
           form.addEventListener("submit", function (e) {
             e.preventDefault();
             var body = cur();
+            if (!readyProviders(st).some(function (p) { return p.name === body.provider; })) { err.textContent = T("cc.no_provider"); form.provider.focus(); return; }
             if (body.workspace && wsState.problem) { err.textContent = T("rn.ws_" + wsState.problem + "_tip"); ws.focus(); return; }
             var btn = form.querySelector('button[type="submit"]');
             btn.disabled = true;

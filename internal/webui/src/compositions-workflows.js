@@ -162,13 +162,13 @@
       var selected='',generation=0,count=((set.details||{}).test_cases||[]).length;
       var panel=openDrawer(function(dw){
         dw.innerHTML='<div class="drawer-head"><h2>'+esc(T('ss.evaluate'))+' · '+esc(set.name)+'</h2><button class="icon-btn" data-dismiss aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="notice">'+esc(T('ev.scope'))+'</p><p>'+esc(T('ev.calls',{n:count*2}))+' · v'+esc(set.version_no)+'</p>'+
-          '<details id="ev-config" open><summary>'+esc(T('ev.options'))+'</summary><form id="ev-start">'+fieldHtml(T('f.provider'),'<select name="provider">'+settings.providers.map(function(p){return opt(p.name,p.name,p.name===settings.default_provider);}).join('')+'</select>')+
+          '<details id="ev-config" open><summary>'+esc(T('ev.options'))+'</summary><form id="ev-start">'+fieldHtml(T('f.provider'),'<select name="provider">'+providerOptions(settings, smartProvider(settings), false, false)+'</select>')+
           fieldHtml(T('ev.budget'),'<input name="budget" type="number" min="0.02" max="5" step="0.01" value="1" required>')+
           '<button type="submit" class="btn primary"'+(!count?' disabled':'')+'>'+esc(T('ev.start'))+'</button>'+(!count?'<p class="hint">'+esc(T('ev.no_cases'))+'</p>':'')+'</form></details><p class="field-err" id="ev-error" role="alert"></p>'+
           '<h3>'+esc(T('ev.history'))+'</h3><select id="ev-history" aria-label="'+esc(T('ev.history'))+'"></select><div id="ev-result" aria-live="polite"></div></div>';
         $('[data-dismiss]',dw).onclick=closeDrawer;
         $('#ev-history',dw).onchange=function(){selected=this.value;++generation;if(selected){$('#ev-config',panel).open=false;poll(generation);}else $('#ev-result',panel).innerHTML='';};
-        $('#ev-start',dw).onsubmit=function(e){e.preventDefault();var f=this,btn=$('button',f);btn.disabled=true;$('#ev-error',dw).textContent='';
+        $('#ev-start',dw).onsubmit=function(e){e.preventDefault();var f=this;if(!readyProviders(settings).some(function(p){return p.name===f.provider.value;})){$('#ev-error',dw).textContent=T('cc.no_provider');return;}var btn=$('button',f);btn.disabled=true;$('#ev-error',dw).textContent='';
           api('/api/skill-set-evals',{method:'POST',body:{set_id:set.id,version_id:set.version_id,provider:f.provider.value,budget_usd:Number(f.budget.value)}}).then(function(r){selected=r.id;$('#ev-config',panel).open=false;history();poll(++generation);}).catch(function(e){$('#ev-error',dw).textContent=e.message;}).finally(function(){btn.disabled=!count;});
         };
       });
@@ -253,8 +253,8 @@
   }
   function workflowRunModal(id) {
     Promise.all([api('/api/workflows/'+enc(id)),api('/api/settings')]).then(function(r){var w=r[0],st=r[1];
-      modal('<div class="card-head"><h2>'+esc(w.name)+'</h2><span class="tag">v'+esc(w.version)+'</span></div><form id="wf-run-form">'+fieldHtml(T('wf.input'),'<textarea name="input" rows="5" maxlength="32000" placeholder="'+esc(T('wf.input_hint'))+'"></textarea>')+fieldHtml(T('f.provider'),'<select name="provider">'+st.providers.map(function(p){return opt(p.name,p.name,p.name===st.default_provider);}).join('')+'</select>')+'<p class="notice">'+esc(T('wf.run_notice'))+'</p><p class="field-err" id="wf-run-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="submit" class="btn primary">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></form>',function(root,close){
-        var f=$('#wf-run-form',root);f.onsubmit=function(e){e.preventDefault();var b=f.querySelector('[type=submit]');b.disabled=true;
+      modal('<div class="card-head"><h2>'+esc(w.name)+'</h2><span class="tag">v'+esc(w.version)+'</span></div><form id="wf-run-form">'+fieldHtml(T('wf.input'),'<textarea name="input" rows="5" maxlength="32000" placeholder="'+esc(T('wf.input_hint'))+'"></textarea>')+fieldHtml(T('f.provider'),'<select name="provider">'+providerOptions(st, smartProvider(st), false, false)+'</select>')+'<p class="notice">'+esc(T('wf.run_notice'))+'</p><p class="field-err" id="wf-run-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="submit" class="btn primary">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></form>',function(root,close){
+        var f=$('#wf-run-form',root);f.onsubmit=function(e){e.preventDefault();if(!readyProviders(st).some(function(p){return p.name===f.provider.value;})){$('#wf-run-error',root).textContent=T('cc.no_provider');return;}var b=f.querySelector('[type=submit]');b.disabled=true;
           api('/api/workflows/'+enc(id)+'/run',{method:'POST',body:{input:f.input.value,provider:f.provider.value}}).then(function(x){close();location.hash='#/workflow-runs/'+enc(x.run_id);}).catch(function(e){b.disabled=false;$('#wf-run-error',root).textContent=e.message;});};
       });
     }).catch(fail);

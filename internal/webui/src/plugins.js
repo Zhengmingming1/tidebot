@@ -156,7 +156,7 @@
     var has = function (k) { return !!$('[data-f="' + k + '"]', root); };
     var el = function (k) { return $('[data-f="' + k + '"]', root); };
     var auto = {}, mine = {};
-    fields.forEach(function (fd) { var e = el(fd.key); if (e) e.addEventListener("input", function (ev) { if (ev.isTrusted) mine[fd.key] = e.value !== auto[fd.key] && e.value !== ""; }); });
+    fields.forEach(function (fd) { var e = el(fd.key); if (e) e.addEventListener("input", function (ev) { if (ev.isTrusted || ev._tbUserSelect) mine[fd.key] = e.value !== auto[fd.key] && e.value !== ""; }); });
     var flash = function (e) { e.classList.remove("af-flash"); void e.offsetWidth; e.classList.add("af-flash"); };
     var put = function (k, v, force) {
       var e = el(k); if (!e || v == null || v === "") return 0;

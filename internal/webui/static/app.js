@@ -2238,6 +2238,102 @@
     if (!document.hidden && state.esPaused) { state.esPaused = false; if (state.esResume) state.esResume(); }
   });
 
+  // Keep native selects as the form/value/validation source. Only the popup is custom:
+  // no mirrored values, hidden required fields, or rebuilt controls on every render.
+  var selectPopup = null, selectPopupSeq = 0;
+  function closeSelectPopup() {
+    if (!selectPopup) return;
+    var p = selectPopup; selectPopup = null;
+    p.observer.disconnect(); p.box.remove();
+    p.select.removeAttribute("aria-controls");
+    p.select.removeAttribute("aria-activedescendant");
+    p.select.removeAttribute("aria-expanded");
+  }
+  function popupSelect(el) {
+    return el && el.tagName === "SELECT" && !el.multiple && el.size <= 1 && !el.disabled && !el.closest("[data-native-select]");
+  }
+  function openSelectPopup(select) {
+    closeSelectPopup();
+    var options = Array.from(select.options), enabled = options.filter(function (o) { return !o.disabled && !o.hidden && !(o.parentElement.tagName === "OPTGROUP" && o.parentElement.disabled); });
+    if (!enabled.length) return;
+    var box = document.createElement("div"), id = "select-pop-" + (++selectPopupSeq);
+    box.id = id; box.className = "select-popup"; box.setAttribute("role", "listbox");
+    box.setAttribute("aria-label", select.getAttribute("aria-label") || Array.from(select.labels || []).map(function (l) { return l.textContent.trim(); }).join(" ") || select.getAttribute("title") || select.name || (select.selectedOptions[0] && select.selectedOptions[0].label) || "");
+    var active = Math.max(0, enabled.indexOf(select.selectedOptions[0])), rows = [], group = null;
+    options.forEach(function (o) {
+      if (o.hidden) return;
+      if (o.parentElement.tagName === "OPTGROUP" && group !== o.parentElement) {
+        group = o.parentElement; var heading = document.createElement("div"); heading.className = "select-popup-group"; heading.textContent = group.label; box.appendChild(heading);
+      }
+      var row = document.createElement("div"); row.id = id + "-" + options.indexOf(o); row.className = "select-popup-option";
+      row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(o.selected));
+      row.setAttribute("aria-disabled", String(enabled.indexOf(o) < 0));
+      var mark = document.createElement("span"); mark.className = "select-popup-check"; mark.setAttribute("aria-hidden", "true"); mark.textContent = o.selected ? "✓" : "";
+      var label = document.createElement("span"); label.textContent = o.label;
+      row.appendChild(mark); row.appendChild(label); box.appendChild(row); rows.push({ option: o, row: row });
+      row.addEventListener("pointermove", function () { if (enabled.indexOf(o) >= 0) highlight(enabled.indexOf(o), false); });
+      row.addEventListener("click", function (e) { if (enabled.indexOf(o) >= 0) choose(o, e.isTrusted); });
+    });
+    function highlight(index, scroll) {
+      active = index;
+      rows.forEach(function (r) { var on = r.option === enabled[active]; r.row.classList.toggle("active", on); if (on) { select.setAttribute("aria-activedescendant", r.row.id); if (scroll) r.row.scrollIntoView({ block: "nearest" }); } });
+    }
+    function choose(o, userAction) {
+      var changed = select.value !== o.value;
+      select.value = o.value;
+      // Real pointer/keyboard choices must participate in the dialog's dirty guard.
+      if (changed && userAction) select._tbTouched = true;
+      closeSelectPopup(); select.focus({ preventScroll: true });
+      if (changed) { ["input", "change"].forEach(function (type) { var event = new Event(type, { bubbles: true }); event._tbUserSelect = !!userAction; select.dispatchEvent(event); }); }
+    }
+    // Mount in the current dialog to keep its focus trap and accessibility scope intact.
+    (select.closest("[role=dialog]") || document.body).appendChild(box);
+    var r = select.getBoundingClientRect(), gap = 6, margin = 8;
+    box.style.minWidth = Math.min(r.width, window.innerWidth - margin * 2) + "px";
+    box.style.maxWidth = (window.innerWidth - margin * 2) + "px";
+    var below = window.innerHeight - r.bottom - gap - margin, above = r.top - gap - margin;
+    var up = below < Math.min(280, box.scrollHeight) && above > below;
+    box.style.maxHeight = Math.max(40, Math.min(320, up ? above : below)) + "px";
+    box.style.left = Math.max(margin, Math.min(r.left, window.innerWidth - box.offsetWidth - margin)) + "px";
+    box.style.top = (up ? Math.max(margin, r.top - gap - box.offsetHeight) : r.bottom + gap) + "px";
+    select.setAttribute("aria-expanded", "true"); select.setAttribute("aria-controls", id);
+    var observer = new MutationObserver(function (records) { if ((records || []).some(function (record) { return select.contains(record.target); }) || !document.contains(select) || select.disabled || options.length !== select.options.length || options.some(function (o, i) { return select.options[i] !== o; })) closeSelectPopup(); });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "hidden", "label"] });
+    selectPopup = { select: select, box: box, observer: observer, key: function (e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeSelectPopup(); }
+      else if (e.key === "Tab") closeSelectPopup();
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopImmediatePropagation(); choose(enabled[active], e.isTrusted); }
+      else if (["ArrowDown", "ArrowUp", "Home", "End"].indexOf(e.key) >= 0) {
+        e.preventDefault(); e.stopImmediatePropagation(); highlight(e.key === "Home" ? 0 : e.key === "End" ? enabled.length - 1 : (active + (e.key === "ArrowDown" ? 1 : -1) + enabled.length) % enabled.length, true);
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        var now = Date.now(); prefix = now - typedAt > 700 ? e.key : prefix + e.key; typedAt = now;
+        var needle = prefix.toLocaleLowerCase(), index = enabled.findIndex(function (o) { return o.label.toLocaleLowerCase().indexOf(needle) === 0; });
+        if (index >= 0) highlight(index, true);
+      }
+    } };
+    var prefix = "", typedAt = 0;
+    highlight(active, true);
+    box.addEventListener("pointerdown", function (e) { e.preventDefault(); });
+  }
+  document.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0) return;
+    var s = e.target.closest("select");
+    if (popupSelect(s)) { e.preventDefault(); var same = selectPopup && selectPopup.select === s; closeSelectPopup(); s.focus({ preventScroll: true }); if (!same) openSelectPopup(s); }
+    else if (selectPopup && !selectPopup.box.contains(e.target)) closeSelectPopup();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (imeKey(e)) return;
+    if (selectPopup) { selectPopup.key(e); return; }
+    if (popupSelect(e.target) && ["ArrowDown", "ArrowUp", "Enter", " ", "Home", "End"].indexOf(e.key) >= 0) {
+      e.preventDefault(); e.stopImmediatePropagation(); openSelectPopup(e.target);
+      if (selectPopup && (e.key === "Home" || e.key === "End")) selectPopup.key(e);
+    }
+  }, true);
+  document.addEventListener("focusin", function (e) { if (selectPopup && e.target !== selectPopup.select && !selectPopup.box.contains(e.target)) closeSelectPopup(); });
+  window.addEventListener("resize", closeSelectPopup);
+  window.addEventListener("blur", closeSelectPopup);
+  window.addEventListener("scroll", function (e) { if (selectPopup && !selectPopup.box.contains(e.target)) closeSelectPopup(); }, true);
   // ---------- HOME ----------
   var HOME_BEATS = 10;
   function beatsBar(beats, extra) {
@@ -2294,12 +2390,10 @@
       if (!document.contains(form)) return;
       var last = "";
       try { last = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
-      var chosen = st.providers.some(function (p) { return p.name === last; }) ? last : st.default_provider;
-      form.provider.innerHTML = st.providers.map(function (p) {
-        return '<option value="' + esc(p.name) + '"' + (p.name === chosen ? " selected" : "") + '>' + esc(p.name) + (p.key_set ? "" : ' ' + esc(T("qr.no_key"))) + '</option>';
-      }).join("");
-      form.provider.disabled = !st.providers.length; submit.disabled = !st.providers.length;
-      if (!st.providers.length) err.textContent = T("cc.no_provider");
+      var ps = readyProviders(st), chosen = ps.some(function (p) { return p.name === last; }) ? last : smartProvider(st);
+      form.provider.innerHTML = providerOptions(st, chosen, false, false);
+      form.provider.disabled = !ps.length; submit.disabled = !ps.length;
+      if (!ps.length) err.textContent = T("cc.no_provider");
     }).catch(function () { if (document.contains(form)) err.textContent = T("home.provider_unavailable"); });
     api("/api/runs/recent-prompts").then(function (d) {
       if (!document.contains(form)) return;
@@ -2412,12 +2506,12 @@
       var st = res[0], recent = edit ? [] : (res[1] && res[1].prompts) || [], skills = res[2] || [], lastProv = "";
       try { lastProv = localStorage.getItem("tb_qr_provider") || ""; } catch (e) {}
       if (edit && edit.provider) lastProv = edit.provider;
-      if (!st.providers.some(function (p) { return p.name === lastProv; })) lastProv = st.default_provider;
+      if (!edit && !readyProviders(st).some(function (p) { return p.name === lastProv; })) lastProv = smartProvider(st);
 
       modal('<div class="card-head"><span class="ico">' + ic(edit ? "edit" : "play") + "</span><h2>" + esc(T(edit ? "qr.edit_title" : "rn.title")) + "</h2></div>" +
         '<form id="qr" class="rn-form">' +
         '<input type="hidden" name="skill_id" id="rn-skill"><div id="rn-bindings"></div><div class="rn-two">' +
-        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + st.providers.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === lastProv ? " selected" : "") + ">" + esc(p.name) + (p.key_set ? "" : " " + T("qr.no_key")) + "</option>"; }).join("") + "</select></label></div>" +
+        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + providerOptions(st, lastProv, !!(edit && edit.provider), false) + "</select></label></div>" +
         '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">' + esc(T("rn.folder")) + "</span>" + tip(T("rn.folder_tip")) + '<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>' +
           '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '"><label data-tip="' + esc(T("rn.read_tip")) + '"><input type="radio" name="mode" value="read" checked><span>' + ic("eye", "sm") + esc(T("rn.read")) + '</span></label><label data-tip="' + esc(T("rn.edit_tip")) + '"><input type="radio" name="mode" value="edit"><span>' + ic("edit", "sm") + esc(T("rn.edit")) + "</span></label></span></span>" +
           '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="rn-wlbl" placeholder="' + esc(T("rn.folder_ph")) + '">' +
@@ -2487,7 +2581,7 @@
               var l = d && d.last;
               if (fill && sk && l && !wsTouched && !ws.value.trim()) {
                 setWs(l.workspace); setMode(l.mode); drawDirs();
-                if (l.provider && st.providers.some(function (p) { return p.name === l.provider; })) form.provider.value = l.provider;
+                if (l.provider && readyProviders(st).some(function (p) { return p.name === l.provider; })) form.provider.value = l.provider;
                 paintHint();
               }
             }).catch(function () {});
@@ -2534,6 +2628,7 @@
           form.addEventListener("submit", function (e) {
             e.preventDefault();
             var body = cur();
+            if (!readyProviders(st).some(function (p) { return p.name === body.provider; })) { err.textContent = T("cc.no_provider"); form.provider.focus(); return; }
             if (body.workspace && wsState.problem) { err.textContent = T("rn.ws_" + wsState.problem + "_tip"); ws.focus(); return; }
             var btn = form.querySelector('button[type="submit"]');
             btn.disabled = true;
@@ -3507,13 +3602,13 @@
       var selected='',generation=0,count=((set.details||{}).test_cases||[]).length;
       var panel=openDrawer(function(dw){
         dw.innerHTML='<div class="drawer-head"><h2>'+esc(T('ss.evaluate'))+' · '+esc(set.name)+'</h2><button class="icon-btn" data-dismiss aria-label="'+esc(T('btn.close'))+'">'+ic('x')+'</button></div><div class="drawer-body"><p class="notice">'+esc(T('ev.scope'))+'</p><p>'+esc(T('ev.calls',{n:count*2}))+' · v'+esc(set.version_no)+'</p>'+
-          '<details id="ev-config" open><summary>'+esc(T('ev.options'))+'</summary><form id="ev-start">'+fieldHtml(T('f.provider'),'<select name="provider">'+settings.providers.map(function(p){return opt(p.name,p.name,p.name===settings.default_provider);}).join('')+'</select>')+
+          '<details id="ev-config" open><summary>'+esc(T('ev.options'))+'</summary><form id="ev-start">'+fieldHtml(T('f.provider'),'<select name="provider">'+providerOptions(settings, smartProvider(settings), false, false)+'</select>')+
           fieldHtml(T('ev.budget'),'<input name="budget" type="number" min="0.02" max="5" step="0.01" value="1" required>')+
           '<button type="submit" class="btn primary"'+(!count?' disabled':'')+'>'+esc(T('ev.start'))+'</button>'+(!count?'<p class="hint">'+esc(T('ev.no_cases'))+'</p>':'')+'</form></details><p class="field-err" id="ev-error" role="alert"></p>'+
           '<h3>'+esc(T('ev.history'))+'</h3><select id="ev-history" aria-label="'+esc(T('ev.history'))+'"></select><div id="ev-result" aria-live="polite"></div></div>';
         $('[data-dismiss]',dw).onclick=closeDrawer;
         $('#ev-history',dw).onchange=function(){selected=this.value;++generation;if(selected){$('#ev-config',panel).open=false;poll(generation);}else $('#ev-result',panel).innerHTML='';};
-        $('#ev-start',dw).onsubmit=function(e){e.preventDefault();var f=this,btn=$('button',f);btn.disabled=true;$('#ev-error',dw).textContent='';
+        $('#ev-start',dw).onsubmit=function(e){e.preventDefault();var f=this;if(!readyProviders(settings).some(function(p){return p.name===f.provider.value;})){$('#ev-error',dw).textContent=T('cc.no_provider');return;}var btn=$('button',f);btn.disabled=true;$('#ev-error',dw).textContent='';
           api('/api/skill-set-evals',{method:'POST',body:{set_id:set.id,version_id:set.version_id,provider:f.provider.value,budget_usd:Number(f.budget.value)}}).then(function(r){selected=r.id;$('#ev-config',panel).open=false;history();poll(++generation);}).catch(function(e){$('#ev-error',dw).textContent=e.message;}).finally(function(){btn.disabled=!count;});
         };
       });
@@ -3598,8 +3693,8 @@
   }
   function workflowRunModal(id) {
     Promise.all([api('/api/workflows/'+enc(id)),api('/api/settings')]).then(function(r){var w=r[0],st=r[1];
-      modal('<div class="card-head"><h2>'+esc(w.name)+'</h2><span class="tag">v'+esc(w.version)+'</span></div><form id="wf-run-form">'+fieldHtml(T('wf.input'),'<textarea name="input" rows="5" maxlength="32000" placeholder="'+esc(T('wf.input_hint'))+'"></textarea>')+fieldHtml(T('f.provider'),'<select name="provider">'+st.providers.map(function(p){return opt(p.name,p.name,p.name===st.default_provider);}).join('')+'</select>')+'<p class="notice">'+esc(T('wf.run_notice'))+'</p><p class="field-err" id="wf-run-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="submit" class="btn primary">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></form>',function(root,close){
-        var f=$('#wf-run-form',root);f.onsubmit=function(e){e.preventDefault();var b=f.querySelector('[type=submit]');b.disabled=true;
+      modal('<div class="card-head"><h2>'+esc(w.name)+'</h2><span class="tag">v'+esc(w.version)+'</span></div><form id="wf-run-form">'+fieldHtml(T('wf.input'),'<textarea name="input" rows="5" maxlength="32000" placeholder="'+esc(T('wf.input_hint'))+'"></textarea>')+fieldHtml(T('f.provider'),'<select name="provider">'+providerOptions(st, smartProvider(st), false, false)+'</select>')+'<p class="notice">'+esc(T('wf.run_notice'))+'</p><p class="field-err" id="wf-run-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="submit" class="btn primary">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></form>',function(root,close){
+        var f=$('#wf-run-form',root);f.onsubmit=function(e){e.preventDefault();if(!readyProviders(st).some(function(p){return p.name===f.provider.value;})){$('#wf-run-error',root).textContent=T('cc.no_provider');return;}var b=f.querySelector('[type=submit]');b.disabled=true;
           api('/api/workflows/'+enc(id)+'/run',{method:'POST',body:{input:f.input.value,provider:f.provider.value}}).then(function(x){close();location.hash='#/workflow-runs/'+enc(x.run_id);}).catch(function(e){b.disabled=false;$('#wf-run-error',root).textContent=e.message;});};
       });
     }).catch(fail);
@@ -5430,10 +5525,10 @@
         }).catch(function (e) { if (my === seq) { err.textContent = e.message; list.innerHTML = ""; dstEl.classList.add("hidden"); host.dispatchEvent(new CustomEvent("sched", { detail: { cron: c, ok: false } })); } });
       }, 300);
     }
-    host.addEventListener("input", function (e) { if (e.isTrusted) touched = true; });
-    host.addEventListener("change", function (e) { if (e.isTrusted && e.target.getAttribute("data-k") !== "tz") touched = true; });
+    host.addEventListener("input", function (e) { if (e.isTrusted || e._tbUserSelect) touched = true; });
+    host.addEventListener("change", function (e) { if ((e.isTrusted || e._tbUserSelect) && e.target.getAttribute("data-k") !== "tz") touched = true; });
     $$("[data-mode]", host).forEach(function (b) { b.addEventListener("click", function (e) {
-      if (e.isTrusted) touched = true;
+      if (e.isTrusted || e._tbUserSelect) touched = true;
       var to = b.getAttribute("data-mode");
       if (to === s.mode) return;
       if (to === "simple") {
@@ -5459,12 +5554,24 @@
     }
     return { value: value, valid: function () { return !err.textContent; }, set: set, touched: function () { return touched; } };
   }
-  // Default provider: the configured default when it has a key, else the first one that does.
+  // key_set includes managed/keyless gateways whose plugin supplies authentication.
+  // Do not infer readiness from a default flag, a model name or a past task.
+  function readyProviders(st) {
+    return (st.providers || []).filter(function (p) { return p.key_set === true; });
+  }
   function smartProvider(st) {
-    var ps = st.providers || [], d = ps.filter(function (p) { return p.name === st.default_provider; })[0];
-    if (d && d.key_set) return d.name;
-    var k = ps.filter(function (p) { return p.key_set; })[0];
-    return (k || d || ps[0] || {}).name || st.default_provider;
+    var ps = readyProviders(st), d = ps.filter(function (p) { return p.name === st.default_provider; })[0];
+    return (d || ps[0] || {}).name || "";
+  }
+  function providerOptions(st, selected, preserve, models) {
+    var ps = readyProviders(st), found = ps.some(function (p) { return p.name === selected; });
+    var unavailable = preserve && !found;
+    if (!found && !preserve) selected = smartProvider(st);
+    // Keep an existing task's exact value, even if deleted or now missing its key.
+    // It remains visible as the current value, but cannot be picked for new work.
+    var head = unavailable ? '<option value="' + esc(selected || "") + '" selected disabled hidden>' + esc(selected ? selected + " " + T("qr.no_key") : T("td.default")) + '</option>' : "";
+    if (!ps.length && !unavailable) head = '<option value="" selected disabled>' + esc(T("cc.no_provider")) + '</option>';
+    return head + ps.map(function (p) { return opt(p.name, p.name + (models && p.model ? " · " + p.model : ""), p.name === selected); }).join("");
   }
   // New-task auto-fill: as the instruction is typed, the server guesses a name and a schedule
   // (POST /api/tasks/infer). A field is only filled while the user hasn't edited it themselves.
@@ -5662,7 +5769,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: st.providers.some(function (p) { return p.name === pre.provider; }) ? pre.provider : smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 30 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -5672,7 +5779,7 @@
         (taskId ? nameF + promptF : promptF + nameF) +
         '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
-        fieldHtml(T("f.provider"), '<select name="provider">' + st.providers.map(function (p) { return opt(p.name, p.name + (p.model ? " · " + p.model : "") + (p.key_set ? "" : " " + T("qr.no_key")), p.name === tf.provider); }).join("") + "</select>") +
+        fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null, (st.fx || {}).display === "CNY" ? 0.05 * st.fx.usd_cny : 0.05) +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes || 30) + '">') +
@@ -5693,6 +5800,7 @@
         var readCostMode = wireCostFields(root, f);
         f.addEventListener("submit", function (e) {
           e.preventDefault();
+          if (!taskId && !readyProviders(st).some(function (p) { return p.name === f.provider.value; })) { toast(T("cc.no_provider"), true); return; }
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
@@ -5868,7 +5976,7 @@
     var has = function (k) { return !!$('[data-f="' + k + '"]', root); };
     var el = function (k) { return $('[data-f="' + k + '"]', root); };
     var auto = {}, mine = {};
-    fields.forEach(function (fd) { var e = el(fd.key); if (e) e.addEventListener("input", function (ev) { if (ev.isTrusted) mine[fd.key] = e.value !== auto[fd.key] && e.value !== ""; }); });
+    fields.forEach(function (fd) { var e = el(fd.key); if (e) e.addEventListener("input", function (ev) { if (ev.isTrusted || ev._tbUserSelect) mine[fd.key] = e.value !== auto[fd.key] && e.value !== ""; }); });
     var flash = function (e) { e.classList.remove("af-flash"); void e.offsetWidth; e.classList.add("af-flash"); };
     var put = function (k, v, force) {
       var e = el(k); if (!e || v == null || v === "") return 0;
