@@ -27,8 +27,22 @@ func NewFileBackend(dir string) *FileBackend {
 }
 
 func (f *FileBackend) key() ([]byte, error) {
-	if b, err := os.ReadFile(f.KeyPath); err == nil && len(b) == 32 {
+	b, err := os.ReadFile(f.KeyPath)
+	if err == nil {
+		if len(b) != 32 {
+			return nil, fmt.Errorf("secrets key has invalid length: got %d, want 32", len(b))
+		}
 		return b, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read secrets key: %w", err)
+	}
+	// Only a new store may create a key. Replacing a missing key for an
+	// existing store cannot recover its data and hides the original failure.
+	if _, err := os.Lstat(f.Path); err == nil {
+		return nil, errors.New("secrets key missing for existing store; restore the original key")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("check secrets store: %w", err)
 	}
 	k := make([]byte, 32)
 	if _, err := rand.Read(k); err != nil {
@@ -37,8 +51,19 @@ func (f *FileBackend) key() ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(f.KeyPath), 0o700); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(f.KeyPath, k, 0o600); err != nil {
+	// Never truncate a key that appeared after the read above (or a dangling
+	// symlink). A failed creation must leave existing recovery material intact.
+	file, err := os.OpenFile(f.KeyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		return nil, err
+	}
+	_, writeErr := file.Write(k)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return nil, writeErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
 	}
 	return k, nil
 }
