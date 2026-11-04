@@ -136,7 +136,7 @@ permissions:
 		t.Fatal(err)
 	}
 	_ = a.Plugins.SetSecret(ctx, "mail-in", "token", "tok123")
-	args, _ := a.mcpArgs(ctx, "production", nil)
+	args, _ := a.mcpArgs(ctx, "production", nil, nil)
 	if len(args) != 2 {
 		t.Fatalf("mcp args %v", args)
 	}
@@ -144,7 +144,7 @@ permissions:
 	if !strings.Contains(string(b), "mail-in__send") || !strings.Contains(string(b), "tok123") {
 		t.Fatalf("mcp config %s", b)
 	}
-	sb, _ := a.mcpArgs(ctx, "dry_run", nil)
+	sb, _ := a.mcpArgs(ctx, "dry_run", nil, nil)
 	b, _ = os.ReadFile(sb[1])
 	if strings.Contains(string(b), "mail-in__send") {
 		t.Fatal("sandbox kept side-effect connector")

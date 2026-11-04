@@ -12,7 +12,8 @@
   function csTitle(s) { return (s && s.title) || T("cs.untitled"); }
   function csAll(s) { return (s && s.turn_list) || []; }
   function csItemHtml(s, cur) {
-    var on = s.id === cur, sub = relDay(s.updated_at) + " · " + plural(s.turns, "cs.turns_one", "cs.turns_many");
+    // a session answering its first turn has 0 turns done: say what it is doing instead
+    var on = s.id === cur, sub = relDay(s.updated_at) + " · " + (s.status === "running" ? T("rc.answering") : plural(s.turns, "cs.turns_one", "cs.turns_many"));
     var tip = T(s.origin === "run" ? "cs.item_tip_run" : "cs.item_tip", { t: when(s.updated_at), n: num(s.turns), c: usd(s.cost_usd, 4) });
     return '<a class="cs-item' + (on ? " active" : "") + '" href="#/chat/' + enc(s.id) + '" data-cs="' + esc(s.id) + '"' + (on ? ' aria-current="page"' : "") + ' data-tip="' + esc(tip) + '">' +
       '<strong class="ell">' + esc(csTitle(s)) + "</strong><small class=\"ell\">" + (s.status === "running" ? '<span class="rc-dot" aria-hidden="true"></span>' : s.origin === "run" ? ic("runs", "sm") : "") + esc(sub) + "</small></a>";
@@ -21,6 +22,37 @@
   function csDirTag(s) {
     var p = (s && s.workspace_dir) || "", base = p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
     return '<span class="rc-tag rc-dir" tabindex="0" data-tip="' + esc(p ? T("cs.dir_tip", { p: p }) : T("cs.scratch_tip")) + '">' + ic("folder", "sm") + '<span class="ell">' + esc(p ? base : T("cs.scratch")) + "</span></span>";
+  }
+  // 能力 N: what the session is bound to (skills, capabilities), applied from the next turn.
+  function csCapsTag(s) {
+    if (!s) return "";
+    var b = (s.bindings || []).filter(function (x) { return !x.missing; }), names = b.map(function (x) { return x.name; }).join("、");
+    return '<button type="button" class="rc-tag rc-caps" id="cs-caps" data-tip="' + esc(b.length ? T("cs.caps_tip", { l: names }) : T("cs.caps_none_tip")) + '">' + ic("box", "sm") + esc(T("cs.caps", { n: num(b.length) })) + "</button>";
+  }
+  function csCapsDialog(s, onSaved) {
+    return Promise.all([api("/api/skills").catch(function () { return []; }), typeof capList === "function" ? capList().catch(function () { return []; }) : []]).then(function (r) {
+      var skills = r[0] || [], caps = r[1] || [], on = {};
+      (s.bindings || []).forEach(function (b) { on[b.kind + ":" + b.id] = 1; });
+      var row = function (kind, id, name, sub) {
+        return '<label class="cs-cap-row"><input type="checkbox" data-k="' + esc(kind) + '" value="' + esc(id) + '"' + (on[kind + ":" + id] ? " checked" : "") + '><span class="ell"><strong>' + esc(name) + "</strong>" + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</span></label>";
+      };
+      var capRows = caps.map(function (c) { return row("capability", c.id, c.title || c.id, c.kind_label || ""); }).join("");
+      var skRows = skills.map(function (k) { return row("skill", k.id, k.name, k.description || ""); }).join("");
+      modal('<div class="card-head"><span class="ico">' + ic("box") + "</span><h2>" + esc(T("cs.caps_title")) + "</h2></div>" +
+        '<p class="muted sm">' + esc(T("cs.caps_sub")) + "</p>" +
+        (caps.length ? '<h3 class="cs-cap-h">' + esc(T("cs.caps_packs")) + '</h3><div class="cs-cap-list">' + capRows + "</div>" : "") +
+        '<h3 class="cs-cap-h">' + esc(T("cs.caps_skills")) + "</h3>" + (skills.length ? '<div class="cs-cap-list">' + skRows + "</div>" : '<p class="muted sm">' + esc(T("cs.caps_no_skills")) + "</p>") +
+        '<p class="field-err" id="cs-caps-err" role="alert"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="cs-caps-ok">' + esc(T("btn.save")) + "</button></div>", function (root, close) {
+        $("#cs-caps-ok", root).addEventListener("click", function (e) {
+          var b = e.currentTarget, body = { skills: [], capabilities: [] };
+          $$("input[data-k]", root).forEach(function (x) { if (x.checked) body[x.getAttribute("data-k") === "skill" ? "skills" : "capabilities"].push(x.value); });
+          b.disabled = true;
+          api("/api/chat-sessions/" + enc(s.id) + "/bindings", { method: "PUT", body: body }).then(function (x) { close(); toast(T("cs.caps_saved")); onSaved(x); }).catch(function (x) {
+            b.disabled = false; if (!x.auth) $("#cs-caps-err", root).textContent = rcErrText(x);
+          });
+        });
+      });
+    });
   }
   function csHeadHtml(s) {
     if (!s) return '<header class="cs-head"><h2 class="ell">' + esc(T("cs.new")) + "</h2></header>";
@@ -37,7 +69,7 @@
       '<a class="btn sm cs-new' + (s ? "" : " active") + '" href="#/chat">' + ic("plus", "sm") + esc(T("cs.new")) + '</a><nav class="cs-list" id="cs-list">' + items + "</nav></aside>" +
       '<section class="cs-main" id="rc" aria-label="' + esc(csTitle(s)) + '">' + csHeadHtml(s) +
       '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">' + thread + "</div>" +
-      rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) }) + "</section></div>";
+      rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s) }) + "</section></div>";
   }
   function renderChat(id) {
     if (id && !CS_ID.test(id)) id = "";
@@ -67,6 +99,17 @@
         onGone: function () { location.hash = "#/chat"; }
       });
       thread.scrollTop = thread.scrollHeight;
+      var cur = s, wireCaps = function () {
+        var btn = $("#cs-caps");
+        if (btn) btn.addEventListener("click", function () {
+          csCapsDialog(cur, function (x) {
+            cur.bindings = x.bindings;
+            var old = $("#cs-caps"), tmp = document.createElement("div"); tmp.innerHTML = csCapsTag(cur);
+            if (old) { old.replaceWith(tmp.firstChild); wireCaps(); }
+          }).catch(fail);
+        });
+      };
+      wireCaps();
       $("#cs-del").addEventListener("click", function (e) {
         var b = e.currentTarget;
         confirmDialog({ title: T("cs.del_title"), body: T("cs.del_body"), ok: T("cs.del"), danger: true }).then(function (y) {

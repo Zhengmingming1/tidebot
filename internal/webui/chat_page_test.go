@@ -23,6 +23,7 @@ func TestChatPageUI(t *testing.T) {
 		`case "chat": p = renderChat(parts[1]); break;`,
 		`create: function () { return api("/api/chat-sessions", { method: "POST", body: { origin: "chat" } }); }`,
 		`confirmDialog({ title: T("cs.del_title")`,
+		`api("/api/chat-sessions/" + enc(s.id) + "/bindings", { method: "PUT", body: body })`,
 	} {
 		if !strings.Contains(app, want) {
 			t.Errorf("app.js lacks %q", want)
@@ -60,19 +61,23 @@ var fromRun = { id: "chat_r", title: "<img src=x onerror=1>", origin: "run", ori
 var item = csItemHtml(fromRun, "chat_r");
 ok(item.indexOf("<img") < 0 && item.indexOf("&lt;img") > 0, "list title escaped");
 ok(item.indexOf('aria-current="page"') > 0 && item.indexOf("rc-dot") > 0 && item.indexOf("cs.item_tip_run") > 0, "open, busy session from a run");
+ok(item.indexOf("rc.answering") > 0 && item.indexOf("cs.turns_many") < 0, "a session answering shows that, not 0 turns");
+var caps = csCapsTag({ id: "c", bindings: [{ kind: "skill", id: "s1", name: "<b>pdf</b>" }, { kind: "capability", id: "c1", name: "dws" }, { kind: "skill", id: "s2", name: "gone", missing: true }] });
+ok(caps.indexOf('cs.caps{&quot;n&quot;:&quot;2&quot;}') > 0 && caps.indexOf("<b>") < 0 && caps.indexOf("gone") < 0 && caps.indexOf("<button") === 0, "capabilities tag: count, escaped names, missing ones left out");
+ok(csCapsTag(null) === "" && csCapsTag({ id: "c" }).indexOf("cs.caps_none_tip") > 0, "no tag on a new session; none bound");
 var bi = csItemHtml(blank, "chat_r");
 ok(bi.indexOf("cs.untitled") > 0 && bi.indexOf("aria-current") < 0 && bi.indexOf("rc-dot") < 0 && bi.indexOf('cs.turns_one{&quot;n&quot;:1}') > 0, "untitled blank session, one turn");
 ok(csDirTag(fromRun).indexOf(">tidebot<") > 0 && csDirTag(fromRun).indexOf("/home/me/code/tidebot/") > 0, "folder: base name, full path in the tooltip");
 ok(csDirTag({ workspace_dir: "C:\\Users\\me\\proj" }).indexOf(">proj<") > 0, "Windows folder");
 ok(csDirTag(blank).indexOf("cs.scratch") > 0, "own empty folder");
 var nw = csPageHtml([blank, fromRun], null);
-ok(nw.indexOf("cs-empty") > 0 && nw.indexOf('id="rc-form"') > 0 && nw.indexOf("cs-new active") > 0 && nw.indexOf("cs-del") < 0, "new session: hint, box, no delete");
+ok(nw.indexOf("cs-empty") > 0 && nw.indexOf('id="rc-form"') > 0 && nw.indexOf("cs-new active") > 0 && nw.indexOf("cs-del") < 0 && nw.indexOf("cs-caps") < 0, "new session: hint, box, no delete, no capabilities yet");
 ok(nw.indexOf('placeholder="cs.ph_new"') > 0, "new session placeholder");
 ok(csPageHtml([], null).indexOf("cs.none") > 0, "empty list");
 var ses = { id: "chat_r", title: "t", origin: "run", origin_run_id: "run_o", turn_list: [{ index: 0, run_id: "run_o", message: "orig", status: "succeeded", answer: "a0" }, { index: 1, run_id: "run_1", message: "q1", status: "succeeded", answer: "a1" }] };
 var open = csPageHtml([fromRun], ses);
 ok(open.indexOf('data-turn="0"') > 0 && open.indexOf('data-turn="1"') > 0, "the run it continues is the first turn");
-ok(open.indexOf('href="#/runs/run_o"') > 0 && open.indexOf('id="cs-del"') > 0 && open.indexOf("cs-empty") < 0, "from-run link, delete");
+ok(open.indexOf('href="#/runs/run_o"') > 0 && open.indexOf('id="cs-del"') > 0 && open.indexOf("cs-empty") < 0 && open.indexOf('id="cs-caps"') > 0, "from-run link, delete, capabilities");
 ok(csHeadHtml({ id: "x", origin: "run", origin_run_id: "x\" onclick=\"y" }).indexOf("onclick") < 0, "odd run id: no link");
 ok(rcBoxHtml({}).indexOf('placeholder="rc.ph"') > 0 && rcBoxHtml({}).indexOf("rc-dir") < 0, "run page box unchanged");
 ok(rcOpenHtml("chat_1").indexOf('href="#/chat/chat_1"') > 0 && rcOpenHtml("").indexOf(" hidden") > 0 && rcOpenHtml("a\"b").indexOf(" hidden") > 0, "open-in-session link");

@@ -80,7 +80,7 @@ func TestOfficialCatalogInstallAndRSSTrigger(t *testing.T) {
 		t.Fatalf("preview %v %v", prev, err)
 	}
 	// The MCP config points the connector at our own binary.
-	args, _ := a.mcpArgs(ctx, "production", nil)
+	args, _ := a.mcpArgs(ctx, "production", nil, nil)
 	b, _ := os.ReadFile(args[1])
 	if !strings.Contains(string(b), `"__plugin"`) || !strings.Contains(string(b), "rss-feed__feeds") {
 		t.Fatalf("mcp %s", b)

@@ -39,6 +39,10 @@ while [[ $i -lt $# ]]; do
       RESUME_ID="${ARGS[$i]:-}"
       ;;
     --no-session-persistence) NO_PERSIST=1 ;;
+    --mcp-config)
+      i=$((i+1))
+      if [[ -n "${TIDEBOT_MOCK_MCP_FILE:-}" && -f "${ARGS[$i]:-}" ]]; then cp "${ARGS[$i]}" "$TIDEBOT_MOCK_MCP_FILE"; fi
+      ;;
     --version)
       echo "mock-claude 0.1.0 (tidebot)"
       exit 0

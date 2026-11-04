@@ -2773,5 +2773,14 @@
   "cs.read_tip": "The session can only read its folder; it won't edit files, run commands or install anything",
   "cs.turns_one": "{n} turn",
   "cs.turns_many": "{n} turns",
-  "cs.send_tip": "Send (every message costs money)"
+  "cs.send_tip": "Send (every message costs money)",
+  "cs.caps": "Capabilities {n}",
+  "cs.caps_tip": "Bound to this session: {l}. Applies from the next turn; still read-only. Click to change",
+  "cs.caps_none_tip": "No skills or capabilities bound yet. Click to choose; applies from the next turn",
+  "cs.caps_title": "Session capabilities",
+  "cs.caps_sub": "Checked skills and capabilities take part in every later turn of this session. The session stays read-only: the AI can read a skill's instructions and files and use a capability's read-only tools, but never runs commands.",
+  "cs.caps_packs": "Capabilities",
+  "cs.caps_skills": "Skills",
+  "cs.caps_no_skills": "There are no skills in the library yet",
+  "cs.caps_saved": "Updated; applies from the next turn"
 }

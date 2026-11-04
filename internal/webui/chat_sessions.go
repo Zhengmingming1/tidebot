@@ -26,6 +26,23 @@ type ChatSession struct {
 	Status         string  `json:"status"` // idle | running | closed
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
+	// Bindings are the skills and capabilities bound to the session: part of
+	// every later turn (read-only like the rest of the session).
+	Bindings []ChatBinding `json:"bindings"`
+}
+
+// ChatBinding is one thing a session is bound to.
+type ChatBinding struct {
+	Kind    string `json:"kind"` // skill | capability
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Missing bool   `json:"missing,omitempty"` // deleted since; not used by turns
+}
+
+// ChatBindingsInput replaces a session's bindings.
+type ChatBindingsInput struct {
+	Skills       []string `json:"skills"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // ChatTurn is one turn: what was asked and the run that answered.
@@ -69,6 +86,7 @@ type ChatSessionAPI interface {
 	GetChatSession(ctx context.Context, id string) (ChatSessionDetail, error)
 	SendChatTurn(ctx context.Context, id, message string) (ChatTurnStarted, error)
 	DeleteChatSession(ctx context.Context, id string) error
+	SetChatBindings(ctx context.Context, id string, in ChatBindingsInput) (ChatSession, error)
 }
 
 // Session errors; the API answers them with a stable "code".
@@ -166,7 +184,8 @@ func (s *Server) handleChatSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleChatSessionSub: GET/DELETE /api/chat-sessions/{id}, POST /api/chat-sessions/{id}/turns.
+// handleChatSessionSub: GET/DELETE /api/chat-sessions/{id}, POST /api/chat-sessions/{id}/turns,
+// PUT /api/chat-sessions/{id}/bindings.
 func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 	api := s.deps.ChatSessions
 	if api == nil {
@@ -221,7 +240,19 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, 202, out)
-	case sub == "" || sub == "turns":
+	case sub == "bindings" && r.Method == http.MethodPut:
+		var body ChatBindingsInput
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&body); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "bad bindings", "code": "invalid"})
+			return
+		}
+		ses, err := api.SetChatBindings(r.Context(), id, body)
+		if err != nil {
+			chatErr(w, err)
+			return
+		}
+		writeJSON(w, 200, ses)
+	case sub == "" || sub == "turns" || sub == "bindings":
 		writeErr(w, 405, "method")
 	default:
 		writeErr(w, 404, "not found")

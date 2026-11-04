@@ -3706,3 +3706,14 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 .rc-sep .rc-open:hover { color: var(--accent); }
 .rc-sep .rc-open[hidden] { display: none; }
 @media (max-width: 640px) { .cs { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); } .cs-list { flex-direction: row; overflow-x: auto; } .cs-item { flex: 0 0 160px; } }
+/* 会话能力：输入框下「能力 N」和绑定对话框 */
+button.rc-tag { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+button.rc-tag:hover { color: var(--text); }
+.rc-tag.rc-caps .i { color: var(--hue-violet, var(--accent)); }
+.cs-cap-h { margin: 16px 0 8px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.cs-cap-list { display: flex; flex-direction: column; gap: 0; max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.cs-cap-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-width: 0; cursor: pointer; }
+.cs-cap-row + .cs-cap-row { border-top: 1px solid var(--border); }
+.cs-cap-row > span { display: flex; flex-direction: column; min-width: 0; }
+.cs-cap-row strong { font-size: 13px; font-weight: 500; }
+.cs-cap-row small { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

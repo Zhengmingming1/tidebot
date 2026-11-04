@@ -38,6 +38,9 @@ const (
 	chatSeedPromptMax = 8 << 10  // the origin run's request in the first turn's record
 	chatSeedAnswerMax = 24 << 10 // and its answer
 	chatTitleMax      = 80
+	// chatNotifyAfter: a turn that took longer sends the usual "run finished"
+	// notice (the owner may have left the page); quicker ones don't.
+	chatNotifyAfter = 60 * time.Second
 )
 
 // chatWebTools are denied in a session that has no web access.
@@ -136,16 +139,17 @@ func hasEnv(env []string, kv string) bool {
 type chatRow struct {
 	webui.ChatSession
 	ClaudeSessionID string
+	bindingsRaw     string
 }
 
 const chatCols = `id, title, origin, origin_run_id, workspace_dir, permission_mode, provider, claude_session_id,
-  turns, cost_total, web_access, status, created_at, updated_at`
+  turns, cost_total, web_access, status, created_at, updated_at, bindings_json`
 
 func scanChat(sc interface{ Scan(...any) error }) (chatRow, error) {
 	var c chatRow
 	var web int
 	err := sc.Scan(&c.ID, &c.Title, &c.Origin, &c.OriginRunID, &c.WorkspaceDir, &c.PermissionMode, &c.Provider,
-		&c.ClaudeSessionID, &c.Turns, &c.CostUSD, &web, &c.Status, &c.CreatedAt, &c.UpdatedAt)
+		&c.ClaudeSessionID, &c.Turns, &c.CostUSD, &web, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.bindingsRaw)
 	c.WebAccess = web != 0
 	c.TurnMax = chatMaxTurns
 	return c, err
@@ -157,6 +161,9 @@ func (a *App) chatSession(ctx context.Context, sid string) (chatRow, error) {
 		return c, webui.ErrChatSessionNotFound
 	}
 	a.chatDisplayCost(&c.ChatSession)
+	if err == nil {
+		c.Bindings = a.chatBindingViews(ctx, c.bindingsRaw)
+	}
 	return c, err
 }
 
@@ -289,6 +296,7 @@ func (a *App) ListChatSessions(ctx context.Context, limit int) ([]webui.ChatSess
 			return nil, err
 		}
 		a.chatDisplayCost(&c.ChatSession)
+		c.Bindings = a.chatBindingViews(ctx, c.bindingsRaw)
 		out = append(out, c.ChatSession)
 	}
 	return out, rows.Err()
@@ -389,7 +397,6 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		deny = append(deny, chatWebTools...)
 		note += chatNoWebNote
 	}
-	args = append(args, "--disallowedTools", strings.Join(deny, ","), "--append-system-prompt", note)
 	ws := c.WorkspaceDir
 	if fi, err := os.Stat(ws); ws == "" || err != nil || !fi.IsDir() {
 		ws = a.chatScratchDir(sid)
@@ -398,12 +405,29 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 			return webui.ChatTurnStarted{}, err
 		}
 	}
+	// What the session is bound to (and the skills of the run it continues),
+	// staged for this turn only; removed when the turn ends.
+	st := a.stageChatSkills(ctx, c)
+	if st != nil {
+		note += chatSkillNote
+	}
+	args = append(args, "--disallowedTools", strings.Join(deny, ","), "--append-system-prompt", note)
+	if st != nil {
+		args = append(args, st.Args(a.modernClaude(), false)...)
+	}
+	mcp := map[string]any{}
+	if srv := chatToolsServer(chatRoots(ws, st), a.chatToolEnv(sid)); srv != nil {
+		mcp["tidebot"] = srv
+		args = append(args, "--allowedTools", "mcp__tidebot")
+	}
 	runID, err := launch(startWait, func(onStart func(string)) error {
+		defer st.Close()
+		defer a.endChatToolToken(sid)
 		started := ""
 		opts := runner.Options{
 			Prompt: prompt, DisplayPrompt: message, WorkspaceDir: ws, TriggerKind: "session",
-			CostBucket: cost.BucketProduction, RunMode: "read", KeepSession: true, ContextArgs: args,
-			OnStart: func(rid string) {
+			CostBucket: cost.BucketProduction, RunMode: "read", KeepSession: true, ContextArgs: args, MCPServers: mcp,
+			OnStart: a.skillStart(st, func(rid string) {
 				started = rid
 				wctx, done := context.WithTimeout(context.Background(), 3*time.Second)
 				_, err := a.DB.ExecContext(wctx, `INSERT INTO chat_session_turns(session_id, turn_index, run_id, created_at) VALUES(?,?,?,?)`, sid, turn, rid, nowUTC())
@@ -412,7 +436,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 					a.Log.Warn("session turn", "session", sid, "error", err)
 				}
 				onStart(rid)
-			},
+			}),
 		}
 		r, err := a.RunPromptEx(context.Background(), opts, c.Provider, 0)
 		if started == "" {

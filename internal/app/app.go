@@ -405,6 +405,11 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		_ = a.Cost.RecordEntry(wctx, cost.EntryFromCost(res.RunID, opts.TaskID, bucket, prof.Name, prof.Model, res.Cost))
 		done()
 	}
+	if opts.TriggerKind == "session" && res.DurationMS < chatNotifyAfter.Milliseconds() && err == nil {
+		// The owner is usually watching the session page: a quick turn needs no
+		// notice. A long one (they may have left) and one that could not run do.
+		return res, err
+	}
 	if opts.TriggerKind == "workflow" || opts.TriggerKind == "skill_set_eval" {
 		// The workflow owns the outcome; node answers must not trigger task notices.
 		return res, err

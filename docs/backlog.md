@@ -5334,3 +5334,22 @@ a bulk edit makes undo exact without a history table.
 - 新会话可选目录（复用运行对话框的目录选择和敏感目录拒绝），现在空白会话只能读自己的空目录。
 - 会话改名（标题行点击编辑）；列表搜索；会话很多时分页。
 - 正在回答时列表行的「0 轮」改成「回答中」。
+
+### 2026-11-03 P0 第四片：会话作为绑定对象（P0 完成）
+
+**Done**
+
+- **会话可以绑定技能和能力包**：`chat_sessions.bindings_json` 改成 `{"skills":[…],"capabilities":[…]}`（旧的 `[]` 当空），新增 `PUT /api/chat-sessions/{id}/bindings`（登录 + CSRF，未知的技能/能力包 400 `invalid`，各最多 16 个）。会话详情和列表多一个 `bindings`（名称；已删除的标 `missing`，不参与运行）。从下一轮起生效。
+- **每轮按绑定挂技能**：来源运行用过的技能（按那次运行记录的版本，pinned）+ 会话绑定的技能（follow，当前版本）+ 能力包里的技能，按运行一样 stage 到 `<data>/skillstage/run-*`，用 `--plugin-dir`、`--add-dir` 和 `--append-system-prompt-file` 加载，这一轮结束就删；这一轮的运行记下用到的技能版本。来源运行的旧版本已被删时不挡这一轮：只挂会话自己的，再不行就不挂并记日志。系统说明追加一句「技能只供参考，这个会话不能执行它们的命令」。**会话仍然只读**：绑定不放开任何写或执行的工具（测试里核对绑定后 deny 列表不变）。
+- **会话能找文件、搜内容了**：`--bare` 下内置工具只有 Bash/Edit/Read，`--tools Read,Glob,Grep` 在 bare 下不生效（实测 2.1.301，请求里只剩 Read）。所以给每轮加一个 tidebot 自己的只读 MCP 服务器 `tidebot`（`agentd __session-tools`，新包 `internal/sessiontools`）：`find_files`（glob，`**`、`{a,b}`）、`search_files`（RE2，可选目录和文件过滤），只在这一轮能读的目录（会话目录 + 本轮 stage 的技能）里找，不跟随符号链接、跳过 `.git` 和二进制文件，有条数、文件大小和总读取量上限，返回可以直接交给 Read 的绝对路径。`--allowedTools mcp__tidebot`。用本机 Claude Code 2.1.301 + 假 Messages API 实测：工具出现在请求里，`dontAsk` 下能调用并拿到结果。
+- **运行的 MCP 配置合并**：`runner.Options.MCPServers` 是 tidebot 自己加的服务器，和绑定的插件连接器写进同一个 0600 文件（`--strict-mcp-config` 不变），运行结束删除。
+- **通知**：会话轮次 60 秒内答完就不发「运行完成」通知（人一般正看着会话页）；更久的、或者没能启动的照常通知。
+- **「0 轮」**：正在回答的会话在列表里显示「正在回答」，不再显示「0 轮」。
+- **界面**：会话页输入框下多一个「能力 N」标签（紫色图标，悬停看绑定了什么），点开是应用内对话框：能力包和技能两组勾选，保存后从下一轮起生效。新会话发出第一条之前不显示。
+- 测试：`app/chatbind_test.go`（未知技能/能力包被拒、去重、绑定后这一轮有 `--plugin-dir` 和技能说明、deny 不变、`--allowedTools mcp__tidebot`、MCP 配置里 `tidebot` 服务器的命令和目录、stage 用完即删、HOME 下没有 `.claude`、运行记下技能版本、快速轮次不发通知、解绑后下一轮不挂；续聊接着带技能的运行时重新挂上那个技能）；`sessiontools/files_test.go`（glob、子目录、`..` 和外部绝对路径被拒、符号链接不跟随、`.git` 和二进制不读、正则错误）；`webui/chat_sessions_test.go`（绑定接口、转义、缺 CSRF 403）；`webui/chat_page_test.go`（「能力 N」计数、转义、已删除的不算、新会话没有、「正在回答」）。mock 新增 `TIDEBOT_MOCK_MCP_FILE`（复制本次的 `--mcp-config`）。
+
+**Learned**
+
+- 实测 `--append-system-prompt` 和 `--append-system-prompt-file` 可以同时用，两段都进系统提示；`--resume` 时系统提示每次按这次传的重新生成（2.1.301 帮助里的 `--system-prompt-snapshot` 默认会记录第一次的系统提示，但这个版本还没启用）。以后启用了要给会话轮次加 `--system-prompt-snapshot off`，否则后绑的技能不生效。
+
+**参考**：方案 §5.1（会话也是绑定对象）；Claude Code 文档 `--tools`、`--allowedTools mcp__<server>`；工具的 glob/grep 语义参考 Claude Code 自带的 Glob/Grep 工具说明（只借语义，没有代码）。

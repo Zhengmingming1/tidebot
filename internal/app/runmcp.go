@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -106,13 +107,29 @@ func readBounded(p string) string {
 // mcpArgs writes the config holding the connectors bound (nil = every enabled
 // one) into a fresh 0600 file and returns its arguments and a cleanup that
 // removes the file; sandbox (dry) runs drop side-effect connectors.
-func (a *App) mcpArgs(ctx context.Context, bucket string, bound func(server, connector string) bool) ([]string, func()) {
+func (a *App) mcpArgs(ctx context.Context, bucket string, bound func(server, connector string) bool, extra map[string]any) ([]string, func()) {
 	nop := func() {}
-	if a.Plugins == nil {
+	servers := map[string]any{}
+	if a.Plugins != nil {
+		if b, n, err := a.Plugins.MCPConfig(ctx, bucket == cost.BucketDryRun, bound); err == nil && n > 0 {
+			var doc struct {
+				Servers map[string]any `json:"mcpServers"`
+			}
+			if json.Unmarshal(b, &doc) == nil {
+				for k, v := range doc.Servers {
+					servers[k] = v
+				}
+			}
+		}
+	}
+	for k, v := range extra {
+		servers[k] = v // tidebot's own servers win a name clash
+	}
+	if len(servers) == 0 {
 		return nil, nop
 	}
-	b, n, err := a.Plugins.MCPConfig(ctx, bucket == cost.BucketDryRun, bound)
-	if err != nil || n == 0 {
+	b, err := json.Marshal(map[string]any{"mcpServers": servers})
+	if err != nil {
 		return nil, nop
 	}
 	if err := os.MkdirAll(a.runMCPDir(), 0o700); err != nil {
@@ -140,9 +157,13 @@ func (a *App) mcpArgs(ctx context.Context, bucket string, bound func(server, con
 func (a *App) applyRunMCP(ctx context.Context, opts *runner.Options, bucket string) func() {
 	cleanup := func() {}
 	all := append(append([]string{}, opts.ExtraArgs...), opts.ContextArgs...)
-	if !opts.NoPluginMCP && !hasArg(all, "--mcp-config") {
+	if !hasArg(all, "--mcp-config") {
+		bound := runMCPBinding(opts).bound
+		if opts.NoPluginMCP {
+			bound = func(string, string) bool { return false }
+		}
 		var args []string
-		args, cleanup = a.mcpArgs(ctx, bucket, runMCPBinding(opts).bound)
+		args, cleanup = a.mcpArgs(ctx, bucket, bound, opts.MCPServers)
 		opts.ExtraArgs = append(opts.ExtraArgs, args...)
 	}
 	if !hasArg(all, "--strict-mcp-config") {

@@ -61,6 +61,10 @@ type Options struct {
 	OnStart func(runID string)
 	// NoPluginMCP keeps the owner's plugin connectors out of this run (AI plugin builder).
 	NoPluginMCP bool
+	// MCPServers are servers tidebot itself adds to this run's MCP config (a
+	// session's read-only "tidebot" tools, bound capabilities), merged with the
+	// bound plugin connectors into the run's one 0600 config file.
+	MCPServers map[string]any
 	// KeepSession lets Claude Code save the run's transcript (a session turn: the
 	// caller passes --session-id or --resume in ContextArgs). Other runs get
 	// --no-session-persistence. The transcript goes to CLAUDE_CONFIG_DIR, which

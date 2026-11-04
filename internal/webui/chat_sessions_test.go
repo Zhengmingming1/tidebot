@@ -13,6 +13,7 @@ import (
 type fakeChats struct {
 	created ChatSessionCreate
 	sent    string
+	bound   ChatBindingsInput
 	err     error
 }
 
@@ -32,6 +33,39 @@ func (f *fakeChats) SendChatTurn(_ context.Context, id, msg string) (ChatTurnSta
 	return ChatTurnStarted{Index: 1, RunID: "run_b"}, f.err
 }
 func (f *fakeChats) DeleteChatSession(context.Context, string) error { return f.err }
+func (f *fakeChats) SetChatBindings(_ context.Context, id string, in ChatBindingsInput) (ChatSession, error) {
+	f.bound = in
+	return ChatSession{ID: id, Bindings: []ChatBinding{{Kind: "skill", ID: "sk_1", Name: "<i>x</i>"}}}, f.err
+}
+
+func TestChatSessionBindingsAPI(t *testing.T) {
+	c := login(t)
+	f := &fakeChats{}
+	c.s.deps.ChatSessions = f
+	rr := c.do(http.MethodPut, "/api/chat-sessions/chat_1/bindings", "application/json", []byte(`{"skills":["sk_1"],"capabilities":["cap_a"]}`))
+	if rr.Code != 200 || len(f.bound.Skills) != 1 || f.bound.Capabilities[0] != "cap_a" || strings.Contains(rr.Body.String(), "<i>") {
+		t.Fatalf("bind %d %s %+v", rr.Code, rr.Body, f.bound)
+	}
+	if code, _ := c.json(http.MethodGet, "/api/chat-sessions/chat_1/bindings", nil); code != 405 {
+		t.Fatalf("GET bindings %d", code)
+	}
+	if rr := c.do(http.MethodPut, "/api/chat-sessions/chat_1/bindings", "application/json", []byte(`{`)); rr.Code != 400 {
+		t.Fatalf("bad body %d", rr.Code)
+	}
+	f.err = ErrChatInvalid
+	if code, out := c.json(http.MethodPut, "/api/chat-sessions/chat_1/bindings", map[string]any{"skills": []string{"nope"}}); code != 400 || out["code"] != "invalid" {
+		t.Fatalf("unknown skill %d %v", code, out)
+	}
+	// no CSRF token: refused
+	req := httptest.NewRequest(http.MethodPut, "/api/chat-sessions/chat_1/bindings", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: c.sid})
+	w := httptest.NewRecorder()
+	c.s.routes().ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Fatalf("no csrf %d", w.Code)
+	}
+}
 
 func TestChatSessionAPI(t *testing.T) {
 	c := login(t)
