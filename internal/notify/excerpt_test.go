@@ -48,6 +48,36 @@ func TestAnswerExcerpt(t *testing.T) {
 	}
 }
 
+func TestAnswerExcerptParagraphLineLimit(t *testing.T) {
+	for _, separator := range []string{"\n", "\n\n", "\n\n\n", "\r\n\r\n"} {
+		for _, count := range []int{ExcerptLines - 1, ExcerptLines, ExcerptLines + 1, 20} {
+			input := strings.TrimSuffix(strings.Repeat("item"+separator, count), separator)
+			got, cut := AnswerExcerpt(input)
+			wantLines := min(count, ExcerptLines)
+			wantSeparator := "\n"
+			if strings.Count(separator, "\n") > 1 {
+				wantSeparator = "\n\n"
+			}
+			want := strings.TrimSuffix(strings.Repeat("item"+wantSeparator, wantLines), wantSeparator)
+			if got != want || cut != (count > ExcerptLines) {
+				t.Errorf("separator=%q count=%d: got %q, cut=%v; want %q, cut=%v", separator, count, got, cut, want, count > ExcerptLines)
+			}
+		}
+	}
+}
+
+func TestAnswerExcerptMixedParagraphs(t *testing.T) {
+	// One paragraph break makes the rendered slice reach eight entries after
+	// seven content lines. The eighth content line must still be included.
+	input := "one\n\ntwo\nthree\nfour\nfive\nsix\nseven\neight"
+	for _, tail := range []string{"", "\n\n", "\n\n---\n", "\n\nnine"} {
+		got, cut := AnswerExcerpt(input + tail)
+		if got != input || cut != strings.Contains(tail, "nine") {
+			t.Errorf("tail=%q: got %q, cut=%v", tail, got, cut)
+		}
+	}
+}
+
 func TestDigestLine(t *testing.T) {
 	if got := digestLine("运行完成：日报\n花费 $0.0100\n\n第一行\n第二行"); got != "运行完成：日报 — 花费 $0.0100 — 第一行 — 第二行" {
 		t.Fatal(got)
