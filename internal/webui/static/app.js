@@ -400,7 +400,7 @@
     }
     function cleanupRequest() { if (tm) clearTimeout(tm); if (opts.signal) opts.signal.removeEventListener("abort", abortExternal); }
     if (ac && timeout) tm = setTimeout(function () { timedOut = true; ac.abort(); }, timeout);
-    var request = netFetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).then(function (res) {
+    return netFetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).then(function (res) {
       var ct = res.headers.get("content-type") || "";
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {
@@ -408,8 +408,7 @@
         if (!res.ok) { var e2 = new Error(data && data.error_info ? errInfoText(data.error_info, data.error) : (data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
         return data;
       });
-    });
-    return request.then(function (data) {
+    }).then(function (data) {
       cleanupRequest();
       return data;
     }, function (err) {
