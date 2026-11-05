@@ -51,20 +51,16 @@
     if (method !== "GET") headers["X-CSRF-Token"] = state.csrf;
     var body = opts.body;
     if (body !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
-    // opts.timeout (ms): abort and reject with a readable error instead of waiting forever.
-    var ac = (opts.timeout || opts.signal) && window.AbortController ? new AbortController() : null, tm = null, timedOut = false;
+    // Page reads must settle so navigation can replace its skeleton with an error and retry.
+    var timeout = opts.timeout == null && method === "GET" ? 30000 : opts.timeout;
+    var ac = (timeout || opts.signal) && window.AbortController ? new AbortController() : null, tm = null, timedOut = false;
     var abortExternal = function () { if (ac) ac.abort(); };
     if (opts.signal && ac) {
       if (opts.signal.aborted) ac.abort(); else opts.signal.addEventListener("abort", abortExternal, { once: true });
     }
     function cleanupRequest() { if (tm) clearTimeout(tm); if (opts.signal) opts.signal.removeEventListener("abort", abortExternal); }
-    if (ac && opts.timeout) tm = setTimeout(function () { timedOut = true; ac.abort(); }, opts.timeout);
-    return netFetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).catch(function (err) {
-      cleanupRequest();
-      if (timedOut) { var et = new Error(T("err.req_timeout")); et.timeout = true; throw et; }
-      throw err;
-    }).then(function (res) {
-      cleanupRequest();
+    if (ac && timeout) tm = setTimeout(function () { timedOut = true; ac.abort(); }, timeout);
+    var request = netFetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined }).then(function (res) {
       var ct = res.headers.get("content-type") || "";
       var p = ct.indexOf("json") >= 0 ? res.json() : res.text();
       return p.then(function (data) {
@@ -72,6 +68,14 @@
         if (!res.ok) { var e2 = new Error(data && data.error_info ? errInfoText(data.error_info, data.error) : (data && data.error) || res.statusText); e2.status = res.status; e2.data = data; throw e2; }
         return data;
       });
+    });
+    return request.then(function (data) {
+      cleanupRequest();
+      return data;
+    }, function (err) {
+      cleanupRequest();
+      if (timedOut) { var et = new Error(T("err.req_timeout")); et.timeout = true; throw et; }
+      throw err;
     });
   }
   // Toasts: success fades after 3s, errors stay until closed, undo toasts last 8s with a button.

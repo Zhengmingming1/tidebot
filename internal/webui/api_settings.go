@@ -185,15 +185,29 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				KeySet: p.AuthEnv != "" && os.Getenv(p.AuthEnv) != ""})
 		}
 	}
-	sum, _ := s.deps.Cost.Summary(r.Context(), "")
-	totp, _ := s.deps.Auth.TOTPEnabled(r.Context())
-	pwSet, _ := s.deps.Auth.HasPassword(r.Context())
+	sum, err := s.deps.Cost.Summary(r.Context(), "")
+	if err != nil {
+		s.settingsFailure(w, r, "cost summary", err)
+		return
+	}
+	totp, err := s.deps.Auth.TOTPEnabled(r.Context())
+	if err != nil {
+		s.settingsFailure(w, r, "two-factor status", err)
+		return
+	}
+	pwSet, err := s.deps.Auth.HasPassword(r.Context())
+	if err != nil {
+		s.settingsFailure(w, r, "password status", err)
+		return
+	}
 	others := 0
 	sessions := []auth.SessionInfo{}
 	if sess := auth.SessionFromContext(r.Context()); sess != nil {
 		others = s.deps.Auth.OtherSessions(r.Context(), sess.ID)
-		if l, err := s.deps.Auth.ListSessions(r.Context(), sess.ID); err == nil {
-			sessions = l
+		sessions, err = s.deps.Auth.ListSessions(r.Context(), sess.ID)
+		if err != nil {
+			s.settingsFailure(w, r, "session list", err)
+			return
 		}
 	}
 	writeJSON(w, 200, map[string]any{
@@ -215,6 +229,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"tz_offset":        tzOffsetMin(s.loc(), time.Now()),
 		"version":          Version,
 	})
+}
+
+func (s *Server) settingsFailure(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	status := http.StatusInternalServerError
+	if s.deps.Log != nil {
+		s.deps.Log.Error("settings request failed", "path", r.URL.Path, "status", status, "operation", operation, "error", err)
+	}
+	writeErr(w, status, err.Error())
 }
 
 // tzOffsetMin is loc's UTC offset at t in minutes (east positive).

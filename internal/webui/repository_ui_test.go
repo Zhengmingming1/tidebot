@@ -74,6 +74,13 @@ ctx.stopRepositoryScan(); assert(didAbort); assert.equal(ctx.repositoryScan,null
  assert.equal(init.headers['X-CSRF-Token'],'csrf');
  ac=new AbortController();ac.abort();await assert.rejects(ctx.apiRaw('/scan',{method:'POST',signal:ac.signal}),e=>e.name==='AbortError');
  await assert.rejects(ctx.apiRaw('/scan',{method:'POST',timeout:2}),e=>e.timeout===true);
+ // Page GETs get a default deadline, and it stays active while the response body is read.
+ let timer;
+ ctx.setTimeout=(fn,ms)=>{timer={fn,ms};return 99;};ctx.clearTimeout=()=>{};
+ ctx.netFetch=(path,arg)=>new Promise((resolve,reject)=>arg.signal.addEventListener('abort',()=>{let e=new Error('cancelled');e.name='AbortError';reject(e);},{once:true}));
+ let pending=ctx.apiRaw('/api/settings');assert.equal(timer.ms,30000);timer.fn();await assert.rejects(pending,e=>e.timeout===true);
+ ctx.netFetch=(path,arg)=>Promise.resolve({headers:{get:()=> 'application/json'},status:200,ok:true,json:()=>new Promise((resolve,reject)=>arg.signal.addEventListener('abort',()=>{let e=new Error('cancelled');e.name='AbortError';reject(e);},{once:true}))});
+ pending=ctx.apiRaw('/api/settings');assert.equal(timer.ms,30000);timer.fn();await assert.rejects(pending,e=>e.timeout===true);
  console.log('repository UI state, escaping, stale response, explicit adoption, cancellation: passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
 `

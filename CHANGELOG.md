@@ -1,10 +1,15 @@
 # Changelog
 
-本文件记录版本变更。完整说明见 [v0.2.5 发布说明](docs/release-notes/v0.2.5.md)及 [release-notes](docs/release-notes/)。
+本文件记录版本变更。完整说明见 [v0.2.6 发布说明](docs/release-notes/v0.2.6.md)及 [release-notes](docs/release-notes/)。
 
 ## Unreleased
 
+## v0.2.6 — 2026-11-05
+
 - 技能导入支持含多个标准 Skill 的 Claude 插件包：作为完整技能包保存命令、辅助技能和共享资源，提供默认入口与整包预览，保留版本冲突确认和导出再导入。运行时按原技能目录解析资源路径；hooks、MCP、agents、LSP 不由该适配启用。详见[插件技能包导入](docs/skill-plugin-packages.md)。
+- 页面 GET 请求默认在 30 秒后中止并显示可重试错误，响应正文读取也受超时保护，避免页面永久停留在骨架屏。
+- 设置接口关键数据读取失败时返回 HTTP 500，并在服务端日志记录请求路径、状态码、失败操作和底层错误。
+- 本次没有新增数据库迁移或 Go 模块依赖变更。
 
 ## v0.2.5 — 2026-11-05
 
