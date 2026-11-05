@@ -129,12 +129,26 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 			return nil, fmt.Errorf("duplicate skill command name %q: rename one skill before combining", name)
 		}
 		used[name] = true
+		dir := filepath.Join(root, "skills", name)
+		if meta, err := skillpkg.ParseFrontmatter(files["SKILL.md"]); err == nil && meta.PluginBundle {
+			// The original plugin root is this skill's copy, not the outer tidebot plugin.
+			for p, data := range files {
+				if strings.EqualFold(filepath.Ext(p), ".md") {
+					skillDir := dir
+					parts := strings.Split(p, "/")
+					if len(parts) >= 3 && parts[0] == "skills" {
+						skillDir = filepath.Join(dir, "skills", parts[1])
+					}
+					text := strings.ReplaceAll(string(data), "${CLAUDE_SKILL_DIR}", skillDir)
+					files[p] = []byte(strings.ReplaceAll(text, "${CLAUDE_PLUGIN_ROOT}", dir))
+				}
+			}
+		}
 		normalized, err := stagedSkillMD(files["SKILL.md"], name)
 		if err != nil {
 			return nil, fmt.Errorf("skill %s: %w", b.SkillID, err)
 		}
 		files["SKILL.md"] = normalized
-		dir := filepath.Join(root, "skills", name)
 		if err := confined.MkdirAll(filepath.Join("skills", name), 0o700); err != nil {
 			return out, err
 		}

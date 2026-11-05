@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -161,5 +162,72 @@ func TestSkillBundleErrorsDoNotImport(t *testing.T) {
 				t.Fatalf("rejected bundle created skills: %v %v", skills, err)
 			}
 		})
+	}
+}
+
+func TestPluginPackageUploadAndVersion(t *testing.T) {
+	for _, format := range []string{"folder", "zip", "tar.gz"} {
+		for _, prefix := range []string{"", "plugin/"} {
+			t.Run(format+"/"+prefix, func(t *testing.T) {
+				c := login(t)
+				files := map[string]string{
+					prefix + ".claude-plugin/plugin.json": `{"name":"merge","description":"Merge fixture"}`,
+					prefix + "commands/merge.md":          "---\nname: merge\n---\nRun scripts/merge.py in the user's workspace.",
+					prefix + "skills/branch/SKILL.md":     "---\nname: branch\n---\nQuery branch.",
+					prefix + "skills/stage/SKILL.md":      "---\nname: stage\n---\nQuery stage.",
+					prefix + "scripts/merge.py":           "print('fixture')\n",
+				}
+				body, ct := bundleUpload(t, format, files)
+				rr := c.do(http.MethodPost, "/api/skills/upload", ct, body)
+				var p skillPreview
+				if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil || rr.Code != 200 {
+					t.Fatalf("upload %d %s: %v", rr.Code, rr.Body.String(), err)
+				}
+				if p.Bundle == nil || p.Bundle.SkillCount != 2 || p.Bundle.CommandCount != 1 || p.Bundle.Entry != "merge" || p.Name != "merge" || p.Files != 6 {
+					t.Fatalf("bundle preview: %+v", p)
+				}
+				if code, out := c.json(http.MethodPost, "/api/skills/import", map[string]string{"stage_id": p.StageID, "name": p.Name}); code != 200 {
+					t.Fatalf("import %d: %v", code, out)
+				}
+				list, err := c.s.deps.Skills.List(context.Background())
+				if err != nil || len(list) != 1 {
+					t.Fatalf("stored skills: %+v %v", list, err)
+				}
+				stored, err := c.s.deps.Skills.Files(context.Background(), list[0].CurrentVersion.ID)
+				if err != nil || len(stored) != 6 {
+					t.Fatalf("stored bundle files: %v %v", stored, err)
+				}
+				for path, data := range files {
+					if got := string(stored[strings.TrimPrefix(path, prefix)]); got != data {
+						t.Errorf("original file changed: %s", path)
+					}
+				}
+				firstVersionID := list[0].CurrentVersion.ID
+				files[prefix+"scripts/merge.py"] = "print('updated fixture')\n"
+				body, ct = bundleUpload(t, format, files)
+				rr = c.do(http.MethodPost, "/api/skills/upload", ct, body)
+				if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil || rr.Code != 200 || p.Existing == nil {
+					t.Fatalf("existing preview %d: %+v %v", rr.Code, p, err)
+				}
+				if code, _ := c.json(http.MethodPost, "/api/skills/import", map[string]string{"stage_id": p.StageID, "name": p.Name}); code != 409 {
+					t.Fatalf("bundle overwrite was not gated: %d", code)
+				}
+				if code, out := c.json(http.MethodPost, "/api/skills/import", map[string]string{"stage_id": p.StageID, "name": p.Name, "mode": "version"}); code != 200 {
+					t.Fatalf("version import %d: %v", code, out)
+				}
+				updated, err := c.s.deps.Skills.List(context.Background())
+				if err != nil || len(updated) != 1 || updated[0].CurrentVersion == nil || updated[0].CurrentVersion.ID == firstVersionID || updated[0].CurrentVersion.VersionNo != 2 {
+					t.Fatalf("expected a distinct v2: %+v %v", updated, err)
+				}
+				oldFiles, err := c.s.deps.Skills.Files(context.Background(), firstVersionID)
+				if err != nil || !reflect.DeepEqual(stored, oldFiles) {
+					t.Fatalf("v1 changed after importing v2: %v", err)
+				}
+				newFiles, err := c.s.deps.Skills.Files(context.Background(), updated[0].CurrentVersion.ID)
+				if err != nil || string(newFiles["scripts/merge.py"]) != "print('updated fixture')\n" {
+					t.Fatalf("v2 shared resource not updated: %q %v", newFiles["scripts/merge.py"], err)
+				}
+			})
+		}
 	}
 }

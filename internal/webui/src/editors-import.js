@@ -118,10 +118,15 @@
         });
       };
       function show(p, name) {
-        var ex = p.existing;
+        var ex = p.existing, bundle = p.bundle && typeof p.bundle === "object" ? p.bundle : null;
+        var bundleNotes = bundle && Array.isArray(bundle.notes) ? bundle.notes.filter(function (note) { return typeof note === "string" && note !== "components_inert"; }) : [];
         prev.innerHTML = '<div class="preview"><form id="sk-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
           '<div class="field"><span>' + esc(T("sk.desc")) + '</span><p class="desc-box">' + esc(p.description || T("sk.no_desc")) + "</p></div>" +
-          (typeof p.source_root === "string" && p.source_root && p.source_root !== "." ? '<p class="notice">' + ic("folder", "sm") + '<span>' + esc(T("sk.source_root", { path: p.source_root })) + '</span></p>' : "") +
+          (bundle ? '<div class="notice">' + ic("folder", "sm") + '<div><strong>' + esc(T("sk.bundle_summary", { name: bundle.name || p.name, skills: bundle.skill_count || 0, commands: bundle.command_count || 0 })) + '</strong>' +
+            (bundle.entry ? '<p>' + esc(T("sk.bundle_entry", { name: bundle.entry })) + '</p>' : "") +
+            '<p>' + esc(T("sk.bundle_resources")) + '</p><p>' + esc(T("sk.bundle_inert")) + '</p>' +
+            (bundleNotes.length ? '<ul class="list-plain">' + bundleNotes.map(function (note) { return '<li>' + esc(note) + '</li>'; }).join("") + '</ul>' : "") + '</div></div>' :
+            (typeof p.source_root === "string" && p.source_root && p.source_root !== "." ? '<p class="notice">' + ic("folder", "sm") + '<span>' + esc(T("sk.source_root", { path: p.source_root })) + '</span></p>' : "")) +
           '<ul class="checks">' + (p.checks || []).map(function (c) { return '<li class="' + (c.ok ? "ok" : "warn") + '">' + ic(c.ok ? "check" : "info", "sm") + esc(T("sk.chk_" + c.key)) + "</li>"; }).join("") + "</ul>" +
           '<details class="ftree" open><summary>' + esc(T("sk.files_n", { n: p.files })) + " · " + esc(fmtBytes(p.size || 0)) + "</summary>" + fileTree(p.tree || []) + "</details>" +
           (ex ? '<p class="notice">' + ic("info", "sm") + esc(T("sk.exists", { n: ex.version_no, next: ex.next_no || ex.version_no + 1 })) + "</p>" : "") + "</form></div>";

@@ -38,15 +38,16 @@ func (s *Server) cleanStaging() {
 }
 
 type skillPreview struct {
-	StageID     string         `json:"stage_id"`
-	SourceRoot  string         `json:"source_root"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Files       int            `json:"files"`
-	Size        int64          `json:"size"`
-	Tree        []previewFile  `json:"tree"`
-	Checks      []previewCheck `json:"checks"`
-	Existing    *skillExisting `json:"existing,omitempty"`
+	StageID     string                 `json:"stage_id"`
+	SourceRoot  string                 `json:"source_root"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Files       int                    `json:"files"`
+	Size        int64                  `json:"size"`
+	Tree        []previewFile          `json:"tree"`
+	Checks      []previewCheck         `json:"checks"`
+	Existing    *skillExisting         `json:"existing,omitempty"`
+	Bundle      *skillpkg.PluginBundle `json:"bundle,omitempty"`
 }
 
 type previewFile struct {
@@ -137,7 +138,7 @@ func (s *Server) handleSkillUpload(w http.ResponseWriter, r *http.Request) {
 		fail(400, "choose a .zip, .skill or .tar.gz file, or a folder")
 		return
 	}
-	root, err := skillpkg.FindRoot(dest)
+	root, bundle, err := skillpkg.PrepareRoot(dest)
 	if err != nil {
 		_ = os.RemoveAll(dest)
 		out := map[string]any{"error": err.Error()}
@@ -167,7 +168,7 @@ func (s *Server) handleSkillUpload(w http.ResponseWriter, r *http.Request) {
 		fail(400, "invalid skill directory")
 		return
 	}
-	p := skillPreview{StageID: sid, SourceRoot: filepath.ToSlash(rel), Name: meta.Name, Description: meta.Description}
+	p := skillPreview{StageID: sid, SourceRoot: filepath.ToSlash(rel), Name: meta.Name, Description: meta.Description, Bundle: bundle}
 	if p.Name == "" && root != dest {
 		p.Name = filepath.Base(root)
 	}
@@ -236,7 +237,7 @@ func (s *Server) importStaged(w http.ResponseWriter, r *http.Request, stageID, n
 		return
 	}
 	root := filepath.Clean(string(rootB))
-	if !strings.HasPrefix(root, dest) {
+	if root != dest && !strings.HasPrefix(root, dest+string(os.PathSeparator)) {
 		writeErr(w, 400, "bad stage")
 		return
 	}

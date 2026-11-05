@@ -87,12 +87,30 @@ function open(){skillImportModal(()=>done++);return ctx;}
   assert.ok(bad.includes("skills/a&amp;b"));assert.ok(bad.includes('&lt;img src=x onerror=&quot;bad&quot;&gt;'));assert.ok(!bad.includes("<img"));
   c.requests[0].resolve(preview("old"));await flush();assert.equal(c.prev.innerHTML,bad);assert.ok(!c.foot.buttons["sk-go"]);
 
+  // A recognized plugin is one complete package; neither its metadata nor notes can inject HTML.
+  c.choose("bundle");const bundle=preview("trunk-merge","trunk-merge");
+  bundle.bundle={name:'trunk-merge <img src=x onerror="bad">',skill_count:3,command_count:1,entry:'trunk-merge <script>bad</script>',notes:['components_inert','shared & preserved','<img src=x onerror="bad">',42]};
+  c.requests[2].resolve(bundle);await flush();const packageHtml=c.prev.innerHTML;
+  assert.ok(packageHtml.includes("完整技能包：trunk-merge &lt;img"));assert.ok(packageHtml.includes("3 个技能 · 1 个命令"));
+  assert.ok(packageHtml.includes("默认入口：trunk-merge &lt;script&gt;bad&lt;/script&gt;"));
+  assert.ok(packageHtml.includes("共享资源按原目录保留"));assert.ok(packageHtml.includes("根据请求选择包内命令或技能"));
+  assert.ok(packageHtml.includes("hooks、MCP、agents 与 LSP 不会启用"));assert.ok(packageHtml.includes("shared &amp; preserved"));
+  assert.ok(!packageHtml.includes("<img"));assert.ok(!packageHtml.includes("<script"));assert.ok(!packageHtml.includes("<li>42</li>"));assert.ok(!packageHtml.includes("components_inert"));
+  assert.ok(!packageHtml.includes("仅导入此目录"));assert.ok(c.foot.buttons["sk-go"]);
+  c.choose("single-again");c.requests[3].resolve(preview("single-again","skills/single-again"));await flush();
+  assert.ok(!c.prev.innerHTML.includes("完整技能包"));assert.ok(c.prev.innerHTML.includes("仅导入此目录"));
+
   // Existing-name confirmation still uses the explicit version mode; English errors remain friendly.
   lang="en";c=open();c.choose("version");c.requests[0].resolve(preview("Existing","skills/existing",{version_no:1,next_no:2}));await flush();
   assert.ok(c.prev.innerHTML.includes("Detected skill folder"));assert.ok(c.foot.buttons["sk-ver"]);
   c.foot.buttons["sk-ver"].events.click();await flush();assert.equal(imports[1].mode,"version");
   c=open();c.choose("missing");c.requests[0].reject(uploadError("skill_root_missing"));await flush();assert.ok(c.prev.innerHTML.includes("SKILL.md was not found"));
   c.choose("multi");c.requests[1].reject(uploadError("multiple_skills",["skills/one","skills/two"]));await flush();assert.ok(c.prev.innerHTML.includes("Import one at a time"));
+  c.choose("bundle-en");const englishBundle=preview("trunk-merge","trunk-merge");
+  englishBundle.bundle={name:"trunk-merge",skill_count:3,command_count:1,notes:null};
+  c.requests[2].resolve(englishBundle);await flush();
+  assert.ok(c.prev.innerHTML.includes("Complete skill package: trunk-merge · skills: 3 · commands: 1"));
+  assert.ok(c.prev.innerHTML.includes("shared resources in their original directories"));assert.ok(!c.prev.innerHTML.includes("Default entry"));
 
   // An old import mutation may finish after the next upload. Its 409/success must not replace or close the new preview.
   c=open();c.deferImport=true;c.choose("import-A");c.requests[0].resolve(preview("import-A"));await flush();

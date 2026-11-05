@@ -301,8 +301,9 @@ func hasSkillMD(dir string) bool {
 
 // Meta is the SKILL.md frontmatter we care about.
 type Meta struct {
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
+	Name         string `yaml:"name" json:"name"`
+	Description  string `yaml:"description" json:"description"`
+	PluginBundle bool   `yaml:"tidebot-plugin-bundle" json:"-"`
 }
 
 // ParseFrontmatter reads the leading "---" YAML block of SKILL.md.
