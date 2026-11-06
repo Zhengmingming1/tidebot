@@ -196,7 +196,7 @@
 
   // ---------- PLUGINS ----------
   // Pure reads: they neither drop the page cache nor wait for the network when cached.
-  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "timezone.get", "network.get", "skills.proposals", "skills.compare", "scheduler.quiet.get"];
+  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "plugins.trigger_fields", "plugins.ai.status", "plugins.ai.messages", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "timezone.get", "network.get", "skills.proposals", "skills.compare", "scheduler.quiet.get", "scheduler.pause.get", "free_pool.status", "free_pool.models", "update.status"];
   function rpcKey(method, params) { return "rpc:" + method + ":" + JSON.stringify(params || {}); }
   function rpcCall(method, params, timeout, read) {
     return api("/api/rpc/" + method, { method: "POST", body: params || {}, timeout: timeout, read: read, cacheKey: read ? rpcKey(method, params) : "" }).then(function (r) { return r.result; });

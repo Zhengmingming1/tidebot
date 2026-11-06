@@ -52,7 +52,7 @@
     var body = opts.body;
     if (body !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
     // Page reads must settle so navigation can replace its skeleton with an error and retry.
-    var timeout = opts.timeout == null && method === "GET" ? 30000 : opts.timeout;
+    var timeout = opts.timeout == null && (method === "GET" || opts.read || opts.cacheKey) ? 30000 : opts.timeout;
     var ac = (timeout || opts.signal) && window.AbortController ? new AbortController() : null, tm = null, timedOut = false;
     var abortExternal = function () { if (ac) ac.abort(); };
     if (opts.signal && ac) {

@@ -160,11 +160,12 @@ func (a *App) chatSession(ctx context.Context, sid string) (chatRow, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, webui.ErrChatSessionNotFound
 	}
-	a.chatDisplayCost(&c.ChatSession)
-	if err == nil {
-		c.Bindings = a.chatBindingViews(ctx, c.bindingsRaw)
+	if err != nil {
+		return c, err
 	}
-	return c, err
+	a.chatDisplayCost(&c.ChatSession)
+	c.Bindings = a.chatBindingViews(ctx, c.bindingsRaw)
+	return c, nil
 }
 
 // chatDisplayCost: cost_total is kept in USD; the API shows money in the display
@@ -305,17 +306,30 @@ func (a *App) ListChatSessions(ctx context.Context, limit int) ([]webui.ChatSess
 		return nil, err
 	}
 	defer rows.Close()
-	var out []webui.ChatSession
+	var chats []chatRow
 	for rows.Next() {
 		c, err := scanChat(rows)
 		if err != nil {
 			return nil, err
 		}
+		chats = append(chats, c)
+	}
+	err = rows.Err()
+	closeErr := rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	// Binding names and a cold FX cache query the same single-connection pool.
+	var out []webui.ChatSession
+	for _, c := range chats {
 		a.chatDisplayCost(&c.ChatSession)
 		c.Bindings = a.chatBindingViews(ctx, c.bindingsRaw)
 		out = append(out, c.ChatSession)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // GetChatSession returns a session and its turns (oldest first).
@@ -325,6 +339,7 @@ func (a *App) GetChatSession(ctx context.Context, sid string) (webui.ChatSession
 		return webui.ChatSessionDetail{}, err
 	}
 	d := webui.ChatSessionDetail{ChatSession: c.ChatSession}
+	fx := a.cachedFX()
 	rows, err := a.DB.QueryContext(ctx, `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.prompt,''), COALESCE(r.status,''),
   COALESCE(r.result_text,''), COALESCE(r.result_truncated,0), COALESCE(r.error_message,''), COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,'')
 FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=? ORDER BY t.turn_index`, sid)
@@ -332,7 +347,6 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 		return d, err
 	}
 	defer rows.Close()
-	fx := a.cachedFX()
 	for rows.Next() {
 		var t webui.ChatTurn
 		var trunc int

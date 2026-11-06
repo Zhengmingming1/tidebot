@@ -5,7 +5,7 @@
   // hidden tab or the page already shown; a 401 here never opens the sign-in screen.
   var PF_REST_MS = 60, PF_MAX = 6, pf = { busy: 0, el: null, t: null };
   function pfGet(path) { return { key: path, run: function () { return apiRaw(path, { quiet: true }); } }; }
-  function pfRpc(method, params) { return { key: rpcKey(method, params), run: function () { return apiRaw("/api/rpc/" + method, { method: "POST", body: params || {}, quiet: true }); } }; }
+  function pfRpc(method, params) { return { key: rpcKey(method, params), run: function () { return apiRaw("/api/rpc/" + method, { method: "POST", body: params || {}, quiet: true, read: true }); } }; }
   function pfDecode(x) { try { return decodeURIComponent(x); } catch (e) { return ""; } }
   // Same requests the page's render starts with; routes with filters in the address are left out.
   function prefetchReqs(hash) {

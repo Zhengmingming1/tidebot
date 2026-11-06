@@ -271,7 +271,8 @@ func TestDetectSafeBoundedChecks(t *testing.T) {
 	if err := os.WriteFile(tool, []byte("#!/bin/sh\nprintf 'example 1.2.3\\n'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	opts := DetectOptions{Paths: map[string]string{"example": tool}, Timeout: 100 * time.Millisecond}
+	// First execution of a new script can exceed 100 ms on macOS; test cancellation separately below.
+	opts := DetectOptions{Paths: map[string]string{"example": tool}, Timeout: 2 * time.Second}
 	result := Detect(context.Background(), []ToolRequirement{{Name: "example", Version: ">=1.2"}}, opts)["example"]
 	if result.Status != "ready" || result.Version != "1.2.3" {
 		t.Fatal(result)
@@ -283,6 +284,7 @@ func TestDetectSafeBoundedChecks(t *testing.T) {
 	if err := os.WriteFile(tool, []byte("#!/bin/sh\nsleep 10\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	opts.Timeout = 100 * time.Millisecond
 	start := time.Now()
 	result = Detect(context.Background(), []ToolRequirement{{Name: "example"}}, opts)["example"]
 	if result.Status != "error" || time.Since(start) > 2*time.Second {

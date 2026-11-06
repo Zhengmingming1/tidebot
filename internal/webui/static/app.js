@@ -392,7 +392,7 @@
     var body = opts.body;
     if (body !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
     // Page reads must settle so navigation can replace its skeleton with an error and retry.
-    var timeout = opts.timeout == null && method === "GET" ? 30000 : opts.timeout;
+    var timeout = opts.timeout == null && (method === "GET" || opts.read || opts.cacheKey) ? 30000 : opts.timeout;
     var ac = (timeout || opts.signal) && window.AbortController ? new AbortController() : null, tm = null, timedOut = false;
     var abortExternal = function () { if (ac) ac.abort(); };
     if (opts.signal && ac) {
@@ -6463,7 +6463,7 @@
 
   // ---------- PLUGINS ----------
   // Pure reads: they neither drop the page cache nor wait for the network when cached.
-  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "timezone.get", "network.get", "skills.proposals", "skills.compare", "scheduler.quiet.get"];
+  var RPC_READS = ["dashboard", "plugins.list", "plugins.catalog", "plugins.get", "plugins.config_get", "plugins.trigger_fields", "plugins.ai.status", "plugins.ai.messages", "triggers.list", "backup.list", "backups.list", "notify.overview", "pricing.get", "pricing.catalog.get", "storage.get", "power.get", "timezone.get", "network.get", "skills.proposals", "skills.compare", "scheduler.quiet.get", "scheduler.pause.get", "free_pool.status", "free_pool.models", "update.status"];
   function rpcKey(method, params) { return "rpc:" + method + ":" + JSON.stringify(params || {}); }
   function rpcCall(method, params, timeout, read) {
     return api("/api/rpc/" + method, { method: "POST", body: params || {}, timeout: timeout, read: read, cacheKey: read ? rpcKey(method, params) : "" }).then(function (r) { return r.result; });
@@ -9733,7 +9733,7 @@
   // hidden tab or the page already shown; a 401 here never opens the sign-in screen.
   var PF_REST_MS = 60, PF_MAX = 6, pf = { busy: 0, el: null, t: null };
   function pfGet(path) { return { key: path, run: function () { return apiRaw(path, { quiet: true }); } }; }
-  function pfRpc(method, params) { return { key: rpcKey(method, params), run: function () { return apiRaw("/api/rpc/" + method, { method: "POST", body: params || {}, quiet: true }); } }; }
+  function pfRpc(method, params) { return { key: rpcKey(method, params), run: function () { return apiRaw("/api/rpc/" + method, { method: "POST", body: params || {}, quiet: true, read: true }); } }; }
   function pfDecode(x) { try { return decodeURIComponent(x); } catch (e) { return ""; } }
   // Same requests the page's render starts with; routes with filters in the address are left out.
   function prefetchReqs(hash) {
