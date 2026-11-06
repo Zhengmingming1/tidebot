@@ -9,7 +9,8 @@ import (
 // from Settings › Data). Uptime Kuma does the same for its heartbeat table
 // (server/jobs/clear-old-data.js: delete rows older than the keep period, then
 // PRAGMA optimize). tidebot's keep periods are fixed: these rows are logs nobody browses
-// past the first screen, and run history and spend are never touched.
+// past the first screen. Task run history and spend stay; workflow execution rows (with
+// their large node outputs) are trimmed after the keep period below.
 type rowRule struct {
 	name  string
 	keep  time.Duration
@@ -34,6 +35,15 @@ var rowRules = []rowRule{
 	// Budget breaches: the spend page shows the newest 10.
 	{"budget_events", 365 * 24 * time.Hour,
 		`DELETE FROM budget_events WHERE id IN (SELECT id FROM budget_events WHERE at < ? LIMIT ?)`},
+	// Workflow executions: each finished run can keep up to 32×128 KB of node output in
+	// the DB. Soft-deleted workflows still leave that history. Drop finished rows past
+	// 90 days (queued/running stay). Nodes go with them via ON DELETE CASCADE.
+	{"workflow_runs", 90 * 24 * time.Hour,
+		`DELETE FROM workflow_runs WHERE id IN (SELECT id FROM workflow_runs WHERE created_at < ? AND status NOT IN ('queued','running') LIMIT ?)`},
+	// Soft-deleted workflows: their finished executions are unreachable from the list,
+	// so reclaim after a week instead of waiting the full 90 days.
+	{"workflow_runs_deleted", 7 * 24 * time.Hour,
+		`DELETE FROM workflow_runs WHERE id IN (SELECT r.id FROM workflow_runs r JOIN workflows w ON w.id=r.workflow_id WHERE w.deleted=1 AND r.created_at < ? AND r.status NOT IN ('queued','running') LIMIT ?)`},
 }
 
 // pruneRows deletes rows past their keep period in batches, so a long backlog never holds

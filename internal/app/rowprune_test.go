@@ -33,13 +33,26 @@ func TestPruneRowsKeepsRecentAndQueued(t *testing.T) {
 	exec(`INSERT INTO budget_events(id, at, scope, kind, detail) VALUES('b_old', ?, 'global', 'exceeded', 'x')`, ago(400))
 	exec(`INSERT INTO budget_events(id, at, scope, kind, detail) VALUES('b_new', ?, 'global', 'exceeded', 'x')`, ago(100))
 	exec(`INSERT INTO runs(id, status, created_at) VALUES('r_ancient','success',?)`, ago(2000))
+	// Workflow executions: large node outputs live in the DB; finished ones past keep go.
+	exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_live','Live',1,0,?,?)`, ago(200), ago(200))
+	exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_gone','Gone',1,1,?,?)`, ago(200), ago(200))
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_old_ok','w_live',1,'succeeded','','{}',?)`, ago(100))
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_new_ok','w_live',1,'succeeded','','{}',?)`, ago(10))
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_running','w_live',1,'running','','{}',?)`, ago(100))
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_queued','w_live',1,'queued','','{}',?)`, ago(100))
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_mid','w_gone',1,'succeeded','','{}',?)`, ago(14)) // soft-deleted, past 7d
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_new','w_gone',1,'failed','','{}',?)`, ago(2))  // soft-deleted, recent
+	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_old_ok','a','succeeded',?)`, strings.Repeat("x", 1024))
+	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_gone_mid','a','succeeded',?)`, strings.Repeat("y", 2048))
+	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_new_ok','a','succeeded','keep')`)
 
 	n, err := a.pruneRows(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 5 {
-		t.Fatalf("deleted %d rows, want 5", n)
+	// 2 login + 1 cleared note + 1 old note + 1 budget + wr_old_ok + wr_gone_mid = 7
+	if n != 7 {
+		t.Fatalf("deleted %d rows, want 7", n)
 	}
 	ids := func(q string) string {
 		rows, err := a.DB.Query(q)
@@ -66,6 +79,12 @@ func TestPruneRowsKeepsRecentAndQueued(t *testing.T) {
 	}
 	if got := ids(`SELECT id FROM runs`); got != "r_ancient" {
 		t.Fatalf("run history must stay: %s", got)
+	}
+	if got := ids(`SELECT id FROM workflow_runs ORDER BY id`); got != "wr_gone_new,wr_new_ok,wr_queued,wr_running" {
+		t.Fatalf("workflow runs left: %s", got)
+	}
+	if got := ids(`SELECT workflow_run_id||':'||node_id FROM workflow_run_nodes ORDER BY 1`); got != "wr_new_ok:a" {
+		t.Fatalf("workflow nodes left: %s", got)
 	}
 	if n, _ := a.pruneRows(ctx, now); n != 0 {
 		t.Fatalf("second pass deleted %d", n)
@@ -123,6 +142,7 @@ func TestPruneQueriesUseIndexes(t *testing.T) {
 		`SELECT COUNT(1), MIN(at) FROM login_attempts WHERE ip='x' AND ok=0 AND at>='2026'`:     "idx_login_attempts_ip_at",
 		`SELECT id FROM notifications WHERE status <> 'queued' AND created_at < '2026' LIMIT 1`: "idx_notifications_created",
 		`SELECT id FROM budget_events WHERE at < '2026' LIMIT 1`:                                "idx_budget_events_at",
+		`SELECT id FROM workflow_runs WHERE created_at < '2026' AND status NOT IN ('queued','running') LIMIT 1`: "idx_workflow_runs_created",
 	}
 	for q, idx := range plans {
 		rows, err := a.DB.Query(`EXPLAIN QUERY PLAN ` + q)
@@ -141,4 +161,67 @@ func TestPruneQueriesUseIndexes(t *testing.T) {
 			t.Errorf("%s: plan %q doesn't use %s", q, p, idx)
 		}
 	}
+}
+
+
+func TestPruneWorkflowRunsReclaimsNodeOutput(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	now := time.Now()
+	ago := func(d int) string { return now.Add(-time.Duration(d) * 24 * time.Hour).UTC().Format(time.RFC3339) }
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := a.DB.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w1','W',1,0,?,?)`, ago(200), ago(200))
+	const fat = 128 << 10 // MaxOutputBytes
+	blob := strings.Repeat("z", fat)
+	const nRuns = 20
+	const nNodes = 8
+	for i := 0; i < nRuns; i++ {
+		rid := fmt.Sprintf("wr_%02d", i)
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES(?,?,1,'succeeded','','{}',?)`, rid, "w1", ago(120))
+		for j := 0; j < nNodes; j++ {
+			exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES(?,?, 'succeeded', ?)`, rid, fmt.Sprintf("n%d", j), blob)
+		}
+	}
+	var beforeBytes int64
+	if err := a.DB.QueryRow(`SELECT COALESCE(SUM(LENGTH(output)),0) FROM workflow_run_nodes`).Scan(&beforeBytes); err != nil {
+		t.Fatal(err)
+	}
+	wantBytes := int64(nRuns * nNodes * fat)
+	if beforeBytes != wantBytes {
+		t.Fatalf("seeded %d bytes, want %d", beforeBytes, wantBytes)
+	}
+	var pageSize, pageCount, freelist int64
+	_ = a.DB.QueryRow(`PRAGMA page_size`).Scan(&pageSize)
+	_ = a.DB.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
+	_ = a.DB.QueryRow(`PRAGMA freelist_count`).Scan(&freelist)
+	beforeFile := (pageCount) * pageSize
+	n, err := a.pruneRows(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != int64(nRuns) {
+		t.Fatalf("deleted %d workflow runs, want %d", n, nRuns)
+	}
+	var afterBytes, afterNodes int64
+	_ = a.DB.QueryRow(`SELECT COALESCE(SUM(LENGTH(output)),0), COUNT(*) FROM workflow_run_nodes`).Scan(&afterBytes, &afterNodes)
+	if afterBytes != 0 || afterNodes != 0 {
+		t.Fatalf("nodes left: count=%d bytes=%d", afterNodes, afterBytes)
+	}
+	_, _ = a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, err = a.DB.Exec(`VACUUM`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = a.DB.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
+	afterFile := pageCount * pageSize
+	if afterFile >= beforeFile {
+		t.Fatalf("db file did not shrink after vacuum: before=%d after=%d (payload was %d)", beforeFile, afterFile, beforeBytes)
+	}
+	t.Logf("workflow prune: removed %d runs / %d KB node output; db %d KB → %d KB after vacuum (−%d KB)",
+		nRuns, beforeBytes>>10, beforeFile>>10, afterFile>>10, (beforeFile-afterFile)>>10)
 }

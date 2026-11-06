@@ -5377,5 +5377,34 @@ a bulk edit makes undo exact without a history table.
 
 **Ideas for later**
 
-- `workflow_runs` / `workflow_run_nodes` 清理（发现 #6）：软删工作流仍留历史，节点输出最大 128KB×32，可纳入「设置 › 数据」清理。
 - WebUI 单包去注释/压空白（发现 #5）：`build-webui.py`，量 gzip 前后。
+- 工作流执行清理是否跟「设置 › 数据」的保留天数挂钩（现在是固定 90 / 软删 7 天）；软删工作流的 `workflow_versions` 是否也要在一段时间后收掉。
+
+### 2026-11-06（续）：清理过期的工作流执行记录（发现 #6）
+
+**Done**
+
+- **问题**：`workflow_runs` / `workflow_run_nodes` 从不清理。每个节点输出最多 128 KB、一次最多 32 个节点；工作流只软删除，历史执行一直堆在 SQLite 里，数据库只涨不缩。任务运行行和花费照旧保留。
+- **改法**：纳入现有的 `pruneRows`（每 6 小时和「设置 › 数据 › 立即清理」一起跑，计入 `deleted_rows`）：
+  1. 已结束的执行（非 `queued`/`running`）超过 **90 天**删除；
+  2. 所属工作流已软删的，已结束执行超过 **7 天**就删（列表里本来也看不到）。
+  `workflow_run_nodes` 靠 `ON DELETE CASCADE` 一起清。排队中/进行中的不动。任务 `runs` 行、花费、子运行记录都不动。
+- 测试：`TestPruneRowsKeepsRecentAndQueued` 覆盖新旧/排队/软删；`TestPruneQueriesUseIndexes` 确认走 `idx_workflow_runs_created`；新增 `TestPruneWorkflowRunsReclaimsNodeOutput`（20 次执行 × 8 节点 × 128 KB）。
+
+| 指标（本机 Linux，测试夹具） | 清理前 | 清理后（含 VACUUM） |
+| --- | ---: | ---: |
+| 节点 output 合计 | 20 480 KB | 0 |
+| 数据库文件 | 21 272 KB | 712 KB（约 −20 560 KB） |
+| 删除的 `workflow_runs` 行 | — | 20（节点经 CASCADE） |
+
+**Learned**
+
+- 软删只藏定义、不碰历史时，大字段（节点 output、`snapshot_json`）会变成「看不见但占盘」的债；对这类表要单独设比「还在用的历史」更短的保留期。
+- SQLite 删除后空间进 freelist，设置里的「压缩数据库」/ `VACUUM` 才会真正把文件变小；清理记录里的 `deleted_rows` 已经能提示这次清了多少行。
+
+**参考**：Uptime Kuma `server/jobs/clear-old-data.js`（按保留期删 heartbeat，再 `PRAGMA optimize`）；tidebot 原有 `rowprune.go` 批删模式。n8n 对 execution data 也有按时间清理。
+
+**Ideas for later**
+
+- WebUI 单包去注释/压空白（发现 #5）。
+- 工作流执行保留天数改成跟「设置 › 数据」可配；软删工作流的版本定义（`workflow_versions`）是否延后回收。
