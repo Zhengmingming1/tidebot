@@ -5125,7 +5125,7 @@ a bulk edit makes undo exact without a history table.
 4. **P1 已核实（不用改） · `#/skills/<不存在的 id>` 返回 400 而不是 404**：页面显示的是服务端原文，不是「找不到」。11-03 08:00 复查：页面显示的是前端自己的「找不到这个技能。」（中英文都对），有错误和「重试」。两个 400 来自 `skills.optimize_settings` 和 `skills.compare` 两个 RPC，前端已经 `catch` 掉，不影响页面。骨架屏那轮（#1）修好之后这一条就不再出现。
 5. **P2 · WebUI 是单个 743 KB 的包**：工作流画布、依赖检查这些新代码每个页面都会加载，注释也一起发出去。可以在 `build-webui.py` 里去掉注释、压缩空白，对比 gzip 前后的大小，并确认 CSP 和测试不受影响。
 6. **P2 · `workflow_runs` 和 `workflow_run_nodes` 不会清理**：每个节点的输出最多 128 KB，单次执行最多 32 个节点。工作流删除只是软删除，历史执行一直保留。要评估数据目录增长，看是否纳入「设置 › 数据」的清理统计。
-7. **P1 · Runner 的 `OnStart` 早于入队**：`startQuickRunAsync` 拿到 id 时，运行还没进等待队列，`QueuePos` 会短暂为 0。如果调度慢一拍，正好赶上空出来的槽位，就会跳过「排队后再检查」（`BeforeStart` 只在等过之后才执行）。CI 上 Go 1.27 两次偶发失败（`TestUserStopQueuedAndRunning` 报 queue pos 0，`TestQueuedRunSkippedWhenBudgetRanOut` 超时）都是这个原因。本轮先让两个测试等运行真正入队；产品上可以考虑在入队之后再调用 OnStart。
+7. **P1 已修 · Runner 的 `OnStart` 早于入队**：`startQuickRunAsync` 拿到 id 时，运行还没进等待队列，`QueuePos` 会短暂为 0。如果调度慢一拍，正好赶上空出来的槽位，就会跳过「排队后再检查」（`BeforeStart` 只在等过之后才执行）。CI 上 Go 1.27 两次偶发失败（`TestUserStopQueuedAndRunning` 报 queue pos 0，`TestQueuedRunSkippedWhenBudgetRanOut` 超时）都是这个原因。本轮先让两个测试等运行真正入队；产品上可以考虑在入队之后再调用 OnStart。
 8. **P2 · Docker 镜像的大头是 node 基础镜像**：agentd 只占 8.9 MB，镜像压缩后 117.6 MB。这是为了跑 claude CLI 的取舍，先记录，不改。
 
 ### 本轮修复：页面加载失败时显示错误和重试，不再被骨架屏盖住
@@ -5353,3 +5353,29 @@ a bulk edit makes undo exact without a history table.
 - 实测 `--append-system-prompt` 和 `--append-system-prompt-file` 可以同时用，两段都进系统提示；`--resume` 时系统提示每次按这次传的重新生成（2.1.301 帮助里的 `--system-prompt-snapshot` 默认会记录第一次的系统提示，但这个版本还没启用）。以后启用了要给会话轮次加 `--system-prompt-snapshot off`，否则后绑的技能不生效。
 
 **参考**：方案 §5.1（会话也是绑定对象）；Claude Code 文档 `--tools`、`--allowedTools mcp__<server>`；工具的 glob/grep 语义参考 Claude Code 自带的 Glob/Grep 工具说明（只借语义，没有代码）。
+
+
+### 2026-11-06：Runner 的 OnStart 改到入队（或拿到槽位）之后（#7）
+
+**Done**
+
+- **产品修复竞态**：`RunOnce` 以前在写入运行行之后、`slots.acquire` 之前就调用 `OnStart`。`startQuickRunAsync` / `launch()` 拿到 id 时，运行还没进等待队列，`QueuePos` 会短暂为 0；若此时前一个运行刚好腾出槽位，新运行会直接拿到槽、`waited=false`，跳过只在等过之后才跑的 `BeforeStart`（预算/任务是否仍可跑的二次检查）。CI 上 Go 1.27 偶发的 `TestUserStopQueuedAndRunning`（queue pos 0）和 `TestQueuedRunSkippedWhenBudgetRanOut`（等不到 skipped）都来自这个窗口。
+- 现在 `OnStart` 只在两种时机触发一次：①已经追加进 `waiting[]`（`onQueued` 回调里，此时 `QueuePos > 0`）；②直接拿到空闲槽（`acquire` 成功返回后）。入队后被取消/退出时仍会把 id 交给 `launch()`（错误路径补一次）。`Options.OnStart` 注释同步说明。
+- 测试：新增 `runner/queue_test.go TestOnStartAfterEnqueueOrSlot`（排队时 OnStart 里 `QueuePos==1`；空闲槽时 `QueuePos==0` 且仍回调）。`stoprun_test` / `recheck_test` 注释改成与新语义一致；保留短等待作兜底。
+
+| 指标 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 排队运行在 OnStart 回调里读到的 `QueuePos` | 常为 0（随后才入队） | 恒为 ≥1 |
+| `TestUserStopQueuedAndRunning` / `TestQueuedRunSkippedWhenBudgetRanOut` 对 QueuePos 的等待 | 依赖轮询，CI 偶发超时/断言 0 | OnStart 返回时已入队；测试立即可见 pos |
+
+**Learned**
+
+- 把「行已写入」和「已对调度器可见」拆开很重要：API 用 OnStart 交 id 时，调用方会立刻查 `QueuePos` / 停排队中的运行；id 早于入队等于把内部调度缝隙暴露成产品行为。
+- `BeforeStart` 只在 `waited` 时跑是有意的（没排队就不必按「等的时候情况变了」再查）；真正要修的是别在入队前把 id 交出去，让本该排队的运行被误判成「没等过」。
+
+**参考**：n8n `packages/cli/src/active-executions.ts` 里执行先进入 active/ throttled 集合，再对外暴露状态；对外可见时机落在调度登记之后。tidebot 的 OnStart 对齐「对队列可见」这一刻。
+
+**Ideas for later**
+
+- `workflow_runs` / `workflow_run_nodes` 清理（发现 #6）：软删工作流仍留历史，节点输出最大 128KB×32，可纳入「设置 › 数据」清理。
+- WebUI 单包去注释/压空白（发现 #5）：`build-webui.py`，量 gzip 前后。

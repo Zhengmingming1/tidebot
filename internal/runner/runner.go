@@ -57,7 +57,9 @@ type Options struct {
 	Logger          *slog.Logger
 	// RunID is filled in by RunOnce (used to label the live process list).
 	RunID string
-	// OnStart, if set, receives the run id as soon as the run row exists (live progress).
+	// OnStart, if set, receives the run id once the run has joined the wait queue
+	// or taken a concurrency slot (live progress / API id handoff). When the run
+	// had to wait, QueuePos is already > 0 by the time OnStart runs.
 	OnStart func(runID string)
 	// NoPluginMCP keeps the owner's plugin connectors out of this run (AI plugin builder).
 	NoPluginMCP bool
@@ -336,14 +338,22 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 			}
 		}
 	}
-	if opts.OnStart != nil {
-		opts.OnStart(runID)
+	// Hand the id back only after the run is visible in the queue (or already
+	// holding a slot). Callers that return the id from OnStart used to see
+	// QueuePos 0 for a beat, and a slot freeing in that window skipped BeforeStart.
+	onStart := opts.OnStart
+	notifyStart := func() {
+		if onStart != nil {
+			onStart(runID)
+			onStart = nil
+		}
 	}
 
 	waited := false
 	queuedAt := time.Now()
 	err := r.slots.acquire(runCtx, r.quit, runID, func(ahead int) {
 		waited = true
+		notifyStart() // already in waiting[]; QueuePos > 0
 		fmt.Fprintf(logW, "[%s] queued: waiting for a free slot (%d ahead)\n", time.Now().Format("15:04:05"), ahead)
 		log.Info("run queued", "run_id", runID, "task_id", opts.TaskID, "ahead", ahead)
 	})
@@ -360,8 +370,10 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 		}
 	}
 	if err != nil {
+		notifyStart() // row exists; launch() still needs the id
 		return r.finishUnstarted(runID, opts, logW, err)
 	}
+	notifyStart()
 	defer r.slots.release()
 	if runCtx.Err() != nil {
 		return r.finishUnstarted(runID, opts, logW, context.Cause(runCtx))

@@ -84,9 +84,10 @@ func TestQueuedRunSkippedWhenBudgetRanOut(t *testing.T) {
 	if err != nil || quick == "" {
 		t.Fatalf("quick: %q %v", quick, err)
 	}
-	// OnStart hands back the id before the run joins the line; wait until it waits there,
-	// or a slow start could find the slot free and never be checked again.
-	waitFor(t, 5*time.Second, func() bool { return a.Runner.QueuePos(quick) > 0 })
+	// OnStart returns the id only after the run has joined the line (QueuePos > 0).
+	if a.Runner.QueuePos(quick) == 0 {
+		waitFor(t, 5*time.Second, func() bool { return a.Runner.QueuePos(quick) > 0 })
+	}
 	events := a.Events.Subscribe(32)
 
 	// Spend lands while they wait (e.g. the long run's usage, another core's run).

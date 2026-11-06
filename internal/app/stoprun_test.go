@@ -49,8 +49,10 @@ func TestUserStopQueuedAndRunning(t *testing.T) {
 	if err != nil || queued == "" {
 		t.Fatalf("queued start: %q %v", queued, err)
 	}
-	// The row (and the id) exist before the run joins the line: OnStart fires first.
-	waitFor(t, 5*time.Second, func() bool { return a.Runner.QueuePos(queued) == 1 })
+	// OnStart returns the id only after the run has joined the line, so QueuePos is 1.
+	if a.Runner.QueuePos(queued) != 1 {
+		waitFor(t, 5*time.Second, func() bool { return a.Runner.QueuePos(queued) == 1 })
+	}
 	if was, err := a.StopRun(ctx, queued); err != nil || was != "queued" {
 		t.Fatalf("stop queued: %q %v", was, err)
 	}

@@ -212,3 +212,54 @@ func TestQueuedRunVisibleStoppableAndTimedFromStart(t *testing.T) {
 		t.Fatal("cancel of a finished run reported true")
 	}
 }
+
+// OnStart fires only after the run has joined the wait queue (QueuePos > 0) or
+// taken a free slot. Returning the id earlier left QueuePos briefly at 0 and let
+// a freeing slot skip BeforeStart.
+func TestOnStartAfterEnqueueOrSlot(t *testing.T) {
+	skipOnWindows(t)
+	r, _, dir := drainRunner(t, 1)
+	slow := slowClaude(t, dir, "0.8")
+	fastDir := t.TempDir()
+	fast := slowClaude(t, fastDir, "0")
+
+	first := make(chan Result, 1)
+	go func() { res, _ := r.RunOnce(context.Background(), drainOpts(slow, dir)); first <- res }()
+	waitActive(t, r, 1)
+
+	type saw struct {
+		id  string
+		pos int
+	}
+	seen := make(chan saw, 1)
+	o := drainOpts(fast, fastDir)
+	o.OnStart = func(id string) { seen <- saw{id: id, pos: r.QueuePos(id)} }
+	done := make(chan Result, 1)
+	go func() { res, _ := r.RunOnce(context.Background(), o); done <- res }()
+	got := <-seen
+	if got.id == "" || got.pos != 1 {
+		t.Fatalf("queued OnStart id=%q QueuePos=%d want 1", got.id, got.pos)
+	}
+	if !r.Cancel(got.id) {
+		t.Fatal("cancel queued")
+	}
+	if res := <-done; res.Status != "canceled" {
+		t.Fatalf("queued status=%s", res.Status)
+	}
+	if res := <-first; res.Status != "succeeded" {
+		t.Fatalf("first: %s", res.Status)
+	}
+
+	// Free slot: OnStart still fires, QueuePos stays 0 (not waiting).
+	free := make(chan saw, 1)
+	o2 := drainOpts(fast, fastDir)
+	o2.OnStart = func(id string) { free <- saw{id: id, pos: r.QueuePos(id)} }
+	res, err := r.RunOnce(context.Background(), o2)
+	if err != nil || res.Status != "succeeded" {
+		t.Fatalf("free slot: %+v %v", res, err)
+	}
+	got = <-free
+	if got.id != res.RunID || got.pos != 0 {
+		t.Fatalf("free OnStart id=%q QueuePos=%d want id=%s pos=0", got.id, got.pos, res.RunID)
+	}
+}
