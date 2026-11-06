@@ -41,7 +41,7 @@ func TestPruneRowsKeepsRecentAndQueued(t *testing.T) {
 	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_running','w_live',1,'running','','{}',?)`, ago(100))
 	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_queued','w_live',1,'queued','','{}',?)`, ago(100))
 	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_mid','w_gone',1,'succeeded','','{}',?)`, ago(14)) // soft-deleted, past 7d
-	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_new','w_gone',1,'failed','','{}',?)`, ago(2))  // soft-deleted, recent
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_new','w_gone',1,'failed','','{}',?)`, ago(2))     // soft-deleted, recent
 	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_old_ok','a','succeeded',?)`, strings.Repeat("x", 1024))
 	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_gone_mid','a','succeeded',?)`, strings.Repeat("y", 2048))
 	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_new_ok','a','succeeded','keep')`)
@@ -138,10 +138,10 @@ func TestCleanupRecordsPrunedRows(t *testing.T) {
 func TestPruneQueriesUseIndexes(t *testing.T) {
 	a := newTestApp(t)
 	plans := map[string]string{
-		`SELECT id FROM login_attempts WHERE at < '2026' LIMIT 1`:                               "idx_login_attempts_at",
-		`SELECT COUNT(1), MIN(at) FROM login_attempts WHERE ip='x' AND ok=0 AND at>='2026'`:     "idx_login_attempts_ip_at",
-		`SELECT id FROM notifications WHERE status <> 'queued' AND created_at < '2026' LIMIT 1`: "idx_notifications_created",
-		`SELECT id FROM budget_events WHERE at < '2026' LIMIT 1`:                                "idx_budget_events_at",
+		`SELECT id FROM login_attempts WHERE at < '2026' LIMIT 1`:                                               "idx_login_attempts_at",
+		`SELECT COUNT(1), MIN(at) FROM login_attempts WHERE ip='x' AND ok=0 AND at>='2026'`:                     "idx_login_attempts_ip_at",
+		`SELECT id FROM notifications WHERE status <> 'queued' AND created_at < '2026' LIMIT 1`:                 "idx_notifications_created",
+		`SELECT id FROM budget_events WHERE at < '2026' LIMIT 1`:                                                "idx_budget_events_at",
 		`SELECT id FROM workflow_runs WHERE created_at < '2026' AND status NOT IN ('queued','running') LIMIT 1`: "idx_workflow_runs_created",
 	}
 	for q, idx := range plans {
@@ -162,7 +162,6 @@ func TestPruneQueriesUseIndexes(t *testing.T) {
 		}
 	}
 }
-
 
 func TestPruneWorkflowRunsReclaimsNodeOutput(t *testing.T) {
 	a := newTestApp(t)
@@ -224,4 +223,91 @@ func TestPruneWorkflowRunsReclaimsNodeOutput(t *testing.T) {
 	}
 	t.Logf("workflow prune: removed %d runs / %d KB node output; db %d KB → %d KB after vacuum (−%d KB)",
 		nRuns, beforeBytes>>10, beforeFile>>10, afterFile>>10, (beforeFile-afterFile)>>10)
+}
+
+func TestPruneSoftDeletedWorkflowVersionsReclaimsDefinition(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	now := time.Now()
+	ago := func(d int) string { return now.Add(-time.Duration(d) * 24 * time.Hour).UTC().Format(time.RFC3339) }
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := a.DB.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Soft-deleted past the week, no runs left → versions + stub + bindings go.
+	exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('wf_gone_old','GoneOld',2,1,?,?)`, ago(40), ago(14))
+	fat := strings.Repeat(`{"nodes":[{"id":"n1","kind":"skill","name":"Step"}]}`+"x", 2000) // ~140 KB definition
+	exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf_gone_old',1,?,?)`, fat, ago(40))
+	exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf_gone_old',2,?,?)`, fat, ago(30))
+	exec(`INSERT INTO capabilities(id,title,status,current_version_id,created_at,updated_at) VALUES('cap1','C','installed','v1',?,?)`, ago(40), ago(40))
+	exec(`INSERT INTO capability_bindings(owner_kind,owner_id,capability_id,version_id,created_at) VALUES('workflow_node','wf_gone_old:n1','cap1','',?)`, ago(30))
+	exec(`INSERT INTO capability_bindings(owner_kind,owner_id,capability_id,version_id,created_at) VALUES('task','task_live','cap1','',?)`, ago(30)) // unrelated: stays
+
+	// Soft-deleted recently, or still has a run → keep versions.
+	exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('wf_gone_new','GoneNew',1,1,?,?)`, ago(10), ago(2))
+	exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf_gone_new',1,'{"nodes":[]}',?)`, ago(10))
+	exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('wf_gone_run','GoneRun',1,1,?,?)`, ago(40), ago(20))
+	exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf_gone_run',1,'{"nodes":[]}',?)`, ago(40))
+	exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_keep','wf_gone_run',1,'succeeded','','{}',?)`, ago(2))
+
+	// Live workflow: never touched by these rules.
+	exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('wf_live','Live',1,0,?,?)`, ago(40), ago(40))
+	exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf_live',1,'{"nodes":[]}',?)`, ago(40))
+
+	var beforeDef int64
+	if err := a.DB.QueryRow(`SELECT COALESCE(SUM(LENGTH(definition_json)),0) FROM workflow_versions WHERE workflow_id='wf_gone_old'`).Scan(&beforeDef); err != nil {
+		t.Fatal(err)
+	}
+	if beforeDef < 100<<10 {
+		t.Fatalf("fixture definition too small: %d", beforeDef)
+	}
+	var pageSize, pageCount int64
+	_ = a.DB.QueryRow(`PRAGMA page_size`).Scan(&pageSize)
+	_ = a.DB.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
+	beforeFile := pageCount * pageSize
+
+	n, err := a.pruneRows(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2 versions + 1 binding + 1 workflow stub = 4 (wr_keep not old enough for runs rule)
+	if n != 4 {
+		t.Fatalf("deleted %d rows, want 4", n)
+	}
+	var leftVers, leftWF, leftBind, liveBind int
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflow_versions WHERE workflow_id='wf_gone_old'`).Scan(&leftVers)
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflows WHERE id='wf_gone_old'`).Scan(&leftWF)
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM capability_bindings WHERE owner_id='wf_gone_old:n1'`).Scan(&leftBind)
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM capability_bindings WHERE owner_id='task_live'`).Scan(&liveBind)
+	if leftVers != 0 || leftWF != 0 || leftBind != 0 {
+		t.Fatalf("soft-deleted reclaim left versions=%d workflows=%d bindings=%d", leftVers, leftWF, leftBind)
+	}
+	if liveBind != 1 {
+		t.Fatal("unrelated task binding was removed")
+	}
+	keep := func(wid string) {
+		t.Helper()
+		var c int
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflow_versions WHERE workflow_id=?`, wid).Scan(&c)
+		if c != 1 {
+			t.Fatalf("%s versions=%d, want 1", wid, c)
+		}
+	}
+	keep("wf_gone_new")
+	keep("wf_gone_run")
+	keep("wf_live")
+
+	_, _ = a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	if _, err := a.DB.Exec(`VACUUM`); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.DB.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
+	afterFile := pageCount * pageSize
+	if afterFile >= beforeFile {
+		t.Fatalf("db file did not shrink after vacuum: before=%d after=%d (payload %d)", beforeFile, afterFile, beforeDef)
+	}
+	t.Logf("soft-deleted workflow versions: removed 2 defs / %d KB; db %d KB → %d KB after vacuum (−%d KB)",
+		beforeDef>>10, beforeFile>>10, afterFile>>10, (beforeFile-afterFile)>>10)
 }

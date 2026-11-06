@@ -5378,7 +5378,7 @@ a bulk edit makes undo exact without a history table.
 **Ideas for later**
 
 - WebUI 单包去注释/压空白（发现 #5）：`build-webui.py`，量 gzip 前后。
-- 工作流执行清理是否跟「设置 › 数据」的保留天数挂钩（现在是固定 90 / 软删 7 天）；软删工作流的 `workflow_versions` 是否也要在一段时间后收掉。
+- 工作流执行清理是否跟「设置 › 数据」的保留天数挂钩（现在是固定 90 / 软删 7 天）。软删工作流的 `workflow_versions` 已在 2026-11-07 回收。
 
 ### 2026-11-06（续）：清理过期的工作流执行记录（发现 #6）
 
@@ -5407,4 +5407,36 @@ a bulk edit makes undo exact without a history table.
 **Ideas for later**
 
 - WebUI 单包去注释/压空白（发现 #5）。
-- 工作流执行保留天数改成跟「设置 › 数据」可配；软删工作流的版本定义（`workflow_versions`）是否延后回收。
+- 工作流执行保留天数改成跟「设置 › 数据」可配。
+
+### 2026-11-07：软删工作流的版本定义与空壳一并回收
+
+**Done**
+
+- **问题**：上一轮清了过期的 `workflow_runs`，但软删工作流的 `workflow_versions.definition_json` 和空壳行一直留着。能力包卸载时会扫全部 `definition_json` 做引用检查（`capability/uninstall_cleanup.go`），软删历史越多越慢，数据库也只涨不缩。上一轮 CI 还因 `rowprune_test.go` 未 `gofmt` 红了。
+- **改法**：同一套 `pruneRows`（7 天宽限期，且该工作流已无任何 `workflow_runs`）再清三样：
+  1. `workflow_versions`（大头）；
+  2. 指向其节点的 `capability_bindings`（`owner_kind=workflow_node`，`owner_id` 前缀精确匹配 `wf…:`）；
+  3. 已无版本、无执行的软删 `workflows` 空壳。
+  仍有近期执行、或软删未满 7 天的不动；未软删的工作流不动。顺带 `gofmt` 修好上一轮测试文件，让 CI 的 i18n/gofmt 关口通过。
+- 测试：新增 `TestPruneSoftDeletedWorkflowVersionsReclaimsDefinition`（两版大 definition、节点绑定、仍有执行/未满 7 天/活着的对照）；原有 keep/index 测试仍过。
+
+| 指标（本机 Linux，测试夹具） | 清理前 | 清理后（含 VACUUM） |
+| --- | ---: | ---: |
+| 软删工作流 definition_json | 207 KB（2 个版本） | 0 |
+| 数据库文件 | 920 KB | 712 KB（约 −208 KB） |
+| 删除行 | — | 2 versions + 1 binding + 1 workflow stub |
+
+**Learned**
+
+- 软删「列表不可见」不等于「引用检查不可见」：卸载路径仍会扫历史 definition；回收策略要和引用扫描的范围对齐，否则磁盘和 CPU 一起漏。
+- 绑定 `owner_id` 用 `substr` 前缀相等，不用 `LIKE`，避免 id 里万一出现 `_`/`%` 误匹配。
+
+**参考**：承接上一轮 Uptime Kuma / n8n 的按保留期清历史；本轮把「定义」和「执行」拆开回收，执行先走、定义在无执行后再走。
+
+**Ideas for later**
+
+- WebUI 单包去注释/压空白（发现 #5）。
+- 工作流执行保留天数跟「设置 › 数据」可配。
+- 能力包卸载时的 definition 扫描可改成按 skill/capability id 的定向查询，避免全表读 JSON。
+- 会话转录（`<data>/claude-config/projects`）是否纳入保留策略：仅删会话时清理，长期闲置会话会一直占盘。

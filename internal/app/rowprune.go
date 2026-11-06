@@ -44,6 +44,32 @@ var rowRules = []rowRule{
 	// so reclaim after a week instead of waiting the full 90 days.
 	{"workflow_runs_deleted", 7 * 24 * time.Hour,
 		`DELETE FROM workflow_runs WHERE id IN (SELECT r.id FROM workflow_runs r JOIN workflows w ON w.id=r.workflow_id WHERE w.deleted=1 AND r.created_at < ? AND r.status NOT IN ('queued','running') LIMIT ?)`},
+	// Soft-deleted workflows whose executions are already gone: drop their version
+	// definitions (definition_json) after the same week. Capability uninstall scans
+	// every definition_json; leaving soft-deleted history forever grows that cost.
+	{"workflow_versions_deleted", 7 * 24 * time.Hour,
+		`DELETE FROM workflow_versions WHERE workflow_id IN (
+			SELECT w.id FROM workflows w
+			WHERE w.deleted=1 AND w.updated_at < ?
+			AND NOT EXISTS (SELECT 1 FROM workflow_runs r WHERE r.workflow_id=w.id)
+			LIMIT ?)`},
+	// Bindings to nodes of those soft-deleted workflows (owner_id is "wf…:node").
+	{"capability_bindings_deleted_workflows", 7 * 24 * time.Hour,
+		`DELETE FROM capability_bindings WHERE owner_kind='workflow_node' AND owner_id IN (
+			SELECT b.owner_id FROM capability_bindings b
+			JOIN workflows w ON w.deleted=1 AND w.updated_at < ?
+				AND b.owner_kind='workflow_node'
+				AND substr(b.owner_id,1,length(w.id)+1)=w.id||':'
+			WHERE NOT EXISTS (SELECT 1 FROM workflow_runs r WHERE r.workflow_id=w.id)
+			LIMIT ?)`},
+	// Empty soft-deleted workflow stubs (no versions, no runs) after the week.
+	{"workflows_deleted", 7 * 24 * time.Hour,
+		`DELETE FROM workflows WHERE id IN (
+			SELECT w.id FROM workflows w
+			WHERE w.deleted=1 AND w.updated_at < ?
+			AND NOT EXISTS (SELECT 1 FROM workflow_runs r WHERE r.workflow_id=w.id)
+			AND NOT EXISTS (SELECT 1 FROM workflow_versions v WHERE v.workflow_id=w.id)
+			LIMIT ?)`},
 }
 
 // pruneRows deletes rows past their keep period in batches, so a long backlog never holds
