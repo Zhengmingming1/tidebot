@@ -5560,5 +5560,36 @@ a bulk edit makes undo exact without a history table.
 **Ideas for later**
 
 - `GC` 在删除事务里遍历单个版本目录算大小（受单快照上限约束，影响小），可挪到事务前。
-- `managed.CheckQuota` 每次托管安装前全树遍历 tools/runtimes/cache，可缓存上次结果并按 mtime 失效。
+- ~~`managed.CheckQuota` 每次托管安装前全树遍历 tools/runtimes/cache，可缓存上次结果并按 mtime 失效。~~ → 见下一轮。
 - WebUI 单包去注释/压空白（发现 #5）；工作流执行保留天数跟「设置 › 数据」可配。
+
+### 2026-11-07：托管依赖 CheckQuota 按目录 mtime 缓存（资源占用）
+
+**Done**
+
+- **问题**：每次托管安装（`InstallArchive` / `InstallNPM` / `InstallUV` 开头 + `finalize`）和「扩展 › 工具」存储视图都会 `CheckQuota` 全树遍历 `tools/`、`runtimes/`、`cache/`、以及每个 `envs/<id>/<ver>`。Node 运行时动辄上万文件；多依赖连续安装、或安装后立刻打开存储页时，同一棵未改动的树被反复 WalkDir。上一轮已把存储统计/快照配额挪出数据库事务，但磁盘遍历本身仍每次全量。
+- **改法**（`internal/capability/managed/storage.go`）：
+  1. 按 `DataDir` 缓存上次 `Usage`（只缓存尺寸，限额每次用当前 `Quotas` 重算，UI 的 MaxInt64 与安装默认限额共用缓存）；
+  2. 失效靠浅层 mtime 指纹 `quotaDiskStamp`：只扫 `kind → name → version`（含 `.install-*` 暂存目录），不进入版本内容；新建/删除/晋升版本会改 stamp，深度内容变更不在本路径的预期里；
+  3. I/O 错误不入缓存；命中时拷贝 `Environments` map，避免并发写。
+- 测试：`storage_quota_cache_test.go`。①未改树第二次不走 `measureTree`；②出现 stage 目录后失效重扫；③缓存命中仍能按更紧限额返回 `ErrQuotaExceeded`；④`TIDEBOT_PERF=1` 冷/热对比。
+
+| 指标（本机 Linux；runtimes 下 2 万文件 + 1 个 env + cache，3 轮） | 冷（全量 Walk） | 热（stamp 命中） |
+| --- | ---: | ---: |
+| `CheckQuota` 耗时 | 38–42 ms | 58–76 µs（约 **500–700×**） |
+| `measureTree` 调用次数（未改树连调 2 次） | 首次 N 次 | 第二次 0 |
+
+**Learned**
+
+- 配额缓存要缓存「尺寸」而不是「是否超限」：同一份 Usage，安装用默认限额、存储页用 MaxInt64，限额应在读缓存后重放。
+- 浅层 stamp 够用的前提是变更都表现为「版本目录出现/消失/改名」（stage → promote、GC）；若将来有对已晋升版本的原地大改写，需要显式失效或加深 stamp。
+
+**参考**：承接 backlog「`managed.CheckQuota` 可缓存上次结果并按 mtime 失效」；与近两轮「先释放连接再 Walk」同一资源主题，本轮省的是重复磁盘遍历本身。
+
+**Ideas for later**
+
+- `GC` 在删除事务里遍历单个版本目录算大小（受单快照上限约束，影响小），可挪到事务前。
+- WebUI 单包去注释/压空白（发现 #5）：`build-webui.py`，量 gzip 前后（粗估 raw 901→787 KB，gzip 246→207 KB）。
+- 工作流执行保留天数跟「设置 › 数据」可配。
+- `cleanupSkillRegistrations` 里对 `capability_versions` 的 lock 全表读也可按 capability_id 收窄（共享检测仍需看其他能力包）。
+- 设置 › 数据的用量条是否加「会话转录」分段；闲置会话的 `chat-sessions/<id>/` 工作目录是否也按同一保留期回收。

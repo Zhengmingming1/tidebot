@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Zhengmingming1/tidebot/internal/safepath"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/safepath"
 )
 
 const DefaultToolsQuota int64 = 2 << 30
@@ -85,8 +87,117 @@ func treeSize(ctx context.Context, root string) (int64, error) {
 	return size, err
 }
 
+// measureTree is the CheckQuota size walk. Tests replace it to count walks.
+var measureTree = treeSize
+
+type quotaCacheEntry struct {
+	stamp string
+	usage Usage
+}
+
+var quotaCacheMu sync.Mutex
+var quotaCache = map[string]quotaCacheEntry{}
+
+func copyUsage(u Usage) Usage {
+	out := Usage{ToolsAndRuntimes: u.ToolsAndRuntimes, Cache: u.Cache, Environments: map[string]int64{}}
+	for k, v := range u.Environments {
+		out.Environments[k] = v
+	}
+	return out
+}
+
+// quotaDiskStamp is a shallow mtime fingerprint of tools/runtimes/envs/cache.
+// It lists kind → name → version (and .install-* stages) without entering
+// version contents, so it stays cheap when a runtime has tens of thousands of
+// files. Creating/removing a staged or promoted version changes the stamp;
+// in-place byte edits deep inside a version are not expected on this path.
+func quotaDiskStamp(dataDir string) (string, error) {
+	var b strings.Builder
+	for _, kind := range []string{"tools", "runtimes", "envs", "cache"} {
+		root := filepath.Join(dataDir, kind)
+		info, err := os.Lstat(root)
+		if os.IsNotExist(err) {
+			b.WriteString(kind + "=missing\n")
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "%s=%d\n", kind, info.ModTime().UnixNano())
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return "", err
+		}
+		for _, e := range entries {
+			info, err := e.Info()
+			if err != nil {
+				return "", err
+			}
+			if !e.IsDir() {
+				fmt.Fprintf(&b, "%s/%s=f%d:%d\n", kind, e.Name(), info.ModTime().UnixNano(), info.Size())
+				continue
+			}
+			fmt.Fprintf(&b, "%s/%s=d%d\n", kind, e.Name(), info.ModTime().UnixNano())
+			children, err := os.ReadDir(filepath.Join(root, e.Name()))
+			if err != nil {
+				return "", err
+			}
+			for _, c := range children {
+				ci, err := c.Info()
+				if err != nil {
+					return "", err
+				}
+				if c.IsDir() {
+					fmt.Fprintf(&b, "%s/%s/%s=d%d\n", kind, e.Name(), c.Name(), ci.ModTime().UnixNano())
+				} else {
+					fmt.Fprintf(&b, "%s/%s/%s=f%d:%d\n", kind, e.Name(), c.Name(), ci.ModTime().UnixNano(), ci.Size())
+				}
+			}
+		}
+	}
+	return b.String(), nil
+}
+
+func loadQuotaCache(dataDir, stamp string) (Usage, bool) {
+	quotaCacheMu.Lock()
+	defer quotaCacheMu.Unlock()
+	ent, ok := quotaCache[dataDir]
+	if !ok || ent.stamp != stamp {
+		return Usage{}, false
+	}
+	return copyUsage(ent.usage), true
+}
+
+func storeQuotaCache(dataDir, stamp string, usage Usage) {
+	quotaCacheMu.Lock()
+	defer quotaCacheMu.Unlock()
+	quotaCache[dataDir] = quotaCacheEntry{stamp: stamp, usage: copyUsage(usage)}
+}
+
+func enforceQuota(usage Usage, q Quotas) (Usage, error) {
+	if usage.Environments == nil {
+		usage.Environments = map[string]int64{}
+	}
+	if usage.ToolsAndRuntimes > q.ToolsAndRuntimes {
+		return usage, fmt.Errorf("%w: tools and runtimes", ErrQuotaExceeded)
+	}
+	if usage.Cache > q.Cache {
+		return usage, fmt.Errorf("%w: cache", ErrQuotaExceeded)
+	}
+	for name, n := range usage.Environments {
+		if n > q.Environment {
+			envName, _, _ := strings.Cut(name, "/")
+			return usage, fmt.Errorf("%w: environment %s", ErrQuotaExceeded, envName)
+		}
+	}
+	return usage, nil
+}
+
 // CheckQuota is read-only and never deletes to make room. Symlinks are not
 // followed. The service should expose its error as a request to clean storage.
+// Results are cached per data directory and invalidated when the shallow
+// directory mtime stamp of tools/runtimes/envs/cache changes, so repeated
+// installs and the extensions storage view do not re-walk unchanged trees.
 func (i *Installer) CheckQuota(ctx context.Context) (Usage, error) {
 	result := Usage{Environments: map[string]int64{}}
 	if !filepath.IsAbs(i.DataDir) {
@@ -98,8 +209,15 @@ func (i *Installer) CheckQuota(ctx context.Context) (Usage, error) {
 			return result, err
 		}
 	}
+	stamp, err := quotaDiskStamp(i.DataDir)
+	if err != nil {
+		return result, err
+	}
+	if cached, ok := loadQuotaCache(i.DataDir, stamp); ok {
+		return enforceQuota(cached, q)
+	}
 	for _, kind := range []string{"tools", "runtimes", "cache"} {
-		n, err := treeSize(ctx, filepath.Join(i.DataDir, kind))
+		n, err := measureTree(ctx, filepath.Join(i.DataDir, kind))
 		if err != nil {
 			return result, err
 		}
@@ -108,12 +226,6 @@ func (i *Installer) CheckQuota(ctx context.Context) (Usage, error) {
 		} else {
 			result.ToolsAndRuntimes += n
 		}
-	}
-	if result.ToolsAndRuntimes > q.ToolsAndRuntimes {
-		return result, fmt.Errorf("%w: tools and runtimes", ErrQuotaExceeded)
-	}
-	if result.Cache > q.Cache {
-		return result, fmt.Errorf("%w: cache", ErrQuotaExceeded)
 	}
 	names, err := os.ReadDir(filepath.Join(i.DataDir, "envs"))
 	if err != nil && !os.IsNotExist(err) {
@@ -132,18 +244,20 @@ func (i *Installer) CheckQuota(ctx context.Context) (Usage, error) {
 				continue
 			}
 			path := filepath.Join(i.DataDir, "envs", name.Name(), version.Name())
-			n, e := treeSize(ctx, path)
+			n, e := measureTree(ctx, path)
 			if e != nil {
 				return result, e
 			}
 			result.Environments[name.Name()+"/"+version.Name()] = n
-			if n > q.Environment {
-				return result, fmt.Errorf("%w: environment %s", ErrQuotaExceeded, name.Name())
-			}
 		}
 	}
-	return result, ctx.Err()
+	if err = ctx.Err(); err != nil {
+		return result, err
+	}
+	storeQuotaCache(i.DataDir, stamp, result)
+	return enforceQuota(result, q)
 }
+
 func (i *Installer) markStage(stage string, r Reference) error {
 	meta := ownership{Format: "tidebot-managed/1", Reference: r, Created: time.Now().UTC(), LastUsed: time.Now().UTC(), Links: map[string]string{}}
 	err := filepath.WalkDir(stage, func(path string, d os.DirEntry, err error) error {
