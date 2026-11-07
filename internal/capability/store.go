@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/id"
@@ -28,6 +29,13 @@ type Store struct {
 	// findings. It must derive its result from the supplied immutable files.
 	ScanSource func(Source, map[string][]byte) (Scan, error)
 }
+
+// installMu serializes snapshot installs between the quota check and commit.
+// Stores are created per request, so the lock is package level.
+var installMu sync.Mutex
+
+// snapshotUsage is replaced by tests to observe the quota walk.
+var snapshotUsage = func(s *Store, ctx context.Context) (int64, error) { return s.SnapshotUsage(ctx) }
 
 func NewStore(db *sql.DB, dataDir string) *Store { return &Store{DB: db, DataDir: dataDir} }
 
@@ -175,17 +183,19 @@ func (s *Store) install(ctx context.Context, proposalID, sessionID, actor string
 			_ = os.RemoveAll(destination)
 		}
 	}()
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return empty, err
-	}
-	defer tx.Rollback()
+	// The quota walk covers the whole capabilities/ tree, which can take a
+	// long time. The pool has a single connection, so walk before BeginTx;
+	// otherwise every other request waits for the disk walk. installMu keeps
+	// installs serialized from the quota check to commit, as the held
+	// connection used to.
+	installMu.Lock()
+	defer installMu.Unlock()
 	limit := s.MaxSnapshotDiskBytes
 	if limit == 0 {
 		limit = 2 << 30
 	}
 	if limit > 0 {
-		usage, e := s.SnapshotUsage(ctx)
+		usage, e := snapshotUsage(s, ctx)
 		if e != nil {
 			return empty, e
 		}
@@ -193,6 +203,11 @@ func (s *Store) install(ctx context.Context, proposalID, sessionID, actor string
 			return empty, errors.New("capability snapshot disk quota exceeded")
 		}
 	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return empty, err
+	}
+	defer tx.Rollback()
 	if proposalID != "" {
 		var originalRaw, kind, baseVersion string
 		if err = tx.QueryRowContext(ctx, `SELECT payload_json,kind,base_version_id FROM capability_proposals WHERE id=? AND session_id=? AND status='applying' AND decided_by=?`, proposalID, sessionID, actor).Scan(&originalRaw, &kind, &baseVersion); err != nil {

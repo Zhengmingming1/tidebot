@@ -5537,3 +5537,28 @@ a bulk edit makes undo exact without a history table.
 - `capability.Store` 安装快照时在写事务里调用 `SnapshotUsage`（遍历整个 `capabilities/`），安装期间同样占住连接；可以把配额检查挪到事务前，事务里只做轻量复核。
 - `managed.CheckQuota` 每次安装前也全树遍历 tools/runtimes/cache，可以缓存上次结果并按 mtime 失效。
 - WebUI 单包去注释/压空白（发现 #5）；工作流执行保留天数跟「设置 › 数据」可配。
+
+### 2026-11-07：安装能力包时配额检查不再占住数据库连接（资源占用 / 卡顿）
+
+**Done**
+
+- **问题**：`capability.Store.install` 先 `BeginTx`，再在事务里调用 `SnapshotUsage` 遍历整个 `<data>/capabilities/` 算快照配额（默认 2 GiB）。连接池只有 1 个连接，遍历期间调度器、WebUI 请求、运行记录写入都在等这个连接。快照越多（多次更新、保留回滚版本）卡得越久；Windows/macOS 上目录遍历更慢、杀毒软件还会扫描。
+- **改法**（`internal/capability/store.go`）：配额遍历挪到 `BeginTx` 之前（快照目录已改名到位，统计口径不变：仍包含本次新快照）；新增包级 `installMu`，从配额检查到提交期间串行化安装，保留原先「占住连接」顺带带来的串行语义——两个并发安装不会都通过只够一个的配额。Store 每次请求新建，所以锁放包级。
+- 测试：`install_quota_perf_test.go`。①配额遍历时另一个 `SELECT 1` 必须 2 s 内拿到连接（改动前：`database held during quota walk: context deadline exceeded`）；②两个并发安装、配额只够一个：配额遍历不并发、恰好一个成功、只装上一个；③`TIDEBOT_PERF=1` 计时。
+
+| 指标（本机 Linux 8 核；capabilities/ 下 2 万个快照文件，3 轮） | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| 安装一个能力包 | 34–38 ms | 35–40 ms（不变） |
+| 安装期间同时发出的 `SELECT 1` 等待连接 | 32–36 ms（等到整个配额遍历结束） | 58–132 µs |
+
+**Learned**
+
+- 和上一轮「扩展 › 工具」存储统计同一类问题：单连接池下 `BeginTx` 就是全局锁，事务开头的慢 I/O 也算。原来的连接占用顺带串行化了并发安装，挪出事务时要用显式锁补回这层语义，不能直接删。
+
+**参考**：上一轮 `90b4aa2`（存储统计先 Rollback 再遍历）；Go `database/sql` 对 `SetMaxOpenConns` 的说明。
+
+**Ideas for later**
+
+- `GC` 在删除事务里遍历单个版本目录算大小（受单快照上限约束，影响小），可挪到事务前。
+- `managed.CheckQuota` 每次托管安装前全树遍历 tools/runtimes/cache，可缓存上次结果并按 mtime 失效。
+- WebUI 单包去注释/压空白（发现 #5）；工作流执行保留天数跟「设置 › 数据」可配。
