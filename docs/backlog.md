@@ -5438,5 +5438,36 @@ a bulk edit makes undo exact without a history table.
 
 - WebUI 单包去注释/压空白（发现 #5）。
 - 工作流执行保留天数跟「设置 › 数据」可配。
-- 能力包卸载时的 definition 扫描可改成按 skill/capability id 的定向查询，避免全表读 JSON。
+- ~~能力包卸载时的 definition 扫描可改成按 skill/capability id 的定向查询，避免全表读 JSON。~~ → 见下一轮（一次扫描 + Contains 门闩）。
 - 会话转录（`<data>/claude-config/projects`）是否纳入保留策略：仅删会话时清理，长期闲置会话会一直占盘。
+
+### 2026-11-06：能力包卸载的历史引用改成一次扫描（资源占用）
+
+**Done**
+
+- **问题**：卸载时 `skillRegistrationRetention` 对每个自有技能都全表读并 JSON 解析 `versions`（task/skill_set）、`workflow_versions`、`workflow_runs`、`chat_sessions`、`capability_proposals`。能力包多技能 × 软删/历史 definition 堆积时是 O(技能数 × 行数) 的解析，上一轮回收软删版本后卸载路径仍会扫还活着的历史版本。
+- **改法**：
+  1. 卸载前对全部候选技能 id **只扫一遍**历史表（`skillsReferencedInHistory`）；
+  2. 每行先用 `strings.Contains` 做门闩，不含任何剩余候选 id 的大 JSON **不解析**；
+  3. 命中后再 `markReferencedSkills` 按 JSON 字符串叶子精确匹配（子串假阳性不保留）；畸形非空且含候选 id 子串仍失败关闭。
+  语义与原来一致：历史 task/workflow/session/proposal 引用仍会保留技能；只是不再对每个技能重复解析无关 definition。
+- 测试：原有卸载保留/回滚用例仍过；新增无关 definition 堆积下的保留与删除、子串假阳性、以及 8 技能 × 80×32KB 的前后对比。
+
+| 指标（本机 Linux，测试夹具） | 优化前 | 优化后 |
+| --- | ---: | ---: |
+| 8 个候选技能 × 80 条无关 32KB definition | 51 ms；640 次行读；约 20 523 KB 进入 Go 并 JSON 解析 | 3.1 ms；各表各扫 1 遍；无关行 0 次 JSON 解析（约 **16×**） |
+| 单技能卸载（80 条无关 definition，含一次历史 task 引用） | — | 约 9–10 ms，技能正确保留 |
+
+**Learned**
+
+- 「按 id 定向」若做成多条 `instr(... ) OR …`，在零命中时 SQLite 仍会对每个候选做全表 instr，多技能反而更慢；**一次读出 + Contains 门闩**更稳，真正省掉的是重复的 Go 侧拷贝和 JSON 解析。
+- 失败关闭不必「任意畸形行就保留所有技能」：不含该技能 id 子串的畸形行不可能引用它；门闩后再对命中行失败关闭更准。
+
+**参考**：承接 backlog「能力包卸载时的 definition 扫描」后续想法；Uptime Kuma / 上一轮 rowprune 的「大 JSON 历史要单独对待」。一次扫描 + 子串门闩的思路接近常见的「先 cheap filter 再 expensive parse」。
+
+**Ideas for later**
+
+- WebUI 单包去注释/压空白（发现 #5）：`build-webui.py`，量 gzip 前后（粗估 raw 901→787 KB，gzip 246→207 KB）。
+- 工作流执行保留天数跟「设置 › 数据」可配。
+- 会话转录（`<data>/claude-config/projects`）是否纳入保留策略：仅删会话时清理，长期闲置会话会一直占盘。
+- `cleanupSkillRegistrations` 里对 `capability_versions` 的 lock 全表读也可按 capability_id 收窄（共享检测仍需看其他能力包）。

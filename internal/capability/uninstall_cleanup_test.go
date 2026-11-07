@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/version"
@@ -152,5 +154,179 @@ func TestUninstallCleanupFailureRollsBackRegistration(t *testing.T) {
 	}
 	if _, err = s.Get(ctx, r.ID); err != nil {
 		t.Fatal("availability changed despite rollback", err)
+	}
+}
+
+func TestUninstallHistoryScanSkipsUnrelatedDefinitions(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	r, _ := installOwnedSkill(t, s)
+	c := r.Lock.Components[0]
+
+	// Large backlog of workflow definitions that do not mention this skill.
+	// Before the instr filter, uninstall parsed every blob for each owned skill.
+	blob := `{"nodes":[{"id":"n1","skill":"unrelated-skill-aaaaaaaa","prompt":"` + strings.Repeat("x", 32*1024) + `"}]}`
+	const n = 80
+	for i := 0; i < n; i++ {
+		wf := "wf-hist-" + string(rune('a'+i%26)) + "-" + itoa(i)
+		if _, err := s.DB.Exec(`INSERT INTO workflows(id,name,description,version,deleted,created_at,updated_at) VALUES(?,?,?,1,0,'t','t')`, wf, wf, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES(?,1,?,?)`, wf, blob, "t"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One historical task version that does reference the skill — must retain.
+	if _, err := version.New(s.DB).Commit(ctx, version.CommitInput{EntityType: "task", EntityID: "old", Content: map[string]any{"skill": c.SkillID}, NoMove: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	out, err := s.UninstallWithReport(ctx, r.ID, "ui")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.RemovedSkills) != 0 {
+		t.Fatalf("should retain skill referenced by historical task: %+v", out)
+	}
+	found := false
+	for _, retained := range out.Retained {
+		if retained.Kind == "skill" && retained.ID == c.SkillID && retained.Reason == "retained by task, workflow, session or proposal history" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing history retention: %+v", out)
+	}
+	t.Logf("uninstall with %d unrelated %dKB workflow definitions: %s", n, len(blob)/1024, elapsed)
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [12]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}
+
+func TestUninstallHistoryScanRemovesWhenNoReference(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	r, _ := installOwnedSkill(t, s)
+	c := r.Lock.Components[0]
+	blob := `{"nodes":[{"id":"n1","skill":"other","prompt":"` + strings.Repeat("y", 8*1024) + `"}]}`
+	for i := 0; i < 40; i++ {
+		wf := "wf-clean-" + itoa(i)
+		if _, err := s.DB.Exec(`INSERT INTO workflows(id,name,description,version,deleted,created_at,updated_at) VALUES(?,?,?,1,0,'t','t')`, wf, wf, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES(?,1,?,?)`, wf, blob, "t"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := time.Now()
+	out, err := s.UninstallWithReport(ctx, r.ID, "ui")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.RemovedSkills) != 1 || out.RemovedSkills[0] != c.SkillID {
+		t.Fatalf("expected exclusive skill removed: %+v", out)
+	}
+	t.Logf("uninstall with 40 unrelated definitions (no ref): %s", elapsed)
+}
+
+func TestUninstallHistoryScanPerf(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	_, _ = installOwnedSkill(t, s) // ensure schema / tables exist
+	blob := `{"nodes":[{"id":"n1","skill":"unrelated-skill-aaaaaaaa","prompt":"` + strings.Repeat("x", 32*1024) + `"}]}`
+	const n = 80
+	for i := 0; i < n; i++ {
+		wf := "wf-perf-" + itoa(i)
+		if _, err := s.DB.Exec(`INSERT INTO workflows(id,name,description,version,deleted,created_at,updated_at) VALUES(?,?,?,1,0,'t','t')`, wf, wf, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES(?,1,?,?)`, wf, blob, "t"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const skills = 8
+	candidates := map[string]bool{}
+	for i := 0; i < skills; i++ {
+		candidates["sk-perf-"+itoa(i)+"-"+strings.Repeat("a", 24)] = true
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	oldStart := time.Now()
+	oldBytes := 0
+	oldRows := 0
+	for sid := range candidates {
+		one := map[string]bool{sid: true}
+		rows, err := tx.Query(`SELECT definition_json FROM workflow_versions`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var raw string
+			if err = rows.Scan(&raw); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			oldBytes += len(raw)
+			oldRows++
+			_ = references(raw, "", one)
+		}
+		rows.Close()
+	}
+	oldElapsed := time.Since(oldStart)
+
+	newStart := time.Now()
+	found, err := skillsReferencedInHistory(ctx, tx, candidates)
+	newElapsed := time.Since(newStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("unexpected hits %+v", found)
+	}
+	t.Logf("%d skills × %d×32KB unrelated defs: old %s (%d row reads, %d KB into Go); new one-pass Contains+parse-gate %s",
+		skills, n, oldElapsed, oldRows, oldBytes/1024, newElapsed)
+	if newElapsed*3 > oldElapsed {
+		t.Fatalf("expected ≥3× speedup, got old=%s new=%s", oldElapsed, newElapsed)
+	}
+}
+
+func TestSkillsReferencedInHistorySubstringFalsePositive(t *testing.T) {
+	// Substring hit that is not a JSON string leaf must not retain.
+	s := testStore(t)
+	ctx := context.Background()
+	r, _ := installOwnedSkill(t, s)
+	c := r.Lock.Components[0]
+	// Embed the skill id inside a longer token so Contains matches but JSON leaf does not.
+	raw := `{"note":"prefix-` + c.SkillID + `-suffix"}`
+	if _, err := s.DB.Exec(`INSERT INTO workflows(id,name,description,version,deleted,created_at,updated_at) VALUES('wf-fp','fp','',1,0,'t','t')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf-fp',1,?,?)`, raw, "t"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.UninstallWithReport(ctx, r.ID, "ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.RemovedSkills) != 1 || out.RemovedSkills[0] != c.SkillID {
+		t.Fatalf("false-positive substring retained skill: %+v", out)
 	}
 }

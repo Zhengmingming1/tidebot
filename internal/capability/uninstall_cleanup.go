@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 )
 
 // UninstallResult distinguishes removed registrations from retained immutable
@@ -83,6 +84,14 @@ func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, ou
 		ids = append(ids, sid)
 	}
 	sort.Strings(ids)
+	candidates := map[string]bool{}
+	for sid := range own {
+		candidates[sid] = true
+	}
+	historyRefs, err := skillsReferencedInHistory(ctx, tx, candidates)
+	if err != nil {
+		return err
+	}
 	for _, sid := range ids {
 		var present int
 		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM skills WHERE id=?`, sid).Scan(&present); err != nil {
@@ -103,7 +112,7 @@ func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, ou
 			reason = "referenced by another capability snapshot"
 		}
 		if reason == "" {
-			reason, err = skillRegistrationRetention(ctx, tx, sid, own[sid])
+			reason, err = skillRegistrationRetention(ctx, tx, sid, own[sid], historyRefs)
 			if err != nil {
 				return err
 			}
@@ -131,7 +140,7 @@ func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, ou
 	return nil
 }
 
-func skillRegistrationRetention(ctx context.Context, tx *sql.Tx, sid string, ownedVersions map[string]bool) (string, error) {
+func skillRegistrationRetention(ctx context.Context, tx *sql.Tx, sid string, ownedVersions, historyRefs map[string]bool) (string, error) {
 	var count int
 	var registeredName string
 	if err := tx.QueryRowContext(ctx, `SELECT name FROM skills WHERE id=?`, sid).Scan(&registeredName); err != nil {
@@ -198,39 +207,119 @@ func skillRegistrationRetention(ctx context.Context, tx *sql.Tx, sid string, own
 			return check.reason, nil
 		}
 	}
-	// Include historical task/workflow versions, not only currently active pointers.
-	for _, query := range []string{
-		`SELECT content_json FROM versions WHERE entity_type IN ('task','skill_set')`,
-		`SELECT definition_json FROM workflow_versions`,
-		`SELECT snapshot_json FROM workflow_runs`,
-		`SELECT bindings_json FROM chat_sessions`,
-		`SELECT payload_json FROM capability_proposals WHERE status IN ('pending','applying')`,
-	} {
+	if historyRefs[sid] {
+		return "retained by task, workflow, session or proposal history", nil
+	}
+	return "", nil
+}
+
+// historyRefQueries are JSON blobs that may pin skill ids across history. Retention
+// must see historical rows (not only current pointers), so these stay broader than
+// the active-only checks that block uninstall itself.
+var historyRefQueries = []string{
+	`SELECT content_json FROM versions WHERE entity_type IN ('task','skill_set')`,
+	`SELECT definition_json FROM workflow_versions`,
+	`SELECT snapshot_json FROM workflow_runs`,
+	`SELECT bindings_json FROM chat_sessions`,
+	`SELECT payload_json FROM capability_proposals WHERE status IN ('pending','applying')`,
+}
+
+// skillsReferencedInHistory scans each history table once for all candidate skill
+// ids. A cheap strings.Contains gate skips JSON parsing for blobs that cannot
+// mention any remaining candidate, so a large historical backlog is no longer
+// O(skills × rows) full parses on every uninstall.
+func skillsReferencedInHistory(ctx context.Context, tx *sql.Tx, candidates map[string]bool) (map[string]bool, error) {
+	found := map[string]bool{}
+	if len(candidates) == 0 {
+		return found, nil
+	}
+	ids := make([]string, 0, len(candidates))
+	for id := range candidates {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, query := range historyRefQueries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		rows, err := tx.QueryContext(ctx, query)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		found := false
 		for rows.Next() {
 			var raw sql.NullString
 			if err = rows.Scan(&raw); err != nil {
 				rows.Close()
-				return "", err
+				return nil, err
 			}
-			if references(raw.String, "", map[string]bool{sid: true}) {
-				found = true
+			remaining := map[string]bool{}
+			for _, id := range ids {
+				if !found[id] {
+					remaining[id] = true
+				}
 			}
+			if len(remaining) == 0 {
+				rows.Close()
+				return found, nil
+			}
+			gate := false
+			for id := range remaining {
+				if strings.Contains(raw.String, id) {
+					gate = true
+					break
+				}
+			}
+			if !gate {
+				continue
+			}
+			markReferencedSkills(raw.String, remaining, found)
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		if found {
-			return "retained by task, workflow, session or proposal history", nil
+		if len(found) == len(candidates) {
+			return found, nil
 		}
 	}
-	return "", nil
+	return found, nil
+}
+
+// markReferencedSkills records every candidate skill id that appears as a JSON
+// string leaf. Malformed non-empty JSON fails closed for candidates whose id
+// substring is present (the Contains gate already selected this row).
+func markReferencedSkills(raw string, candidates, found map[string]bool) {
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		if raw == "" {
+			return
+		}
+		for id := range candidates {
+			if strings.Contains(raw, id) {
+				found[id] = true
+			}
+		}
+		return
+	}
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case string:
+			if candidates[x] {
+				found[x] = true
+			}
+		case []any:
+			for _, child := range x {
+				walk(child)
+			}
+		case map[string]any:
+			for _, child := range x {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
 }
 
 // Rollback after reinstall can rehydrate exclusive registrations removed during
