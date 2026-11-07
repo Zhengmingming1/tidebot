@@ -23,8 +23,9 @@ import (
 
 // --- retention ---------------------------------------------------------------
 
-// RetentionPolicy: transcripts 30 d, artifacts 90 d, always keep the newest 20 runs per
-// task, never touch runs flagged important, and cap logs+artifacts at 10 GB.
+// RetentionPolicy: run logs 30 d, artifacts 90 d, idle chat transcripts follow
+// log days (orphans always removed), always keep the newest 20 runs per task,
+// never touch runs flagged important, and cap logs+artifacts at 10 GB.
 type RetentionPolicy struct {
 	LogDays       int   `json:"log_days"`
 	ArtifactDays  int   `json:"artifact_days"`
@@ -48,13 +49,15 @@ type runFile struct {
 	path  string
 	size  int64
 	mod   time.Time
-	kind  string // log | artifact
+	kind  string // log | artifact | chat
 	// packed: a gzipped run log (<run_id>.log.gz)
 	packed bool
 }
 
-// ApplyRetention deletes old transcripts/artifacts. Run metadata rows stay in the DB.
-// A zero LogDays/ArtifactDays keeps that kind forever; a zero MaxTotalBytes means no cap.
+// ApplyRetention deletes old run logs/artifacts and idle/orphan chat transcripts.
+// Run metadata and chat_sessions rows stay in the DB. A zero LogDays/ArtifactDays
+// keeps that kind forever (orphan chat transcripts are still removed); a zero
+// MaxTotalBytes means no cap on logs+artifacts.
 func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Time) (RetentionReport, error) {
 	plan, err := a.planRetention(ctx, p, now)
 	if err != nil {
@@ -62,13 +65,19 @@ func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Ti
 	}
 	rep := RetentionReport{TotalBytes: plan.TotalBytes}
 	for _, f := range plan.del {
-		if os.RemoveAll(f.path) == nil {
+		ok := os.RemoveAll(f.path) == nil
+		if f.kind == "chat" {
+			// Subagent transcripts / tool results sit beside the .jsonl.
+			_ = os.RemoveAll(strings.TrimSuffix(f.path, ".jsonl"))
+		}
+		if ok {
 			rep.DeletedFiles++
 			rep.FreedBytes += f.size
-		} else {
+		} else if f.kind != "chat" {
 			rep.TotalBytes += f.size
 		}
 	}
+	a.removeEmptyChatProjectDirs()
 	return rep, nil
 }
 
@@ -80,7 +89,8 @@ type retentionPlan struct {
 
 // planRetention decides what ApplyRetention would delete, without touching anything.
 // Important runs, the newest KeepPerTask runs of each task and runs still queued or
-// running are never selected.
+// running are never selected. Chat transcripts for answering sessions are kept;
+// orphans and long-idle ones follow LogDays (see planChatTranscriptRetention).
 func (a *App) planRetention(ctx context.Context, p RetentionPolicy, now time.Time) (retentionPlan, error) {
 	var plan retentionPlan
 	protected := map[string]bool{}
@@ -138,7 +148,136 @@ func (a *App) planRetention(ctx context.Context, p RetentionPolicy, now time.Tim
 			plan.TotalBytes -= f.size
 		}
 	}
+	if err := a.planChatTranscriptRetention(ctx, p, now, &plan); err != nil {
+		return plan, err
+	}
 	return plan, nil
+}
+
+// chatSessionRef is a live session's Claude Code transcript id and idle clock.
+type chatSessionRef struct {
+	status    string
+	updatedAt time.Time
+}
+
+// planChatTranscriptRetention adds orphan and long-idle Claude Code transcripts
+// under <data>/claude-config/projects to the plan. Orphans (no chat_sessions row)
+// always go; idle sessions follow LogDays (0 = keep). Sessions still answering a
+// turn keep their transcript. Losing a transcript only forces the next turn to
+// reseed (--session-id); the chat_sessions row and turn history stay.
+func (a *App) planChatTranscriptRetention(ctx context.Context, p RetentionPolicy, now time.Time, plan *retentionPlan) error {
+	live := map[string]chatSessionRef{}
+	rows, err := a.DB.QueryContext(ctx, `SELECT claude_session_id, status, updated_at FROM chat_sessions WHERE claude_session_id <> ''`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var csid, status, updated string
+		if err = rows.Scan(&csid, &status, &updated); err != nil {
+			rows.Close()
+			return err
+		}
+		if !isUUID(csid) {
+			continue
+		}
+		ts, perr := time.Parse(time.RFC3339Nano, updated)
+		if perr != nil {
+			ts, perr = time.Parse(time.RFC3339, updated)
+		}
+		if perr != nil {
+			ts = now // unparseable stamp: treat as fresh, do not age-delete
+		}
+		live[csid] = chatSessionRef{status: status, updatedAt: ts}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, f := range a.chatTranscriptFiles() {
+		ref, ok := live[f.runID]
+		if ok && ref.status == "running" {
+			continue
+		}
+		drop := !ok // orphan: session row gone (or never linked)
+		if !drop && p.LogDays > 0 && now.Sub(ref.updatedAt) > time.Duration(p.LogDays)*24*time.Hour {
+			drop = true
+		}
+		if drop {
+			plan.del = append(plan.del, f)
+			plan.FreeBytes += f.size
+		}
+	}
+	return nil
+}
+
+// chatTranscriptFiles lists Claude Code session transcripts tidebot owns
+// (<data>/claude-config/projects/<folder>/<uuid>.jsonl) and sizes each with its
+// companion directory (subagent / tool-result sidecars).
+func (a *App) chatTranscriptFiles() []runFile {
+	root := filepath.Join(a.claudeConfigDir(), "projects")
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var files []runFile
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, e.Name())
+		kids, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, k := range kids {
+			name := k.Name()
+			if k.IsDir() || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			csid := strings.TrimSuffix(name, ".jsonl")
+			if !isUUID(csid) {
+				continue
+			}
+			p := filepath.Join(dir, name)
+			fi, err := k.Info()
+			if err != nil || !fi.Mode().IsRegular() {
+				continue
+			}
+			size := fi.Size()
+			mod := fi.ModTime()
+			if side := strings.TrimSuffix(p, ".jsonl"); side != p {
+				if s, m := dirSize(side); s > 0 {
+					size += s
+					if m.After(mod) {
+						mod = m
+					}
+				}
+			}
+			files = append(files, runFile{runID: csid, path: p, size: size, mod: mod, kind: "chat"})
+		}
+	}
+	return files
+}
+
+// removeEmptyChatProjectDirs drops empty folders left under projects/ after
+// transcript cleanup (Claude Code keys folders by workspace path encoding).
+func (a *App) removeEmptyChatProjectDirs() {
+	root := filepath.Join(a.claudeConfigDir(), "projects")
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, e.Name())
+		kids, err := os.ReadDir(dir)
+		if err == nil && len(kids) == 0 {
+			_ = os.Remove(dir)
+		}
+	}
 }
 
 // runFiles lists run transcripts (<data>/runs/<id>.log) and artifact folders

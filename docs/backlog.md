@@ -5469,5 +5469,38 @@ a bulk edit makes undo exact without a history table.
 
 - WebUI 单包去注释/压空白（发现 #5）：`build-webui.py`，量 gzip 前后（粗估 raw 901→787 KB，gzip 246→207 KB）。
 - 工作流执行保留天数跟「设置 › 数据」可配。
-- 会话转录（`<data>/claude-config/projects`）是否纳入保留策略：仅删会话时清理，长期闲置会话会一直占盘。
+- ~~会话转录（`<data>/claude-config/projects`）是否纳入保留策略：仅删会话时清理，长期闲置会话会一直占盘。~~ → 见下一轮。
 - `cleanupSkillRegistrations` 里对 `capability_versions` 的 lock 全表读也可按 capability_id 收窄（共享检测仍需看其他能力包）。
+
+### 2026-11-07：会话转录纳入保留策略（资源占用）
+
+**Done**
+
+- **问题**：Claude Code 会话转录只在「删除会话」时清理（`<data>/claude-config/projects/<folder>/<uuid>.jsonl` 及同名 sidecar）。长期闲置的会话、以及删会话失败/崩溃留下的孤儿转录会一直占盘；设置 › 数据的清理预览也不包含它们。
+- **改法**：挂进现有 `ApplyRetention` / `planRetention`（每 6 小时和「立即清理」）：
+  1. **孤儿**（没有任何 `chat_sessions.claude_session_id` 指向）一律删；
+  2. **闲置**超过「运行日志保留天数」`LogDays`（默认 30，设 0 则不按龄删）的会话转录删除；
+  3. 正在回答（`status=running`）的不动；`chat_sessions` 行和轮次历史不动。
+  顺带清空的 `projects/<folder>`。丢转录后下一轮走已有的 lost-transcript 路径（`--session-id` 重开），不改产品语义。
+- 测试：`TestChatTranscriptRetentionOrphansAndIdle`（孤儿/闲置删、新鲜/运行中/非 UUID 保留、`LogDays=0` 只清孤儿、空目录回收）；`TestChatTranscriptRetentionPreviewCounts`（清理预览计入）。
+
+| 指标（本机 Linux，测试夹具） | 清理前 | 清理后 |
+| --- | ---: | ---: |
+| 20 个闲置会话 ×（64 KB jsonl + 32 KB sidecar）+ 1 个新鲜 | 1 984 KB | 64 KB（仅新鲜） |
+| 报告 `freed_bytes` / `deleted_files` | — | 1 920 KB / 20 |
+| 清理耗时 | — | ≈1.8 ms |
+
+**Learned**
+
+- 会话行还在、转录没了并不破坏产品：续聊本来就会在丢转录时 reseed；保留策略可以只动 Claude Code 侧文件，不必软删会话。
+- 龄期用 `chat_sessions.updated_at` 比文件 mtime 稳（避免误伤刚绑定、转录尚未重写的会话）；孤儿则不看龄期。
+
+**参考**：承接 backlog「会话转录是否纳入保留策略」；对齐 Uptime Kuma / 近几轮 rowprune 的「看不见但占盘要单独收」。lost-transcript 行为见 `chatsession.go` 与 `TestChatSessionLostTranscriptStartsOver`。
+
+**Ideas for later**
+
+- WebUI 单包去注释/压空白（发现 #5）：`build-webui.py`，量 gzip 前后（粗估 raw 901→787 KB，gzip 246→207 KB）。
+- 工作流执行保留天数跟「设置 › 数据」可配。
+- `cleanupSkillRegistrations` 里对 `capability_versions` 的 lock 全表读也可按 capability_id 收窄（共享检测仍需看其他能力包）。
+- 设置 › 数据的用量条是否加「会话转录」分段（现在只进清理预览的 files/bytes，不单独占 parts）。
+- 闲置会话的 `chat-sessions/<id>/` 工作目录是否也按同一保留期回收。
