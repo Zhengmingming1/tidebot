@@ -83,6 +83,15 @@ func (a *App) capabilityStorageRequest(ctx context.Context, action string, r web
 		}
 		return report, tx.Commit()
 	}
+	// The view only reads. Release the pool's single connection before walking
+	// managed directories, which can hold tens of thousands of files: holding it
+	// would stall every other request and the scheduler for the whole walk.
+	if err = tx.Rollback(); err != nil {
+		return nil, err
+	}
+	if err = capabilityStorageToolSizes(ctx, tools); err != nil {
+		return nil, err
+	}
 	// Request unlimited read-only accounting so an exceeded earlier category
 	// does not hide subsequent categories from the UI.
 	installer.Quotas = managed.Quotas{ToolsAndRuntimes: math.MaxInt64, Environment: math.MaxInt64, Cache: math.MaxInt64}
@@ -158,10 +167,6 @@ func (a *App) capabilityStorageReferences(ctx context.Context, tx *sql.Tx) ([]ma
 			}
 			refs[ref] = true
 			item.Directory = dir
-			item.Bytes, e = capabilityStorageSize(ctx, dir)
-			if e != nil {
-				return nil, nil, e
-			}
 		}
 	}
 	if err = rows.Err(); err != nil {
@@ -184,6 +189,32 @@ func (a *App) capabilityStorageReferences(ctx context.Context, tx *sql.Tx) ([]ma
 		return a.Name+"/"+a.Path+"/"+a.Version < b.Name+"/"+b.Path+"/"+b.Version
 	})
 	return references, tools, nil
+}
+
+// capabilityStorageWalk measures one managed directory (a variable for tests).
+var capabilityStorageWalk = capabilityStorageSize
+
+// capabilityStorageToolSizes fills in sizes outside any transaction. Commands
+// of one runtime (node, npm, npx) and the versions that pin it share a
+// directory, which is walked once.
+func capabilityStorageToolSizes(ctx context.Context, tools []capabilityStorageTool) error {
+	sizes := map[string]int64{}
+	for i := range tools {
+		dir := tools[i].Directory
+		if dir == "" {
+			continue
+		}
+		size, ok := sizes[dir]
+		if !ok {
+			var err error
+			if size, err = capabilityStorageWalk(ctx, dir); err != nil {
+				return err
+			}
+			sizes[dir] = size
+		}
+		tools[i].Bytes = size
+	}
+	return nil
 }
 
 func capabilityManagedReference(root string, resolved capability.Resolved) (managed.Reference, string, error) {
@@ -239,6 +270,11 @@ func capabilityStorageSize(ctx context.Context, root string) (int64, error) {
 	}
 	var size int64
 	err := filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		// The view walks without a database lock, so a concurrent cleanup may
+		// remove entries mid-walk; those simply no longer count.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -247,6 +283,9 @@ func capabilityStorageSize(ctx context.Context, root string) (int64, error) {
 		}
 		if !d.IsDir() {
 			info, e := d.Info()
+			if errors.Is(e, os.ErrNotExist) {
+				return nil
+			}
 			if e != nil {
 				return e
 			}

@@ -5504,3 +5504,36 @@ a bulk edit makes undo exact without a history table.
 - `cleanupSkillRegistrations` 里对 `capability_versions` 的 lock 全表读也可按 capability_id 收窄（共享检测仍需看其他能力包）。
 - 设置 › 数据的用量条是否加「会话转录」分段（现在只进清理预览的 files/bytes，不单独占 parts）。
 - 闲置会话的 `chat-sessions/<id>/` 工作目录是否也按同一保留期回收。
+
+### 2026-11-07：扩展 › 工具页的存储统计不再占住数据库连接（资源占用 / 卡顿）
+
+**Done**
+
+- **问题**：数据库连接池只有 1 个连接（`SetMaxOpenConns(1)`）。`capabilityStorageRequest` 打开事务后，在遍历 `capability_versions` 的游标里对每条锁文件的每个托管依赖都 `WalkDir` 一遍目录算大小，之后还在事务未结束时跑 `CheckQuota`（tools/runtimes/cache/envs 全树）和 `SnapshotUsage`。打开「扩展 › 工具」时，整个遍历期间所有其他请求、调度器、运行记录写入都在等这一个连接。同一个运行时目录被 node/npm/npx 三个命令、以及每个历史版本重复遍历（3 命令 × 6 版本 = 18 次）。「立即清理」也在持写锁时白算一遍这些大小（清理只需要引用，不需要大小）。
+- **改法**（只动 `internal/app/capability_storage.go`）：
+  1. `capabilityStorageReferences` 只在事务里收集引用和目录，不再碰磁盘；
+  2. 只读视图拿到引用后立刻 `Rollback` 释放连接，再算大小、`CheckQuota`、`SnapshotUsage`；
+  3. 新增 `capabilityStorageToolSizes`：按目录记忆，同一目录只遍历一次；
+  4. 清理（`storage_gc`）仍在写事务里做（原有的「先拿写锁，再查 applying，再 GC」不变），但不再计算工具大小；
+  5. 视图不再挡住清理后，遍历中途被删掉的文件按不存在跳过，不报错。
+- 测试：`capability_storage_perf_test.go`。①视图遍历目录时另一个查询必须能在 2 s 内拿到连接，且共享目录只遍历 1 次（改动前：`database held during disk walk: context deadline exceeded`）；②清理不遍历工具目录（改动前 6 次）；③`TIDEBOT_PERF=1` 计时。原有的保留 / 回滚 / applying 拒绝 / 引用校验测试全过。
+
+| 指标（本机 Linux 8 核；node 运行时 2 万个文件，3 个命令 × 6 个锁版本） | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| 「扩展 › 工具」存储统计耗时（3 轮） | 761–845 ms | 69–77 ms（约 11×） |
+| 同时发出的 `SELECT 1` 等待连接 | 756–839 ms（等到整个统计结束） | 77–99 µs |
+| 共享运行时目录的遍历次数 | 18（+ CheckQuota 1） | 1（+ CheckQuota 1） |
+| 「立即清理」持写锁期间为算大小做的遍历 | 每个托管依赖 × 版本 | 0 |
+
+**Learned**
+
+- 单连接池下，事务 = 全局锁。任何「事务里做磁盘 / 网络 / 子进程」都会把整个应用卡住；只读事务拿完数据就应该立刻结束，慢活放到事务外。
+- 按「锁文件 × 依赖名」循环做 I/O 时，要先按真正的资源（目录）去重；一个 Node 运行时就有 3 个命令名指向同一目录。
+
+**参考**：Go `database/sql` 文档对 `SetMaxOpenConns` 的说明（连接用尽时调用方阻塞等待）；本仓库 `4e7b424`（会话列表先关游标再解析绑定）是同一类问题。
+
+**Ideas for later**
+
+- `capability.Store` 安装快照时在写事务里调用 `SnapshotUsage`（遍历整个 `capabilities/`），安装期间同样占住连接；可以把配额检查挪到事务前，事务里只做轻量复核。
+- `managed.CheckQuota` 每次安装前也全树遍历 tools/runtimes/cache，可以缓存上次结果并按 mtime 失效。
+- WebUI 单包去注释/压空白（发现 #5）；工作流执行保留天数跟「设置 › 数据」可配。
