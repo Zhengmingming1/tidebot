@@ -129,7 +129,7 @@ func quotaDiskStamp(dataDir string) (string, error) {
 			return "", err
 		}
 		for _, e := range entries {
-			info, err := e.Info()
+			info, err := stampInfo(filepath.Join(root, e.Name()))
 			if err != nil {
 				return "", err
 			}
@@ -143,7 +143,7 @@ func quotaDiskStamp(dataDir string) (string, error) {
 				return "", err
 			}
 			for _, c := range children {
-				ci, err := c.Info()
+				ci, err := stampInfo(filepath.Join(root, e.Name(), c.Name()))
 				if err != nil {
 					return "", err
 				}
@@ -156,6 +156,14 @@ func quotaDiskStamp(dataDir string) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// stampInfo reads mtime/size from the file itself. On Windows, DirEntry.Info
+// returns the copy cached in the parent directory index, which NTFS updates
+// lazily, so it can lag behind recent writes and make the stamp flap or miss
+// a change; Lstat reads the authoritative record.
+func stampInfo(path string) (os.FileInfo, error) {
+	return os.Lstat(path)
 }
 
 func loadQuotaCache(dataDir, stamp string) (Usage, bool) {

@@ -20,7 +20,11 @@ func recoveryTestDB(t *testing.T, codes []string) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	})
 	if err := New(database).EnsureOwner(context.Background()); err != nil {
 		t.Fatal(err)
 	}

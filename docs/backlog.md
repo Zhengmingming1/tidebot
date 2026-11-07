@@ -5593,3 +5593,30 @@ a bulk edit makes undo exact without a history table.
 - 工作流执行保留天数跟「设置 › 数据」可配。
 - `cleanupSkillRegistrations` 里对 `capability_versions` 的 lock 全表读也可按 capability_id 收窄（共享检测仍需看其他能力包）。
 - 设置 › 数据的用量条是否加「会话转录」分段；闲置会话的 `chat-sessions/<id>/` 工作目录是否也按同一保留期回收。
+
+### 2026-11-07：升级 modernc.org/sqlite 修复取消查询泄漏语句（WAL 无限增长）+ Windows CI 两个失败
+
+**Done**
+
+- **问题 1（严重，资源/数据）**：主模块（agentd / 服务端 / Docker 镜像）仍是 `modernc.org/sqlite v1.37.0`。该版本 `stmt.query` 在语句已产出首行、随后上下文才结束时，直接丢掉 `Rows` 不 `finalize`（上游 v1.40.1 修复）。tidebot 单连接池 + 请求超时（`ebc6ced` 页面请求超时）/ 客户端断开都会触发：泄漏的语句一直占着读事务，WAL 检查点 `busy=1`，`journal_size_limit` 也截不动，`-wal` 无限增长；`Close` 后 `sqlite3_close_v2` 变僵尸连接，文件句柄不释放。另 v1.42.2 修了「已取消的上下文会中断同连接上之后无关查询」的 TOCTOU。
+- **问题 2（CI）**：Windows 上 `TestRecoveryCodeRetryHonorsCancellation` 的 TempDir 清理报 `auth.db` 被占用——正是问题 1：取消重试泄漏语句，Close 后句柄仍开着。
+- **问题 3（CI + Windows 正确性）**：`TestCheckQuotaCachesUnchangedTree` 在 Windows 第二次仍全树遍历。`quotaDiskStamp` 用 `DirEntry.Info()`，Windows 上返回父目录索引里的缓存副本，NTFS 延迟更新，刚写完的文件/目录 mtime、大小会在两次调用间变化（缓存总不命中），也可能漏掉变化（陈旧命中）。改为对每项 `os.Lstat` 读权威记录。
+- **改法**：主模块与 `cmd/tidebot-desktop` 统一升到 `modernc.org/sqlite v1.62.0`（`libc v1.80.1` 按上游要求同步；桌面端原本已是 v1.44.3，只有服务端受影响）；`stampInfo` 用 `Lstat`；quota 测试失败时打印前后 stamp 便于定位；auth 测试 Close 出错时报错。
+- 新增 `internal/db/cancel_leak_test.go`：1500 次随机超时查询后写入 300 行，`wal_checkpoint(TRUNCATE)` 必须 `busy=0` 且 `-wal` 截为 0。旧版本 5 次中 2 次失败，新版本 5/5 通过。
+
+| 指标（本机 Linux；2000 次取消查询后写 3000×4KB，再 `wal_checkpoint(TRUNCATE)`，3 轮） | v1.37.0 | v1.62.0 |
+| --- | ---: | ---: |
+| 检查点被泄漏读事务卡住 | 2/3 轮 `busy=1` | 0/3 |
+| 检查点后 `-wal` 大小 | 38 991 KB（截不动） | 0 KB |
+| `Close` 后仍打开的库文件句柄 | 5 | 0 |
+| auth 取消重试 ×300 次后句柄泄漏 | 约 1/10 次 | 0 |
+
+**Learned**
+
+- 依赖版本漂移：桌面模块被 Wails 依赖间接拉到较新 sqlite，主模块停在旧版，两端行为不一致；dependabot 目前只管 Actions，gomod 没纳入。
+- Windows 上 `ReadDir` 的 `DirEntry.Info()` 不适合做「变更指纹」，要 `Lstat`。Linux 测试抓不到这两类问题（已删除的打开文件照样能 unlink）。
+
+**Ideas for later**
+
+- dependabot 加 `gomod`（根目录与 `cmd/tidebot-desktop`），按周分组，避免 sqlite/libc 再落后几十个版本。
+- 可加一个 `db.Stats` / WAL 大小的诊断项（设置 › 数据），WAL 异常变大时提示。

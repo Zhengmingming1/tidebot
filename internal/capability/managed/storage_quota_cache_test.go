@@ -63,6 +63,7 @@ func TestCheckQuotaCachesUnchangedTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stamp1, _ := quotaDiskStamp(root)
 	firstWalks := walks.Load()
 	if firstWalks == 0 {
 		t.Fatal("expected an initial size walk")
@@ -72,7 +73,8 @@ func TestCheckQuotaCachesUnchangedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if walks.Load() != firstWalks {
-		t.Fatalf("cached CheckQuota walked again: %d -> %d", firstWalks, walks.Load())
+		stamp2, _ := quotaDiskStamp(root)
+		t.Fatalf("cached CheckQuota walked again: %d -> %d\nstamp before:\n%s\nstamp after:\n%s", firstWalks, walks.Load(), stamp1, stamp2)
 	}
 	if first.ToolsAndRuntimes != second.ToolsAndRuntimes || first.Cache != second.Cache {
 		t.Fatalf("cached usage mismatch: %+v vs %+v", first, second)
