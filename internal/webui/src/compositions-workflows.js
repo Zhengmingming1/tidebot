@@ -336,13 +336,39 @@
       canvas();inspect();
     });
   }
-  function renderWorkflowRun(id) {
-    return api('/api/workflow-runs/'+enc(id)).then(function(r){
-      var active=r.status==='queued'||r.status==='running',byID=Object.create(null),order=Object.create(null);r.snapshot.nodes.forEach(function(n,i){byID[n.id]=n;order[n.id]=i;});var ordered=r.nodes.slice().sort(function(a,b){return order[a.node_id]-order[b.node_id];});
-      mount('<div class="page-head wf-page-head"><div><a href="#/workflows/'+enc(r.workflow_id)+'">← '+esc(r.snapshot.name)+'</a><h1>'+esc(T('wf.execution'))+'</h1></div><div class="row-actions actions">'+wfStatus(r.status)+(active?'<button class="btn danger" id="wf-stop">'+esc(T('btn.stop'))+'</button>':'')+'</div></div><section class="card"><div class="row-actions"><span class="tag">v'+esc(r.workflow_version)+'</span><span class="muted">'+esc(fmtTime(r.created_at))+'</span><span>'+esc(r.provider)+'</span></div><p class="hint">'+esc(T('wf.snapshot_hint'))+'</p><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(r.input)+'</pre></details>'+(r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+wfDiagram(r.snapshot,r.nodes)+'</section><div class="wf-execution">'+ordered.map(function(n){var step=byID[n.node_id]||{};return '<article class="card"><div class="card-head"><strong>'+esc(step.name||n.node_id)+'</strong><code>'+esc(n.node_id)+'</code><span class="grow"></span>'+wfStatus(n.status)+'</div>'+(n.child_run_id?'<a class="btn sm" href="#/runs/'+enc(n.child_run_id)+'">'+ic('terminal','sm')+esc(T('wf.open_log'))+'</a>':'')+(n.branch?'<p>'+esc(T('wf.branch_result'))+' '+esc(T('wf.branch_'+n.branch))+'</p>':'')+(n.error?'<p class="notice bad">'+esc(errInfoText(n.error_info,n.error))+'</p>':'')+(n.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(n.output)+'</pre></details>':'')+((step.skill_bindings||[]).length?'<details><summary>'+esc(T('wf.skill_snapshot'))+'</summary><ul class="list-plain">'+step.skill_bindings.map(function(b){return '<li>'+esc(b.skill_name||b.skill_id)+' · '+esc(T(b.role==='primary'?'ss.primary':'ss.auxiliary'))+' · <code>'+esc(b.version_id)+'</code></li>';}).join('')+'</ul></details>':'')+'</article>';}).join('')+'</div>','workflows',[[T('nav.workflows'),'#/workflows'],[r.snapshot.name,'#/workflows/'+enc(r.workflow_id)],[T('wf.execution')]]);
-      if(active){$('#wf-stop').onclick=function(){var b=this;b.disabled=true;api('/api/workflow-runs/'+enc(id)+'/stop',{method:'POST',body:{}}).then(function(){return renderWorkflowRun(id);}).catch(function(e){b.disabled=false;fail(e);});};livePoll(function(){return api('/api/workflow-runs/'+enc(id)).then(function(next){if(JSON.stringify(next)!==JSON.stringify(r))return renderWorkflowRun(id);});},2000);}
-    });
+  // Execution page. A change seen by the poll is painted from that same response (one request,
+  // not a second fetch) and keeps what the reader set: which sections are open, how far each
+  // output is scrolled, the page scroll. While text is selected or a dialog is open the new data
+  // waits for the next quiet check. Polling stops once the run has ended — it used to go on
+  // comparing against the stale running snapshot, refetching and repainting every 2 s for as long
+  // as the finished page stayed open, reopening every output the reader had folded.
+  // (idea: uptime-kuma src/mixins/socket.js patches the monitor list in place instead of rebuilding.)
+  function wfRunKeep(box) {
+    var k = Object.create(null);
+    $$('details[data-wf-d]', box).forEach(function (d) { var pre = $('pre', d); k[d.getAttribute('data-wf-d')] = { open: d.open, top: pre ? pre.scrollTop : 0 }; });
+    return k;
   }
+  function wfRunRestore(box, k) {
+    $$('details[data-wf-d]', box).forEach(function (d) { var s = k[d.getAttribute('data-wf-d')]; if (!s) return; d.open = s.open; var pre = $('pre', d); if (pre && s.top) pre.scrollTop = s.top; });
+  }
+  function renderWorkflowRun(id) {
+    return api('/api/workflow-runs/'+enc(id)).then(function(r){ paintWorkflowRun(id, r, null); });
+  }
+  function paintWorkflowRun(id, r, keep) {
+      var active=r.status==='queued'||r.status==='running',byID=Object.create(null),order=Object.create(null);r.snapshot.nodes.forEach(function(n,i){byID[n.id]=n;order[n.id]=i;});var ordered=r.nodes.slice().sort(function(a,b){return order[a.node_id]-order[b.node_id];});
+      mount('<div class="page-head wf-page-head"><div><a href="#/workflows/'+enc(r.workflow_id)+'">← '+esc(r.snapshot.name)+'</a><h1>'+esc(T('wf.execution'))+'</h1></div><div class="row-actions actions">'+wfStatus(r.status)+(active?'<button class="btn danger" id="wf-stop">'+esc(T('btn.stop'))+'</button>':'')+'</div></div><section class="card"><div class="row-actions"><span class="tag">v'+esc(r.workflow_version)+'</span><span class="muted">'+esc(fmtTime(r.created_at))+'</span><span>'+esc(r.provider)+'</span></div><p class="hint">'+esc(T('wf.snapshot_hint'))+'</p><details data-wf-d="input"><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(r.input)+'</pre></details>'+(r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+wfDiagram(r.snapshot,r.nodes)+'</section><div class="wf-execution">'+ordered.map(function(n){var step=byID[n.node_id]||{};return '<article class="card"><div class="card-head"><strong>'+esc(step.name||n.node_id)+'</strong><code>'+esc(n.node_id)+'</code><span class="grow"></span>'+wfStatus(n.status)+'</div>'+(n.child_run_id?'<a class="btn sm" href="#/runs/'+enc(n.child_run_id)+'">'+ic('terminal','sm')+esc(T('wf.open_log'))+'</a>':'')+(n.branch?'<p>'+esc(T('wf.branch_result'))+' '+esc(T('wf.branch_'+n.branch))+'</p>':'')+(n.error?'<p class="notice bad">'+esc(errInfoText(n.error_info,n.error))+'</p>':'')+(n.output?'<details open data-wf-d="out:'+esc(n.node_id)+'"><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(n.output)+'</pre></details>':'')+((step.skill_bindings||[]).length?'<details data-wf-d="sk:'+esc(n.node_id)+'"><summary>'+esc(T('wf.skill_snapshot'))+'</summary><ul class="list-plain">'+step.skill_bindings.map(function(b){return '<li>'+esc(b.skill_name||b.skill_id)+' · '+esc(T(b.role==='primary'?'ss.primary':'ss.auxiliary'))+' · <code>'+esc(b.version_id)+'</code></li>';}).join('')+'</ul></details>':'')+'</article>';}).join('')+'</div>','workflows',[[T('nav.workflows'),'#/workflows'],[r.snapshot.name,'#/workflows/'+enc(r.workflow_id)],[T('wf.execution')]]);
+      if(keep)wfRunRestore(page(),keep);
+      if(!active){stopPoll();return;}
+      var here=location.hash,sig=JSON.stringify(r),held=null;
+      var repaint=function(next){if(location.hash!==here)return;var pg=page(),y=window.scrollY,sy=pg.scrollTop;paintWorkflowRun(id,next,wfRunKeep(pg));window.scrollTo(0,y);pg.scrollTop=sy;};
+      var fetchNext=function(){return api('/api/workflow-runs/'+enc(id));};
+      $('#wf-stop').onclick=function(){var b=this;b.disabled=true;api('/api/workflow-runs/'+enc(id)+'/stop',{method:'POST',body:{}}).then(fetchNext).then(repaint).catch(function(e){b.disabled=false;fail(e);});};
+      livePoll(function(){
+        if(held){if(liveQuiet(page())){var d=held;held=null;repaint(d);}return;}
+        return fetchNext().then(function(next){if(location.hash!==here)return;var s=JSON.stringify(next);if(s===sig)return;sig=s;if(liveQuiet(page()))repaint(next);else held=next;});
+      },2000);
+  }
+
   function dependencyFindingHTML(items) {
     return (items||[]).map(function(f){var level=['missing','uncertain','available','blocked'].indexOf(f.level)>=0?f.level:'uncertain';
       return '<article class="dep-finding"><div class="row-actions"><strong>'+esc(f.dependency)+'</strong><span class="grow"></span><span class="pill '+(level==='missing'||level==='blocked'?'bad':level==='available'?'ok':'warn')+'">'+esc(T('dep.'+level))+'</span></div><p>'+esc(f.reason)+'</p>'+(f.evidence?'<details><summary>'+esc(T('dep.evidence'))+'</summary><pre class="wf-output">'+esc(f.evidence)+'</pre></details>':'')+(f.suggestion?'<p class="notice">'+esc(f.suggestion)+'</p>':'')+'</article>';
