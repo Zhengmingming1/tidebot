@@ -8107,20 +8107,98 @@
       });
     });
   }
-  function capDeviceLoginDialog(id) {
-    var base="/api/capabilities/"+enc(id)+"/login";
-    modal('<div class="card-head"><h2>'+esc(T("cap.cli_login"))+'</h2></div><p>'+esc(T("cap.cli_login_note"))+'</p><div id="cap-device-state"></div><p class="field-err" id="cap-device-error"></p><div class="actions"><button class="btn ghost" data-close>'+esc(T("btn.close"))+'</button><button class="btn ghost" id="cap-device-cancel">'+esc(T("cap.cancel_login"))+'</button><button class="btn primary" id="cap-device-start">'+esc(T("cap.start_login"))+'</button></div>',function(root){
-      var output=$("#cap-device-state",root),timer=null;
-      var paint=function(v){if(!document.contains(output))return;output.textContent=capText(v.status)+(v.user_code?' · '+v.user_code:'');
-        if(v.verification_uri){var u=new URL(v.verification_uri);if(u.protocol==="https:"){var a=document.createElement("a");a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";a.className="btn sm";a.textContent=T("cap.open_auth");output.appendChild(a);}}
-        if(v.status==="starting"||v.status==="pending")timer=setTimeout(poll,1500);
-      };
-      var failLogin=function(e){var err=$("#cap-device-error",root);if(err)err.textContent=e.message;};
-      var poll=function(){if(!document.contains(output))return;api(base,{fresh:true}).then(paint).catch(failLogin);};
-      $("#cap-device-start",root).addEventListener("click",function(e){e.currentTarget.disabled=true;api(base,{method:"POST",body:{reviewed:true}}).then(paint).catch(function(err){if(document.contains(output))$("#cap-device-start",root).disabled=false;failLogin(err);});});
-      $("#cap-device-cancel",root).addEventListener("click",function(){clearTimeout(timer);api(base+"/cancel",{method:"POST",body:{}}).then(paint).catch(failLogin);});
-      poll();
+  function capLoginLabel(status) {
+    if (status === "starting") return T("cap.login_starting");
+    if (status === "pending") return T("cap.login_pending");
+    if (status === "cancelled") return T("cap.login_cancelled");
+    if (status === "failed") return T("cap.login_failed");
+    if (status === "completed") return T("cap.login_completed");
+    return T("cap.login_idle");
+  }
+  // Device login: one poll chain, Start works again after fail/cancel, stale replies are dropped.
+  function capBindDeviceLogin(root, base) {
+    var output = $("#cap-device-state", root);
+    var startBtn = $("#cap-device-start", root);
+    var cancelBtn = $("#cap-device-cancel", root);
+    var errEl = $("#cap-device-error", root);
+    var timer = null, reqId = 0, closed = false;
+    function stopPoll() { clearTimeout(timer); timer = null; }
+    function nextReq() { stopPoll(); return ++reqId; }
+    function alive(id) { return !closed && id === reqId && document.contains(output); }
+    function failLogin(e) { if (errEl) errEl.textContent = e.message; }
+    function syncButtons(status) {
+      var busy = status === "starting" || status === "pending";
+      if (startBtn) startBtn.disabled = busy;
+      if (cancelBtn) cancelBtn.disabled = !busy;
+    }
+    function paint(v) {
+      if (!document.contains(output)) return;
+      var status = v.status || "idle";
+      output.textContent = capLoginLabel(status) + (v.user_code ? " · " + v.user_code : "");
+      var note = status === "failed" ? T("cap.login_failed_note") : status === "completed" ? T("cap.login_completed_note") : "";
+      if (note) {
+        var p = document.createElement("p");
+        p.className = "muted sm";
+        p.textContent = note;
+        output.appendChild(p);
+      }
+      if (v.verification_uri) {
+        try {
+          var u = new URL(v.verification_uri);
+          if (u.protocol === "https:") {
+            var a = document.createElement("a");
+            a.href = u.href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.className = "btn sm";
+            a.textContent = T("cap.open_auth");
+            output.appendChild(a);
+          }
+        } catch (ignore) {}
+      }
+      syncButtons(status);
+      if (status === "starting" || status === "pending") {
+        stopPoll();
+        timer = setTimeout(poll, 1500);
+      } else stopPoll();
+    }
+    function poll() {
+      if (closed || !document.contains(output)) return;
+      var id = nextReq();
+      api(base, { fresh: true }).then(function (v) { if (alive(id)) paint(v); }).catch(function (e) { if (alive(id)) failLogin(e); });
+    }
+    if (startBtn) startBtn.addEventListener("click", function () {
+      if (closed) return;
+      startBtn.disabled = true;
+      if (errEl) errEl.textContent = "";
+      var id = nextReq();
+      api(base, { method: "POST", body: { reviewed: true } }).then(function (v) {
+        if (alive(id)) paint(v);
+      }).catch(function (e) {
+        if (!alive(id)) return;
+        failLogin(e);
+        syncButtons("idle");
+        poll();
+      });
     });
+    if (cancelBtn) cancelBtn.addEventListener("click", function () {
+      if (closed) return;
+      if (errEl) errEl.textContent = "";
+      var id = nextReq();
+      api(base + "/cancel", { method: "POST", body: {} }).then(function (v) {
+        if (alive(id)) paint(v);
+      }).catch(function (e) {
+        if (!alive(id)) return;
+        failLogin(e);
+        syncButtons("idle");
+        poll();
+      });
+    });
+    poll();
+    return function () { closed = true; reqId++; stopPoll(); };
+  }
+  function capDeviceLoginDialog(id) {
+    var stop = function () {};
+    modal('<div class="card-head"><h2>' + esc(T("cap.cli_login")) + '</h2></div><p>' + esc(T("cap.cli_login_note")) + '</p><div id="cap-device-state"></div><p class="field-err" id="cap-device-error" role="alert"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.close")) + '</button><button type="button" class="btn ghost" id="cap-device-cancel">' + esc(T("cap.cancel_login")) + '</button><button type="button" class="btn primary" id="cap-device-start">' + esc(T("cap.start_login")) + '</button></div>', function (root) {
+      stop = capBindDeviceLogin(root, "/api/capabilities/" + enc(id) + "/login");
+    }, function () { stop(); });
   }
 
   function capStorageBytes(n) { return (Number(n || 0) / (1024 * 1024)).toFixed(1) + " MiB"; }
