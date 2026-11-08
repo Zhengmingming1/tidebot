@@ -184,7 +184,17 @@ func TestPurgeSkillStages(t *testing.T) {
 	a := newTestApp(t)
 	_ = os.MkdirAll(filepath.Join(a.skillStageRoot(), "run-1", "skills"), 0o700)
 	_ = os.MkdirAll(filepath.Join(a.Cfg.DataDir, "button-1"), 0o700)
+	_ = os.MkdirAll(filepath.Join(a.Cfg.DataDir, ".cap-skill-123", "refs"), 0o700)
+	_ = os.MkdirAll(filepath.Join(a.Cfg.DataDir, "dependency-check", "analysis-9"), 0o700)
 	a.purgeSkillStages()
+	for _, p := range []string{".cap-skill-123", filepath.Join("dependency-check", "analysis-9")} {
+		if _, err := os.Stat(filepath.Join(a.Cfg.DataDir, p)); !os.IsNotExist(err) {
+			t.Fatalf("%s left", p)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(a.Cfg.DataDir, "dependency-check")); err != nil {
+		t.Fatal("dependency-check folder itself should stay")
+	}
 	if ents, _ := os.ReadDir(a.skillStageRoot()); len(ents) != 0 {
 		t.Fatal("stage left")
 	}
@@ -272,5 +282,29 @@ func TestRunsUseProviderKeyNotClaudeLogin(t *testing.T) {
 	}
 	if strings.Contains(string(env), "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Fatal("subscription token passed to the run")
+	}
+}
+
+// Managed installs a crash interrupted are removed at startup with the other
+// capability recovery; promoted versions stay.
+func TestStartupRemovesInterruptedManagedInstalls(t *testing.T) {
+	a := newTestApp(t)
+	stage := filepath.Join(a.Cfg.DataDir, "runtimes", "node", ".install-1", "lib")
+	kept := filepath.Join(a.Cfg.DataDir, "runtimes", "node", "22.11.0")
+	for _, d := range []string{stage, kept} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(stage, "a.js"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.Cfg.DataDir, "runtimes", "node", ".download-1"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.recoverCapabilityProposals(context.Background())
+	ents, err := os.ReadDir(filepath.Join(a.Cfg.DataDir, "runtimes", "node"))
+	if err != nil || len(ents) != 1 || ents[0].Name() != "22.11.0" {
+		t.Fatalf("left %v %v", ents, err)
 	}
 }

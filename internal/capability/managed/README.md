@@ -24,7 +24,9 @@ recipe and verification method before calling an installer.
   fails closed on network/parse errors. Ordinary CVEs are not malware verdicts.
 
 All installs stage within the destination filesystem, rename on success, and
-remove their stage on failure. Existing versions are never overwritten. If a
+remove their stage on failure. Stages (`.install-*`) and downloads (`.download-*`)
+left by a crash or force quit are removed by `SweepStages` at startup and by GC.
+Existing versions are never overwritten. If a
 later capability transaction fails, the caller removes only newly installed,
 unreferenced directories. A result does not globally modify PATH. Package-manager
 environment sizes are checked after execution; OS-level disk quotas are not

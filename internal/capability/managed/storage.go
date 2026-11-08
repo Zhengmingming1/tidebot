@@ -400,6 +400,7 @@ type GCOptions struct {
 type GCReport struct {
 	Removed    []Reference `json:"removed"`
 	CacheFiles []string    `json:"cache_files"`
+	Stages     []string    `json:"stages"`
 	Skipped    []string    `json:"skipped"`
 	FreedBytes int64       `json:"freed_bytes"`
 }
@@ -496,7 +497,114 @@ func (i *Installer) GC(ctx context.Context, opts GCOptions) (GCReport, error) {
 	if err := i.gcCaches(ctx, now, opts.DryRun, &report); err != nil {
 		return report, err
 	}
+	stages, err := sweepStages(ctx, i.DataDir, opts.DryRun)
+	report.Stages = stages.Removed
+	report.FreedBytes += stages.FreedBytes
+	report.Skipped = append(report.Skipped, stages.Skipped...)
+	return report, err
+}
+
+// StageReport is what SweepStages removed: install stages and downloads an
+// interrupted install left next to the versions (relative slash paths).
+type StageReport struct {
+	Removed    []string `json:"removed"`
+	Skipped    []string `json:"skipped"`
+	FreedBytes int64    `json:"freed_bytes"`
+}
+
+// SweepStages removes the .install-* stage directories and .download-* files
+// that an install interrupted by a crash, force quit or power loss leaves in
+// <kind>/<name>/. Every install removes its own on return, so leftovers are
+// never reused; they only count against the quota (and GC skips dot entries),
+// until installs fail with ErrQuotaExceeded and nothing can clean them. Call it
+// at startup before installs can run, or with no install in progress (GC).
+// Links are never followed: a linked stage is skipped, and RemoveAll removes
+// links inside a stage without touching their targets.
+func SweepStages(ctx context.Context, dataDir string) (StageReport, error) {
+	return sweepStages(ctx, dataDir, false)
+}
+
+func sweepStages(ctx context.Context, dataDir string, dry bool) (StageReport, error) {
+	report := StageReport{Removed: []string{}}
+	if !filepath.IsAbs(dataDir) {
+		return report, errors.New("invalid managed data directory")
+	}
+	for _, kind := range []string{"tools", "runtimes", "envs"} {
+		root := filepath.Join(dataDir, kind)
+		if err := checkExistingParents(root); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return report, err
+		}
+		names, err := os.ReadDir(root)
+		if err != nil {
+			return report, err
+		}
+		for _, name := range names {
+			if !name.IsDir() || !validID(name.Name()) {
+				continue
+			}
+			parent := filepath.Join(root, name.Name())
+			entries, err := os.ReadDir(parent)
+			if err != nil {
+				return report, err
+			}
+			for _, e := range entries {
+				if err = ctx.Err(); err != nil {
+					return report, err
+				}
+				stage := strings.HasPrefix(e.Name(), ".install-")
+				download := strings.HasPrefix(e.Name(), ".download-")
+				if !stage && !download {
+					continue
+				}
+				rel := kind + "/" + name.Name() + "/" + e.Name()
+				path := filepath.Join(parent, e.Name())
+				info, err := os.Lstat(path)
+				if err != nil {
+					if os.IsNotExist(err) {
+						continue
+					}
+					return report, err
+				}
+				if (stage && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0)) || (download && !info.Mode().IsRegular()) {
+					report.Skipped = append(report.Skipped, rel)
+					continue
+				}
+				size := info.Size()
+				if stage {
+					// A partial tree may hold unreadable entries; count what can be read.
+					size = stageSize(path)
+				}
+				if !dry {
+					if err = os.RemoveAll(path); err != nil {
+						report.Skipped = append(report.Skipped, rel)
+						continue
+					}
+				}
+				report.Removed = append(report.Removed, rel)
+				report.FreedBytes += size
+			}
+		}
+	}
 	return report, nil
+}
+
+func stageSize(root string) int64 {
+	var size int64
+	_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.Type().IsRegular() {
+			if info, e := d.Info(); e == nil {
+				size += info.Size()
+			}
+		}
+		return nil
+	})
+	return size
 }
 
 type cacheOwnership struct {

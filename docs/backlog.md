@@ -5784,3 +5784,35 @@ a bulk edit makes undo exact without a history table.
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）；`GC` 在删除事务里量目录大小；`cleanupSkillRegistrations` 按 capability_id 收窄。
 - 有变化时会话详情仍整份返回所有轮次；可以再带「最后一轮序号」只回变化的轮次。
 - 设备登录失败时服务端 `note` 仍是英文；界面已用本地化说明覆盖，若以后要展示 CLI 原文需单独做 `error_info`。
+
+### 2026-11-08：中断的托管依赖安装不再永久占用配额（BUG / 资源占用）
+
+**Done**
+
+- **问题**：托管依赖（Node 运行时、CLI 压缩包、npm/uv 环境）安装时先在 `<data>/<tools|runtimes|envs>/<名称>/` 下建 `.install-*` 暂存目录，压缩包下载到同目录的 `.download-*`，只靠 `defer` 删除。安装过程中崩溃、强制退出、断电（Node 包下载和解压要几十秒到几分钟），这两样就永远留下：①`CheckQuota` 把 `tools/`、`runtimes/` 整树算进配额，`envs/<id>/.install-*` 还被当成一个单独的环境；②「扩展 › 工具 › 立即清理」的 GC 跳过所有以 `.` 开头的目录，清不掉；③没有任何启动清理。几次中断后 2 GiB 配额被残留占满，之后每次安装都报 `ErrQuotaExceeded`，界面上又没有办法回收。同类小残留：能力包技能导入的 `<data>/.cap-skill-*`、依赖检查的 `<data>/dependency-check/analysis-*`。
+- **改法**：
+  1. `managed.SweepStages`：只看 `<kind>/<名称>/` 这一层，删 `.install-*` 目录和 `.download-*` 普通文件；符号链接（或类型不对）的跳过并记进 `Skipped`，删除失败（如 Windows 上文件被占用）也只跳过、不报错。不进版本目录，已晋升的版本和其他点开头的条目不动。
+  2. 启动时在 `recoverCapabilityProposals` 里调用（和快照恢复、把 `applying` 改成 `failed` 放在一起）。所有托管安装都只在 `applying` 的提议下进行，重启必然结束它们，所以启动时没有在用的暂存。
+  3. `GC` 结尾也调用（`立即清理` 本来就要求没有 `applying` 的提议），报告新增 `stages`，释放量计入 `freed_bytes`，界面上的「已释放」数字自动包含；`DryRun` 只统计不删。
+  4. `purgeSkillStages` 顺带清 `.cap-skill-*` 和 `dependency-check/analysis-*`（保留 `dependency-check` 目录本身）。
+- 测试：`managed/stage_sweep_test.go`（三类残留删除、已晋升版本 / `.keep` / 链接成 `.install-link` 的目录及其目标都不动、二次调用无操作、相对路径拒绝；残留让配额超限 → GC dry run 只统计 → GC 后配额恢复、`envs` 不再有 `.install-*` 一项；`TIDEBOT_PERF=1` 计时）；`app/skillisolation_test.go`（启动恢复清掉托管残留、保留版本目录；`purgeSkillStages` 清两类新残留）。`go test ./...`、`go test -race ./internal/capability/managed` 通过，`GOOS=windows/darwin go vet` 干净。
+
+| 指标（本机 Linux；一次被强制退出的 Node 包安装：2 万个文件的 `.install-*` + 30 MB `.download-*`，3 轮） | 修复前 | 修复后 |
+| --- | ---: | ---: |
+| 配额里的 tools+runtimes 用量 | 70 723 KB（永远不降） | 启动后 3 KB |
+| 「立即清理」能回收的残留 | 0 KB（GC 跳过点开头目录） | 70 720 KB |
+| 清理耗时（只在有残留时发生一次） | — | 237–246 ms |
+| 没有残留时的启动开销 | — | 每个 `<kind>/<名称>` 一次 `ReadDir` |
+
+**Learned**
+
+- 「失败时 `defer` 删除」只覆盖进程还活着的失败；凡是在数据目录里建暂存的地方，都要有一个「启动时收尸」的对应物，而且 GC 跳过的条目要和暂存命名规则对齐，否则残留会落进「算配额、但谁都不删」的缝里。
+- 能否安全清理暂存，取决于有没有一个能证明「此刻没有安装在跑」的状态：这里是 `applying` 提议（启动时统一置 `failed`，GC 时拒绝并发）。`Installer.mu` 每个请求一个实例，管不了跨请求。
+
+**参考**：本仓库 `capability.Store.RecoverStorage` 对快照 `.stage-*` 的启动清理、`purgeSkillStages` 对运行暂存的启动清理；npm 的 `cacache` 也是靠 `npm cache verify` 回收中断写入留下的 tmp。
+
+**Ideas for later**
+
+- 「扩展 › 工具」的用量条可以显示「残留 N MB，可清理」，让没重启的用户也知道（现在只能点立即清理）。
+- `Installer.mu` 每次请求新建，跨请求不互斥；目前靠 `applying` 提议串行，若以后有不经提议的安装入口，需改成按 `DataDir` 的包级锁。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；能力包 `GC` 在删除事务里量目录大小；`cleanupSkillRegistrations` 按 capability_id 收窄。

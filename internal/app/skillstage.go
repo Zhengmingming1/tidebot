@@ -176,8 +176,12 @@ func (a *App) purgeSkillStages() {
 	if len(ents) > 0 {
 		a.Log.Info("removed leftover skill stages", "count", len(ents))
 	}
-	// Button runs of older versions used scratch folders next to the data.
-	if old, _ := filepath.Glob(filepath.Join(a.Cfg.DataDir, "button-*")); len(old) > 0 {
+	// Button runs of older versions used scratch folders next to the data; a
+	// crash during a capability skill import (.cap-skill-*) or a dependency
+	// check (dependency-check/analysis-*) leaves its scratch folder too. Each is
+	// removed by its owner on return, so at startup none is in use.
+	for _, pattern := range []string{"button-*", ".cap-skill-*", filepath.Join("dependency-check", "analysis-*")} {
+		old, _ := filepath.Glob(filepath.Join(a.Cfg.DataDir, pattern))
 		for _, p := range old {
 			if fi, err := os.Lstat(p); err == nil && fi.IsDir() {
 				_ = os.RemoveAll(p)

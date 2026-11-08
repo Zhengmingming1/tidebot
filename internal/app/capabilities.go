@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/capability"
+	"github.com/Zhengmingming1/tidebot/internal/capability/managed"
 	"github.com/Zhengmingming1/tidebot/internal/capability/oauth"
 	"github.com/Zhengmingming1/tidebot/internal/sessiontools"
 	"github.com/Zhengmingming1/tidebot/internal/skillrepo"
@@ -749,6 +750,13 @@ func (a *App) capabilitySource(ctx context.Context, source string) (capability.S
 func (a *App) recoverCapabilityProposals(ctx context.Context) {
 	if _, err := a.caps().RecoverStorage(ctx); err != nil {
 		a.Log.Warn("recover capability snapshots", "error", err)
+	}
+	// Installs only run under an applying proposal, which a restart ends; the
+	// stages and downloads an interrupted one left are never reused.
+	if r, err := managed.SweepStages(ctx, a.Cfg.DataDir); err != nil {
+		a.Log.Warn("remove interrupted managed installs", "error", err)
+	} else if len(r.Removed) > 0 {
+		a.Log.Info("removed interrupted managed installs", "count", len(r.Removed), "bytes", r.FreedBytes)
 	}
 	_, err := a.caps().RecoverInterruptedProposals(ctx)
 	if err != nil {
