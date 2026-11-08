@@ -62,6 +62,15 @@ type ChatTurn struct {
 type ChatSessionDetail struct {
 	ChatSession
 	TurnList []ChatTurn `json:"turn_list"`
+	// Sig fingerprints this answer; GET …?since=<sig> answers {"unchanged":true}
+	// while it still matches (see chatSessionSigner).
+	Sig string `json:"sig,omitempty"`
+}
+
+// chatSessionSigner is optional: an app that can fingerprint a session cheaply
+// lets the session page's 1.5 s poll skip unchanged sessions.
+type chatSessionSigner interface {
+	ChatSessionSig(ctx context.Context, id string) (string, error)
 }
 
 // ChatSessionCreate starts a session from a finished run, or a blank one
@@ -200,6 +209,24 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case sub == "" && r.Method == http.MethodGet:
+		// The fingerprint is taken before the read: a change in between only
+		// makes the next poll fetch again, never hides one.
+		sig := ""
+		if sg, ok := api.(chatSessionSigner); ok {
+			v, err := sg.ChatSessionSig(r.Context(), id)
+			if errors.Is(err, ErrChatSessionNotFound) {
+				chatErr(w, err)
+				return
+			}
+			if err == nil {
+				sig = v
+			}
+		}
+		if since := r.URL.Query().Get("since"); sig != "" && since == sig {
+			w.Header().Set("Cache-Control", "no-store")
+			writeJSON(w, 200, map[string]any{"unchanged": true, "sig": sig})
+			return
+		}
 		d, err := api.GetChatSession(r.Context(), id)
 		if err != nil {
 			chatErr(w, err)
@@ -208,6 +235,7 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 		if d.TurnList == nil {
 			d.TurnList = []ChatTurn{}
 		}
+		d.Sig = sig
 		writeJSON(w, 200, d)
 	case sub == "" && r.Method == http.MethodDelete:
 		if err := api.DeleteChatSession(r.Context(), id); err != nil {

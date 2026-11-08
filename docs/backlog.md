@@ -5712,3 +5712,38 @@ a bulk edit makes undo exact without a history table.
 - 会话详情本身（`/api/chat-sessions/<id>`）每 1.5 秒也是整份重拉，可以同样带指纹或接 `/api/events` 的 rev。
 - 能力包设备登录对话框点「开始」时初始轮询的 timer 没清（仍未做）。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）；`GC` 在删除事务里量目录大小；`cleanupSkillRegistrations` 按 capability_id 收窄。
+
+### 2026-11-08：会话回答中轮询会话详情不再每次整份重拉、整页重算 Markdown（资源占用）
+
+**Done**
+
+- **问题**：会话（运行页「继续对话」和会话页）在回答期间每 1.5 秒 `GET /api/chat-sessions/<id>`。服务端每次读出所有轮次的答案（单轮最多 128 KB，最多 50 轮）、换算币种、整份 JSON 发回；前端每次都对**每一轮**调 `rcTurnHtml`（含 `mdHtml` 把答案转成 HTML）再和上次比较，没变也要算一遍。回答本身的实时输出走运行的事件流（SSE），所以这段时间绝大多数轮询拿到的内容完全没变。
+- **改法**：
+  1. `app.ChatSessionSig`：会话行（含绑定名称、显示币种下的花费）和当前汇率整体哈希；轮次只读小列（状态、`finished_at`、花费、`octet_length(result_text)`、`octet_length(error_message)` 等），不读答案正文。runner 先写状态、后写答案（`UpdateRunFinish` 之后才 `SetRunResult`），所以答案长度必须在指纹里，测试覆盖了这一步。
+  2. `GET /api/chat-sessions/<id>` 先算指纹再读详情（中间有变化只会让下一次再拉一次，不会漏），整份回复带 `sig`；`?since=<sig>` 相同则只回 `{"unchanged":true,"sig":…}`（`no-store`）。指纹是可选接口，没有它的实现照旧整份返回；不存在的会话照旧 404。
+  3. 前端 `bindChat.load`：带上次的 `sig`；`unchanged` 时不重画任何轮次，只照常刷新能力包卡片（`capRefreshSession`，它有自己的指纹）；404 时丢弃 sig；预载（运行页 / 会话页首屏）的 sig 直接沿用。
+- 测试：`app/chatsession_sig_test.go`（新轮次、状态、答案、花费、报错、截断、会话行、标题、运行被删、显示币种都会改变指纹；不同会话不共用；多字节答案按字节长度；`TIDEBOT_PERF=1` 计时）；`webui/chat_session_poll_test.go`（接口：相同 sig 短回复且不读详情、旧/空 sig 整份、缺失会话 404、无指纹实现整份；node 下跑真实 `bindChat`：未变不渲染任何轮次但仍刷新能力包卡片、变化重画并换新 sig、404 后不再请求、无预载首拉不带 since）。前端测试在改动前的 `run-chat.js` 上失败（每次轮询都渲染全部轮次）。`go test ./...` 全过。
+
+| 指标 | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| 服务端每次轮询（20 轮 × 16 KB 答案 + 1 轮回答中，本机 Linux，50 次取平均、5 轮取最好） | 0.73 ms，357 204 B | 0.09 ms，51 B（未变时） |
+| 浏览器 15 s 内会话详情流量（同样数据，演示实例，1024×655 headless Chrome） | 3 796 281 B（9 次） | 520 B（10 次） |
+| 浏览器 15 s 内主线程任务时间（CDP `TaskDuration`，zh-CN 两轮 / en 一轮） | 953–1084 ms | 385–425 ms |
+| 回答结束（先写状态、0.5 s 后写答案）后页面显示最终答案、退出回答态 | 是 | 是（3.5 s 内） |
+| app.js | 905.1 KB / gzip 247.1 KB | 905.9 KB / gzip 247.4 KB（主要是注释） |
+
+方法：两个演示实例（`HEAD` 与本轮构建）各建一个会话，直接往库里写 20 轮已完成 + 1 轮回答中的记录，打开 `#/chat/<id>`，4 s 后用 CDP `Performance.getMetrics` 量 15 s。脚本 `/workspace/chat_poll_measure.py`（仓库外）。截图：`/workspace/screenshots/2026-11-08-chat-poll-since-{zh-CN,en}.png`。
+
+**参考**：HTTP 条件请求（ETag / `If-None-Match` → 304）的思路，沿用上一轮能力包卡片的 `?since=` 做法，免得改 `api()` 的缓存层。
+
+**Learned**
+
+- 指纹要覆盖「分两次写」的数据：只看运行状态会在状态和答案两次写入之间拿到一个「已完成但没答案」的指纹，之后答案写入时指纹不变，页面就永远缺答案。
+- `octet_length()` 能拿到 TEXT 的字节长度而不必把大答案读进来（`length()` 要数字符）。
+- 前端「每轮比较 HTML」虽然避免了 DOM 闪烁，但比较本身就要把每轮 Markdown 重新渲染一遍；轮数一多，CPU 花在比较上而不是变化上。
+
+**Ideas for later**
+
+- 有变化时仍整份返回所有轮次；可以再带「最后一轮序号」只回变化的轮次。
+- 能力包设备登录对话框：点「开始」后按钮一直禁用，登录失败/取消后只能关掉对话框重开；取消时进行中的轮询仍可能再排一次（仍未做）。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；`GC` 在删除事务里量目录大小；`cleanupSkillRegistrations` 按 capability_id 收窄。

@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -362,6 +365,59 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 		d.TurnList = append(d.TurnList, t)
 	}
 	return d, rows.Err()
+}
+
+// chatTurnSigQuery reads what can change in a session's turns without the
+// answers themselves: a finished run gets its status, error and cost first and
+// its answer (result_text, up to 128 KB) in a later statement, so the answer's
+// byte length is part of the fingerprint. octet_length() comes from the record
+// header; the answer text is not loaded. The prompt (the turn's message) never
+// changes once the run exists; a deleted run shows as an empty status.
+const chatTurnSigQuery = `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.status,''), COALESCE(r.finished_at,''),
+  COALESCE(octet_length(r.result_text),-1), COALESCE(r.result_truncated,0), COALESCE(octet_length(r.error_message),-1),
+  COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,'')
+FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=? ORDER BY t.turn_index`
+
+// ChatSessionSig is a fingerprint of what GetChatSession would return. The
+// session page polls every 1.5 s while a turn is answered (its live lines come
+// over the run's event stream); with ?since=<sig> an unchanged session is a
+// short reply instead of every turn's answer again. The session row (with the
+// binding names and the display cost) and the display currency are hashed
+// whole; the turns by chatTurnSigQuery.
+func (a *App) ChatSessionSig(ctx context.Context, sid string) (string, error) {
+	c, err := a.chatSession(ctx, sid)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	enc := json.NewEncoder(h)
+	if err = enc.Encode(c.ChatSession); err != nil {
+		return "", err
+	}
+	if err = enc.Encode(a.cachedFX()); err != nil {
+		return "", err
+	}
+	rows, err := a.DB.QueryContext(ctx, chatTurnSigQuery, sid)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			idx, trunc                  int
+			runID, at, status, fin, cur string
+			ansLen, errLen              int64
+			amount                      float64
+		)
+		if err = rows.Scan(&idx, &runID, &at, &status, &fin, &ansLen, &trunc, &errLen, &amount, &cur); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%d\x00%g\x00%s\n", idx, runID, at, status, fin, ansLen, trunc, errLen, amount, cur)
+	}
+	if err = rows.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)[:12]), nil
 }
 
 // SendChatTurn starts the next turn and returns once its run row exists (or

@@ -182,11 +182,25 @@
       if (busy()) livePoll(load, RC_POLL_MS); else if (st.polling) stopPoll();
       st.polling = busy();
     };
+    // While a turn is answered this runs every 1.5 s. The answer's live lines come over the
+    // run's event stream, so most polls find nothing new: with ?since=<sig> the server says
+    // {unchanged} instead of sending every turn's answer again, and nothing is re-rendered
+    // (each repaint used to turn every answer's markdown into HTML again to compare it).
     var load = function () {
       if (!st.id) return Promise.resolve();
-      return api("/api/chat-sessions/" + enc(st.id), { fresh: true }).then(function (s) { if (document.contains(sec)) paint(s); }).catch(function (e) {
+      var id = st.id, since = st.ses && st.sig && st.sigId === id ? "?since=" + enc(st.sig) : "";
+      return api("/api/chat-sessions/" + enc(id) + since, { fresh: true }).then(function (s) {
+        if (!document.contains(sec) || id !== st.id) return;
+        if (s && s.unchanged) {
+          if (s.sig === st.sig) { if (typeof capRefreshSession === "function") capRefreshSession(sec, id); return; }
+          st.sig = ""; return load();
+        }
+        st.sig = (s && s.sig) || ""; st.sigId = id;
+        paint(s);
+      }).catch(function (e) {
         if (!document.contains(sec)) return;
         if (e.status === 404) {
+          st.sig = "";
           if (o.onGone) { o.onGone(); return; }
           st.id = ""; st.ses = null; thread.innerHTML = ""; st.painted = {}; if ($("#rc-sep", sec)) $("#rc-sep", sec).hidden = true; sync(); return;
         }
@@ -222,6 +236,6 @@
       if (s) { s.disabled = true; stopRun(s.getAttribute("data-rc-stop"), s.getAttribute("data-st")).then(function () { load(); }).catch(function (x) { s.disabled = false; fail(x); }); }
     });
     sync();
-    if (o.pre) { turnsOf(o.pre).forEach(function (t) { st.painted[t.index] = rcTurnHtml(t); }); paint(o.pre); } else load();
+    if (o.pre) { st.sig = o.pre.sig || ""; st.sigId = st.id; turnsOf(o.pre).forEach(function (t) { st.painted[t.index] = rcTurnHtml(t); }); paint(o.pre); } else load();
     return { load: load };
   }
