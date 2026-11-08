@@ -523,8 +523,9 @@ func (a *App) chatSeed(ctx context.Context, sid, message string) (string, error)
 // chatData keeps quoted text from closing the record's tags.
 func chatData(s string) string { return strings.ReplaceAll(s, "</", "<\\/") }
 
-// DeleteChatSession removes a session, its scratch folder and its transcript in
-// tidebot's Claude Code config dir. The turns' runs stay in the run history.
+// DeleteChatSession removes a session, its capability proposals, its scratch
+// folder and its transcript in tidebot's Claude Code config dir. The turns' runs
+// stay in the run history.
 func (a *App) DeleteChatSession(ctx context.Context, sid string) error {
 	c, err := a.chatSession(ctx, sid)
 	if err != nil {
@@ -538,6 +539,9 @@ func (a *App) DeleteChatSession(ctx context.Context, sid string) error {
 		return webui.ErrChatSessionBusy
 	}
 	_, _ = a.DB.ExecContext(ctx, `DELETE FROM chat_session_turns WHERE session_id=?`, sid)
+	// Its capability proposals can no longer be confirmed (that goes through the
+	// session). One being applied finishes first; retention drops it afterwards.
+	_, _ = a.DB.ExecContext(ctx, `DELETE FROM capability_proposals WHERE session_id=? AND status<>'applying'`, sid)
 	for _, p := range a.chatTranscripts(c.ClaudeSessionID) {
 		_ = os.Remove(p)
 		_ = os.RemoveAll(strings.TrimSuffix(p, ".jsonl")) // subagent transcripts, tool results

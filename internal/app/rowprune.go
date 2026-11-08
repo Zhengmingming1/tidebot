@@ -70,6 +70,21 @@ var rowRules = []rowRule{
 			AND NOT EXISTS (SELECT 1 FROM workflow_runs r WHERE r.workflow_id=w.id)
 			AND NOT EXISTS (SELECT 1 FROM workflow_versions v WHERE v.workflow_id=w.id)
 			LIMIT ?)`},
+	// Capability proposals (the install / update / uninstall cards in a session):
+	// payload_json holds the whole lock, diff and scan (up to 1 MB). A pending one
+	// expires after 24 h but its row keeps status 'pending'; nothing ever removed
+	// them. Proposals of a deleted session can no longer be confirmed: drop them
+	// after a day. Every other settled or expired one goes after 30 days (the
+	// capability's own event log keeps the audit trail). 'applying' stays: startup
+	// recovery turns an interrupted one into 'failed'.
+	{"capability_proposals_orphan", 24 * time.Hour,
+		`DELETE FROM capability_proposals WHERE id IN (
+			SELECT p.id FROM capability_proposals p
+			WHERE p.status<>'applying' AND p.created_at < ?
+			AND NOT EXISTS (SELECT 1 FROM chat_sessions s WHERE s.id=p.session_id)
+			LIMIT ?)`},
+	{"capability_proposals", 30 * 24 * time.Hour,
+		`DELETE FROM capability_proposals WHERE id IN (SELECT id FROM capability_proposals WHERE status<>'applying' AND created_at < ? LIMIT ?)`},
 }
 
 // pruneRows deletes rows past their keep period in batches, so a long backlog never holds

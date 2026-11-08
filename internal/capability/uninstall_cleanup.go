@@ -221,7 +221,13 @@ var historyRefQueries = []string{
 	`SELECT definition_json FROM workflow_versions`,
 	`SELECT snapshot_json FROM workflow_runs`,
 	`SELECT bindings_json FROM chat_sessions`,
-	`SELECT payload_json FROM capability_proposals WHERE status IN ('pending','applying')`,
+	// Only proposals that can still be applied: one being applied, or a pending one
+	// that has not expired (ClaimProposal refuses expired ones) and whose session
+	// still exists (confirming goes through the session). Expired pending rows keep
+	// status 'pending' in the table, so the expiry is checked here.
+	`SELECT payload_json FROM capability_proposals WHERE status='applying'
+	 OR (status='pending' AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	     AND EXISTS (SELECT 1 FROM chat_sessions s WHERE s.id=capability_proposals.session_id))`,
 }
 
 // skillsReferencedInHistory scans each history table once for all candidate skill

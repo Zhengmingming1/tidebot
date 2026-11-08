@@ -5652,3 +5652,33 @@ a bulk edit makes undo exact without a history table.
 - 执行详情接口每次返回全部节点输出（最多约 4 MB）；轮询可以带 `?since=` 或 ETag，只在有变化时返回正文。
 - 已核对：技能组合评测 `poll(gen)`、依赖检查用的是自带 generation 的 `setTimeout` 链，结束即停，没有同类问题。
 - WebUI 单包去注释/压空白（发现 #5）；工作流执行保留天数跟「设置 › 数据」可配。
+
+### 2026-11-08：能力包提议过期/会话删除后不再算「引用」，并纳入行清理（BUG / 资源占用）
+
+**Done**
+
+- **问题 1（业务逻辑矛盾）**：会话里的安装/更新/卸载卡片（`capability_proposals`）24 小时后过期，`ClaimProposal` 也拒绝过期的，但表里状态一直是 `pending`，没有任何代码改成 `expired`。卸载能力包时 `skillsReferencedInHistory` 把所有 `pending` 当作「还可能被应用」，于是一张早已过期、永远点不了的更新卡片（或已删会话留下的卡片）会让卸载后的技能注册一直「retained by … proposal history」，界面说保留，但没有任何办法让它被用上。
+- **问题 2（资源占用）**：提议从不清理。`payload_json` 装整份 lock + diff + 扫描结果（上限 1 MB），删会话也不删它的卡片；每次卸载/预览还要把这些过期行的 payload 从库里读一遍。
+- **改法**：
+  1. 卸载的历史引用只看「还能被应用」的提议：`applying`，或 `pending` 且未过期、会话仍存在（`uninstall_cleanup.go`）。
+  2. `DeleteChatSession` 同时删该会话非 `applying` 的提议（正在应用的等它结束后由清理回收）。
+  3. `rowprune` 新增两条：已删会话的提议 1 天后删；其余非 `applying` 的提议 30 天后删（审计看能力包自己的 `capability_events`）。`applying` 不动，启动恢复本来就会把中断的改成 `failed`。
+- 测试：`capability/proposal_history_test.go`（过期 / 孤儿 / 已关闭的提议不再保留技能；未过期的 `pending` 和 `applying` 仍保留）；`app/capability_proposal_prune_test.go`（行清理 8 种组合、删会话只留 `applying`）。三个新测试在改动前都失败。
+
+| 指标（本机 Linux；300 张 40 天前的过期更新卡片，每张约 64 KB，一半属于已删会话，取 5 次最好） | 修复前 | 修复后 |
+| --- | ---: | ---: |
+| 卸载后技能注册被过期卡片「保留」 | 是 | 否（正常删除） |
+| 卸载历史扫描读入的提议行 / 耗时 | 300 行 / 12.1–13.3 ms | 0 行 / 4.5–4.6 ms（行清理之后为 0） |
+| `capability_proposals` 中 payload 总量（一次清理后） | 19 323 KB，永不回收 | 0 KB |
+
+**Learned**
+
+- 「状态列 + 过期时间列」并存时，只靠写入端判断过期（`ClaimProposal`）不够，所有读端（这里是卸载的引用扫描）都要一起看过期时间，或者有人负责把状态改掉。
+- SQLite 读 `status`、`expires_at` 也要跨过前面的大 `payload_json` 溢出页，所以光改查询条件只省一半（12→4.5 ms），真正省的是行清理。
+
+**Ideas for later**
+
+- `capability_proposals` 的列顺序让小列排在大 payload 后面；若之后改表，可把 payload 挪到最后或拆表，列表/过滤不必碰溢出页。
+- 会话页提议列表在回答中每 1.5 秒随轮询拉一次（带完整 payload，最多 200 条）；可以只在 `/api/rev` 变化或提议数变化时再拉。
+- 能力包设备登录对话框：点「开始」时初始轮询的 timer 没清，会并行两条轮询链（小问题，结束即停）。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；`GC` 在删除事务里量目录大小；`cleanupSkillRegistrations` 按 capability_id 收窄。
