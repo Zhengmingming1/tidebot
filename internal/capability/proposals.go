@@ -2,6 +2,8 @@ package capability
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"time"
@@ -106,9 +108,39 @@ func readProposal(row rowScanner) (Proposal, error) {
 
 const proposalColumns = `id,session_id,run_id,kind,payload_json,status,decided_by,decided_at,created_at,expires_at,base_version_id`
 
+// ProposalSigQuery lists what can change about a session's cards (a new card,
+// or a status change, which always stamps decided_at). Payloads never change
+// after insert. The covering index answers it without touching payload rows.
+const ProposalSigQuery = `SELECT id,status,decided_at FROM capability_proposals WHERE session_id=? ORDER BY created_at DESC LIMIT 200`
+
 func (s *Store) GetProposal(ctx context.Context, proposalID string) (Proposal, error) {
 	return readProposal(s.DB.QueryRowContext(ctx, `SELECT `+proposalColumns+` FROM capability_proposals WHERE id=?`, proposalID))
 }
+
+// ProposalsSig is a short fingerprint of a session's card list; equal sigs
+// mean ListProposals would return the same cards.
+func (s *Store) ProposalsSig(ctx context.Context, sessionID string) (string, error) {
+	rows, err := s.DB.QueryContext(ctx, ProposalSigQuery, sessionID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	h := sha256.New()
+	h.Write([]byte(sessionID))
+	for rows.Next() {
+		var id, status, decided string
+		if err := rows.Scan(&id, &status, &decided); err != nil {
+			return "", err
+		}
+		h.Write([]byte{0})
+		h.Write([]byte(id + "\x1f" + status + "\x1f" + decided))
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)[:12]), nil
+}
+
 func (s *Store) ListProposals(ctx context.Context, sessionID string) ([]Proposal, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+proposalColumns+` FROM capability_proposals WHERE session_id=? ORDER BY created_at DESC LIMIT 200`, sessionID)
 	if err != nil {

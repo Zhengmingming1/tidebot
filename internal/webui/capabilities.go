@@ -40,6 +40,7 @@ type CapabilityRequest struct {
 	Query               string            `json:"query,omitempty"`
 	SessionID           string            `json:"session_id,omitempty"`
 	ProposalID          string            `json:"proposal_id,omitempty"`
+	Since               string            `json:"-"`
 	Reason              string            `json:"reason,omitempty"`
 	Path                string            `json:"path,omitempty"`
 	Reviewed            bool              `json:"reviewed,omitempty"`
@@ -57,7 +58,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	route := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/capabilities"), "/")
-	req := CapabilityRequest{Providers: r.URL.Query().Get("providers"), RunID: r.URL.Query().Get("run_id"), VersionID: r.URL.Query().Get("version_id"), Source: r.URL.Query().Get("source"), Query: r.URL.Query().Get("q"), SessionID: r.URL.Query().Get("session_id"), Path: r.URL.Query().Get("path")}
+	req := CapabilityRequest{Providers: r.URL.Query().Get("providers"), RunID: r.URL.Query().Get("run_id"), VersionID: r.URL.Query().Get("version_id"), Source: r.URL.Query().Get("source"), Query: r.URL.Query().Get("q"), SessionID: r.URL.Query().Get("session_id"), Path: r.URL.Query().Get("path"), Since: r.URL.Query().Get("since")}
 	action := ""
 	switch {
 	case route == "sources" && r.Method == http.MethodGet:

@@ -5682,3 +5682,33 @@ a bulk edit makes undo exact without a history table.
 - 会话页提议列表在回答中每 1.5 秒随轮询拉一次（带完整 payload，最多 200 条）；可以只在 `/api/rev` 变化或提议数变化时再拉。
 - 能力包设备登录对话框：点「开始」时初始轮询的 timer 没清，会并行两条轮询链（小问题，结束即停）。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）；`GC` 在删除事务里量目录大小；`cleanupSkillRegistrations` 按 capability_id 收窄。
+
+### 2026-11-08：会话页能力包卡片轮询不再每次整份重拉，刷新时保留已勾选的确认项（资源占用 / BUG）
+
+**Done**
+
+- **问题**：会话正在回答时，`run-chat.js` 每 1.5 秒轮询一次会话，每次都顺带 `GET /api/capabilities/proposals?session_id=`。服务端每次读出这个会话最多 200 张卡片的完整 `payload_json`（单张上限 1 MB）、逐张 JSON 解析、算依赖计划、再整份发回；前端只要有一张卡变了就 `box.innerHTML` 整块重建，用户已经勾上的「我已查看」「我了解风险」「下载依赖」和本地改动的选择全部被清掉，回答期间要反复重勾。另外过期只在下一次重画时才显示，卡片过期后「安装」按钮还亮着，点了才报冲突。
+- **改法**：
+  1. 服务端（`capability/proposals.go`、`app/capabilities.go`）：新增 `ProposalsSig`，只取 `id,status,decided_at` 算一个指纹（payload 写入后不再变，状态变化都会写 `decided_at`）。请求带 `since=<上次的 sig>` 且相同时只回 `{"unchanged":true,"sig":…}`，不读 payload。新迁移 `043` 把 `capability_proposals_session` 索引扩成 `(session_id,created_at,id,status,decided_at)`，指纹查询走覆盖索引，不碰 payload 的溢出页（测试里用 `EXPLAIN QUERY PLAN` 核对）。会话归属检查照旧在前面。
+  2. 前端（`capabilities.js`）：拆出 `capPaintProposals`，按卡片 id 逐张比较 HTML，只替换变了的那一张、只给新卡绑事件，其他卡的 DOM（含勾选状态）原样保留，顺序按服务端排。最早一张待确认卡片到期时用本地定时器重画成「已过期」，不发请求。加载失败后下一次成功会清掉错误文字。
+- 测试：`app/capability_proposals_poll_test.go`（未变时短应答、新卡/状态变化/伪造 sig/别的会话都回整份、指纹查询是覆盖索引；`TIDEBOT_PERF=1` 计时）；`webui/capability_proposals_live_test.go`（node 下跑真实函数：首次不带 since、未变不重画、新卡插到顶部时其他卡 DOM 和勾选不变、只给新卡绑事件、状态变化只换那一张、节流、到期本地重画不发请求、移除的卡删掉；把比较改回整块重建时测试失败）；`webui/capabilities_test.go` 加 `since` 透传。`go test ./...` 全过。
+
+| 指标（本机 Linux；一个会话 20 张约 64 KB 的卡片，每次 20 次取平均，5 轮取最好） | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| 回答期间每次轮询的服务端耗时（含 JSON 编码） | 19.2–19.9 ms | 0.039 ms（列表没变时） |
+| 每次轮询的响应体 | 1 320 958 B | 51 B（列表没变时） |
+| 一张卡变化时被重建的卡片 | 全部（勾选全丢） | 只有那一张 |
+| 卡片过期后界面变成「已过期」 | 等下一次有变化的重画 | 到期即变，不发请求 |
+
+**参考**：HTTP 条件请求（`If-None-Match` / 304）的思路，这里用查询参数带指纹，免得改 `api()` 的缓存层；按 key 局部替换沿用本仓库 `run-chat.js` 的按轮重画。
+
+**Learned**
+
+- 「轮询 + 有变化就 innerHTML」会把表单状态一起冲掉；带勾选框、下拉的卡片必须按 key 局部替换。
+- 覆盖索引能让「只看小列」的查询完全跳过大 TEXT 列的溢出页；上一轮发现的「小列排在大 payload 后面」不用改表也能绕开。
+
+**Ideas for later**
+
+- 会话详情本身（`/api/chat-sessions/<id>`）每 1.5 秒也是整份重拉，可以同样带指纹或接 `/api/events` 的 rev。
+- 能力包设备登录对话框点「开始」时初始轮询的 timer 没清（仍未做）。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；`GC` 在删除事务里量目录大小；`cleanupSkillRegistrations` 按 capability_id 收窄。

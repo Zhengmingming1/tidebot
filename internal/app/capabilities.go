@@ -334,12 +334,21 @@ func (a *App) CapabilityRequest(ctx context.Context, action string, r webui.Capa
 		if _, e := a.chatSession(ctx, r.SessionID); e != nil {
 			return nil, e
 		}
+		// The chat page polls this while a turn is answered; an unchanged list
+		// is answered from the index alone, without reading the payloads.
+		sig, e := a.caps().ProposalsSig(ctx, r.SessionID)
+		if e != nil {
+			return nil, e
+		}
+		if r.Since != "" && r.Since == sig {
+			return map[string]any{"unchanged": true, "sig": sig}, nil
+		}
 		ps, e := a.caps().ListProposals(ctx, r.SessionID)
 		out := []capabilityProposalView{}
 		for _, p := range ps {
 			out = append(out, proposalView(p))
 		}
-		return map[string]any{"proposals": out}, e
+		return map[string]any{"proposals": out, "sig": sig}, e
 	case "confirm", "dismiss", "files", "file":
 		if _, e := a.chatSession(ctx, r.SessionID); e != nil {
 			return nil, e

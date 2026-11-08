@@ -70,17 +70,43 @@
       var filesButton = $("[data-cap-files]", el); if (filesButton) filesButton.addEventListener("click", function () { capFilesDialog(p).catch(fail); });
     });
   }
+  // Keyed by card: only a card whose HTML changed is replaced, so ticked boxes and
+  // chosen options on the other cards survive a refresh. An unchanged list comes
+  // back as {unchanged} (the server answers from an index, no payloads).
+  function capPaintProposals(box, sec, sid) {
+    var ps = box._ps || [], now = Date.now(), next = 0, keep = {};
+    ps.forEach(function (p, i) {
+      var h = capProposalHtml(p), el = null, exp = p.status === "pending" && p.expires_at ? Date.parse(p.expires_at) : 0;
+      if (exp > now && (!next || exp < next)) next = exp;
+      $$("[data-cap-proposal]", box).forEach(function (x) { if (x.getAttribute("data-cap-proposal") === p.id) el = x; });
+      keep[p.id] = 1;
+      if (!el || el._capH !== h) {
+        var tmp = document.createElement("div"); tmp.innerHTML = h;
+        var fresh = tmp.firstChild; fresh._capH = h;
+        capWireProposals(tmp, [p], function () { box._sig = ""; capRefreshSession(sec, sid, true); });
+        if (el) box.replaceChild(fresh, el); else box.appendChild(fresh);
+        el = fresh;
+      }
+      if (box.children[i] !== el) box.insertBefore(el, box.children[i] || null);
+    });
+    $$("[data-cap-proposal]", box).forEach(function (x) { if (!keep[x.getAttribute("data-cap-proposal")]) x.remove(); });
+    // a pending card turns "expired" by the clock alone: repaint it then, no request
+    clearTimeout(box._expT);
+    if (next) box._expT = setTimeout(function () { if (document.contains(box)) capPaintProposals(box, sec, sid); }, Math.min(next - now + 50, 2147483000));
+  }
   function capRefreshSession(sec, sid, force) {
     var box = $(".cap-session-proposals", sec);
     if (!box) { box = document.createElement("div"); box.className = "cap-session-proposals"; var form = $("#rc-form", sec); sec.insertBefore(box, form); }
     if (box._busy) { if (force) box._force = true; return; }
     if (!force && Date.now() - (box._last || 0) < 1200) return;
     box._busy = true; box._last = Date.now();
-    api("/api/capabilities/proposals?session_id=" + enc(sid), { fresh: true }).then(function (r) {
+    api("/api/capabilities/proposals?session_id=" + enc(sid) + (box._sig ? "&since=" + enc(box._sig) : ""), { fresh: true }).then(function (r) {
       if (!document.contains(box)) return;
-      var ps = r.proposals || [], h = ps.map(capProposalHtml).join("");
-      if (h !== box._html) { box._html = h; box.innerHTML = h; capWireProposals(box, ps, function () { box._html = null; capRefreshSession(sec, sid, true); }); }
-    }).catch(function (e) { if (!e.auth && document.contains(box)) { box.textContent = T("cap.load_error"); box._html = null; } }).finally(function () { box._busy = false; if (box._force && document.contains(box)) { box._force = false; capRefreshSession(sec, sid, true); } });
+      if (r.unchanged && r.sig === box._sig) return;
+      if (box._failed) { box.textContent = ""; box._failed = false; }
+      box._ps = r.proposals || []; box._sig = r.sig || "";
+      capPaintProposals(box, sec, sid);
+    }).catch(function (e) { if (!e.auth && document.contains(box)) { clearTimeout(box._expT); box.textContent = T("cap.load_error"); box._failed = true; box._sig = ""; box._ps = []; } }).finally(function () { box._busy = false; if (box._force && document.contains(box)) { box._force = false; capRefreshSession(sec, sid, true); } });
   }
   function capPropose(source) {
     return api("/api/chat-sessions", { method: "POST", body: { origin: "chat" } }).then(function (s) {

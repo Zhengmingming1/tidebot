@@ -37,6 +37,7 @@ func TestCapabilityRoutesAndImmutableConfirmation(t *testing.T) {
 		{"POST", "/api/capabilities/test-cap/credentials_clear", `{"reviewed":true}`, "credentials_clear", 200},
 		{"GET", "/api/capabilities/storage/gc", "", "", 404},
 		{"GET", "/api/capabilities/search?q=pdf", "", "search", 200},
+		{"GET", "/api/capabilities/proposals?session_id=s&since=abc", "", "proposals", 200},
 		{"POST", "/api/capabilities/proposals", `{"source":"pdf","session_id":"s"}`, "propose", 201},
 		{"POST", "/api/capabilities/proposals/p/confirm", `{"session_id":"s","reviewed":true,"secondary_confirm":true}`, "confirm", 200},
 		{"GET", "/api/capabilities/proposals/p/file?session_id=s&path=SKILL.md", "", "file", 200},
@@ -52,6 +53,9 @@ func TestCapabilityRoutesAndImmutableConfirmation(t *testing.T) {
 			s.handleCapabilities(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
 			if w.Code != tc.status || api.action != tc.action {
 				t.Fatalf("status %d action %q body %s", w.Code, api.action, w.Body.String())
+			}
+			if tc.action == "proposals" && (api.req.SessionID != "s" || api.req.Since != "abc") {
+				t.Fatalf("proposals request %+v", api.req)
 			}
 			if tc.action == "confirm" && api.req.ProposalID != "p" {
 				t.Fatalf("wrong proposal %q", api.req.ProposalID)
