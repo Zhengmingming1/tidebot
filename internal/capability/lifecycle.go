@@ -541,68 +541,47 @@ func (s *Store) GC(ctx context.Context, capID, actor string) (GCResult, error) {
 		if err = ctx.Err(); err != nil {
 			return out, err
 		}
-		tx, e := s.DB.BeginTx(ctx, nil)
+		// Check references and measure the snapshot before taking the pool's
+		// only connection: pinned versions are skipped without a disk walk, and
+		// the walk never blocks other requests. Snapshots are immutable, so the
+		// size cannot change; references are rechecked inside the transaction.
+		references, e := gcReferences(ctx, s.DB, capID, v)
 		if e != nil {
 			return out, e
 		}
-		// Recheck the current pointer inside the deletion transaction.
-		var references int
-		e = tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM capabilities WHERE id=? AND current_version_id=?)+(SELECT count(*) FROM capability_bindings WHERE capability_id=? AND version_id=?)+(SELECT count(*) FROM capability_run_bindings WHERE capability_id=? AND version_id=?)`, capID, v.VersionID, capID, v.VersionID, capID, v.VersionID).Scan(&references)
-		if e != nil {
-			tx.Rollback()
-			return out, e
-		}
 		if references > 0 {
-			tx.Rollback()
-			continue
-		}
-		// Preserve registered skill versions used by historical runs as well.
-		for _, component := range v.Lock.Components {
-			if component.VersionID == "" {
-				continue
-			}
-			var n int
-			e = tx.QueryRowContext(ctx, `SELECT count(*) FROM run_skill_bindings WHERE version_id=?`, component.VersionID).Scan(&n)
-			if e != nil {
-				tx.Rollback()
-				return out, e
-			}
-			references += n
-		}
-		if references > 0 {
-			tx.Rollback()
 			continue
 		}
 		if !safeID.MatchString(v.VersionID) {
-			tx.Rollback()
 			return out, errors.New("invalid version identity")
 		}
 		base := filepath.Join(s.DataDir, "capabilities", capID)
 		target := filepath.Join(base, v.VersionID)
 		if e = checkExistingDirectory(base); e != nil {
-			tx.Rollback()
 			return out, e
 		}
-		var size int64
-		e = filepath.WalkDir(target, func(_ string, d os.DirEntry, e error) error {
-			if e != nil {
-				return e
-			}
-			if d.Type()&os.ModeSymlink != 0 {
-				return errors.New("refusing GC of symlink snapshot")
-			}
-			if !d.IsDir() {
-				info, e := d.Info()
-				if e != nil {
-					return e
-				}
-				size += info.Size()
-			}
-			return nil
-		})
+		size, e := gcSnapshotSize(ctx, target)
 		if e != nil {
-			tx.Rollback()
 			return out, e
+		}
+		tx, e := s.DB.BeginTx(ctx, nil)
+		if e != nil {
+			return out, e
+		}
+		// Recheck the current pointer and bindings inside the deletion transaction.
+		if references, e = gcReferences(ctx, tx, capID, v); e != nil || references > 0 {
+			tx.Rollback()
+			if e != nil {
+				return out, e
+			}
+			continue
+		}
+		if info, e := os.Lstat(target); e != nil || !info.IsDir() {
+			tx.Rollback()
+			if e != nil {
+				return out, e
+			}
+			return out, errors.New("refusing GC of symlink snapshot")
 		}
 		trash := filepath.Join(base, ".gc-"+v.VersionID)
 		if _, e = os.Lstat(trash); !errors.Is(e, os.ErrNotExist) {
@@ -633,6 +612,55 @@ func (s *Store) GC(ctx context.Context, capID, actor string) (GCResult, error) {
 	}
 	return out, nil
 }
+
+// gcReferences counts what still needs a snapshot: the current pointer,
+// bindings, run bindings, and historical runs of its registered skill versions.
+func gcReferences(ctx context.Context, q skillQuery, capID string, v Record) (int, error) {
+	var references int
+	if err := q.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM capabilities WHERE id=? AND current_version_id=?)+(SELECT count(*) FROM capability_bindings WHERE capability_id=? AND version_id=?)+(SELECT count(*) FROM capability_run_bindings WHERE capability_id=? AND version_id=?)`, capID, v.VersionID, capID, v.VersionID, capID, v.VersionID).Scan(&references); err != nil {
+		return 0, err
+	}
+	for _, component := range v.Lock.Components {
+		if references > 0 {
+			break
+		}
+		if component.VersionID == "" {
+			continue
+		}
+		var n int
+		if err := q.QueryRowContext(ctx, `SELECT count(*) FROM run_skill_bindings WHERE version_id=?`, component.VersionID).Scan(&n); err != nil {
+			return 0, err
+		}
+		references += n
+	}
+	return references, nil
+}
+
+// gcSnapshotSize is replaced by tests to observe the walk.
+var gcSnapshotSize = func(ctx context.Context, target string) (int64, error) {
+	var size int64
+	err := filepath.WalkDir(target, func(_ string, d os.DirEntry, e error) error {
+		if e != nil {
+			return e
+		}
+		if e = ctx.Err(); e != nil {
+			return e
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return errors.New("refusing GC of symlink snapshot")
+		}
+		if !d.IsDir() {
+			info, e := d.Info()
+			if e != nil {
+				return e
+			}
+			size += info.Size()
+		}
+		return nil
+	})
+	return size, err
+}
+
 func checkExistingDirectory(dir string) error {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
