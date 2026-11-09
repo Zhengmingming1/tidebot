@@ -5913,3 +5913,28 @@ a bulk edit makes undo exact without a history table.
 - 托管依赖 `managed.GC` 和 `SweepStages` 删除失败目前是跳过，可以在「扩展 › 工具」显示「N 项暂时删不掉，稍后自动重试」。
 - `cleanupSkillRegistrations` 每次卸载都读出所有能力包全部版本的 lock_json 并校验 SHA-256；可以只对本能力包校验完整性。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）。
+
+### 2026-11-09：会话里确认「卸载能力包」卡片不再必然失败（BUG，工作流中断）
+
+**Done**
+
+- **问题**：能力包带有专属技能（由确认卡安装、只属于这个能力包）时，在会话里走「卸载」确认卡**每次都失败**，报「uninstall contents changed; review a new proposal」，重新提议也一样，只能去扩展页直接卸载。原因：卸载前要判断技能还有没有被「仍可执行的提议」引用（`historyRefQueries` 里 `capability_proposals` 那一条），而卸载卡自己的 payload 里就有 lock 和删除摘要，列着要删的技能 ID。①提议时算出的摘要是「删除技能 X」；②点确认后卡片变成 `applying`，在写锁里重算摘要时，这张卡自己就把 X 算成「被提议历史引用」→ 摘要变成「保留 X」→ 和用户看过的摘要不一致 → 拒绝。同一会话里模型提了两次卸载卡时，第二张的摘要还会被第一张带偏成「保留」。问题从 P3（`239b824`）起就有，v0.2.7 已带出去；原有测试的能力包只有 MCP 组件，没有技能，所以没测到。
+- **改法**：引用查询排除 `kind='uninstall'` 的提议。卸载卡不会安装或固定任何东西，它的 payload 就是要删的东西本身；被另一个能力包共享的技能仍由 `capability_versions` 的 lock 判定为共享，不受影响。安装 / 更新 / 绑定 / 修复 / 技能优化这类提议照旧算引用。
+- 测试：`capability/uninstall_proposal_selfref_test.go`（预览 → 建两张卸载卡 → 待确认时预览仍是「删除」→ 认领 → `UninstallVersionWithReport` 成功并删掉技能；进行中的更新提议仍保留技能）；`app/capability_lifecycle_proposals_test.go` 新增端到端：会话里确认安装 `pdf` → 解绑 → 提卸载卡 → 走 `CapabilityRequest("confirm")`，能力包卸掉、技能注册删掉、卡片 `applied`。改动前两个新测试都失败（报的正是「uninstall contents changed」）。`go test ./...` 全过。
+
+| 场景（带 1 个专属技能的能力包，会话卸载卡） | 修复前 | 修复后 |
+| --- | --- | --- |
+| 确认卸载 | 失败（摘要不一致） | 成功，删除技能注册 |
+| 卡片待确认时重算的摘要 | 「保留：被提议历史引用」 | 「删除」，与卡片一致 |
+| 同会话有两张卸载卡时新卡的摘要 | 被另一张带偏成「保留」 | 「删除」 |
+
+**Learned**
+
+- 「是否被引用」的扫描如果包含「操作记录 / 提议」类表，要排除正在执行的这次操作本身；否则「执行前复核」会把自己算进去，复核永远不通过。
+- 测试夹具只覆盖最简单的组件类型（MCP）时，跟技能相关的整条分支等于没测；生命周期测试至少要有一个带技能的夹具。
+
+**Ideas for later**
+
+- 卸载确认路径仍把清理计划算三遍（确认前 `PreviewUninstall` 一遍，写锁里预览比对一遍、真删一遍），每遍都全表扫任务版本、工作流版本和执行快照；可以在写锁里只算一遍计划，比对后直接按计划删。
+- `cleanupSkillRegistrations` 的 `capability_run_bindings` 计数与技能无关，却在每个技能的循环里查一次，可以提到循环外。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；`cleanupSkillRegistrations` 只对本能力包校验 lock 完整性。

@@ -175,3 +175,57 @@ func TestCapabilityUninstallProposalRejectsChangedSummaryAndLateBinding(t *testi
 		})
 	}
 }
+
+// End to end through the session card: a capability whose skill was installed by
+// a confirmed card, unbound by the owner, then uninstalled through an uninstall
+// card. Confirming must remove the exclusive skill instead of failing with
+// "uninstall contents changed".
+func TestCapabilityUninstallCardRemovesExclusiveSkill(t *testing.T) {
+	a, _, sid := capFixture(t)
+	ctx := context.Background()
+	v, err := a.CapabilityRequest(ctx, "propose", webui.CapabilityRequest{Source: "pdf", SessionID: sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err = a.CapabilityRequest(ctx, "confirm", webui.CapabilityRequest{ProposalID: v.(capabilityProposalView).ID, SessionID: sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := v.(capability.Record)
+	skillID := rec.Lock.Components[0].SkillID
+	if skillID == "" {
+		t.Fatal("install did not register a skill")
+	}
+	if _, err = a.DB.Exec(`UPDATE chat_sessions SET bindings_json='[]' WHERE id=?`, sid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.DB.Exec(`DELETE FROM capability_bindings WHERE capability_id=?`, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	v, err = a.proposeCapabilityLifecycle(ctx, "uninstall", webui.CapabilityRequest{Source: rec.ID, SessionID: sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := v.(capabilityProposalView).Proposal
+	if len(p.UninstallPreview.RemovedSkills) != 1 || p.UninstallPreview.RemovedSkills[0] != skillID {
+		t.Fatalf("summary should remove the skill: %+v", p.UninstallPreview)
+	}
+	out, err := a.CapabilityRequest(ctx, "confirm", webui.CapabilityRequest{ProposalID: p.ID, SessionID: sid, Reviewed: true, VersionID: rec.VersionID})
+	if err != nil {
+		t.Fatalf("confirmed uninstall failed: %v", err)
+	}
+	if res, ok := out.(capability.UninstallResult); !ok || len(res.RemovedSkills) != 1 {
+		t.Fatalf("result: %#v", out)
+	}
+	if _, err = a.caps().Get(ctx, rec.ID); err == nil {
+		t.Fatal("capability still installed")
+	}
+	var n int
+	if err = a.DB.QueryRow(`SELECT count(*) FROM skills WHERE id=?`, skillID).Scan(&n); err != nil || n != 0 {
+		t.Fatal("skill registration kept", n, err)
+	}
+	got, err := a.caps().GetProposal(ctx, p.ID)
+	if err != nil || got.Status != "applied" {
+		t.Fatalf("proposal status %q %v", got.Status, err)
+	}
+}
