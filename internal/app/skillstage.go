@@ -11,6 +11,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 )
 
 // Skills tidebot manages are only ever loaded into runs tidebot starts. Each run
@@ -128,7 +129,7 @@ func (st *skillStage) argsWithText(modern, explicit bool, text string) []string 
 	}
 	const maxArg = 16 << 10 // command lines are limited (32K on Windows)
 	if len(text) > maxArg {
-		text = text[:maxArg] + "\n…(truncated)"
+		text = textclip.Head(text, maxArg) + "\n…(truncated)"
 	}
 	return append(args, "--append-system-prompt", text)
 }

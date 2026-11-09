@@ -13,6 +13,8 @@ import (
 	"github.com/andybalholm/cascadia"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
+
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 )
 
 // RobotsAllowed fetches /robots.txt and checks path for our user agent ("tidebot") or "*".
@@ -263,9 +265,7 @@ func pollWeb(ctx context.Context, cfg map[string]any, st *State, first bool) ([]
 	if err != nil {
 		return nil, err
 	}
-	if len(txt) > 200<<10 {
-		txt = txt[:200<<10]
-	}
+	txt = textclip.Head(txt, 200<<10) // a cut character would differ from the saved (JSON, U+FFFD) copy
 	if st.preview {
 		return []Item{{"url": str(cfg, "url"), "text": snippet(txt, 800)}}, nil
 	}

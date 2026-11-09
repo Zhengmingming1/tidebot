@@ -8,7 +8,6 @@
 package sessiontools
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -237,7 +237,11 @@ func SearchFiles(roots []Root, pattern, path, glob string, ignoreCase bool) (str
 	if err != nil {
 		return "", fmt.Errorf("bad regular expression: %v", err)
 	}
+	// A match always contains the pattern's literal prefix (if any), so a file
+	// without it is skipped without splitting it into lines.
+	lit, _ := re.LiteralPrefix()
 	var out []string
+	var buf []byte // reused for every file
 	total := int64(0)
 	err = walk(roots, path, glob, func(r Root, root *os.Root, rel string, size int64) error {
 		if size > maxFileBytes {
@@ -252,7 +256,11 @@ func SearchFiles(roots []Root, pattern, path, glob string, ignoreCase bool) (str
 		}
 		// Enforce the limit on the read as well as the earlier directory entry:
 		// files can grow between stat and open.
-		b, err := io.ReadAll(io.LimitReader(f, min(int64(maxFileBytes), maxTotalBytes-total)+1))
+		var b []byte
+		if limit := min(int64(maxFileBytes), maxTotalBytes-total) + 1; int64(cap(buf)) < min(size+512, limit) {
+			buf = make([]byte, 0, min(size+512, limit)) // the size seen when listed, plus room to notice growth
+		}
+		b, buf, err = readCapped(f, min(int64(maxFileBytes), maxTotalBytes-total)+1, buf)
 		f.Close()
 		total += int64(len(b))
 		if total > maxTotalBytes {
@@ -261,20 +269,20 @@ func SearchFiles(roots []Root, pattern, path, glob string, ignoreCase bool) (str
 		if err != nil || len(b) > maxFileBytes || bytes.IndexByte(b[:min(len(b), 8000)], 0) >= 0 {
 			return nil // unreadable or binary
 		}
-		sc := bufio.NewScanner(bytes.NewReader(b))
-		sc.Buffer(make([]byte, 64<<10), 1<<20)
-		for n := 1; sc.Scan(); n++ {
-			line := sc.Text()
-			if !re.MatchString(line) {
-				continue
+		if lit != "" && !bytes.Contains(b, []byte(lit)) {
+			return nil
+		}
+		stop := false
+		eachLine(b, func(n int, line []byte) bool {
+			if !re.Match(line) {
+				return true
 			}
-			if len(line) > maxLineBytes {
-				line = line[:maxLineBytes] + "…"
-			}
-			out = append(out, fmt.Sprintf("%s:%d: %s", show(r, rel), n, line))
-			if len(out) >= maxMatches {
-				return errStop
-			}
+			out = append(out, fmt.Sprintf("%s:%d: %s", show(r, rel), n, clipLine(line)))
+			stop = len(out) >= maxMatches
+			return !stop
+		})
+		if stop {
+			return errStop
 		}
 		return nil
 	})
@@ -289,4 +297,59 @@ func SearchFiles(roots []Root, pattern, path, glob string, ignoreCase bool) (str
 		s += "\n… (stopped; narrow the pattern, path or glob)"
 	}
 	return s, nil
+}
+
+// readCapped reads at most limit bytes of f into buf's storage (grown as
+// needed and handed back for the next file), so a search does not allocate a
+// fresh, repeatedly doubled buffer for every file it reads.
+func readCapped(f io.Reader, limit int64, buf []byte) (b, keep []byte, err error) {
+	buf = buf[:0]
+	for int64(len(buf)) < limit {
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)]
+		}
+		room := min(int64(cap(buf)), limit)
+		n, e := f.Read(buf[len(buf):room])
+		buf = buf[:len(buf)+n]
+		if e == io.EOF {
+			break
+		}
+		if e != nil {
+			return buf, buf, e
+		}
+	}
+	return buf, buf, nil
+}
+
+// eachLine calls fn with every line of b (numbered from 1) without its line
+// ending, \n or \r\n: a Windows file's lines match `$` and show no stray \r.
+// Lines have no length limit (b is already capped at maxFileBytes), so a long
+// minified line does not end the search of the rest of the file. fn returns
+// false to stop. The line aliases b.
+func eachLine(b []byte, fn func(n int, line []byte) bool) {
+	for n := 1; len(b) > 0; n++ {
+		line := b
+		if i := bytes.IndexByte(b, '\n'); i >= 0 {
+			line, b = b[:i], b[i+1:]
+		} else {
+			b = nil
+		}
+		line = bytes.TrimSuffix(line, []byte{'\r'})
+		if !fn(n, line) {
+			return
+		}
+	}
+}
+
+// clipLine cuts a matching line to maxLineBytes on a character boundary, so
+// Chinese or emoji text is not broken into U+FFFD by the JSON reply.
+func clipLine(line []byte) string {
+	if len(line) <= maxLineBytes {
+		return string(line)
+	}
+	i := maxLineBytes
+	for i > 0 && !utf8.RuneStart(line[i]) {
+		i--
+	}
+	return string(line[:i]) + "…"
 }

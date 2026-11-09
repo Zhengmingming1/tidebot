@@ -26,6 +26,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 )
 
 type ctxKey string
@@ -126,7 +127,7 @@ func (a *App) fireTask(bindingID, taskID, kind, source, payload string) (err err
 		return errors.New("task is not active")
 	}
 	if len(payload) > 64<<10 {
-		payload = payload[:64<<10] + "\n[truncated]"
+		payload = textclip.Head(payload, 64<<10) + "\n[truncated]"
 	}
 	ctx := context.WithValue(context.Background(), externalInputKey, guard.WrapExternal(source, payload))
 	go func() {

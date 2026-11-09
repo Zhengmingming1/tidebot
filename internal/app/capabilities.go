@@ -22,6 +22,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/sessiontools"
 	"github.com/Zhengmingming1/tidebot/internal/skillrepo"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
+	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
 	"gopkg.in/yaml.v3"
 )
@@ -385,10 +386,7 @@ func (a *App) CapabilityRequest(ctx context.Context, action string, r webui.Capa
 				return nil, capError(404, "not_found", "file not found")
 			}
 			truncated := len(b) > 64<<10
-			if truncated {
-				b = b[:64<<10]
-			}
-			return map[string]any{"path": r.Path, "text": string(b), "truncated": truncated, "untrusted": true}, nil
+			return map[string]any{"path": r.Path, "text": textclip.Head(string(b), 64<<10), "truncated": truncated, "untrusted": true}, nil
 		}
 		if action == "confirm" {
 			if e = capability.ValidateLocalChoices(p, r.LocalChoices); e != nil {
@@ -605,10 +603,7 @@ func (a *App) rpcSessionTool(ctx context.Context, raw json.RawMessage) (any, err
 		if !ok {
 			return nil, errors.New("file not found")
 		}
-		if len(b) > 64<<10 {
-			b = b[:64<<10]
-		}
-		out = map[string]any{"text": string(b), "untrusted": true}
+		out = map[string]any{"text": textclip.Head(string(b), 64<<10), "untrusted": true}
 	case "cap_test":
 		req.Source = in.Args["id"]
 		if _, e := a.caps().Get(ctx, req.Source); e != nil {
