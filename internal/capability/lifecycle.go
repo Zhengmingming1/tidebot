@@ -604,13 +604,69 @@ func (s *Store) GC(ctx context.Context, capID, actor string) (GCResult, error) {
 			_ = os.Rename(trash, target)
 			return out, e
 		}
-		if e = os.RemoveAll(trash); e != nil {
-			return out, e
-		}
+		// The row is gone and the snapshot is out of reach, so the version is
+		// removed even if deleting its files fails (a file locked by another
+		// process on Windows). The leftover trash is retried below and by every
+		// later GC and startup recovery instead of aborting the remaining versions.
 		out.RemovedVersions = append(out.RemovedVersions, v.VersionID)
-		out.BytesFreed += size
+		out.BytesFreed += size - gcRemoveTrash(trash)
 	}
+	out.BytesFreed += s.gcSweepTrash(ctx, capID)
 	return out, nil
+}
+
+// gcRemoveAll is replaced by tests to simulate files that cannot be deleted.
+var gcRemoveAll = os.RemoveAll
+
+// gcRemoveTrash deletes a committed snapshot's trash and returns the bytes it
+// could not delete.
+func gcRemoveTrash(trash string) int64 {
+	if gcRemoveAll(trash) == nil {
+		return 0
+	}
+	var left int64
+	_ = filepath.WalkDir(trash, func(_ string, d os.DirEntry, e error) error {
+		if e == nil && d.Type().IsRegular() {
+			if info, e := d.Info(); e == nil {
+				left += info.Size()
+			}
+		}
+		return nil
+	})
+	return left
+}
+
+// gcSweepTrash retries trash that an earlier GC committed but could not delete.
+// Only directories whose version row is gone are touched: a concurrent GC that
+// renamed its snapshot but has not committed still has the row and may roll
+// the rename back. Returns the bytes freed.
+func (s *Store) gcSweepTrash(ctx context.Context, capID string) int64 {
+	base := filepath.Join(s.DataDir, "capabilities", capID)
+	if checkExistingDirectory(base) != nil {
+		return 0
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return 0
+	}
+	var freed int64
+	for _, entry := range entries {
+		versionID, ok := strings.CutPrefix(entry.Name(), ".gc-")
+		if !ok || !entry.IsDir() || !safeID.MatchString(versionID) || ctx.Err() != nil {
+			continue
+		}
+		var present int
+		if s.DB.QueryRowContext(ctx, `SELECT count(*) FROM capability_versions WHERE capability_id=? AND id=?`, capID, versionID).Scan(&present) != nil || present > 0 {
+			continue
+		}
+		trash := filepath.Join(base, entry.Name())
+		size, err := gcSnapshotSize(ctx, trash)
+		if err != nil {
+			continue
+		}
+		freed += size - gcRemoveTrash(trash)
+	}
+	return freed
 }
 
 // gcReferences counts what still needs a snapshot: the current pointer,
@@ -715,6 +771,7 @@ func (s *Store) RecoverStorage(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	count := 0
+	var failed []error
 	for _, capDir := range caps {
 		if err = ctx.Err(); err != nil {
 			return count, err
@@ -766,12 +823,16 @@ func (s *Store) RecoverStorage(ctx context.Context) (int, error) {
 				remove = present == 0
 			}
 			if remove {
-				if e = os.RemoveAll(target); e != nil {
-					return count, e
+				// A file held open elsewhere (Windows) must not stop recovery of
+				// the remaining entries; the leftover is retried on the next start
+				// and by GC.
+				if e = gcRemoveAll(target); e != nil {
+					failed = append(failed, e)
+					continue
 				}
 				count++
 			}
 		}
 	}
-	return count, nil
+	return count, errors.Join(failed...)
 }
