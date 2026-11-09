@@ -5966,3 +5966,27 @@ a bulk edit makes undo exact without a history table.
 - 服务端可以让 `propose` / `update` / `rescan` / `import` 接受「新会话」并在同一事务里建会话和提议，彻底去掉两步之间的窗口。
 - 已经积累的空会话（`origin='chat'`、0 轮、无提议、无绑定、超过 N 天）可以考虑纳入数据保留清理；要先确认不会误删用户刻意留着的空白会话。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）；`cleanupSkillRegistrations` 只对本能力包校验 lock 完整性、把 `capability_run_bindings` 计数提出循环。
+
+### 2026-11-09：会话确认卸载能力包时写锁里只算一次清理计划（资源占用 / 卡顿）
+
+**Done**
+
+- **问题**：会话里确认「卸载」卡片走 `UninstallVersionWithReport(…, reviewed)`，在持有写锁（连接池只有 1 个连接）的事务里把技能清理计划算了两遍：一遍和卡片上用户看过的摘要比对，一遍真删。每遍都读出全部能力包版本的 lock 并校验 SHA-256、全表扫一次任务 / 技能组合版本、工作流版本、工作流执行快照、会话绑定和提议。历史越多，卸载期间调度器和 WebUI 请求等得越久。另外 `capability_run_bindings` 的计数与技能无关，却在每个技能的循环里各查一次。
+- **改法**（`internal/capability/uninstall_cleanup.go`、`lifecycle.go`）：`cleanupSkillRegistrations` 拆成只读的 `planSkillCleanup` 和按计划删除的 `applySkillCleanup`。`uninstallPinned` 在写锁里算一次计划，有卡片摘要就比对，不一致照旧拒绝；一致就按同一份计划删，报告也直接用这份计划。预览和扩展页直接卸载的结果不变。运行绑定计数提到循环外。
+- 测试：`uninstall_plan_perf_test.go`。①确认卸载时历史只扫 1 次（改动前 2 次），报告与卡片摘要一致、技能注册删除；②过期摘要仍拒绝且不删技能、不改状态；③`TIDEBOT_PERF=1` 计时。`go test ./...`、`go test -race ./internal/capability/...` 通过，`GOOS=windows/darwin go vet` 干净。
+
+| 指标（本机 Linux 8 核；1 个带专属技能的能力包，5000 条 8 KB 任务版本历史，3 轮） | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| 会话确认卸载耗时（全程持写锁） | 66–71 ms | 41–42 ms |
+| 写锁内历史全表扫描次数 | 2 | 1 |
+| 写锁内 lock 读取 + SHA-256 校验次数 | 2 × 全部版本 | 1 × 全部版本 |
+
+**Learned**
+
+- 「复核后执行」如果复核和执行各自重算一遍，等于把最慢的那部分在锁里做两次；先算出计划、比对、再按同一份计划执行，既省一半时间，也保证删掉的正是比对过的内容。
+
+**Ideas for later**
+
+- `uninstallPinned` 前半段的引用检查（会话绑定、当前任务 / 工作流定义、进行中的执行快照）仍是全表 JSON 解析，没有 `strings.Contains` 预筛；可以照 `skillsReferencedInHistory` 加预筛。
+- `planSkillCleanup` 仍对所有能力包的全部版本做 SHA-256 校验；能力包多、版本多时可以考虑按 `capability_id` 先只校验本包，其他包只取组件 skill_id（要先确认不弱化防篡改语义）。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）。

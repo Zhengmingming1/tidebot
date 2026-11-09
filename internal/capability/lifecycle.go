@@ -313,22 +313,24 @@ func (s *Store) uninstallPinned(ctx context.Context, capID, versionID, actor str
 			return ErrReferenced
 		}
 	}
+	plan := UninstallResult{RemovedSkills: []string{}, Retained: []UninstallRetention{}}
+	if err = planSkillCleanup(ctx, tx, capID, &plan); err != nil {
+		return err
+	}
 	if reviewed != nil {
-		current := UninstallResult{RemovedSkills: []string{}, Retained: []UninstallRetention{}}
-		if err = cleanupSkillRegistrations(ctx, tx, capID, &current, true); err != nil {
-			return err
-		}
 		want, _ := json.Marshal(reviewed)
-		got, _ := json.Marshal(current)
+		got, _ := json.Marshal(plan)
 		if string(want) != string(got) {
 			return errors.New("uninstall contents changed; review a new proposal")
 		}
 	}
-	if err = cleanupSkillRegistrations(ctx, tx, capID, report, preview); err != nil {
-		return err
-	}
+	report.RemovedSkills = append(report.RemovedSkills, plan.RemovedSkills...)
+	report.Retained = append(report.Retained, plan.Retained...)
 	if preview {
 		return nil
+	}
+	if err = applySkillCleanup(ctx, tx, plan); err != nil {
+		return err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM capability_tool_grants WHERE capability_id=?`, capID); err != nil {
 		return err

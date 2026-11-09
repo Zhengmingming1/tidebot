@@ -34,10 +34,12 @@ func (s *Store) UninstallWithReport(ctx context.Context, capID, actor string) (U
 	return out, nil
 }
 
-// cleanupSkillRegistrations runs under the uninstall transaction's writer lock.
-// Immutable skill versions/blobs remain available to retained snapshots. Only
-// skills whose complete provenance belongs to this capability can be removed.
-func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, out *UninstallResult, preview bool) error {
+// planSkillCleanup runs under the uninstall transaction's writer lock and only
+// reads. Immutable skill versions/blobs remain available to retained snapshots.
+// Only skills whose complete provenance belongs to this capability are listed
+// for removal. The confirmed path compares this plan with the reviewed one and
+// then applies the same plan, so history is scanned once per uninstall.
+func planSkillCleanup(ctx context.Context, tx *sql.Tx, capID string, out *UninstallResult) error {
 	own := map[string]map[string]bool{}
 	shared := map[string]bool{}
 	rows, err := tx.QueryContext(ctx, `SELECT capability_id,lock_json,lock_sha256 FROM capability_versions`)
@@ -92,6 +94,13 @@ func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, ou
 	if err != nil {
 		return err
 	}
+	// Run pins belong to the capability, not to one skill: count them once.
+	var runPins int
+	if len(ids) > 0 {
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM capability_run_bindings WHERE capability_id=?`, capID).Scan(&runPins); err != nil {
+			return err
+		}
+	}
 	for _, sid := range ids {
 		var present int
 		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM skills WHERE id=?`, sid).Scan(&present); err != nil {
@@ -101,10 +110,6 @@ func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, ou
 			continue
 		}
 		reason := ""
-		var runPins int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM capability_run_bindings WHERE capability_id=?`, capID).Scan(&runPins); err != nil {
-			return err
-		}
 		if runPins > 0 {
 			reason = "retained by capability run history"
 		}
@@ -121,22 +126,26 @@ func cleanupSkillRegistrations(ctx context.Context, tx *sql.Tx, capID string, ou
 			out.Retained = append(out.Retained, UninstallRetention{"skill", sid, reason})
 			continue
 		}
-		if preview {
-			out.RemovedSkills = append(out.RemovedSkills, sid)
-			continue
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM pointers WHERE entity_type='skill' AND entity_id=?`, sid); err != nil {
-			return err
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM skills WHERE id=?`, sid); err != nil {
-			return err
-		}
 		out.RemovedSkills = append(out.RemovedSkills, sid)
 	}
 	out.Retained = append(out.Retained,
 		UninstallRetention{"snapshots", capID, "immutable capability and skill versions retained for audit; snapshot cleanup requires explicit confirmation"},
 		UninstallRetention{"managed_dependencies", capID, "tools and environments remain referenced by retained snapshots; use reviewed storage cleanup after snapshot cleanup"},
 		UninstallRetention{"credentials", capID, "credentials require separate explicit revoke and clear confirmation"})
+	return nil
+}
+
+// applySkillCleanup deletes the registrations a plan lists for removal. It must
+// run in the same transaction that produced the plan.
+func applySkillCleanup(ctx context.Context, tx *sql.Tx, plan UninstallResult) error {
+	for _, sid := range plan.RemovedSkills {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM pointers WHERE entity_type='skill' AND entity_id=?`, sid); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM skills WHERE id=?`, sid); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -234,6 +243,9 @@ var historyRefQueries = []string{
 	     AND EXISTS (SELECT 1 FROM chat_sessions s WHERE s.id=capability_proposals.session_id)))`,
 }
 
+// historyScanHook lets tests count full history scans.
+var historyScanHook func()
+
 // skillsReferencedInHistory scans each history table once for all candidate skill
 // ids. A cheap strings.Contains gate skips JSON parsing for blobs that cannot
 // mention any remaining candidate, so a large historical backlog is no longer
@@ -242,6 +254,9 @@ func skillsReferencedInHistory(ctx context.Context, tx *sql.Tx, candidates map[s
 	found := map[string]bool{}
 	if len(candidates) == 0 {
 		return found, nil
+	}
+	if historyScanHook != nil {
+		historyScanHook()
 	}
 	ids := make([]string, 0, len(candidates))
 	for id := range candidates {
