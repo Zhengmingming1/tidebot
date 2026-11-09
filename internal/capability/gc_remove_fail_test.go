@@ -34,6 +34,15 @@ func TestGCContinuesWhenTrashRemovalFails(t *testing.T) {
 	versions := gcFixture(t, s, 5, 10)
 	base := filepath.Join(s.DataDir, "capabilities", "example")
 	stuck := ".gc-" + versions[0].VersionID
+	// Snapshot sizes differ slightly (each lock carries its own identity).
+	sizes := map[string]int64{}
+	for _, v := range versions[:3] {
+		n, err := gcSnapshotSize(ctx, filepath.Join(base, v.VersionID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sizes[v.VersionID] = n
+	}
 	allow := failRemove(t, stuck)
 
 	gc, err := s.GC(ctx, "example", "ui")
@@ -55,11 +64,10 @@ func TestGCContinuesWhenTrashRemovalFails(t *testing.T) {
 			t.Fatal("trash of a deletable version left behind", v.VersionID)
 		}
 	}
-	size, _ := gcSnapshotSize(ctx, filepath.Join(base, stuck))
-	perVersion := size
-	if gc.BytesFreed != 2*perVersion {
-		t.Fatalf("bytes freed %d, want %d (stuck snapshot not counted)", gc.BytesFreed, 2*perVersion)
+	if want := sizes[versions[1].VersionID] + sizes[versions[2].VersionID]; gc.BytesFreed != want {
+		t.Fatalf("bytes freed %d, want %d (stuck snapshot not counted)", gc.BytesFreed, want)
 	}
+	perVersion := sizes[versions[0].VersionID]
 
 	allow()
 	again, err := s.GC(ctx, "example", "ui")
