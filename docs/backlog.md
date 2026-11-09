@@ -5938,3 +5938,31 @@ a bulk edit makes undo exact without a history table.
 - 卸载确认路径仍把清理计划算三遍（确认前 `PreviewUninstall` 一遍，写锁里预览比对一遍、真删一遍），每遍都全表扫任务版本、工作流版本和执行快照；可以在写锁里只算一遍计划，比对后直接按计划删。
 - `cleanupSkillRegistrations` 的 `capability_run_bindings` 计数与技能无关，却在每个技能的循环里查一次，可以提到循环外。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）；`cleanupSkillRegistrations` 只对本能力包校验 lock 完整性。
+
+### 2026-11-09：扩展页安装 / 重新扫描 / 更新 / 试用 / 导入失败时不再留下空会话（BUG / 业务逻辑矛盾）
+
+**Done**
+
+- **问题**：扩展页有 5 个入口要先建一个空白会话放确认卡，再发第二个请求：发现页「预览确认卡」/ 搜索结果安装（`capPropose`）、管理弹窗的「重新扫描」「更新」「试用」、导入能力包文件。第二个请求失败（已安装、来源格式不对、离线拉不到 Git、依赖检查超时、包无效、绑定失败）时界面只报错，但刚建的会话留在「会话」列表里：没标题、没轮次、没有卡片。每点一次失败就多一个，用户只能逐个手动删。会话页自己的「新会话」已经有相反的约定（`dropEmpty`：第一次发送失败就删掉刚建的会话），两边矛盾。
+- **改法**（`src/capabilities.js`）：新增 `capInNewSession(work)`，5 个入口都走它：先建会话，`work` 失败（含同步抛错）就尽力 `DELETE` 刚建的会话，再把原错误抛给调用方，界面报错不变；删除本身失败也不覆盖原错误。成功的会话照旧保留并跳转。服务端 `DeleteChatSession` 会一并删掉它的待确认提议，不碰 `applying` 的。
+- 测试：`capability_session_drop_test.go`（静态：`capabilities.js` 只剩 helper 一处建会话、5 个入口都走 helper；node：成功不删、失败删并原样抛错、同步抛错也删、建会话失败不发删除、删除失败不覆盖原错误）。改动前跑失败。`go test ./internal/webui`、`build-webui.py --check`、`check-i18n.py` 通过。
+
+| 场景（演示实例，Playwright 在发现页输入无效来源点 3 次「预览确认卡」） | 修复前 | 修复后 |
+| --- | ---: | ---: |
+| 「会话」里多出的空会话 | 3 | 0 |
+| 界面报错 | 有 | 有（不变） |
+
+截图：`/workspace/tidebot-shots/extensions-discover-failed-install-no-empty-session-1024x655.png`（不在仓库内）。
+
+**Learned**
+
+- 「先建容器、再填内容」的两步流程，第二步失败要有回滚，否则失败的点击会变成用户可见的垃圾数据；同一个仓库里同类流程（会话页 `dropEmpty`）已经有约定时，新入口要复用同一个约定。
+- 只在前端回滚覆盖不了「浏览器在两步之间关掉」的情况，但那种窗口很短；真正彻底的做法是服务端一次请求里建会话 + 建提议。
+
+**参考**：本仓库 `run-chat.js` 的 `dropEmpty`（会话页第一次发送失败删除刚建的会话）。
+
+**Ideas for later**
+
+- 服务端可以让 `propose` / `update` / `rescan` / `import` 接受「新会话」并在同一事务里建会话和提议，彻底去掉两步之间的窗口。
+- 已经积累的空会话（`origin='chat'`、0 轮、无提议、无绑定、超过 N 天）可以考虑纳入数据保留清理；要先确认不会误删用户刻意留着的空白会话。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；`cleanupSkillRegistrations` 只对本能力包校验 lock 完整性、把 `capability_run_bindings` 计数提出循环。

@@ -7906,8 +7906,20 @@
       capPaintProposals(box, sec, sid);
     }).catch(function (e) { if (!e.auth && document.contains(box)) { clearTimeout(box._expT); box.textContent = T("cap.load_error"); box._failed = true; box._sig = ""; box._ps = []; } }).finally(function () { box._busy = false; if (box._force && document.contains(box)) { box._force = false; capRefreshSession(sec, sid, true); } });
   }
-  function capPropose(source) {
+  // capInNewSession: a card needs a session to live in, so a blank one is made first. When
+  // the request after it fails (already installed, bad source, offline, invalid bundle) the
+  // session holds nothing and is dropped again, like a blank chat whose first send fails;
+  // otherwise every failed click left an empty session in 会话.
+  function capInNewSession(work) {
     return api("/api/chat-sessions", { method: "POST", body: { origin: "chat" } }).then(function (s) {
+      return Promise.resolve(s).then(work).catch(function (e) {
+        api("/api/chat-sessions/" + enc(s.id), { method: "DELETE" }).catch(function () {});
+        throw e;
+      });
+    });
+  }
+  function capPropose(source) {
+    return capInNewSession(function (s) {
       return api("/api/capabilities/proposals", { method: "POST", body: { session_id: s.id, source: source } }).then(function () { location.hash = "#/chat/" + enc(s.id); });
     });
   }
@@ -7994,10 +8006,10 @@
           }).catch(function (e) { b.disabled = false; error(e); });
         }); });
         $("#cap-rescan", root).addEventListener("click", function (e) { var b=e.currentTarget;b.disabled=true;
-          api("/api/chat-sessions",{method:"POST",body:{origin:"chat"}}).then(function(session){return api("/api/capabilities/"+enc(capID)+"/rescan",{method:"POST",body:{session_id:session.id}}).then(function(){close();location.hash="#/chat/"+enc(session.id);});}).catch(error).finally(function(){b.disabled=false;});
+          capInNewSession(function(session){return api("/api/capabilities/"+enc(capID)+"/rescan",{method:"POST",body:{session_id:session.id}}).then(function(){close();location.hash="#/chat/"+enc(session.id);});}).catch(error).finally(function(){b.disabled=false;});
         });
         $("#cap-update", root).addEventListener("click", function (e) { var b = e.currentTarget; b.disabled = true;
-          api("/api/chat-sessions", { method: "POST", body: { origin: "chat" } }).then(function (session) {
+          capInNewSession(function (session) {
             return api("/api/capabilities/" + enc(capID) + "/update", { method: "POST", body: { session_id: session.id } }).then(function () { close(); location.hash = "#/chat/" + enc(session.id); });
           }).catch(function (e) { b.disabled = false; error(e); });
         });
@@ -8008,7 +8020,7 @@
           confirmDialog({title:T("cap.deactivate"),body:T("cap.deactivate_note"),ok:T("cap.deactivate")}).then(function(yes){if(!yes)return;b.disabled=true;return api("/api/capabilities/"+enc(capID)+"/deactivate",{method:"POST",body:{reviewed:true}}).then(function(){close();refresh();});}).catch(error).finally(function(){b.disabled=false;});
         });
         $("#cap-smoke", root).addEventListener("click", function(e){var b=e.currentTarget;b.disabled=true;
-          api("/api/chat-sessions",{method:"POST",body:{origin:"chat"}}).then(function(session){return api("/api/chat-sessions/"+enc(session.id)+"/bindings",{method:"PUT",body:{skills:[],capabilities:[capID]}}).then(function(){draftSave("cs_"+session.id,T("cap.smoke_prompt"));draftFlush();close();location.hash="#/chat/"+enc(session.id);toast(T("cap.smoke_note"));});}).catch(error).finally(function(){b.disabled=false;});
+          capInNewSession(function(session){return api("/api/chat-sessions/"+enc(session.id)+"/bindings",{method:"PUT",body:{skills:[],capabilities:[capID]}}).then(function(){draftSave("cs_"+session.id,T("cap.smoke_prompt"));draftFlush();close();location.hash="#/chat/"+enc(session.id);toast(T("cap.smoke_note"));});}).catch(error).finally(function(){b.disabled=false;});
         });
         $("#cap-clean-snapshots", root).addEventListener("click", function (e) { var b = e.currentTarget;
           confirmDialog({ title: T("cap.clean_snapshots"), body: T("cap.clean_snapshots_note"), ok: T("cap.clean_snapshots") }).then(function (yes) { if (!yes) return; b.disabled = true;
@@ -8030,7 +8042,7 @@
   }
   function capImportFile(file) {
     if (!file || file.size > 90 * 1024 * 1024) return Promise.reject(new Error(T("cap.import_size")));
-    return file.text().then(function (text) { var bundle = JSON.parse(text); return api("/api/chat-sessions", { method: "POST", body: { origin: "chat" } }).then(function (s) {
+    return file.text().then(function (text) { var bundle = JSON.parse(text); return capInNewSession(function (s) {
       return api("/api/capabilities/import", { method: "POST", body: { session_id: s.id, bundle: bundle } }).then(function () { location.hash = "#/chat/" + enc(s.id); });
     }); });
   }
