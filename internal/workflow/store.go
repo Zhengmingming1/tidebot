@@ -18,15 +18,22 @@ type Service struct {
 	// Prepare validates references when saving and freezes versions when starting.
 	Prepare func(context.Context, Definition) (Definition, error)
 	OnError func(error)
-	mu      sync.Mutex
-	active  map[string]context.CancelCauseFunc
-	closing bool
-	wg      sync.WaitGroup
-	retries atomic.Uint64
+	// Admit runs when a run is about to start, with the frozen snapshot: it may refuse
+	// (e.g. the folder is busy) and returns what to release when the run ends.
+	Admit func(ctx context.Context, rid string, d Definition) (release func(), err error)
+	// OverBudget reports, before each node starts, why the run must not go on
+	// ("" = go on). Only called for definitions with a budget.
+	OverBudget func(ctx context.Context, rid string, d Definition) string
+	mu         sync.Mutex
+	active     map[string]context.CancelCauseFunc
+	done       map[string]chan struct{}
+	closing    bool
+	wg         sync.WaitGroup
+	retries    atomic.Uint64
 }
 
 func New(db *sql.DB, execute Executor) *Service {
-	return &Service{DB: db, Execute: execute, active: map[string]context.CancelCauseFunc{}}
+	return &Service{DB: db, Execute: execute, active: map[string]context.CancelCauseFunc{}, done: map[string]chan struct{}{}}
 }
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 func (s *Service) check(ctx context.Context, d *Definition) error {
@@ -145,10 +152,36 @@ func (s *Service) Delete(ctx context.Context, wid string) error {
 	return err
 }
 func (s *Service) Start(ctx context.Context, wid, input, provider string) (string, error) {
+	return s.StartWith(ctx, StartOptions{WorkflowID: wid, Input: input, Provider: provider})
+}
+
+// GetVersion returns one saved version of a workflow (the workflow must still exist).
+func (s *Service) GetVersion(ctx context.Context, wid string, version int) (Workflow, error) {
+	w, err := s.Get(ctx, wid)
+	if err != nil || version == 0 || version == w.Version {
+		return w, err
+	}
+	var raw string
+	err = s.DB.QueryRowContext(ctx, `SELECT definition_json FROM workflow_versions WHERE workflow_id=? AND version=?`, wid, version).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return w, fmt.Errorf("workflow version %d not found", version)
+	}
+	if err != nil {
+		return w, err
+	}
+	w.Version = version
+	w.Definition = Definition{}
+	err = json.Unmarshal([]byte(raw), &w.Definition)
+	return w, err
+}
+
+// StartWith starts a run of a workflow version (a task's pinned one, or the current).
+func (s *Service) StartWith(ctx context.Context, o StartOptions) (string, error) {
+	input, provider, wid := o.Input, o.Provider, o.WorkflowID
 	if len(input) > MaxOutputBytes {
 		return "", fmt.Errorf("workflow input exceeds %d KB", MaxOutputBytes>>10)
 	}
-	w, err := s.Get(ctx, wid)
+	w, err := s.GetVersion(ctx, wid, o.Version)
 	if err != nil {
 		return "", err
 	}
@@ -192,15 +225,36 @@ func (s *Service) Start(ctx context.Context, wid, input, provider string) (strin
 			return "", err
 		}
 	}
+	release := func() {}
+	if s.Admit != nil {
+		r, err := s.Admit(ctx, rid, d)
+		if err != nil {
+			return "", err
+		}
+		if r != nil {
+			release = r
+		}
+	}
 	if err = tx.Commit(); err != nil {
+		release()
 		return "", err
 	}
-	runCtx, cancel := context.WithCancelCause(context.Background())
+	runCtx, cancel := context.WithCancelCause(context.WithValue(context.Background(), runInfoKey{}, RunInfo{RunID: rid, TaskID: o.TaskID, Bucket: o.Bucket, Def: d}))
 	s.active[rid] = cancel
+	finished := make(chan struct{})
+	s.done[rid] = finished
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		defer func() { cancel(nil); s.mu.Lock(); delete(s.active, rid); s.mu.Unlock() }()
+		defer func() {
+			release()
+			cancel(nil)
+			s.mu.Lock()
+			delete(s.active, rid)
+			delete(s.done, rid)
+			s.mu.Unlock()
+			close(finished)
+		}()
 		s.run(runCtx, rid, d, input, provider)
 	}()
 	return rid, nil
@@ -278,6 +332,23 @@ func (s *Service) Stop(rid string) error {
 		return nil
 	}
 	return ErrNotActive
+}
+
+// WaitRun blocks until a run this service started has finished (at once when it is
+// not running here). Canceling ctx stops waiting, not the run.
+func (s *Service) WaitRun(ctx context.Context, rid string) error {
+	s.mu.Lock()
+	ch := s.done[rid]
+	s.mu.Unlock()
+	if ch == nil {
+		return nil
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 func (s *Service) BeginShutdown() {
 	s.mu.Lock()

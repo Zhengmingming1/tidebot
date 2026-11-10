@@ -308,7 +308,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	if bucket == "" {
 		bucket = cost.BucketProduction
 	}
-	callerCap := callerCapUSD(opts.ExtraArgs)
+	callerCap := runCallerCap(opts)
 	runMax, cc, err := a.admitRun(ctx, opts.TaskID, bucket, prof, callerCap)
 	if err != nil {
 		return runner.Result{}, err
@@ -639,6 +639,16 @@ func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket strin
 	return h, nil
 }
 
+// runCallerCap is the caller's own cap on a run, in USD (0 = none): the lower of a
+// --max-budget-usd it passed and Options.CapUSD (e.g. a workflow budget's rest).
+func runCallerCap(o runner.Options) float64 {
+	c := callerCapUSD(o.ExtraArgs)
+	if o.CapUSD > 0 && (c <= 0 || o.CapUSD < c) {
+		c = o.CapUSD
+	}
+	return c
+}
+
 func isMockBin(bin string) bool {
 	return bin != "" && (strings.Contains(bin, "mock-claude") || bin == "true")
 }
@@ -660,6 +670,9 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		if prow, err := a.Store.GetProviderByID(ctx, task.ProviderID.String); err == nil {
 			providerName = prow.Name
 		}
+	}
+	if view.Spec != nil && view.Spec.WorkflowID != "" {
+		return a.runTaskWorkflow(ctx, task, *view.Spec, providerName, bucket, onStart)
 	}
 	prompt, versionID, nextIDs, err := a.Tasks.CompilePromptView(ctx, view)
 	if err != nil {

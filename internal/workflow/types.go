@@ -25,8 +25,23 @@ type Definition struct {
 	Description    string `json:"description,omitempty"`
 	MaxParallel    int    `json:"max_parallel"`
 	TimeoutMinutes int    `json:"timeout_minutes"`
-	Nodes          []Node `json:"nodes"`
+	// WorkspaceDir is the folder every node works in ("" = none: read-only nodes get
+	// an empty folder each, edit / exec nodes share a scratch folder per run).
+	WorkspaceDir string `json:"workspace_dir,omitempty"`
+	// RunMode is the permission level of every node: read | edit | exec. "" = a
+	// workflow saved before the three levels, which runs read-only as it always did.
+	RunMode string `json:"run_mode,omitempty"`
+	// Budget caps the whole run's cost in BudgetCurrency (0 = no cap, the default):
+	// once reached no further node starts, and a node starts capped at what is left.
+	Budget         float64 `json:"budget,omitempty"`
+	BudgetCurrency string  `json:"budget_currency,omitempty"`
+	Nodes          []Node  `json:"nodes"`
 }
+
+// Writes reports whether nodes may change files in a shared folder: they then run
+// one at a time ("one change at a time in a folder").
+func (d Definition) Writes() bool { return d.RunMode == "edit" || d.RunMode == "exec" }
+
 type Node struct {
 	Context          *ContextPolicy    `json:"context,omitempty"`
 	ContextRunID     string            `json:"-"`
@@ -96,6 +111,35 @@ type NodeRun struct {
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at"`
 }
+
+// RunInfo describes the workflow run an executor call belongs to (RunFrom).
+type RunInfo struct {
+	RunID  string
+	TaskID string // the task that started the run ("" = started by hand)
+	Bucket string // the task's cost bucket ("" = production)
+	Def    Definition
+}
+
+type runInfoKey struct{}
+
+// RunFrom returns the run an executor call belongs to.
+func RunFrom(ctx context.Context) (RunInfo, bool) {
+	ri, ok := ctx.Value(runInfoKey{}).(RunInfo)
+	return ri, ok
+}
+
+// StartOptions starts a workflow run (StartWith).
+type StartOptions struct {
+	WorkflowID string
+	Version    int // 0 = the current version
+	Input      string
+	Provider   string
+	TaskID     string
+	Bucket     string
+}
+
+// ErrBudget stops a run whose total cost reached the workflow's budget.
+var ErrBudget = errors.New("workflow budget reached")
 
 // Executor must honor cancellation, preserve the run's permission limits and report
 // the child run ID before it starts waiting for a global runner slot.

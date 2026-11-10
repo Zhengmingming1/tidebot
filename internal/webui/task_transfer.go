@@ -72,6 +72,15 @@ type taskFileEntry struct {
 	// it keeps running as edit). Effort: "" (Claude Code decides) | low | medium | high.
 	RunMode string `json:"run_mode,omitempty"`
 	Effort  string `json:"effort,omitempty"`
+	// Workflow: a workflow task. Found again by id (same machine) or by name; the
+	// pinned version is kept only for the same workflow, else it follows the current.
+	Workflow *taskFileWorkflow `json:"workflow,omitempty"`
+}
+
+type taskFileWorkflow struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Version int    `json:"version,omitempty"`
 }
 
 // exportTasks: GET /api/tasks/export[?ids=a,b] → tidebot-tasks-YYYYMMDD.json (all live
@@ -124,6 +133,10 @@ func (s *Server) taskEntryOf(ctx context.Context, v tasksvc.TaskView) taskFileEn
 	e := taskFileEntry{Name: v.Task.Name, Prompt: sp.Prompt, Cron: v.Task.CronExpr, Enabled: v.Task.Status == "active",
 		TimeoutMinutes: sp.TimeoutMinutes, MaxRunUSD: sp.MaxBudgetUSD, Provider: sp.Provider, AllowedTools: sp.AllowedTools,
 		RunMode: sp.RunMode, Effort: sp.Effort}
+	if sp.WorkflowID != "" {
+		ref := s.taskWorkflowRef(ctx, sp.WorkflowID, sp.WorkflowVersion)
+		e.Workflow = &taskFileWorkflow{ID: ref.ID, Name: ref.Name, Version: ref.Version}
+	}
 	if cp, err := s.deps.Tasks.GetCostPolicy(ctx, v.Task.ID); err == nil {
 		cp.Revision = 0
 		cp.FXRevision = ""
@@ -338,6 +351,17 @@ func (s *Server) checkImport(ctx context.Context, i int, e *taskFileEntry, taken
 		eff := strings.TrimSpace(e.Effort)
 		f.Effort = &eff
 	}
+	if e.Workflow != nil {
+		ref, note := s.importWorkflow(ctx, *e.Workflow)
+		if ref == nil {
+			res.Error = "workflow not found: " + e.Workflow.Name
+			return res, f, tasksvc.Spec{}
+		}
+		if note != "" {
+			res.Notes = append(res.Notes, note)
+		}
+		f.Workflow = ref
+	}
 	if len(e.Tags) > 0 {
 		tags := e.Tags
 		f.Tags = &tags
@@ -417,8 +441,12 @@ func firstLine(s string, max int) string {
 // successor (so the history says "imported"), then schedule, status, policy and budget.
 func (s *Server) createImported(ctx context.Context, f taskForm, extra tasksvc.Spec) (string, error) {
 	goal := extra.Goal
-	tv, err := s.deps.Tasks.Create(ctx, tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, Goal: goal, ProviderName: f.Provider,
-		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"})
+	in := tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, Goal: goal, ProviderName: f.Provider,
+		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"}
+	if f.Workflow != nil {
+		in.WorkflowID, in.WorkflowVersion = f.Workflow.ID, f.Workflow.Version
+	}
+	tv, err := s.deps.Tasks.Create(ctx, in)
 	if err != nil {
 		return "", err
 	}
@@ -487,4 +515,32 @@ func (s *Server) importTaskBindings(ctx context.Context, in []taskFileSkill) ([]
 		out = append(out, b)
 	}
 	return tasksvc.NormalizeBindings(out)
+}
+
+// importWorkflow finds an imported workflow task's workflow on this machine: by id,
+// else by name (then following its current version, noted as "workflow_current").
+func (s *Server) importWorkflow(ctx context.Context, in taskFileWorkflow) (*taskWorkflowForm, string) {
+	if s.deps.Workflows == nil {
+		return nil, ""
+	}
+	if in.ID != "" {
+		if _, err := s.deps.Workflows.GetVersion(ctx, in.ID, in.Version); err == nil {
+			return &taskWorkflowForm{ID: in.ID, Version: in.Version}, ""
+		}
+	}
+	list, err := s.deps.Workflows.List(ctx)
+	if err != nil {
+		return nil, ""
+	}
+	name := strings.TrimSpace(in.Name)
+	for _, w := range list {
+		if name != "" && w.Name == name {
+			note := ""
+			if in.Version != 0 {
+				note = "workflow_current"
+			}
+			return &taskWorkflowForm{ID: w.ID}, note
+		}
+	}
+	return nil, ""
 }

@@ -37,6 +37,9 @@ type Options struct {
 	Timeout      time.Duration
 	Bare         bool
 	ExtraArgs    []string
+	// CapUSD is the caller's own cost cap for this run in USD (0 = none), e.g. what a
+	// workflow's total budget has left; the run's cap is the lower of it and budgets.
+	CapUSD float64
 	// DisplayPrompt, if set, is the prompt the run row keeps (what the owner typed)
 	// when Prompt carries more, e.g. a leading /skill command.
 	DisplayPrompt string

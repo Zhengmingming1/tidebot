@@ -46,8 +46,10 @@ type taskDTO struct {
 	ConstraintIDs []string `json:"constraint_ids"`
 	Skills        []string `json:"skills"`
 	Tags          []string `json:"tags"`
-	RunsToday     int      `json:"runs_today"`
-	LastStatus    string   `json:"last_status"`
+	// Workflow: the workflow a workflow task runs (Name "" = deleted since).
+	Workflow   *taskWorkflowForm `json:"workflow,omitempty"`
+	RunsToday  int               `json:"runs_today"`
+	LastStatus string            `json:"last_status"`
 	// List answer only: when the newest run was created and the last few runs, oldest first.
 	LastRunAt string `json:"last_run_at,omitempty"`
 	Beats     []beat `json:"beats,omitempty"`
@@ -103,6 +105,9 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 		}
 		for _, b := range v.Spec.SkillBindings {
 			d.Skills = append(d.Skills, b.SkillName)
+		}
+		if v.Spec.WorkflowID != "" {
+			d.Workflow = &taskWorkflowForm{ID: v.Spec.WorkflowID, Version: v.Spec.WorkflowVersion}
 		}
 	}
 	return d

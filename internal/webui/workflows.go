@@ -1,8 +1,11 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/workflow"
 	"io"
 	"net/http"
@@ -21,6 +24,15 @@ func workflowBody(w http.ResponseWriter, r *http.Request, v any) error {
 	return nil
 }
 func workflowError(w http.ResponseWriter, err error) {
+	var de *guard.DirError
+	if errors.As(err, &de) { // the folder: same answers as the Run dialog
+		writeJSON(w, 400, map[string]string{"error": err.Error(), "problem": de.Problem})
+		return
+	}
+	if errors.Is(err, guard.ErrDirBusy) {
+		writeJSON(w, 409, map[string]string{"error": err.Error(), "problem": "busy"})
+		return
+	}
 	code := 400
 	if errors.Is(err, workflow.ErrNotFound) {
 		code = 404
@@ -31,6 +43,45 @@ func workflowError(w http.ResponseWriter, err error) {
 	}
 	writeErrInfo(w, code, err.Error())
 }
+
+// workflowItem is a workflow in the list, with the tasks that run it on a schedule
+// or by hand (their schedule and budgets are the workflow's "schedule / budget").
+type workflowItem struct {
+	workflow.Workflow
+	Tasks []workflowTaskRef `json:"tasks"`
+}
+
+type workflowTaskRef struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Cron    string `json:"cron"`
+	Status  string `json:"status"`
+	Version int    `json:"version"` // pinned workflow version (0 = current)
+}
+
+func (s *Server) workflowItems(ctx context.Context, list []workflow.Workflow) []workflowItem {
+	byWF := map[string][]workflowTaskRef{}
+	if s.deps.Tasks != nil {
+		if tasks, err := s.deps.Tasks.List(ctx); err == nil {
+			for _, v := range tasks {
+				if v.Spec == nil || v.Spec.WorkflowID == "" || v.Task.Status == "archived" {
+					continue
+				}
+				byWF[v.Spec.WorkflowID] = append(byWF[v.Spec.WorkflowID], workflowTaskRef{ID: v.Task.ID, Name: v.Task.Name, Cron: v.Task.CronExpr, Status: v.Task.Status, Version: v.Spec.WorkflowVersion})
+			}
+		}
+	}
+	out := make([]workflowItem, 0, len(list))
+	for _, w := range list {
+		refs := byWF[w.ID]
+		if refs == nil {
+			refs = []workflowTaskRef{}
+		}
+		out = append(out, workflowItem{Workflow: w, Tasks: refs})
+	}
+	return out
+}
+
 func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Workflows == nil {
 		writeErrInfo(w, 503, "workflows unavailable")
@@ -43,7 +94,7 @@ func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 			workflowError(w, err)
 			return
 		}
-		writeJSON(w, 200, list)
+		writeJSON(w, 200, s.workflowItems(r.Context(), list))
 	case http.MethodPost:
 		var d workflow.Definition
 		if err := workflowBody(w, r, &d); err != nil {
@@ -112,7 +163,7 @@ func (s *Server) handleWorkflowSub(w http.ResponseWriter, r *http.Request) {
 			workflowError(w, err)
 			return
 		}
-		writeJSON(w, 200, item)
+		writeJSON(w, 200, s.workflowItems(r.Context(), []workflow.Workflow{item})[0])
 	case http.MethodPut:
 		var in struct {
 			ExpectedVersion int                 `json:"expected_version"`

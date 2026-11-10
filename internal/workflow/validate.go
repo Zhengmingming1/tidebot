@@ -33,6 +33,23 @@ func Validate(d *Definition) error {
 	if d.TimeoutMinutes < 0 || d.TimeoutMinutes > 1440 {
 		return fmt.Errorf("timeout must be 0 (unlimited) or 1-1440 minutes")
 	}
+	switch d.RunMode {
+	case "", "read", "edit", "exec":
+	default:
+		return fmt.Errorf("run mode must be read, edit or exec")
+	}
+	d.WorkspaceDir = strings.TrimSpace(d.WorkspaceDir)
+	if len(d.WorkspaceDir) > 4096 {
+		return fmt.Errorf("folder path is too long")
+	}
+	if math.IsNaN(d.Budget) || math.IsInf(d.Budget, 0) || d.Budget < 0 || d.Budget > 10000 {
+		return fmt.Errorf("budget must be between 0 and 10000")
+	}
+	if d.Budget == 0 {
+		d.BudgetCurrency = ""
+	} else if d.BudgetCurrency != "USD" && d.BudgetCurrency != "CNY" {
+		return fmt.Errorf("budget currency must be USD or CNY")
+	}
 	nodes := map[string]*Node{}
 	for i := range d.Nodes {
 		n := &d.Nodes[i]

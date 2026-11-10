@@ -44,6 +44,17 @@ type taskForm struct {
 	Policy *taskPolicyForm `json:"policy,omitempty"`
 	// Tags: nil (left out, e.g. an older page or agentctl) keeps the task's tags.
 	Tags *[]string `json:"tags,omitempty"`
+	// Workflow: the task runs this workflow (its prompt is the input); nil keeps the
+	// task's target, an empty id turns it back into a prompt task.
+	Workflow *taskWorkflowForm `json:"workflow,omitempty"`
+}
+
+// taskWorkflowForm names a task's workflow: Version pins a saved one (0 = current).
+type taskWorkflowForm struct {
+	ID      string `json:"id"`
+	Version int    `json:"version"`
+	Name    string `json:"name,omitempty"`    // answers only
+	Current int    `json:"current,omitempty"` // answers only: the workflow's current version
 }
 
 // A missing timeout in a legacy edit preserves its value; explicit zero removes it.
@@ -160,7 +171,14 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 	if f.Name == "" || utf8.RuneCountInString(f.Name) > 80 {
 		return errors.New("name is required (max 80 characters)")
 	}
-	if f.Prompt == "" || len(f.Prompt) > 32<<10 {
+	// a workflow task's prompt is the workflow's input, which may be empty
+	wfTask := f.Workflow != nil && f.Workflow.ID != ""
+	if f.Workflow == nil && taskID != "" {
+		if cur, err := s.deps.Tasks.Get(ctx, taskID); err == nil && cur.Spec != nil {
+			wfTask = cur.Spec.WorkflowID != ""
+		}
+	}
+	if f.Prompt == "" && !wfTask || len(f.Prompt) > 32<<10 {
 		return errors.New("instruction is required (max 32 KB)")
 	}
 	if f.Provider != "" && s.deps.Reg != nil {
@@ -187,6 +205,20 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 	}
 	if f.Effort != nil && !tasksvc.ValidEffort(*f.Effort) {
 		return errors.New("effort must be low, medium or high")
+	}
+	if f.Workflow != nil && f.Workflow.ID != "" {
+		if s.deps.Workflows == nil {
+			return errors.New("workflows unavailable")
+		}
+		if f.Workflow.Version < 0 {
+			return errors.New("workflow version must be 0 (current) or a saved version")
+		}
+		if _, err := s.deps.Workflows.GetVersion(ctx, f.Workflow.ID, f.Workflow.Version); err != nil {
+			return errors.New("unknown workflow or workflow version")
+		}
+		// a workflow task brings its own skills, folder and permission level
+		empty := []tasksvc.SkillBinding{}
+		f.SkillBindings, f.SkillID, f.SkillVersionID, f.SkillSetSource = &empty, "", "", nil
 	}
 	if f.SkillBindings != nil {
 		normalized, err := tasksvc.NormalizeBindings(*f.SkillBindings)
@@ -295,6 +327,14 @@ func specFromForm(spec tasksvc.Spec, f taskForm) tasksvc.Spec {
 	if f.Effort != nil {
 		spec.Effort = *f.Effort
 	}
+	if f.Workflow != nil {
+		spec.WorkflowID, spec.WorkflowVersion = f.Workflow.ID, f.Workflow.Version
+		if f.Workflow.ID == "" {
+			spec.WorkflowVersion = 0
+		} else {
+			spec.SkillSetSource = nil
+		}
+	}
 	if f.SkillBindings != nil {
 		spec.SkillBindings = append([]tasksvc.SkillBinding(nil), (*f.SkillBindings)...)
 	} else if f.SkillID != "" {
@@ -344,8 +384,12 @@ func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 	if f.Workspace != nil {
 		ws = *f.Workspace
 	}
-	tv, err := s.deps.Tasks.Create(ctx, tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, ProviderName: f.Provider, WorkspaceDir: ws,
-		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"})
+	in := tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, ProviderName: f.Provider, WorkspaceDir: ws,
+		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"}
+	if f.Workflow != nil {
+		in.WorkflowID, in.WorkflowVersion = f.Workflow.ID, f.Workflow.Version
+	}
+	tv, err := s.deps.Tasks.Create(ctx, in)
 	if err != nil {
 		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
 			writeErr(w, 409, err.Error())
@@ -361,7 +405,7 @@ func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 			_ = s.deps.Tasks.SetSchedule(context.WithoutCancel(ctx), tv.Task.ID, "")
 		}
 	}()
-	if f.SkillID != "" || f.SkillBindings != nil || len(f.SkillSetSource) > 0 || f.RunMode != nil && *f.RunMode != "" || f.Effort != nil && *f.Effort != "" {
+	if f.Workflow == nil && (f.SkillID != "" || f.SkillBindings != nil || len(f.SkillSetSource) > 0) || f.RunMode != nil && *f.RunMode != "" || f.Effort != nil && *f.Effort != "" {
 		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, specFromForm(*tv.Spec, f), "user", "bind skill"); err != nil {
 			writeErr(w, 500, err.Error())
 			return
@@ -481,6 +525,9 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 		tags = m[id]
 	}
 	f.Tags = &tags
+	if v.Spec.WorkflowID != "" {
+		f.Workflow = s.taskWorkflowRef(ctx, v.Spec.WorkflowID, v.Spec.WorkflowVersion)
+	}
 	return map[string]any{"skill_set_state": s.deps.Skills.SourceState(ctx, v.Spec.SkillSetSource, bindings), "form": f, "fail_streak": p.ConsecutiveFailures, "breaker_at": policy.BreakerThreshold}, nil
 }
 
@@ -685,4 +732,15 @@ FROM budgets WHERE scope='task' AND scope_id=?`, from)
 		return ps.Put(ctx, p)
 	}
 	return nil
+}
+
+// taskWorkflowRef names a task's workflow for the page (Name "" = deleted since).
+func (s *Server) taskWorkflowRef(ctx context.Context, id string, version int) *taskWorkflowForm {
+	ref := &taskWorkflowForm{ID: id, Version: version}
+	if s.deps.Workflows != nil {
+		if w, err := s.deps.Workflows.Get(ctx, id); err == nil {
+			ref.Name, ref.Current = w.Name, w.Version
+		}
+	}
+	return ref
 }

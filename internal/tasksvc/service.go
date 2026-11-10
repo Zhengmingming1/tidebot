@@ -41,6 +41,9 @@ type CreateInput struct {
 	OverlapPolicy  string `json:"overlap_policy"`
 	TimeoutMinutes int    `json:"timeout_minutes"`
 	Actor          string `json:"actor"`
+	// A workflow task (Spec.WorkflowID): the prompt is the workflow's input and may be empty.
+	WorkflowID      string `json:"workflow_id,omitempty"`
+	WorkflowVersion int    `json:"workflow_version,omitempty"`
 }
 
 // TaskView is task row + current version summary.
@@ -54,7 +57,7 @@ func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // Create inserts task + v1 + current pointer.
 func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) {
-	if in.Name == "" || in.Prompt == "" {
+	if in.Name == "" || in.Prompt == "" && in.WorkflowID == "" {
 		return TaskView{}, fmt.Errorf("name and prompt required")
 	}
 	if in.Actor == "" {
@@ -81,6 +84,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	spec := Spec{
 		Goal: in.Goal, Prompt: in.Prompt, Provider: in.ProviderName,
 		WorkspaceDir: in.WorkspaceDir, TimeoutMinutes: in.TimeoutMinutes,
+		WorkflowID: in.WorkflowID, WorkflowVersion: in.WorkflowVersion,
+	}
+	if err := spec.CheckTarget(); err != nil {
+		return TaskView{}, err
 	}
 	var next sql.NullString
 	if in.CronExpr != "" && s.Sched != nil {
@@ -129,6 +136,9 @@ func (s *Service) UpdateSpecExpected(ctx context.Context, taskID string, spec Sp
 	}
 	if !ValidEffort(spec.Effort) {
 		return TaskView{}, fmt.Errorf("effort must be low, medium or high")
+	}
+	if err := spec.CheckTarget(); err != nil {
+		return TaskView{}, err
 	}
 	specWrites.Lock()
 	defer specWrites.Unlock()

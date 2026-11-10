@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 
 	"github.com/Zhengmingming1/tidebot/internal/version"
+	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
 
 // ---------- tasks ----------
@@ -39,6 +41,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, toTaskDTO(v))
 	}
+	s.nameTaskWorkflows(r.Context(), out)
 	if err := s.enrichTaskList(r.Context(), out); err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -122,6 +125,9 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		}
 		d := toTaskDTO(v)
 		d.Workspace, d.WorkspaceDefault = s.taskWorkspace(d.ID, d.Workspace)
+		if d.Workflow != nil {
+			d.Workflow = s.taskWorkflowRef(ctx, d.Workflow.ID, d.Workflow.Version)
+		}
 		if m, err := s.taskTags(ctx, id); err == nil && m[id] != nil {
 			d.Tags = m[id]
 		}
@@ -314,5 +320,29 @@ func (s *Server) handleAmendAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	default:
 		writeErr(w, 404, "not found")
+	}
+}
+
+// nameTaskWorkflows fills in the names of the workflows workflow tasks run.
+func (s *Server) nameTaskWorkflows(ctx context.Context, out []taskDTO) {
+	if s.deps.Workflows == nil {
+		return
+	}
+	var byID map[string]workflow.Workflow
+	for i := range out {
+		ref := out[i].Workflow
+		if ref == nil {
+			continue
+		}
+		if byID == nil {
+			byID = map[string]workflow.Workflow{}
+			list, _ := s.deps.Workflows.List(ctx)
+			for _, w := range list {
+				byID[w.ID] = w
+			}
+		}
+		if w, ok := byID[ref.ID]; ok {
+			ref.Name, ref.Current = w.Name, w.Version
+		}
 	}
 }

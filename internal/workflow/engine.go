@@ -54,6 +54,10 @@ func (s *Service) run(parent context.Context, rid string, d Definition, input, p
 	active := 0
 	var failure error
 	stopped := false
+	parallel := d.MaxParallel
+	if d.Writes() { // one shared writable folder: one change at a time
+		parallel = 1
+	}
 	for {
 		if ctx.Err() != nil {
 			stopped = true
@@ -79,8 +83,16 @@ func (s *Service) run(parent context.Context, rid string, d Definition, input, p
 					progressed = true
 					continue
 				}
-				if !ready || active >= d.MaxParallel {
+				if !ready || active >= parallel {
 					continue
+				}
+				if n.Kind == "skill" && d.Budget > 0 && s.OverBudget != nil {
+					if why := s.OverBudget(ctx, rid, d); why != "" {
+						// Nodes already going finish (each started capped at what was left).
+						failure = fmt.Errorf("%w: %s", ErrBudget, why)
+						stopped = true
+						break
+					}
 				}
 				template := n.Prompt
 				if n.Kind == "condition" {

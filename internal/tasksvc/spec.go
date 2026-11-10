@@ -23,6 +23,30 @@ type Spec struct {
 	RunMode string `json:"run_mode,omitempty"`
 	// Effort: "" (Claude Code decides) | "low" | "medium" | "high".
 	Effort string `json:"effort,omitempty"`
+	// WorkflowID makes the task run a workflow instead of a prompt with skills: the
+	// prompt is the workflow's input, and the workflow's own folder and permission
+	// level apply. WorkflowVersion pins a saved version (0 = always the current one).
+	// The task's schedule, budgets and timeout apply as for any task (a run cap to
+	// each node's run).
+	WorkflowID      string `json:"workflow_id,omitempty"`
+	WorkflowVersion int    `json:"workflow_version,omitempty"`
+}
+
+// CheckTarget rejects a spec that is both a workflow and a prompt with skills.
+func (s Spec) CheckTarget() error {
+	if s.WorkflowID == "" {
+		if s.WorkflowVersion != 0 {
+			return fmt.Errorf("workflow version without a workflow")
+		}
+		return nil
+	}
+	if s.WorkflowVersion < 0 {
+		return fmt.Errorf("workflow version must be 0 (current) or a saved version")
+	}
+	if len(s.SkillBindings) > 0 || s.SkillSetSource != nil {
+		return fmt.Errorf("a workflow task cannot also bind skills")
+	}
+	return nil
 }
 
 // RunModes are the permission levels a run can have.
