@@ -19,9 +19,9 @@ type ChatSession struct {
 	WorkspaceDir   string  `json:"workspace_dir"`
 	PermissionMode string  `json:"permission_mode"` // read
 	Provider       string  `json:"provider"`
-	Turns          int     `json:"turns"`    // turns sent (the origin run is turn 0)
-	TurnMax        int     `json:"turn_max"` // turns a session may send
-	CostUSD        float64 `json:"cost_usd"` // display currency, like runs' cost_usd
+	Turns          int     `json:"turns"`     // turns sent (the origin run is turn 0)
+	TurnHint       int     `json:"turn_hint"` // from this many turns the page shows a soft "long session" hint (no limit)
+	CostUSD        float64 `json:"cost_usd"`  // display currency, like runs' cost_usd
 	WebAccess      bool    `json:"web_access"`
 	Status         string  `json:"status"` // idle | running | closed
 	CreatedAt      string  `json:"created_at"`
@@ -104,7 +104,6 @@ var (
 	ErrChatRunNotFound     = errors.New("run not found")
 	ErrChatRunNotFinished  = errors.New("the run has not finished")
 	ErrChatSessionBusy     = errors.New("the session is answering a turn")
-	ErrChatTurnLimit       = errors.New("the session has reached its turn limit")
 	ErrChatInvalid         = errors.New("invalid session request")
 )
 
@@ -142,7 +141,6 @@ func chatErr(w http.ResponseWriter, err error) {
 		{ErrChatRunNotFound, 404, "run_not_found"},
 		{ErrChatRunNotFinished, 409, "run_not_finished"},
 		{ErrChatSessionBusy, 409, "busy"},
-		{ErrChatTurnLimit, 409, "turn_limit"},
 		{ErrChatInvalid, 400, "invalid"},
 	}
 	for _, c := range codes {

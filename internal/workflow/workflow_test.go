@@ -314,3 +314,37 @@ func TestOutputAndPromptLimitsDoNotSilentlyTruncate(t *testing.T) {
 		t.Fatal("input was reinterpreted as template")
 	}
 }
+
+// Unlimited first: no overall time limit unless the owner sets one, and 0 never
+// turns into an instant deadline.
+func TestWorkflowTimeoutZeroIsUnlimited(t *testing.T) {
+	var hadDeadline atomic.Bool
+	s := service(t, func(ctx context.Context, n Node, prompt, provider string, onStart func(string)) (string, error) {
+		_, ok := ctx.Deadline()
+		hadDeadline.Store(ok)
+		return "ok", nil
+	})
+	w := save(t, s, skill("a"))
+	if w.Definition.TimeoutMinutes != 0 {
+		t.Fatalf("hidden default timeout %d", w.Definition.TimeoutMinutes)
+	}
+	if r := finished(t, s, start(t, s, w)); r.Status != "succeeded" || hadDeadline.Load() {
+		t.Fatalf("unlimited run: %s deadline=%v", r.Status, hadDeadline.Load())
+	}
+	limited := w.Definition
+	limited.TimeoutMinutes = 5
+	w2, err := s.Save(context.Background(), w.ID, w.Version, limited)
+	if err != nil || w2.Definition.TimeoutMinutes != 5 {
+		t.Fatalf("limit not kept: %v %+v", err, w2.Definition)
+	}
+	if r := finished(t, s, start(t, s, w2)); r.Status != "succeeded" || !hadDeadline.Load() {
+		t.Fatalf("limited run: %s deadline=%v", r.Status, hadDeadline.Load())
+	}
+	for _, bad := range []int{-1, 1441} {
+		d := limited
+		d.TimeoutMinutes = bad
+		if _, err := s.Save(context.Background(), "", 0, d); err == nil {
+			t.Fatalf("accepted timeout %d", bad)
+		}
+	}
+}

@@ -323,8 +323,10 @@
   }
   function costModeLabel(mode) { return T("costmode." + (mode || "task")); }
   function costModeBadge(mode) { return '<span class="pill ' + (mode === "bypass" ? 'warn' : 'plain') + '">' + esc(costModeLabel(mode)) + '</span>'; }
-  function costFieldsHtml(cp, currency, daily, run) {
-    cp = cp || { mode: "task", run_amount: run, daily_amount: daily };
+  // A new task starts with no limits of its own (only the optional global budget);
+  // the owner adds a per-run or daily cap later by ticking the box.
+  function costFieldsHtml(cp, currency, daily) {
+    cp = cp || { mode: "global", run_amount: null, daily_amount: daily };
     var mode = cp.mode || "task", c = cp.currency || currency || "USD";
     return '<section class="cost-policy"><label class="check"><input type="checkbox" name="cost_enabled"' + (mode === "task" ? ' checked' : '') + '> <strong>' + esc(T("costmode.title")) + '</strong></label>' +
       '<div class="form-row cost-limits">' + fieldHtml(T("costmode.run", {c:c}), '<input name="run_amount" type="number" min="0" max="10000" step="0.0001" value="' + esc(cp.run_amount == null ? '' : cp.run_amount) + '" placeholder="' + esc(T("tf.no_cap")) + '">') +
@@ -357,7 +359,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 0 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -369,7 +371,7 @@
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
         fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
-        costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null, (st.fx || {}).display === "CNY" ? 0.05 * st.fx.usd_cny : 0.05) +
+        costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null) +
         '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
         wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +

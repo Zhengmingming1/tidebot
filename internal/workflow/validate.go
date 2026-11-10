@@ -29,11 +29,9 @@ func Validate(d *Definition) error {
 	if d.MaxParallel < 1 || d.MaxParallel > 4 {
 		return fmt.Errorf("parallelism must be 1-4")
 	}
-	if d.TimeoutMinutes == 0 {
-		d.TimeoutMinutes = 30
-	}
-	if d.TimeoutMinutes < 1 || d.TimeoutMinutes > 1440 {
-		return fmt.Errorf("timeout must be 1-1440 minutes")
+	// 0 = no overall time limit (the default); a limit is optional, 1-1440 minutes.
+	if d.TimeoutMinutes < 0 || d.TimeoutMinutes > 1440 {
+		return fmt.Errorf("timeout must be 0 (unlimited) or 1-1440 minutes")
 	}
 	nodes := map[string]*Node{}
 	for i := range d.Nodes {

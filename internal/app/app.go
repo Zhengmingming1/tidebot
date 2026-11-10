@@ -288,6 +288,8 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		}
 		key = ""
 	}
+	// 0 = no time limit. Tasks set their own (optional) limit; other runs use the
+	// configured default_timeout, which is 0 (unlimited) unless the owner set one.
 	if timeout <= 0 && opts.TaskID == "" {
 		timeout = a.Cfg.DefaultTimeout
 	}
@@ -319,8 +321,6 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			"--permission-mode", "dontAsk",
 			"--permission-prompts", "none",
 			"--restricted",
-			"--max-budget-usd", "0",
-			"--effort", "low",
 		}
 	}
 	opts.ExtraArgs = a.budgetArgs(opts.ExtraArgs, prof, runMax)
@@ -540,7 +540,9 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 	if a.Cost != nil {
 		var chk cost.CheckResult
 		if taskID == "" {
-			chk, err = a.Cost.CheckBeforeRun(ctx, taskID, bucket, 0.05)
+			// Runs the owner starts outside a task carry no per-run cap: only the
+			// optional global daily budget applies (none set = unlimited).
+			chk, err = a.Cost.CheckBeforeRun(ctx, taskID, bucket, 0)
 		} else {
 			chk, err = a.Cost.CheckBeforeRunPolicy(ctx, taskID, bucket, 0, mode)
 		}
@@ -556,8 +558,6 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 		}
 		runMax, tokenMax = chk.RunMaxUSD, chk.RunMaxTokens
 		sources = chk.LimitSources
-	} else if taskID == "" {
-		runMax = a.cachedFX().Convert(0.05, pricing.USD, a.cachedFX().Display)
 	}
 	f := a.cachedFX()
 	if bucket == cost.BucketDryRun {

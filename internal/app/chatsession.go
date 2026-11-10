@@ -37,7 +37,9 @@ import (
 // (readOnlyDeny) and has no web access unless the session has it turned on.
 
 const (
-	chatMaxTurns      = 50       // turns per session (cost guard rail; the page will show it)
+	// chatLongTurns: from this many turns the page shows a soft "long session"
+	// hint (each turn resends more context). Never a limit: the owner decides.
+	chatLongTurns     = 50
 	chatSeedPromptMax = 8 << 10  // the origin run's request in the first turn's record
 	chatSeedAnswerMax = 24 << 10 // and its answer
 	chatTitleMax      = 80
@@ -154,7 +156,7 @@ func scanChat(sc interface{ Scan(...any) error }) (chatRow, error) {
 	err := sc.Scan(&c.ID, &c.Title, &c.Origin, &c.OriginRunID, &c.WorkspaceDir, &c.PermissionMode, &c.Provider,
 		&c.ClaudeSessionID, &c.Turns, &c.CostUSD, &web, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.bindingsRaw)
 	c.WebAccess = web != 0
-	c.TurnMax = chatMaxTurns
+	c.TurnHint = chatLongTurns
 	return c, err
 }
 
@@ -436,9 +438,6 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	}
 	if c.Status == "closed" {
 		return webui.ChatTurnStarted{}, fmt.Errorf("%w: session closed", webui.ErrChatInvalid)
-	}
-	if c.Turns >= chatMaxTurns {
-		return webui.ChatTurnStarted{}, webui.ErrChatTurnLimit
 	}
 	if _, err := a.ResolveProfile(c.Provider); err != nil {
 		return webui.ChatTurnStarted{}, err

@@ -215,7 +215,7 @@
       var health = '<section class="card"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("pl.health")) + '</h2></div><div class="grid g4">' +
         stat(T("pl.runs24"), n24) + stat(T("pl.success7"), Math.round((d.success_rate_7d || 0) * 100) + "%") +
         stat(T("pl.p95"), ((d.duration_p95_ms || 0) / 1000).toFixed(1) + " s") + stat(T("pl.cost7"), usd(d.cost_7d_usd || 0, 2)) +
-        stat(T("pl.confirms"), d.pending_confirmations || 0) + stat(T("pl.claude"), d.claude_version || "?") +
+        stat(T("pl.tasks_active"), d.tasks_active || 0) + stat(T("pl.claude"), d.claude_version || "?") +
         stat(T("pl.disk"), ((d.disk_bytes || 0) / 1048576).toFixed(1) + " MB") + stat(T("pl.backup"), d.last_backup ? fmtTime(d.last_backup) : T("td.none")) + "</div></section>";
       var prow = plugins.length ? '<div class="grid g2 pl-cards">' + plugins.map(function (p) {
         var cur = p.current || {}, m = cur.manifest || {}, hasCfg = m.config_schema && m.config_schema.properties && Object.keys(m.config_schema.properties).length;

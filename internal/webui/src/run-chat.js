@@ -139,17 +139,17 @@
     if (d) ta.value = d.text;
     var fit = function () { ta.style.height = ""; ta.style.height = Math.min(Math.round(window.innerHeight * 0.4), ta.scrollHeight) + "px"; };
     fit();
-    var full = function () { var s = st.ses; return !!(s && s.turn_max && s.turns >= s.turn_max); };
+    // a long session only gets a soft hint (more context per turn); sending never stops
+    var long = function () { var s = st.ses; return !!(s && s.turn_hint && s.turns >= s.turn_hint); };
     var busy = function () { return st.sending || !!(st.ses && (st.ses.status === "running" || (st.ses.turn_list || []).some(function (t) { return t.index > 0 && rcBusy(t.status); }))); };
     var sync = function () {
-      var b = busy(), f = full(), empty = !ta.value.trim();
-      send.disabled = b || f || empty;
-      ta.disabled = f;
-      ta.placeholder = T(f ? "rc.limit_ph" : o.ph || "rc.ph");
-      send.setAttribute("data-tip", T(f ? "rc.limit_tip" : b ? "rc.busy_tip" : o.send_tip || "rc.send_tip"));
+      var b = busy(), empty = !ta.value.trim();
+      send.disabled = b || empty;
+      ta.placeholder = T(o.ph || "rc.ph");
+      send.setAttribute("data-tip", T(b ? "rc.busy_tip" : o.send_tip || "rc.send_tip"));
       var s = st.ses, html = "";
-      if (s) html = (f ? '<span class="pill warn sm">' + esc(T("rc.limit")) + "</span>" : "") +
-        '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), m: num(s.turn_max), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns), m: num(s.turn_max) })) + "</span>";
+      if (s) html = (long() ? '<span class="pill sm" tabindex="0" data-tip="' + esc(T("rc.long_tip")) + '">' + esc(T("rc.long")) + "</span>" : "") +
+        '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns) })) + "</span>";
       if (meta._h !== html) { meta.innerHTML = html; meta._h = html; }
       $("#rc-noweb", sec).hidden = !!(s && s.web_access);
     };
@@ -211,7 +211,7 @@
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var v = ta.value.trim();
-      if (!v || busy() || full()) return;
+      if (!v || busy()) return;
       if (new Blob([v]).size > 16384) { showErr(T("rc.err_too_long")); return; }
       showErr(""); st.sending = true; sync();
       var made = null;
@@ -226,7 +226,7 @@
         if (made && o.dropEmpty) { api("/api/chat-sessions/" + enc(made.id), { method: "DELETE" }).catch(function () {}); st.id = ""; }
         if (e.auth || !document.contains(sec)) return;
         showErr(rcErrText(e));
-        if (e.data && (e.data.code === "busy" || e.data.code === "turn_limit")) load();
+        if (e.data && e.data.code === "busy") load();
       }).then(function () { st.sending = false; if (document.contains(sec)) sync(); });
     });
     ta.addEventListener("input", function () { fit(); showErr(""); draftSave(key, ta.value); sync(); });

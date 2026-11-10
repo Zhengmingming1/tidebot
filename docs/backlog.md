@@ -6022,3 +6022,21 @@ a bulk edit makes undo exact without a history table.
 - 旧版本已经恢复成 `idle` 的会话，中断轮的花费仍未计入（无法与正常结束的轮次区分，宁少不多）。
 - `OnStart` 写轮次行失败时让这一轮直接失败（仍未做）。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）；`uninstallPinned` 引用检查加 `strings.Contains` 预筛。
+
+### 2026-11-09：先不设限 P0——去掉看不见的默认限制（业务逻辑矛盾）
+
+方案：`unlimited-first`（技能 → 运行 / 会话 → 采用 → 存为任务 → 再逐步加限制）。P0 只去掉默认值，不放开执行命令。
+
+- **单次 $0.05**：`cost.CheckBeforeRun` 的 `runMaxUSD<=0 → 0.05` 删掉，0 = 不限，日预算剩余用 `lowerCap` 收紧；`admitRun` 对不属于任务的运行（运行对话框、重跑、按钮、会话每一轮、工作流节点）传 0，`a.Cost==nil` 时的 0.05 兜底也删掉。辅助分析（依赖检查 $1、技能分析 $0.10、对照评测、试运行）的显式上限不变。`RunPromptEx` 默认参数去掉误导的 `--max-budget-usd 0` 和固定的 `--effort low`（用户运行的 effort 交给 Claude Code，辅助分析仍自带）。
+- **新任务**：`tasksvc.Create` 不再写单次 0.05 的预算行；任务表单默认不勾「任务费用控制」、金额留空（不限）、计划默认「手动」。
+- **迁移 044**：只删 tidebot 自己填的上限——模式 `task`、无 token 上限、金额正好 USD 0.05（或 CNY 0.05×当前汇率，±0.0001）、没有任何一次 `cost_policy_update` 改过单次金额（表单原样保存不算改）、也不是 034 从用户自设值压下来的。原值写进 `operation_log(unlimited_default_migration)`，`cost_policy_revision+1` 让升级前打开的编辑框必须重载。和方案原稿的差异：方案写的是 `revision=1`，但 WebUI 新建任务时会立即保存一次花费策略（revision=2），只看 revision 会漏掉绝大多数从表单建的任务，所以改成按审计日志判断金额是否被改过。
+- **花费页提示**：升级后花费页顶部一条页内横条「已为 N 个任务移除默认的单次上限 $0.05」，悬停列出任务名，「全部恢复」按日志原样写回（显示币种变了会换算；之后用户又设过的上限保留），× 关闭后不再出现。`POST /api/spend/unlimited-notice {action: restore|dismiss}`，登录 + CSRF。
+- **30 分钟**：`config.DefaultTimeout` 默认 0，`Validate` 允许 0（负数、不足 1 s 报错）；配置里写了 `default_timeout` 的照旧生效。工作流 `TimeoutMinutes` 0 = 不限（不再改写成 30），**engine 在 0 时直接用父 context**——否则 0 分钟就是立刻超时。编辑器「限制总时长（分钟）」改为勾选项，默认不勾；已保存的工作流定义保留原值，不生成新版本。
+- **会话 50 轮**：不再拦截，`turn_max` 换成 `turn_hint`，满 50 轮只显示「对话较长」小标签（悬停说明上下文变长、花费变高），仍可发送；`ErrChatTurnLimit` / `turn_limit` 和对应文案删除。
+- **确认卡说法**：`--bare` 下钩子不跑，危险操作确认从不触发；扩展页健康卡的「等你确认」改为「启用中的任务」，通知分组说明去掉「操作需要你批准」。`pending_confirmations` 表和 hook 代码留给 P1 处理。
+- 保留：全局每日预算（新装默认 $5，可设为不限）；没设就完全不限，不提醒。
+- 测试：`cost_test`（0 = 不限、全局剩余、显式上限）、`app/unlimited_defaults_test`（不属于任务的运行无单次上限、参数里没有 `--max-budget-usd` / `--effort`、辅助分析仍带上限、新任务无上限）、`db/unlimited_defaults_test`（八种任务：未改默认 / 表单原样保存 / 改过又改回 / 自设 / 有 token 上限 / global 模式 / CNY 默认 / 旧汇率 CNY，迁移可重复）、`tasksvc/unlimited_notice_test`（恢复、换算、用户新设的保留、关闭后不可恢复）、`webui/spend_unlimited_test`（接口、CSRF、表单默认值、转义）、`workflow` 0 不设截止时间、`config` 0 合法；第 51 轮可发送。`go test ./...`、相关包 `-race` 通过。
+
+**心得**：一个「默认值」散在后端兜底、表单预填、迁移物化三处，单删一处等于没删；迁移判定「用户有没有动过」要看真正记录用户意图的地方（审计日志），而不是一个被创建流程顺手 +1 的计数。
+
+**后续（P1 起）**：执行命令的安全底座（沙箱 `--settings`、`SensitiveReadDeny`、危险命令 deny 集、完整性校验、preflight 检测 bwrap/socat、删除 hook 写入）；原生 Windows 照常允许「可执行命令」，分段上标「无系统沙箱」，第一次使用时用应用内说明框讲一次。运行对话框 / 任务 / 会话 / 工作流三档权限（P2）；会话调技能闭环与「存为任务」锁定采用版本（P3）；任务表单自动推断的计划仍会自动填入（P3 改为只作建议）。

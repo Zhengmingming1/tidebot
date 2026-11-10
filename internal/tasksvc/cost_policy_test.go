@@ -32,8 +32,14 @@ func TestCostPolicyAtomicRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Mode != "task" || p.RunAmount == nil || *p.RunAmount != 0.05 {
+	// Unlimited first: a new task has no per-run or daily cap of its own.
+	if p.Mode != "task" || p.RunAmount != nil || p.DailyAmount != nil {
 		t.Fatalf("default %+v", p)
+	}
+	var rows int
+	s.Store.DB.QueryRow(`SELECT COUNT(*) FROM budgets WHERE scope='task' AND scope_id=?`, tid).Scan(&rows)
+	if rows != 0 {
+		t.Fatalf("new task got %d budget rows", rows)
 	}
 	_, err = s.Store.DB.Exec(`INSERT INTO budgets(id,scope,scope_id,period,max_usd,max_tokens,action,warn_at_pct,created_at,updated_at) VALUES('d','task',?,'day',10,1000,'notify',75,'now','now')`, tid)
 	if err != nil {
@@ -45,7 +51,7 @@ func TestCostPolicyAtomicRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Mode != "bypass" || p.Revision != 2 || *p.DailyAmount != 20 || *p.RunAmount != .05 {
+	if p.Mode != "bypass" || p.Revision != 2 || *p.DailyAmount != 20 || p.RunAmount != nil {
 		t.Fatalf("updated %+v", p)
 	}
 	var tokens, warn int
@@ -80,6 +86,9 @@ func TestCostPolicyAtomicRoundTrip(t *testing.T) {
 func TestCostPolicyCurrencyAndValidation(t *testing.T) {
 	s, tid := costPolicyFixture(t)
 	ctx := context.Background()
+	if _, err := s.Store.DB.Exec(`INSERT INTO budgets(id,scope,scope_id,period,max_usd,action,warn_at_pct,bucket,created_at,updated_at,currency) VALUES('r','task',?,'run',0.05,'pause_notify',80,'','now','now','USD')`, tid); err != nil {
+		t.Fatal(err)
+	}
 	old, _ := s.GetCostPolicy(ctx, tid)
 	_, err := s.Store.DB.Exec(`INSERT INTO settings(user_id,key,value_json) VALUES('owner','pricing.fx','{"display":"CNY","usd_cny":7}')`)
 	if err != nil {
@@ -135,7 +144,7 @@ func TestCostPolicyFailedAuditRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Mode != before.Mode || after.Revision != before.Revision || *after.RunAmount != *before.RunAmount {
+	if after.Mode != before.Mode || after.Revision != before.Revision || after.RunAmount != nil || before.RunAmount != nil {
 		t.Fatalf("partial save: %+v", after)
 	}
 }

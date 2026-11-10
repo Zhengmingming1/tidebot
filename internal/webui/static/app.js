@@ -3730,17 +3730,18 @@
     var routeKey=location.hash,creating=!id||id==='new';
     return Promise.all([api('/api/skills'),api('/api/skill-sets'),creating?Promise.resolve(null):api('/api/workflows/'+enc(id))]).then(function(r){
       if(location.hash!==routeKey || workflowDraftGuard&&workflowDraftGuard.dirty())return;
-      var skills=r[0],sets=r[1],saved=r[2],def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:30,nodes:[]};
+      var skills=r[0],sets=r[1],saved=r[2],def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:0,nodes:[]};
       if(def.nodes.some(function(n){return !n.position;}))wfArrange(def);
       var selected=def.nodes.length?def.nodes[0].id:'',zoom=0.85,drag=null,link=null,baseline=JSON.stringify(def);
       mount('<div class="page-head wf-page-head"><div><a href="#/workflows">← '+esc(T('nav.workflows'))+'</a><h1>'+esc(creating?T('wf.create'):saved.name)+'</h1></div><div class="row-actions actions"><button class="btn" id="wf-check">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" id="wf-save">'+ic('check','sm')+esc(T('btn.save'))+'</button>'+(creating?'':'<button class="btn" id="wf-run">'+ic('play','sm')+esc(T('btn.run'))+'</button>')+'</div></div>'+
-        '<form id="wf-meta" class="card wf-meta"><div class="wf-meta-name">'+fieldHtml(T('tf.name'),'<input name="name" required maxlength="80" value="'+esc(def.name)+'">')+'</div><details class="wf-options"><summary>'+esc(T('wf.options'))+'</summary><div class="form-row">'+fieldHtml(T('wf.parallel'),'<input name="max_parallel" type="number" min="1" max="4" value="'+def.max_parallel+'">')+fieldHtml(T('tf.timeout'),'<input name="timeout_minutes" type="number" min="1" max="1440" value="'+def.timeout_minutes+'">')+'</div>'+fieldHtml(T('sk.desc'),'<input name="description" maxlength="4096" value="'+esc(def.description||'')+'">')+'</details></form>'+
+        '<form id="wf-meta" class="card wf-meta"><div class="wf-meta-name">'+fieldHtml(T('tf.name'),'<input name="name" required maxlength="80" value="'+esc(def.name)+'">')+'</div><details class="wf-options"><summary>'+esc(T('wf.options'))+'</summary><div class="form-row">'+fieldHtml(T('wf.parallel'),'<input name="max_parallel" type="number" min="1" max="4" value="'+def.max_parallel+'">')+'<div class="field wf-timeout"><label class="check"><input type="checkbox" name="timeout_enabled"'+(def.timeout_minutes>0?' checked':'')+'> '+esc(T('wf.timeout_enabled'))+tip(T('wf.timeout_tip'))+'</label><input name="timeout_minutes" type="number" min="1" max="1440" aria-label="'+esc(T('tf.timeout'))+'" placeholder="'+esc(T('tf.no_cap'))+'" value="'+(def.timeout_minutes>0?def.timeout_minutes:'')+'"'+(def.timeout_minutes>0?'':' disabled')+'></div></div>'+fieldHtml(T('sk.desc'),'<input name="description" maxlength="4096" value="'+esc(def.description||'')+'">')+'</details></form>'+
         '<div class="wf-designer"><aside class="card wf-palette"><h2>'+esc(T('wf.palette'))+'</h2><p class="hint">'+esc(T('wf.drag_hint'))+'</p><div id="wf-palette-skills">'+skills.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="skill" data-palette-index="'+i+'">'+ic('skills','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+(skills.length?'':'<a href="#/skills">'+esc(T('wf.need_skill'))+'</a>')+'</div><h3>'+esc(T('ss.title'))+'</h3>'+sets.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="set" data-palette-index="'+i+'">'+ic('layers','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+'<h3>'+esc(T('wf.control'))+'</h3><button type="button" class="wf-palette-item" draggable="true" data-palette="condition">'+ic('branch','sm')+esc(T('wf.condition'))+'</button></aside>'+
         '<section class="card wf-canvas-panel"><div class="wf-canvas-toolbar"><button class="btn sm" id="wf-arrange">'+esc(T('wf.arrange'))+'</button><button class="btn sm" id="wf-example">'+esc(T('wf.example'))+'</button><span class="grow"></span><label>'+esc(T('wf.zoom'))+' <select id="wf-zoom">'+[50,75,85,100,125].map(function(n){return opt(n,n+'%',n===85);}).join('')+'</select></label></div><p class="hint" id="wf-canvas-hint">'+esc(T('wf.connect_hint'))+'</p><div class="wf-canvas-scroll" id="wf-canvas-scroll"><svg id="wf-canvas" role="group" aria-label="'+esc(T('wf.graph'))+'" tabindex="0"></svg></div></section>'+
         '<aside class="card wf-inspector" id="wf-inspector"></aside></div><p class="notice bad hidden" id="wf-error" role="alert"></p>'+
         (creating?'':'<section class="card"><div class="card-head"><h2>'+esc(T('wf.history'))+'</h2><span class="grow"></span><button class="btn ghost sm" id="wf-delete">'+esc(T('btn.delete'))+'</button></div><div id="wf-history"></div></section>'),'workflows',[[T('nav.workflows'),'#/workflows'],[creating?T('wf.create'):saved.name]]);
       var f=$('#wf-meta'),svg=$('#wf-canvas'),inspector=$('#wf-inspector'),host=$('#wf-canvas-scroll');
-      function read(){def.name=f.name.value.trim();def.description=f.description.value;def.max_parallel=+f.max_parallel.value;def.timeout_minutes=+f.timeout_minutes.value;return def;}
+      function read(){def.name=f.name.value.trim();def.description=f.description.value;def.max_parallel=+f.max_parallel.value;def.timeout_minutes=f.timeout_enabled.checked?+f.timeout_minutes.value||0:0;return def;}
+      f.timeout_enabled.onchange=function(){f.timeout_minutes.disabled=!this.checked;if(this.checked&&!f.timeout_minutes.value)f.timeout_minutes.value=60;if(this.checked)f.timeout_minutes.focus();};
       function error(msg){var el=$('#wf-error');el.textContent=msg||'';el.classList.toggle('hidden',!msg);}
       function point(e){var p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;return p.matrixTransform(svg.getScreenCTM().inverse());}
       function canvas(){var scene=wfScene(def,selected);svg.setAttribute('viewBox','0 0 '+scene.width+' '+scene.height);svg.style.width=(scene.width*zoom)+'px';svg.style.height=(scene.height*zoom)+'px';svg.innerHTML=scene.html;if(link&&link.to){var p=def.nodes.find(function(n){return n.id===link.from;}).position,y=p.y+(link.branch==='true'?30:link.branch==='false'?65:43);svg.insertAdjacentHTML('beforeend','<path class="wf-link-draft" d="M '+(p.x+200)+' '+y+' L '+link.to.x+' '+link.to.y+'"/>');}}
@@ -5805,8 +5806,10 @@
   }
   function costModeLabel(mode) { return T("costmode." + (mode || "task")); }
   function costModeBadge(mode) { return '<span class="pill ' + (mode === "bypass" ? 'warn' : 'plain') + '">' + esc(costModeLabel(mode)) + '</span>'; }
-  function costFieldsHtml(cp, currency, daily, run) {
-    cp = cp || { mode: "task", run_amount: run, daily_amount: daily };
+  // A new task starts with no limits of its own (only the optional global budget);
+  // the owner adds a per-run or daily cap later by ticking the box.
+  function costFieldsHtml(cp, currency, daily) {
+    cp = cp || { mode: "global", run_amount: null, daily_amount: daily };
     var mode = cp.mode || "task", c = cp.currency || currency || "USD";
     return '<section class="cost-policy"><label class="check"><input type="checkbox" name="cost_enabled"' + (mode === "task" ? ' checked' : '') + '> <strong>' + esc(T("costmode.title")) + '</strong></label>' +
       '<div class="form-row cost-limits">' + fieldHtml(T("costmode.run", {c:c}), '<input name="run_amount" type="number" min="0" max="10000" step="0.0001" value="' + esc(cp.run_amount == null ? '' : cp.run_amount) + '" placeholder="' + esc(T("tf.no_cap")) + '">') +
@@ -5839,7 +5842,7 @@
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "0 9 * * *", budget_usd: 0, enabled: true, timeout_minutes: 0 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0 };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -5851,7 +5854,7 @@
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
         fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
-        costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null, (st.fx || {}).display === "CNY" ? 0.05 * st.fx.usd_cny : 0.05) +
+        costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null) +
         '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
         wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +
@@ -6508,7 +6511,7 @@
       var health = '<section class="card"><div class="card-head"><span class="ico">' + ic("pulse") + "</span><h2>" + esc(T("pl.health")) + '</h2></div><div class="grid g4">' +
         stat(T("pl.runs24"), n24) + stat(T("pl.success7"), Math.round((d.success_rate_7d || 0) * 100) + "%") +
         stat(T("pl.p95"), ((d.duration_p95_ms || 0) / 1000).toFixed(1) + " s") + stat(T("pl.cost7"), usd(d.cost_7d_usd || 0, 2)) +
-        stat(T("pl.confirms"), d.pending_confirmations || 0) + stat(T("pl.claude"), d.claude_version || "?") +
+        stat(T("pl.tasks_active"), d.tasks_active || 0) + stat(T("pl.claude"), d.claude_version || "?") +
         stat(T("pl.disk"), ((d.disk_bytes || 0) / 1048576).toFixed(1) + " MB") + stat(T("pl.backup"), d.last_backup ? fmtTime(d.last_backup) : T("td.none")) + "</div></section>";
       var prow = plugins.length ? '<div class="grid g2 pl-cards">' + plugins.map(function (p) {
         var cur = p.current || {}, m = cur.manifest || {}, hasCfg = m.config_schema && m.config_schema.properties && Object.keys(m.config_schema.properties).length;
@@ -7696,17 +7699,17 @@
     if (d) ta.value = d.text;
     var fit = function () { ta.style.height = ""; ta.style.height = Math.min(Math.round(window.innerHeight * 0.4), ta.scrollHeight) + "px"; };
     fit();
-    var full = function () { var s = st.ses; return !!(s && s.turn_max && s.turns >= s.turn_max); };
+    // a long session only gets a soft hint (more context per turn); sending never stops
+    var long = function () { var s = st.ses; return !!(s && s.turn_hint && s.turns >= s.turn_hint); };
     var busy = function () { return st.sending || !!(st.ses && (st.ses.status === "running" || (st.ses.turn_list || []).some(function (t) { return t.index > 0 && rcBusy(t.status); }))); };
     var sync = function () {
-      var b = busy(), f = full(), empty = !ta.value.trim();
-      send.disabled = b || f || empty;
-      ta.disabled = f;
-      ta.placeholder = T(f ? "rc.limit_ph" : o.ph || "rc.ph");
-      send.setAttribute("data-tip", T(f ? "rc.limit_tip" : b ? "rc.busy_tip" : o.send_tip || "rc.send_tip"));
+      var b = busy(), empty = !ta.value.trim();
+      send.disabled = b || empty;
+      ta.placeholder = T(o.ph || "rc.ph");
+      send.setAttribute("data-tip", T(b ? "rc.busy_tip" : o.send_tip || "rc.send_tip"));
       var s = st.ses, html = "";
-      if (s) html = (f ? '<span class="pill warn sm">' + esc(T("rc.limit")) + "</span>" : "") +
-        '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), m: num(s.turn_max), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns), m: num(s.turn_max) })) + "</span>";
+      if (s) html = (long() ? '<span class="pill sm" tabindex="0" data-tip="' + esc(T("rc.long_tip")) + '">' + esc(T("rc.long")) + "</span>" : "") +
+        '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns) })) + "</span>";
       if (meta._h !== html) { meta.innerHTML = html; meta._h = html; }
       $("#rc-noweb", sec).hidden = !!(s && s.web_access);
     };
@@ -7768,7 +7771,7 @@
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var v = ta.value.trim();
-      if (!v || busy() || full()) return;
+      if (!v || busy()) return;
       if (new Blob([v]).size > 16384) { showErr(T("rc.err_too_long")); return; }
       showErr(""); st.sending = true; sync();
       var made = null;
@@ -7783,7 +7786,7 @@
         if (made && o.dropEmpty) { api("/api/chat-sessions/" + enc(made.id), { method: "DELETE" }).catch(function () {}); st.id = ""; }
         if (e.auth || !document.contains(sec)) return;
         showErr(rcErrText(e));
-        if (e.data && (e.data.code === "busy" || e.data.code === "turn_limit")) load();
+        if (e.data && e.data.code === "busy") load();
       }).then(function () { st.sending = false; if (document.contains(sec)) sync(); });
     });
     ta.addEventListener("input", function () { fit(); showErr(""); draftSave(key, ta.value); sync(); });
@@ -8567,7 +8570,10 @@
       var pct = function (u, m) { return m ? Math.min(100, u / m * 100) : 0; };
       var cls = function (p) { return p >= 100 ? " bad" : p >= 80 ? " warn" : ""; };
       var gp = pct(s.total_usd, global.max_usd);
-      mount((hasBypass ? '<div class="notice warn">' + esc(T("costmode.spend_notice")) + '</div>' : "") + '<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
+      // one-time: tidebot removed the $0.05 per-run caps it had filled in itself (migration 044)
+      var un = d.unlimited_notice, unNames = un && un.tasks ? un.tasks.map(function (t) { return t.name; }) : [];
+      var unHtml = unNames.length ? '<div class="notice sp-unl" id="sp-unl" role="status"><span class="sp-unl-txt" tabindex="0" data-tip="' + esc(T("sp.unl_tip", { names: unNames.slice(0, 20).join(/^zh/.test(state.lang || "") ? "、" : ", ") + (unNames.length > 20 ? " …" : "") })) + '">' + esc(T("sp.unl_text", { n: unNames.length })) + '</span><button type="button" class="btn sm" id="sp-unl-restore">' + esc(T("sp.unl_restore")) + '</button><button type="button" class="icon-btn sm" id="sp-unl-x" data-tip="' + esc(T("sp.unl_dismiss")) + '" aria-label="' + esc(T("sp.unl_dismiss")) + '">' + ic("x", "sm") + "</button></div>" : "";
+      mount(unHtml + (hasBypass ? '<div class="notice warn">' + esc(T("costmode.spend_notice")) + '</div>' : "") + '<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
         '<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("time.today")) + "</small><strong>" + esc(usd(s.total_usd, 4)) + "</strong><span>" + esc(global.max_usd ? T("sp.pct_of", { p: Math.round(gp), m: usd(global.max_usd) }) : T("sp.no_cap")) + "</span></div>" +
         '<div class="card stat"' + (global.max_usd && global.held_usd > 0 ? ' data-tip="' + esc(T("sp.remaining_held_tip", { cap: usd(global.max_usd), used: usd(s.total_usd, 4), held: usd(global.held_usd, 4) })) + '"' : "") + "><small>" + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd - (global.held_usd || 0))) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +
@@ -8582,6 +8588,15 @@
         '<section class="card flush sp-events"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("sp.events")) + "</h2></div>" + (d.events.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.when")) + "</th><th>" + esc(T("sp.scope")) + "</th><th>" + esc(T("sp.detail")) + "</th></tr></thead><tbody>" + d.events.map(function (e) { return '<tr><td class="nowrap">' + esc(when(e.at)) + '</td><td><span class="pill bad">' + esc(T("sp.scope_" + e.scope)) + "</span></td><td>" + esc(e.code ? T("be." + e.code, { name: e.name || T("sp.scope_" + e.scope), used: e.used, cap: e.cap, held: e.held, n: e.n }) : e.detail) + "<small>" + esc(T("sp.action", { a: T("act." + e.action) === "act." + e.action ? e.action : T("act." + e.action) })) + "</small></td></tr>"; }).join("") + "</tbody></table>" : emptyState("shield", T("sp.no_breach"), T("sp.no_breach_sub"))) + "</section>",
         "spend", [[T("nav.spend")]]);
       applySizes(page());
+      var unAct = function (action) {
+        var bar = $("#sp-unl"); if (!bar) return;
+        $$("button", bar).forEach(function (b) { b.disabled = true; });
+        api("/api/spend/unlimited-notice", { method: "POST", body: { action: action } }).then(function (r) {
+          bar.remove();
+          if (action === "restore") toast(T("sp.unl_restored", { n: (r && r.restored) || 0 }));
+        }).catch(function (e) { $$("button", bar).forEach(function (b) { b.disabled = false; }); toast(e.message || T("sp.unl_fail"), true); });
+      };
+      if ($("#sp-unl")) { $("#sp-unl-restore").addEventListener("click", function () { unAct("restore"); }); $("#sp-unl-x").addEventListener("click", function () { unAct("dismiss"); }); }
       var paintBody = function (r) {
         var rows = r.rows || [], mxd = Math.max.apply(null, (r.days || []).map(function (x) { return x.usd; }).concat([0.0001]));
         var nm = function (x) { return spendView.by === "task" ? (x.key ? (x.name || taskNames[x.key] || x.key) : T("run.adhoc_paren")) : (x.key || T("sp.unknown")); };

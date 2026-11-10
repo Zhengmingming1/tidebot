@@ -55,7 +55,7 @@ func TestLegacyCostPolicyMigration(t *testing.T) {
 		id       string
 		amount   float64
 		currency string
-	}{{"high", .4, "CNY"}, {"low", .01, "USD"}, {"none", .4, "CNY"}} {
+	}{{"high", .4, "CNY"}, {"low", .01, "USD"}} {
 		var amount float64
 		var currency, mode string
 		if err = database.QueryRow(`SELECT b.max_usd,b.currency,t.cost_control_mode FROM budgets b JOIN tasks t ON t.id=b.scope_id WHERE b.scope_id=? AND b.period='run'`, tt.id).Scan(&amount, &currency, &mode); err != nil {
@@ -64,6 +64,17 @@ func TestLegacyCostPolicyMigration(t *testing.T) {
 		if math.Abs(amount-tt.amount) > 1e-10 || currency != tt.currency || mode != "task" {
 			t.Fatalf("%s: %v %s %s", tt.id, amount, currency, mode)
 		}
+	}
+	// 044: the cap 034 filled in for "none" was tidebot's, not the owner's: removed
+	// (and logged); "high" was lowered from the owner's own cap and stays.
+	var left int
+	database.QueryRow(`SELECT COUNT(*) FROM budgets WHERE scope_id='none' AND period='run'`).Scan(&left)
+	if left != 0 {
+		t.Fatal("implicit default cap kept")
+	}
+	var logged float64
+	if err = database.QueryRow(`SELECT json_extract(detail_json,'$.max_amount') FROM operation_log WHERE entity_id='none' AND action='unlimited_default_migration'`).Scan(&logged); err != nil || math.Abs(logged-.4) > 1e-10 {
+		t.Fatalf("removal not logged %v %v", logged, err)
 	}
 	var original float64
 	var tokens, warn int

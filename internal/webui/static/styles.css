@@ -3874,3 +3874,9 @@ button.rc-tag:hover { color: var(--text); }
   .wf-designer .wf-palette { max-height: 144px; }
   #wf-meta .form-row { grid-template-columns: minmax(0,1fr); }
 }
+/* spend page: one-time notice about removed default caps */
+.notice.sp-unl { align-items: center; margin: 0 0 var(--s1); }
+.sp-unl .sp-unl-txt { flex: 1; min-width: 0; }
+/* workflow options: "limit total time" is an opt-in checkbox above the minutes */
+.wf-timeout > .check { gap: var(--sp-1); font-size: var(--fs-sm); font-weight: 500; color: var(--text-2); }
+.wf-timeout > .check input[type=checkbox] { width: auto; height: auto; flex: none; margin: 0; padding: 0; }

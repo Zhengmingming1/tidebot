@@ -85,3 +85,20 @@ func TestShutdownGraceDefaultAndEnv(t *testing.T) {
 		t.Fatalf("negative grace %v", cfg.ShutdownGrace)
 	}
 }
+
+// Unlimited first: runs get no time limit unless the owner configures one.
+func TestDefaultTimeoutIsUnlimited(t *testing.T) {
+	c := Default()
+	if c.DefaultTimeout != 0 {
+		t.Fatalf("default timeout %v", c.DefaultTimeout)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("0 rejected: %v", err)
+	}
+	for _, bad := range []time.Duration{-time.Second, time.Millisecond} {
+		c.DefaultTimeout = bad
+		if c.Validate() == nil {
+			t.Fatalf("accepted %v", bad)
+		}
+	}
+}

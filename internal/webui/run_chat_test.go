@@ -93,7 +93,7 @@ func TestRunChatUI(t *testing.T) {
 	for _, m := range regexp.MustCompile(`"code":\s*"(\w+)"|, "(\w+)"\},`).FindAllStringSubmatch(string(goSrc), -1) {
 		codes[m[1]+m[2]] = true
 	}
-	if len(codes) < 7 {
+	if len(codes) < 6 {
 		t.Fatalf("codes %v", codes)
 	}
 	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
@@ -110,7 +110,7 @@ func TestRunChatUI(t *testing.T) {
 	}
 
 	runNode(t, `
-var state = { dict: { "rc.err_busy": 1, "rc.err_turn_limit": 1 } };
+var state = { dict: { "rc.err_busy": 1 } };
 function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 function enc(s) { return encodeURIComponent(s); }
 function T(k, v) { return k + (v ? JSON.stringify(v) : ""); }

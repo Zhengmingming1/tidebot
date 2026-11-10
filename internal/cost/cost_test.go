@@ -73,3 +73,29 @@ func TestBudgetEnforcementAndLedger(t *testing.T) {
 		t.Fatalf("assist uses only shared global cap: %+v %v", allowed, err)
 	}
 }
+
+// 0 is no per-run cap (no hidden $0.05): only budgets the owner set apply.
+func TestCheckBeforeRunZeroIsUnlimited(t *testing.T) {
+	sqlDB, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	s := New(sqlDB, nil)
+	ctx := context.Background()
+	chk, err := s.CheckBeforeRun(ctx, "", BucketProduction, 0)
+	if err != nil || !chk.OK || chk.RunMaxUSD != 0 {
+		t.Fatalf("no budget: %+v %v", chk, err)
+	}
+	if err = s.UpsertBudget(ctx, Budget{Scope: "global", Period: "day", Action: "pause_notify", MaxUSD: sql.NullFloat64{Float64: 2, Valid: true}, Currency: "USD"}); err != nil {
+		t.Fatal(err)
+	}
+	chk, err = s.CheckBeforeRun(ctx, "", BucketProduction, 0)
+	if err != nil || !chk.OK || chk.RunMaxUSD != 2 {
+		t.Fatalf("global budget: %+v %v", chk, err)
+	}
+	chk, _ = s.CheckBeforeRun(ctx, "", BucketProduction, 0.5)
+	if chk.RunMaxUSD != 0.5 {
+		t.Fatalf("explicit cap: %+v", chk)
+	}
+}

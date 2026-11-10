@@ -48,7 +48,8 @@ func TestConcurrentRunsShareBudget(t *testing.T) {
 		}
 		return running != ""
 	})
-	if held, n := a.Cost.Held("global", "", "", pricing.USD); n != 1 || held < 0.04 || held > 0.0500001 {
+	// No per-run cap of its own (unlimited first): the run holds what is left of the global budget.
+	if held, n := a.Cost.Held("global", "", "", pricing.USD); n != 1 || held < 0.04 || held > 0.0550001 {
 		t.Fatalf("first run holds %v (%d)", held, n)
 	}
 	events := a.Events.Subscribe(32)

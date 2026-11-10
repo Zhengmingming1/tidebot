@@ -102,7 +102,7 @@ FROM cost_ledger c LEFT JOIN tasks t ON t.id=c.task_id WHERE c.created_at >= ? A
 		}
 		rows.Close()
 	}
-	writeJSON(w, 200, map[string]any{"summary": sum, "days": days, "events": events, "top_tasks": top})
+	writeJSON(w, 200, map[string]any{"summary": sum, "days": days, "events": events, "top_tasks": top, "unlimited_notice": s.unlimitedNotice(r)})
 }
 
 func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {

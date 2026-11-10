@@ -128,7 +128,10 @@
       var pct = function (u, m) { return m ? Math.min(100, u / m * 100) : 0; };
       var cls = function (p) { return p >= 100 ? " bad" : p >= 80 ? " warn" : ""; };
       var gp = pct(s.total_usd, global.max_usd);
-      mount((hasBypass ? '<div class="notice warn">' + esc(T("costmode.spend_notice")) + '</div>' : "") + '<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
+      // one-time: tidebot removed the $0.05 per-run caps it had filled in itself (migration 044)
+      var un = d.unlimited_notice, unNames = un && un.tasks ? un.tasks.map(function (t) { return t.name; }) : [];
+      var unHtml = unNames.length ? '<div class="notice sp-unl" id="sp-unl" role="status"><span class="sp-unl-txt" tabindex="0" data-tip="' + esc(T("sp.unl_tip", { names: unNames.slice(0, 20).join(/^zh/.test(state.lang || "") ? "、" : ", ") + (unNames.length > 20 ? " …" : "") })) + '">' + esc(T("sp.unl_text", { n: unNames.length })) + '</span><button type="button" class="btn sm" id="sp-unl-restore">' + esc(T("sp.unl_restore")) + '</button><button type="button" class="icon-btn sm" id="sp-unl-x" data-tip="' + esc(T("sp.unl_dismiss")) + '" aria-label="' + esc(T("sp.unl_dismiss")) + '">' + ic("x", "sm") + "</button></div>" : "";
+      mount(unHtml + (hasBypass ? '<div class="notice warn">' + esc(T("costmode.spend_notice")) + '</div>' : "") + '<div class="page-head"><div><h1>' + esc(T("nav.spend")) + "</h1><p>" + esc(T("sp.sub", { tz: s.timezone || state.tz })) + "</p></div></div>" +
         '<div class="grid g4">' +
         '<div class="card stat"><small>' + esc(T("time.today")) + "</small><strong>" + esc(usd(s.total_usd, 4)) + "</strong><span>" + esc(global.max_usd ? T("sp.pct_of", { p: Math.round(gp), m: usd(global.max_usd) }) : T("sp.no_cap")) + "</span></div>" +
         '<div class="card stat"' + (global.max_usd && global.held_usd > 0 ? ' data-tip="' + esc(T("sp.remaining_held_tip", { cap: usd(global.max_usd), used: usd(s.total_usd, 4), held: usd(global.held_usd, 4) })) + '"' : "") + "><small>" + esc(T("sp.remaining")) + "</small><strong>" + esc(global.max_usd ? usd(Math.max(0, global.max_usd - s.total_usd - (global.held_usd || 0))) : "∞") + "</strong><span>" + esc(T("sp.global_daily")) + "</span></div>" +
@@ -143,6 +146,15 @@
         '<section class="card flush sp-events"><div class="card-head"><span class="ico">' + ic("shield") + "</span><h2>" + esc(T("sp.events")) + "</h2></div>" + (d.events.length ? '<table class="table"><thead><tr><th>' + esc(T("sp.when")) + "</th><th>" + esc(T("sp.scope")) + "</th><th>" + esc(T("sp.detail")) + "</th></tr></thead><tbody>" + d.events.map(function (e) { return '<tr><td class="nowrap">' + esc(when(e.at)) + '</td><td><span class="pill bad">' + esc(T("sp.scope_" + e.scope)) + "</span></td><td>" + esc(e.code ? T("be." + e.code, { name: e.name || T("sp.scope_" + e.scope), used: e.used, cap: e.cap, held: e.held, n: e.n }) : e.detail) + "<small>" + esc(T("sp.action", { a: T("act." + e.action) === "act." + e.action ? e.action : T("act." + e.action) })) + "</small></td></tr>"; }).join("") + "</tbody></table>" : emptyState("shield", T("sp.no_breach"), T("sp.no_breach_sub"))) + "</section>",
         "spend", [[T("nav.spend")]]);
       applySizes(page());
+      var unAct = function (action) {
+        var bar = $("#sp-unl"); if (!bar) return;
+        $$("button", bar).forEach(function (b) { b.disabled = true; });
+        api("/api/spend/unlimited-notice", { method: "POST", body: { action: action } }).then(function (r) {
+          bar.remove();
+          if (action === "restore") toast(T("sp.unl_restored", { n: (r && r.restored) || 0 }));
+        }).catch(function (e) { $$("button", bar).forEach(function (b) { b.disabled = false; }); toast(e.message || T("sp.unl_fail"), true); });
+      };
+      if ($("#sp-unl")) { $("#sp-unl-restore").addEventListener("click", function () { unAct("restore"); }); $("#sp-unl-x").addEventListener("click", function () { unAct("dismiss"); }); }
       var paintBody = function (r) {
         var rows = r.rows || [], mxd = Math.max.apply(null, (r.days || []).map(function (x) { return x.usd; }).concat([0.0001]));
         var nm = function (x) { return spendView.by === "task" ? (x.key ? (x.name || taskNames[x.key] || x.key) : T("run.adhoc_paren")) : (x.key || T("sp.unknown")); };

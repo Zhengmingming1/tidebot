@@ -75,7 +75,7 @@ func TestChatSessionResumeOnlyInTidebotConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ses.Title != "summarize the notes" || ses.Status != "idle" || ses.PermissionMode != "read" || ses.WebAccess || ses.Turns != 0 || ses.TurnMax != chatMaxTurns {
+	if ses.Title != "summarize the notes" || ses.Status != "idle" || ses.PermissionMode != "read" || ses.WebAccess || ses.Turns != 0 || ses.TurnHint != chatLongTurns {
 		t.Fatalf("session %+v", ses)
 	}
 	if again, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid}); err != nil || again.ID != ses.ID {
@@ -226,10 +226,12 @@ func TestChatSessionRefusals(t *testing.T) {
 		t.Fatalf("delete while answering: %v", err)
 	}
 	a.recoverChatSessions(ctx)
-	a.DB.Exec(`UPDATE chat_sessions SET turns=? WHERE id=?`, chatMaxTurns, ses.ID)
-	if _, err := a.SendChatTurn(ctx, ses.ID, "x"); !errors.Is(err, webui.ErrChatTurnLimit) {
-		t.Fatalf("turn limit (after recovery freed it): %v", err)
+	// Unlimited first: a long session only gets a hint on the page, turn 51 still goes.
+	a.DB.Exec(`UPDATE chat_sessions SET turns=? WHERE id=?`, chatLongTurns, ses.ID)
+	if _, err := a.SendChatTurn(ctx, ses.ID, "x"); err != nil {
+		t.Fatalf("turn after the long-session hint (after recovery freed it): %v", err)
 	}
+	waitTurn(t, a, ses.ID, chatLongTurns+1)
 }
 
 func TestChatSessionWorkspace(t *testing.T) {

@@ -202,18 +202,6 @@ ON CONFLICT(scope,scope_id,period,bucket) DO UPDATE SET max_usd=excluded.max_usd
 	return after, nil
 }
 
-func (s *Service) initializeCostPolicy(ctx context.Context, taskID string) error {
-	unlock := s.lockCostPolicy(ctx)
-	defer unlock()
-	f, _, err := policyFX(ctx, s.Store.DB)
-	if err != nil {
-		return err
-	}
-	now := nowUTC()
-	_, err = s.Store.DB.ExecContext(ctx, `INSERT INTO budgets(id,scope,scope_id,period,max_usd,action,warn_at_pct,bucket,created_at,updated_at,currency) VALUES(?,'task',?,'run',?,'pause_notify',80,'',?,?,?) ON CONFLICT(scope,scope_id,period,bucket) DO NOTHING`, id.New("bud"), taskID, f.Convert(0.05, pricing.USD, f.Display), now, now, f.Display)
-	return err
-}
-
 func (s *Service) duplicateCostPolicy(ctx context.Context, source, target, actor string) error {
 	unlock := s.lockCostPolicy(ctx)
 	defer unlock()

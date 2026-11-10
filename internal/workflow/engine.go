@@ -33,8 +33,12 @@ func readiness(n Node, states map[string]*NodeRun) (ready, skip bool) {
 	return active == len(n.Needs), active != len(n.Needs)
 }
 func (s *Service) run(parent context.Context, rid string, d Definition, input, provider string) {
-	ctx, timeout := context.WithTimeout(parent, time.Duration(d.TimeoutMinutes)*time.Minute)
-	defer timeout()
+	ctx := parent
+	if d.TimeoutMinutes > 0 { // 0 = unlimited; never an instant deadline
+		var timeout context.CancelFunc
+		ctx, timeout = context.WithTimeout(parent, time.Duration(d.TimeoutMinutes)*time.Minute)
+		defer timeout()
+	}
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	if err := s.putRun(rid, "running", "", true); err != nil {

@@ -99,9 +99,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	if err := s.Store.InsertTask(ctx, task); err != nil {
 		return TaskView{}, err
 	}
-	if err := s.initializeCostPolicy(ctx, tid); err != nil {
-		return TaskView{}, err
-	}
+	// No per-run or daily cap of its own: a new task is limited only by the
+	// optional global daily budget until the owner adds limits.
 	task.CostControlMode = "task"
 	task.CostPolicyRevision = 1
 	res, err := s.Ver.Commit(ctx, version.CommitInput{

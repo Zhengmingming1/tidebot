@@ -117,7 +117,7 @@ func TestChatSessionAPI(t *testing.T) {
 		err  error
 		code int
 		key  string
-	}{{ErrChatSessionBusy, 409, "busy"}, {ErrChatTurnLimit, 409, "turn_limit"}, {ErrChatRunNotFinished, 409, "run_not_finished"}, {ErrChatRunNotFound, 404, "run_not_found"}} {
+	}{{ErrChatSessionBusy, 409, "busy"}, {ErrChatRunNotFinished, 409, "run_not_finished"}, {ErrChatRunNotFound, 404, "run_not_found"}} {
 		f.err = e.err
 		if code, out := c.json(http.MethodPost, "/api/chat-sessions/chat_1/turns", map[string]string{"message": "m"}); code != e.code || out["code"] != e.key {
 			t.Fatalf("%v: %d %v", e.err, code, out)

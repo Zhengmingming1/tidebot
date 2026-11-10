@@ -64,7 +64,7 @@ func Default() Config {
 		LogFormat:        "text",
 		ClaudeBin:        "claude",
 		MaxConcurrency:   2,
-		DefaultTimeout:   30 * time.Minute,
+		DefaultTimeout:   0, // no time limit; a task or workflow can add its own
 		DefaultProvider:  "anthropic",
 		ProvidersFile:    filepath.Join(appHome, "providers.yaml"),
 		WebUIEnabled:     false,
@@ -244,8 +244,8 @@ func (c Config) Validate() error {
 	if c.MaxConcurrency < 1 {
 		return fmt.Errorf("max_concurrency must be >= 1")
 	}
-	if c.DefaultTimeout < time.Second {
-		return fmt.Errorf("default_timeout must be >= 1s")
+	if c.DefaultTimeout < 0 || (c.DefaultTimeout > 0 && c.DefaultTimeout < time.Second) {
+		return fmt.Errorf("default_timeout must be 0 (unlimited) or >= 1s")
 	}
 	if c.DBPath == "" {
 		return fmt.Errorf("db_path is required")

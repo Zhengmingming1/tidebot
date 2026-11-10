@@ -75,6 +75,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/spend", s.withAuthCSRF(s.handleSpend))
 	mux.HandleFunc("/api/spend/breakdown", s.withAuthCSRF(s.handleSpendBreakdown))
 	mux.HandleFunc("/api/spend/export", s.withAuthCSRF(s.handleSpendExport))
+	mux.HandleFunc("/api/spend/unlimited-notice", s.withAuthCSRF(s.handleUnlimitedNotice))
 	mux.HandleFunc("/api/claude/status", s.withAuthCSRF(s.handleClaudeStatus))
 	mux.HandleFunc("/api/desktop/pick-file", s.withAuthCSRF(s.handlePickFile))
 	mux.HandleFunc("/api/desktop/pick-folder", s.withAuthCSRF(s.handlePickFolder))

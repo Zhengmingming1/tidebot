@@ -49,7 +49,7 @@ var errPatterns = func() []errPattern {
 		p("wf_description", `description exceeds 4096 bytes`),
 		p("wf_node_count", `workflow needs 1-(\d+) nodes`, "max"),
 		p("wf_parallel", `parallelism must be 1-4`),
-		p("wf_timeout_range", `timeout must be 1-1440 minutes`),
+		p("wf_timeout_range", `timeout must be 0 \(unlimited\) or 1-1440 minutes`),
 		p("wf_retry", `node `+id+`: retry_max must be 0-5 and retry_backoff_ms 0-60000`, "node"),
 		p("wf_condition_retry", `condition node `+id+` cannot retry`, "node"),
 		p("wf_position", `node `+id+`: canvas position must be within 0-10000`, "node"),

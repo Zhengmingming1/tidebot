@@ -196,13 +196,14 @@ type CheckResult struct {
 }
 
 // CheckBeforeRun validates global/task daily caps and returns per-run max.
-// runMaxUSD is a USD default (0 = $0.05); the result is in the display currency.
+// runMaxUSD is an optional USD cap: 0 means no per-run cap, only what budgets
+// the owner set apply. The result (0 = unlimited) is in the display currency.
 func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, runMaxUSD float64) (CheckResult, error) {
 	if bucket == "" {
 		bucket = BucketProduction
 	}
-	if runMaxUSD <= 0 {
-		runMaxUSD = 0.05
+	if runMaxUSD < 0 {
+		runMaxUSD = 0
 	}
 	f := s.GetFX()
 	out := CheckResult{OK: true, RunMaxUSD: f.Convert(runMaxUSD, pricing.USD, f.Display), Currency: f.Display}
@@ -210,9 +211,7 @@ func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, run
 	// Per-run budget row (scope=task period=run) can tighten runMaxUSD
 	if taskID != "" {
 		if b, err := s.findBudget(ctx, "task", taskID, "run", ""); err == nil && b.MaxUSD.Valid && b.MaxUSD.Float64 > 0 {
-			if v := f.Convert(b.MaxUSD.Float64, b.Currency, f.Display); v < out.RunMaxUSD {
-				out.RunMaxUSD = v
-			}
+			out.RunMaxUSD = lowerCap(out.RunMaxUSD, f.Convert(b.MaxUSD.Float64, b.Currency, f.Display))
 		}
 	}
 
@@ -251,10 +250,7 @@ func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, run
 				out.Warn = true
 				out.WarnDetail = fmt.Sprintf("%s spend at %.0f%% of daily %s cap", c.scope, pct, b.Currency)
 			}
-			remain := f.Convert(b.MaxUSD.Float64-usedUSD, b.Currency, f.Display)
-			if remain < out.RunMaxUSD {
-				out.RunMaxUSD = remain
-			}
+			out.RunMaxUSD = lowerCap(out.RunMaxUSD, f.Convert(b.MaxUSD.Float64-usedUSD, b.Currency, f.Display))
 		}
 		if c.scope == "task" && b.MaxTokens.Valid && b.MaxTokens.Int64 > 0 && usedTok >= b.MaxTokens.Int64 {
 			out.OK = false
@@ -263,11 +259,6 @@ func (s *Service) CheckBeforeRun(ctx context.Context, taskID, bucket string, run
 			out.BreachAction = b.Action
 			return out, nil
 		}
-	}
-	if out.RunMaxUSD <= 0 {
-		out.OK = false
-		out.Reason = "remaining daily budget is zero"
-		out.BreachAction = "pause_notify"
 	}
 	return out, nil
 }
