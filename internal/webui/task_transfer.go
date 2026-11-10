@@ -68,6 +68,10 @@ type taskFileEntry struct {
 	AllowedTools   []string            `json:"allowed_tools,omitempty"` // as the task has them
 	Policy         *taskPolicyForm     `json:"policy,omitempty"`        // retries, catch-up, priority
 	Tags           []string            `json:"tags,omitempty"`
+	// RunMode: read | edit | exec ("" = a task saved before the three levels:
+	// it keeps running as edit). Effort: "" (Claude Code decides) | low | medium | high.
+	RunMode string `json:"run_mode,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 }
 
 // exportTasks: GET /api/tasks/export[?ids=a,b] → tidebot-tasks-YYYYMMDD.json (all live
@@ -118,7 +122,8 @@ func (s *Server) exportTasks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) taskEntryOf(ctx context.Context, v tasksvc.TaskView) taskFileEntry {
 	sp := v.Spec
 	e := taskFileEntry{Name: v.Task.Name, Prompt: sp.Prompt, Cron: v.Task.CronExpr, Enabled: v.Task.Status == "active",
-		TimeoutMinutes: sp.TimeoutMinutes, MaxRunUSD: sp.MaxBudgetUSD, Provider: sp.Provider, AllowedTools: sp.AllowedTools}
+		TimeoutMinutes: sp.TimeoutMinutes, MaxRunUSD: sp.MaxBudgetUSD, Provider: sp.Provider, AllowedTools: sp.AllowedTools,
+		RunMode: sp.RunMode, Effort: sp.Effort}
 	if cp, err := s.deps.Tasks.GetCostPolicy(ctx, v.Task.ID); err == nil {
 		cp.Revision = 0
 		cp.FXRevision = ""
@@ -165,7 +170,7 @@ type importResult struct {
 	From   string   `json:"from,omitempty"` // the name in the file when it was renamed
 	Cron   string   `json:"cron,omitempty"`
 	Prompt string   `json:"prompt,omitempty"` // first 200 characters, for the preview
-	Notes  []string `json:"notes,omitempty"`  // renamed | skill_missing | provider_missing | budget_dropped
+	Notes  []string `json:"notes,omitempty"`  // renamed | skill_missing | provider_missing | budget_dropped | run_exec
 	Error  string   `json:"error,omitempty"`  // set → not importable
 	TaskID string   `json:"task_id,omitempty"`
 }
@@ -322,6 +327,17 @@ func (s *Server) checkImport(ctx context.Context, i int, e *taskFileEntry, taken
 			res.Notes = append(res.Notes, "cost_bypass")
 		}
 	}
+	if e.RunMode != "" {
+		m := strings.TrimSpace(e.RunMode)
+		f.RunMode = &m
+		if m == "exec" { // the preview says the task will run commands
+			res.Notes = append(res.Notes, "run_exec")
+		}
+	}
+	if e.Effort != "" {
+		eff := strings.TrimSpace(e.Effort)
+		f.Effort = &eff
+	}
 	if len(e.Tags) > 0 {
 		tags := e.Tags
 		f.Tags = &tags
@@ -413,7 +429,7 @@ func (s *Server) createImported(ctx context.Context, f taskForm, extra tasksvc.S
 	}
 	sp := specFromForm(*tv.Spec, f)
 	sp.Constraints, sp.AllowedTools, sp.MaxBudgetUSD = extra.Constraints, extra.AllowedTools, extra.MaxBudgetUSD
-	if len(sp.Constraints) > 0 || len(sp.AllowedTools) > 0 || sp.MaxBudgetUSD > 0 || len(sp.SkillBindings) > 0 {
+	if len(sp.Constraints) > 0 || len(sp.AllowedTools) > 0 || sp.MaxBudgetUSD > 0 || len(sp.SkillBindings) > 0 || sp.RunMode != "" || sp.Effort != "" {
 		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, sp, "user", "imported"); err != nil {
 			return undo(err)
 		}

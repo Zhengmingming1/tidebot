@@ -38,6 +38,12 @@ func (a *App) claudeConfigDir() string { return filepath.Join(a.Cfg.DataDir, "cl
 
 // stageSkills writes bindings into a fresh stage directory. Close removes it.
 func (a *App) stageSkills(ctx context.Context, bindings []tasksvc.SkillBinding) (*skillStage, error) {
+	return a.stageSkillsWith(ctx, bindings, nil)
+}
+
+// stageSkillsWith stages bindings with some skills' files taken from drafts
+// (skill id → files; see skillstore.StageWith).
+func (a *App) stageSkillsWith(ctx context.Context, bindings []tasksvc.SkillBinding, drafts map[string]map[string][]byte) (*skillStage, error) {
 	if len(bindings) == 0 {
 		return nil, nil
 	}
@@ -68,7 +74,7 @@ func (a *App) stageSkills(ctx context.Context, bindings []tasksvc.SkillBinding) 
 	if err != nil {
 		return nil, err
 	}
-	skills, err := a.Skills.Stage(ctx, dir, bindings)
+	skills, err := a.Skills.StageWith(ctx, dir, bindings, drafts)
 	if err != nil {
 		os.RemoveAll(dir)
 		return nil, err
@@ -326,6 +332,9 @@ func (st *skillStage) Bindings() []tasksvc.SkillBinding {
 	}
 	out := make([]tasksvc.SkillBinding, 0, len(st.Skills))
 	for _, sk := range st.Skills {
+		if sk.Draft { // not a stored version: the run record names only real ones
+			continue
+		}
 		out = append(out, tasksvc.SkillBinding{SkillID: sk.SkillID, SkillName: sk.DisplayName, VersionID: sk.VersionID, Mode: "pinned", Role: sk.Role})
 	}
 	return out

@@ -156,6 +156,10 @@ ON CONFLICT(sha256) DO UPDATE SET refcount=refcount+1`, sha, len(data), data)
 	return err
 }
 
+// ReadTree reads a skill folder (regular files only, safe relative paths,
+// within the package size limits; .git is skipped).
+func ReadTree(root string) (map[string][]byte, error) { return readTree(root) }
+
 func readTree(root string) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	var total int

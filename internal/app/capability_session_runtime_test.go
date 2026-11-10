@@ -52,7 +52,7 @@ func TestSessionCapabilityRuntimeEnvironmentAndSkillDedup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := a.stageChatSkills(ctx, row)
+	st, _ := a.stageChatSkills(ctx, row)
 	if st == nil {
 		t.Fatal("no staged skill")
 	}

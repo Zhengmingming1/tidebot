@@ -111,7 +111,9 @@ func (s *Service) skillName(ctx context.Context, skillID string) string {
 
 // Propose stores files as a candidate version (current untouched), runs static checks and,
 // depending on mode and risk, starts a canary or waits for approval.
-// source: "auto" (analyzer) or "user" (explicit "write this into the skill").
+// source: "auto" (analyzer), "user" (explicit "write this into the skill") or
+// "session" (a session's skill draft saved as a version: the owner is on the
+// page and adopts it there, so no "new proposal" notice is sent).
 func (s *Service) Propose(ctx context.Context, skillID string, files map[string][]byte, source, category, rationale string) (*Proposal, error) {
 	cur, err := s.Ver.CurrentVersion(ctx, version.EntitySkill, skillID)
 	if err != nil {
@@ -156,7 +158,9 @@ VALUES(?,?,?,?,?,?,?,?,?,?)`, p.ID, skillID, ver.ID, source, category, rationale
 		p.Status = "canary"
 		return p, nil
 	}
-	s.emit(EventProposal, skillID, p.ID)
+	if source != "session" {
+		s.emit(EventProposal, skillID, p.ID)
+	}
 	return p, nil
 }
 

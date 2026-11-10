@@ -308,6 +308,8 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, ses)
+	case sub == "draft" || strings.HasPrefix(sub, "draft/") || sub == "task-preset":
+		s.handleChatDraft(w, r, id, sub)
 	case sub == "" || sub == "turns" || sub == "bindings" || sub == "mode":
 		writeErr(w, 405, "method")
 	default:

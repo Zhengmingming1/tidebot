@@ -36,6 +36,9 @@ type StagedSkill struct {
 	Description string
 	Dir         string // absolute folder holding SKILL.md
 	SkillMD     []byte
+	// Draft: staged from a session's skill draft (StageWith), not from
+	// VersionID's files; VersionID is the version the draft started from.
+	Draft bool
 }
 
 // Command is the slash command that invokes the skill in a run.
@@ -92,6 +95,13 @@ JOIN versions v ON v.id=CASE WHEN ?='follow' THEN p.version_id ELSE ? END
 // and root/skills/<name>/. Load it with --plugin-dir root. File paths from the
 // store must stay inside the skill folder.
 func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.SkillBinding) ([]StagedSkill, error) {
+	return s.StageWith(ctx, root, bindings, nil)
+}
+
+// StageWith stages bindings, taking a skill's files from drafts (skill id →
+// files) instead of its version: a session's skill draft. The draft's binding
+// names the version it started from (its name and manifest come from there).
+func (s *Service) StageWith(ctx context.Context, root string, bindings []tasksvc.SkillBinding, drafts map[string]map[string][]byte) ([]StagedSkill, error) {
 	bindings, err := s.ResolveBindings(ctx, bindings)
 	if err != nil {
 		return nil, err
@@ -120,6 +130,13 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 		files, man, err := s.versionFiles(ctx, verID)
 		if err != nil {
 			return out, err
+		}
+		draft, isDraft := drafts[b.SkillID]
+		if isDraft {
+			files = make(map[string][]byte, len(draft))
+			for p, data := range draft {
+				files[p] = append([]byte(nil), data...)
+			}
 		}
 		if len(files["SKILL.md"]) == 0 {
 			return nil, fmt.Errorf("skill %s has no SKILL.md", b.SkillID)
@@ -174,7 +191,7 @@ func (s *Service) Stage(ctx context.Context, root string, bindings []tasksvc.Ski
 				return out, err
 			}
 		}
-		st := StagedSkill{DisplayName: b.SkillName, Role: b.Role, SkillID: b.SkillID, VersionID: verID, Name: name, Dir: dir, SkillMD: files["SKILL.md"]}
+		st := StagedSkill{DisplayName: b.SkillName, Role: b.Role, SkillID: b.SkillID, VersionID: verID, Name: name, Dir: dir, SkillMD: files["SKILL.md"], Draft: isDraft}
 		if meta, err := skillpkg.ParseFrontmatter(st.SkillMD); err == nil {
 			st.Description = meta.Description
 		}

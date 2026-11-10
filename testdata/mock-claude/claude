@@ -43,6 +43,10 @@ while [[ $i -lt $# ]]; do
       i=$((i+1))
       if [[ -n "${TIDEBOT_MOCK_MCP_FILE:-}" && -f "${ARGS[$i]:-}" ]]; then cp "${ARGS[$i]}" "$TIDEBOT_MOCK_MCP_FILE"; fi
       ;;
+    --append-system-prompt-file)
+      i=$((i+1))
+      if [[ -n "${TIDEBOT_MOCK_PROMPT_FILE:-}" && -f "${ARGS[$i]:-}" ]]; then cp "${ARGS[$i]}" "$TIDEBOT_MOCK_PROMPT_FILE"; fi
+      ;;
     --settings)
       i=$((i+1))
       if [[ -n "${TIDEBOT_MOCK_SETTINGS_FILE:-}" && -f "${ARGS[$i]:-}" ]]; then cp "${ARGS[$i]}" "$TIDEBOT_MOCK_SETTINGS_FILE"; fi

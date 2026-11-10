@@ -574,12 +574,22 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	}
 	// What the session is bound to (and the skills of the run it continues),
 	// staged for this turn only; removed when the turn ends.
-	st := a.stageChatSkills(ctx, c)
+	st, draftSkill := a.stageChatSkills(ctx, c)
 	if st != nil {
 		if mode == "exec" {
 			note += chatSkillExecNote
 		} else {
 			note += chatSkillNote
+		}
+	}
+	draftDir := ""
+	if draftSkill != "" {
+		name := a.skillName(draftSkill)
+		if mode == "read" {
+			note += fmt.Sprintf(chatDraftReadNote, name)
+		} else {
+			draftDir = a.chatDraftDir(sid)
+			note += fmt.Sprintf(chatDraftEditNote, name, draftDir)
 		}
 	}
 	if len(deny) > 0 {
@@ -589,8 +599,11 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	if st != nil {
 		args = append(args, st.Args(a.modernClaude(), false)...)
 	}
+	if draftDir != "" { // the model may change the draft (and only through this folder)
+		args = append(args, "--add-dir", draftDir)
+	}
 	mcp := map[string]any{}
-	if srv := chatToolsServer(chatRoots(ws, st), a.chatToolEnv(sid)); srv != nil {
+	if srv := chatToolsServer(chatRoots(ws, st, draftDir), a.chatToolEnv(sid)); srv != nil {
 		mcp["tidebot"] = srv
 		args = append(args, "--allowedTools", "mcp__tidebot")
 	}
