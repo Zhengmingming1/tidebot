@@ -152,7 +152,7 @@ func (a *App) mcpArgs(ctx context.Context, bucket string, bound func(server, con
 }
 
 // applyRunMCP gives a run --strict-mcp-config, its bound connectors and the
-// agent-config deny rules. Call after applyGuard (which adds the task's allowed
+// deny rules every run gets (agent config, sensitive reads, the fixed danger set). Call after applyGuard (which adds the task's allowed
 // tools). The returned cleanup removes the run's connector config.
 func (a *App) applyRunMCP(ctx context.Context, opts *runner.Options, bucket string) func() {
 	cleanup := func() {}
@@ -170,6 +170,8 @@ func (a *App) applyRunMCP(ctx context.Context, opts *runner.Options, bucket stri
 		opts.ExtraArgs = append(opts.ExtraArgs, "--strict-mcp-config")
 	}
 	addDisallowed(opts, guard.AgentConfigDeny())
+	addDisallowed(opts, guard.SensitiveReadDeny())
+	addDisallowed(opts, guard.DangerDeny())
 	return cleanup
 }
 

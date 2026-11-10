@@ -14,13 +14,13 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/notify"
 )
 
-var urgentEvents = map[string]bool{EventConfirmNeeded: true, EventBudgetBreached: true, EventBreakerTripped: true}
+var urgentEvents = map[string]bool{EventAgentConfigChanged: true, EventBudgetBreached: true, EventBreakerTripped: true}
 
 // NotificationKeys are the structured message keys stored with each notification.
 // The WebUI renders "ntf.<key>.t" / "ntf.<key>.b" from its own i18n files
 // (scripts/check-i18n.py checks every key here has both).
 var NotificationKeys = []string{"run_finished", "run_failed", "run_interrupted", "approval_needed", "budget_breached", "budget_warning",
-	"breaker_tripped", "confirm_needed", "update_available", "update_rolled_back", "plugin_notify", "disk_low", "channel_down", "channel_up", "generic", "test"}
+	"breaker_tripped", "confirm_needed", "agent_config_changed", "update_available", "update_rolled_back", "plugin_notify", "disk_low", "channel_down", "channel_up", "generic", "test"}
 
 // EventToMessage renders an event in the configured language (channels, tray) and
 // also carries the message key + params so the WebUI can render it in the viewer's language.
@@ -61,8 +61,9 @@ func (a *App) EventToMessage(e Event) (notify.Message, bool) {
 		m.Title, m.Body = i18n.T("desktop.n.budget_warn"), e.Detail
 	case EventBreakerTripped:
 		m.Title, m.Body = i18n.T("notify.breaker", shown), e.Detail
-	case EventConfirmNeeded:
-		m.Title, m.Body = i18n.T("notify.confirm", shown), e.Detail
+	case EventAgentConfigChanged:
+		m.Params["run"] = e.RunID
+		m.Title, m.Body = i18n.T("notify.agent_config", shown), e.Detail
 	case EventUpdateAvailable, EventUpdateRolledBack:
 		ver, rest, _ := strings.Cut(e.Detail, "\n")
 		m.Params["v"], m.Params["detail"] = ver, rest

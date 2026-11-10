@@ -11,9 +11,8 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
 
-func TestGuardArgsAndConfirmations(t *testing.T) {
+func TestGuardArgs(t *testing.T) {
 	a := newTestApp(t)
-	a.HookExe = "/opt/tidebot/agentd"
 	ctx := context.Background()
 	task, err := a.EnsureTask(ctx, "g", "p", "", "", "")
 	if err != nil {
@@ -27,16 +26,25 @@ func TestGuardArgsAndConfirmations(t *testing.T) {
 	}
 	b, _ := os.ReadFile(argsFile)
 	args := string(b)
-	if !strings.Contains(args, "--allowedTools\nRead,Bash(git diff *)") || !strings.Contains(args, "--settings") {
+	if !strings.Contains(args, "--allowedTools\nRead,Bash(git diff *)") || !strings.Contains(args, "--restricted") {
 		t.Fatal(args)
+	}
+	// no hook settings any more (hooks never ran under --bare)
+	if strings.Contains(args, "--settings") {
+		t.Fatal("a run that isn't a command run gets no --settings: " + args)
+	}
+	if _, err := os.Stat(filepath.Join(a.Cfg.DataDir, "guard-settings.json")); err == nil {
+		t.Fatal("guard-settings.json written")
+	}
+	// every run: sensitive reads and the fixed danger set denied
+	for _, want := range []string{"Read(~/.ssh/**)", "Read(~/.aws/**)", "Bash(sudo *)", "Bash(git push --force*)", "Bash(* | sh)", "Edit(//**/.mcp.json)"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing deny %s", want)
+		}
 	}
 	ws := filepath.Join(a.Cfg.HomeDir, "workspaces", task.ID)
 	if _, err := os.Stat(ws); err != nil {
 		t.Fatal("per-task workspace not created")
-	}
-	settings, _ := os.ReadFile(filepath.Join(a.Cfg.DataDir, "guard-settings.json"))
-	if !strings.Contains(string(settings), `agentd\" hook pretool`) {
-		t.Fatal(string(settings))
 	}
 	// external trigger without policy tools → tightened default
 	t2, _ := a.EnsureTask(ctx, "ext", "p", "", "", "")
@@ -44,28 +52,5 @@ func TestGuardArgsAndConfirmations(t *testing.T) {
 	b, _ = os.ReadFile(argsFile)
 	if !strings.Contains(string(b), "Bash(git status)") {
 		t.Fatal("external default tools missing")
-	}
-
-	ch := a.Events.Subscribe(8)
-	deny, _ := a.GuardCheck(ctx, "r1", task.ID, "Bash", "Bash:rm -rf x", "rm-rf", "")
-	deny2, _ := a.GuardCheck(ctx, "r1", task.ID, "Bash", "Bash:rm -rf x", "rm-rf", "")
-	if !deny || !deny2 {
-		t.Fatal("must deny")
-	}
-	if e := <-ch; e.Kind != EventConfirmNeeded {
-		t.Fatal(e.Kind)
-	}
-	list, _ := a.ListConfirmations(ctx, "pending")
-	if len(list) != 1 {
-		t.Fatalf("dedupe: %d", len(list))
-	}
-	if err := a.DecideConfirmation(ctx, list[0].ID, true); err != nil {
-		t.Fatal(err)
-	}
-	if deny, _ := a.GuardCheck(ctx, "r2", task.ID, "Bash", "Bash:rm -rf x", "rm-rf", ""); deny {
-		t.Fatal("approved call should pass once")
-	}
-	if deny, _ := a.GuardCheck(ctx, "r3", task.ID, "Bash", "Bash:rm -rf x", "rm-rf", ""); !deny {
-		t.Fatal("approval is single use")
 	}
 }

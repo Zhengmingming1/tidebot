@@ -40,7 +40,7 @@ type Options struct {
 	// DisplayPrompt, if set, is the prompt the run row keeps (what the owner typed)
 	// when Prompt carries more, e.g. a leading /skill command.
 	DisplayPrompt string
-	// SkillID / SkillVersionID / RunMode ('read' | 'edit') label runs started from
+	// SkillID / SkillVersionID / RunMode ('read' | 'edit' | 'exec') label runs started from
 	// the Run dialog.
 	SkillID, SkillVersionID, RunMode string
 	// ContextArgs are added after ExtraArgs whether or not the caller set ExtraArgs
@@ -98,6 +98,14 @@ type Options struct {
 	// sees the run end. It gets a context that isn't canceled with the run; a
 	// non-empty return is written to the run log.
 	AfterExit func(ctx context.Context, runID string) string
+	// StopGrace > 0 (unix): stopping the run sends Claude Code SIGTERM and waits up
+	// to this long before killing its process group. Command runs need it: on
+	// Linux the sandbox puts empty placeholder files (.bashrc, .gitconfig, .vscode
+	// …) in the working folder while a command runs and removes them only when
+	// Claude Code exits normally; SIGKILL leaves them behind.
+	StopGrace time.Duration
+	// Web (command runs): commands may reach any host; otherwise the sandbox lets none through.
+	Web bool
 }
 
 // Result is the outcome of one run.
@@ -678,7 +686,8 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 		cmd.Env = withLoopbackBypass(cmd.Env)
 	}
 	// Own process group (unix) / job object (windows) so the whole tree dies on cancel.
-	setupProcess(cmd)
+	exited := setupProcess(cmd, opts.StopGrace)
+	defer exited()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

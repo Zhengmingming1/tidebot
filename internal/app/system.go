@@ -17,6 +17,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/db"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
@@ -337,23 +338,23 @@ func (a *App) runRetention(ctx context.Context) {
 
 // Dashboard is a compact health summary.
 type Dashboard struct {
-	Execution        runner.Metrics   `json:"execution"`
-	Workflow         workflow.Metrics `json:"workflow"`
-	Version          string           `json:"version"`
-	ClaudeVersion    string           `json:"claude_version"`
-	Runs24h          map[string]int   `json:"runs_24h"`
-	Runs7d           map[string]int   `json:"runs_7d"`
-	SuccessRate7d    float64          `json:"success_rate_7d"`
-	CostTodayUSD     float64          `json:"cost_today_usd"`
-	Cost7dUSD        float64          `json:"cost_7d_usd"`
-	DurationP50MS    int64            `json:"duration_p50_ms"`
-	DurationP95MS    int64            `json:"duration_p95_ms"`
-	TasksActive      int              `json:"tasks_active"`
-	TasksPaused      int              `json:"tasks_paused"`
-	PendingConfirms  int              `json:"pending_confirmations"`
-	PluginsInstalled int              `json:"plugins_installed"`
-	LastBackup       string           `json:"last_backup"`
-	DiskBytes        int64            `json:"disk_bytes"`
+	Execution        runner.Metrics      `json:"execution"`
+	Workflow         workflow.Metrics    `json:"workflow"`
+	Version          string              `json:"version"`
+	ClaudeVersion    string              `json:"claude_version"`
+	Runs24h          map[string]int      `json:"runs_24h"`
+	Runs7d           map[string]int      `json:"runs_7d"`
+	SuccessRate7d    float64             `json:"success_rate_7d"`
+	CostTodayUSD     float64             `json:"cost_today_usd"`
+	Cost7dUSD        float64             `json:"cost_7d_usd"`
+	DurationP50MS    int64               `json:"duration_p50_ms"`
+	DurationP95MS    int64               `json:"duration_p95_ms"`
+	TasksActive      int                 `json:"tasks_active"`
+	TasksPaused      int                 `json:"tasks_paused"`
+	Sandbox          guard.SandboxStatus `json:"sandbox"` // can command runs be sandboxed here
+	PluginsInstalled int                 `json:"plugins_installed"`
+	LastBackup       string              `json:"last_backup"`
+	DiskBytes        int64               `json:"disk_bytes"`
 }
 
 func (a *App) countRuns(ctx context.Context, since time.Time) map[string]int {
@@ -411,7 +412,7 @@ func (a *App) BuildDashboard(ctx context.Context) Dashboard {
 	}
 	_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE status='active'`).Scan(&d.TasksActive)
 	_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE status='paused'`).Scan(&d.TasksPaused)
-	_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM pending_confirmations WHERE status='pending'`).Scan(&d.PendingConfirms)
+	d.Sandbox = a.SandboxStatus()
 	_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM plugins`).Scan(&d.PluginsInstalled)
 	_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at),'') FROM backups`).Scan(&d.LastBackup)
 	_ = filepath.Walk(a.Cfg.DataDir, func(_ string, fi os.FileInfo, err error) error {
@@ -457,7 +458,6 @@ func (a *App) MetricsHandler() http.Handler {
 			{"tidebot_run_duration_p95_ms", "p95 run duration over 7 days.", float64(d.DurationP95MS)},
 			{"tidebot_tasks_active", "Active tasks.", float64(d.TasksActive)},
 			{"tidebot_tasks_paused", "Paused tasks.", float64(d.TasksPaused)},
-			{"tidebot_pending_confirmations", "Dangerous actions waiting for the owner.", float64(d.PendingConfirms)},
 			{"tidebot_disk_bytes", "Bytes used under the data dir.", float64(d.DiskBytes)},
 		}
 		for _, g := range gauges {

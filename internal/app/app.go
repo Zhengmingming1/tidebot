@@ -83,8 +83,6 @@ type App struct {
 	policyRuns policyRunState
 
 	retryScale float64
-	// HookExe is the binary that implements `hook pretool` (defaults to os.Executable()).
-	HookExe string
 }
 
 // Open loads config, opens DB, and builds subsystems.
@@ -320,7 +318,9 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		opts.ExtraArgs = []string{
 			"--permission-mode", "dontAsk",
 			"--permission-prompts", "none",
-			"--restricted",
+		}
+		if opts.RunMode != "exec" { // command runs get Bash, inside the sandbox (applyExecSandbox)
+			opts.ExtraArgs = append(opts.ExtraArgs, "--restricted")
 		}
 	}
 	opts.ExtraArgs = a.budgetArgs(opts.ExtraArgs, prof, runMax)
@@ -333,6 +333,13 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 	}
 	defer capCleanup()
 	defer a.applyRunMCP(ctx, &opts, bucket)()
+	if opts.RunMode == "exec" {
+		sbCleanup, err := a.applyExecSandbox(ctx, &opts)
+		if err != nil {
+			return runner.Result{}, err
+		}
+		defer sbCleanup()
+	}
 	// Keep Claude Code from self-updating mid-run; version is recorded per run.
 	opts.EnvBase = append(opts.EnvBase, "DISABLE_AUTOUPDATER=1")
 	// Its own state for the run stays in tidebot's directory, not the owner's home.

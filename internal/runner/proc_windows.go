@@ -4,6 +4,7 @@ package runner
 
 import (
 	"os/exec"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -11,8 +12,10 @@ import (
 
 // setupProcess starts the child in a new process group; afterStart assigns it to a job
 // object with KILL_ON_JOB_CLOSE so cancel/exit takes down the whole tree.
-func setupProcess(cmd *exec.Cmd) {
+// The job object ends the tree at once; grace isn't used (no sandbox on Windows).
+func setupProcess(cmd *exec.Cmd, grace time.Duration) func() {
 	cmd.SysProcAttr = &windows.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
+	return func() {}
 }
 
 func afterStart(cmd *exec.Cmd) func() {

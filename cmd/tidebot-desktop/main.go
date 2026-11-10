@@ -148,7 +148,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "open core:", err)
 		os.Exit(1)
 	}
-	core.HookExe = helper
 	defer core.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

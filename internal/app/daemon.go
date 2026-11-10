@@ -51,6 +51,7 @@ func (a *App) StartDaemon(ctx context.Context) (*Daemon, error) {
 	}
 	a.purgeSkillStages()
 	a.purgeRunMCP()
+	a.purgeRunSandbox()
 	a.recoverChatSessions(ctx)
 	a.recoverCapabilityProposals(ctx)
 	a.purgeRunSnaps()

@@ -21,8 +21,8 @@ var EventGroups = []struct {
 	ID     string
 	Events []string
 }{
-	{"failed", []string{"run_failed"}}, // includes "didn't finish" (same event)
-	{"confirm", []string{"approval_needed", "confirm_needed"}},
+	{"failed", []string{"run_failed"}},                                                 // includes "didn't finish" (same event)
+	{"confirm", []string{"approval_needed", "confirm_needed", "agent_config_changed"}}, // confirm_needed: older versions' hook (never fired)
 	{"budget", []string{"budget_breached", "budget_warning"}},
 	{"breaker", []string{"breaker_tripped"}},
 	{"finished", []string{"run_finished"}}, // only tasks with success notices on

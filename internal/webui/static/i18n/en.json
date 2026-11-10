@@ -3011,5 +3011,8 @@
   "sp.unl_dismiss": "Got it, hide this",
   "sp.unl_restored": "Restored the per-run cap on {n} tasks",
   "sp.unl_fail": "That didn’t work, please try again",
-  "pl.tasks_active": "Active tasks"
+  "pl.tasks_active": "Active tasks",
+  "ntf.agent_config_changed.t": "Agent config changed: {name}",
+  "ntf.agent_config_changed.b": "{detail}",
+  "notif.agent_config_changed": "Agent config changed"
 }

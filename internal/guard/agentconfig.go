@@ -2,7 +2,6 @@ package guard
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -29,8 +28,8 @@ var agentInstallCommands = []string{
 // cover every built-in tool that changes files (Write, Edit, NotebookEdit) and
 // the file commands and redirections Claude Code recognizes in Bash; `//**/`
 // anchors at the filesystem root, so the rule holds in the working folder, in
-// --add-dir folders and in the home folder, on every drive on Windows. The
-// guard hook can't do this: --bare runs skip hooks.
+// --add-dir folders and in the home folder, on every drive on Windows (hooks
+// can't do this: --bare runs skip them).
 func AgentConfigDeny() []string {
 	var out []string
 	for _, d := range agentConfigDirs {
@@ -76,21 +75,4 @@ func IsAgentConfigPath(p, cwd string) bool {
 		}
 	}
 	return false
-}
-
-var (
-	reAgentInstall = regexp.MustCompile(`(?i)\b(claude\s+(mcp\s+(add|remove)|plugins?\s)|npx\s+(-y\s+|--yes\s+)?skills\s|dws\s+skills?\s+(setup|install|add))`)
-	// a redirect, tee, cp/mv/ln/install target or a sed -i edit naming agent config
-	reAgentWrite = regexp.MustCompile(`(?i)(>>?|\btee\b|\bcp\b|\bmv\b|\bln\b|\binstall\b|\bsed\s+-i|\bmkdir\b|\btouch\b)[^|;&]*?(^|[\s"'=/\\~])(\.claude|\.codex|\.cursor|\.gemini|\.agents|\.config[/\\]opencode)([/\\]|\.json\b)|(>>?|\btee\b|\bcp\b|\bmv\b|\bln\b|\bsed\s+-i|\btouch\b)[^|;&]*?(^|[\s"'=/\\])(\.mcp\.json|CLAUDE(\.local)?\.md|AGENTS\.md|GEMINI\.md)\b`)
-)
-
-// agentConfigBash reports why a shell command changes agent config ("" = it doesn't).
-func agentConfigBash(cmd string) string {
-	if reAgentInstall.MatchString(cmd) {
-		return "installs into an agent's own config; install through tidebot instead"
-	}
-	if reAgentWrite.MatchString(cmd) {
-		return "writes agent configuration (.claude, .mcp.json, CLAUDE.md …)"
-	}
-	return ""
 }

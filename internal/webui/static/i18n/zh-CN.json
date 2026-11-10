@@ -3011,5 +3011,8 @@
   "sp.unl_dismiss": "知道了，不再显示",
   "sp.unl_restored": "已恢复 {n} 个任务的单次上限",
   "sp.unl_fail": "操作没有成功，请重试",
-  "pl.tasks_active": "启用中的任务"
+  "pl.tasks_active": "启用中的任务",
+  "ntf.agent_config_changed.t": "检测到 agent 配置被改动：{name}",
+  "ntf.agent_config_changed.b": "{detail}",
+  "notif.agent_config_changed": "agent 配置被改动"
 }
