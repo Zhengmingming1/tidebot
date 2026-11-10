@@ -459,11 +459,18 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		if runID != "" {
 			turns = 1
 		}
-		_, _ = a.DB.ExecContext(wctx, `UPDATE chat_sessions SET status='idle', turns=turns+?, cost_total=cost_total+?, updated_at=? WHERE id=?`,
+		_, _ = a.DB.ExecContext(wctx, `UPDATE chat_sessions SET status='idle', turns=max(turns+?, `+chatTurnCount+`), cost_total=cost_total+?, updated_at=? WHERE id=?`,
 			turns, a.RunCostUSD(r), nowUTC(), sid)
 	}
 
-	turn := c.Turns + 1
+	// The next index comes from the turn rows, not the counter: a core that
+	// stopped mid-turn left that turn's row but never counted it, and reusing
+	// its index would drop the new turn (primary key) from the session.
+	var turn int
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(turn_index),0)+1 FROM chat_session_turns WHERE session_id=?`, sid).Scan(&turn); err != nil {
+		release("", runner.Result{})
+		return webui.ChatTurnStarted{}, err
+	}
 	prompt, csid := message, c.ClaudeSessionID
 	var args []string
 	if csid != "" && len(a.chatTranscripts(csid)) > 0 {
@@ -605,10 +612,16 @@ func (a *App) DeleteChatSession(ctx context.Context, sid string) error {
 	return os.RemoveAll(filepath.Join(a.chatSessionsDir(), safeChatID(sid)))
 }
 
+// chatTurnCount is the number of turns a session row (chat_sessions.id) has
+// asked for; turn 0, the run a session continues, is not one.
+const chatTurnCount = `(SELECT COUNT(*) FROM chat_session_turns t WHERE t.session_id=chat_sessions.id AND t.turn_index>0)`
+
 // recoverChatSessions frees sessions a previous core left answering a turn
 // (their runs were closed by recoverInterruptedRuns). Called at startup.
 func (a *App) recoverChatSessions(ctx context.Context) {
-	if _, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='idle' WHERE status='running'`); err != nil {
+	// The interrupted turn's row exists but was never counted; count it so the
+	// page and the turn limit agree with the turn list.
+	if _, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='idle', turns=max(turns, `+chatTurnCount+`) WHERE status='running'`); err != nil {
 		a.Log.Warn("recover sessions", "error", err)
 	}
 }

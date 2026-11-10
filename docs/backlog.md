@@ -5990,3 +5990,21 @@ a bulk edit makes undo exact without a history table.
 - `uninstallPinned` 前半段的引用检查（会话绑定、当前任务 / 工作流定义、进行中的执行快照）仍是全表 JSON 解析，没有 `strings.Contains` 预筛；可以照 `skillsReferencedInHistory` 加预筛。
 - `planSkillCleanup` 仍对所有能力包的全部版本做 SHA-256 校验；能力包多、版本多时可以考虑按 `capability_id` 先只校验本包，其他包只取组件 skill_id（要先确认不弱化防篡改语义）。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）。
+
+### 2026-11-09：会话回答中途 tidebot 被强退后，下一轮回答不再从会话里消失（BUG，数据丢失）
+
+- **问题**：`SendChatTurn` 用 `chat_sessions.turns + 1` 当新一轮的 `turn_index`，`turns` 只在这一轮结束时（`release`）加一，而轮次行在运行开始时（`OnStart`）就写进 `chat_session_turns`（主键 `session_id, turn_index`）。会话回答中途核心被强退、崩溃或断电时，这一轮的行已经写了，计数却没加；启动时 `recoverChatSessions` 只把状态改回 `idle`。下一次发消息又拿到同一个序号，插入撞主键，只记一条警告，**这一轮照常运行、花钱，但回答不出现在会话里**（运行记录里有，`--resume` 的 transcript 里也有，模型「记得」用户看不到的那轮）。计数也比轮次列表少一，50 轮上限跟着偏。
+- **改法**（`internal/app/chatsession.go`）：新一轮序号改用 `MAX(turn_index)+1`（在把会话置为 `running` 之后读，同一会话一次只有一轮）；`release` 和启动恢复都把 `turns` 设为 `max(turns(+1), 轮次行数)`，被中断的那轮算进计数，写行失败的那轮仍按原来计入上限，计数只增不减。
+- 测试：`chatsession_recover_test.go`。①一轮完成后模拟「第 2 轮行已写、会话仍 running、turns=1」，恢复后 turns=2；再发一轮序号为 3，会话里 3 轮都在，第 3 轮就是新运行；②计数大于行数时不回退。改动前①在恢复后报 `turns 1 list 2`，跳过这一步后报 `next turn index 2, want 3`（新一轮被丢）。`go test ./...`、`-race -count=3` 通过。
+
+| 场景 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 回答中途强退后再发 1 条消息，会话里能看到的新回答 | 0/1（撞主键被丢） | 1/1 |
+| 恢复后计数 / 轮次列表 | 1 / 2 | 2 / 2 |
+
+**心得**：「先写明细行、结束时再加计数」的两步，中间一旦进程没了，计数就落后于行；下一个序号要从行本身推出来，计数在恢复时按行对齐，而不是两边各记各的。
+
+**后续想法**：
+- 被中断那一轮的花费：`recoverInterruptedRuns` 关掉的运行若有已记的花费，没有加进会话 `cost_total`；可以在恢复时按轮次行重算。
+- `OnStart` 写轮次行只有 3 s 超时、失败只记日志；写不进去时可以让这一轮直接失败，避免「跑了但会话里看不到」。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；`uninstallPinned` 引用检查加 `strings.Contains` 预筛。
