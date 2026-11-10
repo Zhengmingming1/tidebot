@@ -619,9 +619,62 @@ const chatTurnCount = `(SELECT COUNT(*) FROM chat_session_turns t WHERE t.sessio
 // recoverChatSessions frees sessions a previous core left answering a turn
 // (their runs were closed by recoverInterruptedRuns). Called at startup.
 func (a *App) recoverChatSessions(ctx context.Context) {
+	if err := a.recoverChatTurnCosts(ctx); err != nil {
+		a.Log.Warn("recover session costs", "error", err)
+	}
 	// The interrupted turn's row exists but was never counted; count it so the
 	// page and the turn limit agree with the turn list.
 	if _, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='idle', turns=max(turns, `+chatTurnCount+`) WHERE status='running'`); err != nil {
 		a.Log.Warn("recover sessions", "error", err)
 	}
+}
+
+// recoverChatTurnCosts adds the cost of each interrupted turn to its
+// session's cost_total (USD). Usage is saved mid-run every few seconds, so
+// the turn's run row often already has a cost, but release() never ran.
+// Only turns release() never counted are added (session still running, turn
+// index above the counter), each with the cost recorded on its run; older
+// turns are never re-priced. The add, the count and the idle status are one
+// statement guarded by status='running', so a repeated recovery adds nothing.
+func (a *App) recoverChatTurnCosts(ctx context.Context) error {
+	// The pool has a single connection: read the rate (a cold cache queries
+	// the DB) before the query below holds it.
+	fx := a.cachedFX()
+	rows, err := a.DB.QueryContext(ctx, `
+SELECT s.id, COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,'')
+FROM chat_sessions s
+JOIN chat_session_turns t ON t.session_id=s.id AND t.turn_index>s.turns
+JOIN runs r ON r.id=t.run_id
+WHERE s.status='running' AND t.turn_index>0 AND r.cost_amount>0`)
+	if err != nil {
+		return err
+	}
+	add := map[string]float64{}
+	for rows.Next() {
+		var sid, cur string
+		var amt float64
+		if err := rows.Scan(&sid, &amt, &cur); err != nil {
+			rows.Close()
+			return err
+		}
+		add[sid] += fx.Convert(amt, cur, pricing.USD)
+	}
+	err = rows.Err()
+	if cerr := rows.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	for sid, usd := range add {
+		res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='idle', turns=max(turns, `+chatTurnCount+`), cost_total=cost_total+?, updated_at=? WHERE id=? AND status='running'`,
+			usd, nowUTC(), sid)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			a.Log.Info("recovered session cost", "session", sid, "cost_usd", usd)
+		}
+	}
+	return nil
 }

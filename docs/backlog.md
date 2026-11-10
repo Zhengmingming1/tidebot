@@ -6008,3 +6008,17 @@ a bulk edit makes undo exact without a history table.
 - 被中断那一轮的花费：`recoverInterruptedRuns` 关掉的运行若有已记的花费，没有加进会话 `cost_total`；可以在恢复时按轮次行重算。
 - `OnStart` 写轮次行只有 3 s 超时、失败只记日志；写不进去时可以让这一轮直接失败，避免「跑了但会话里看不到」。
 - 仍未做：WebUI 单包去注释/压空白（发现 #5）；`uninstallPinned` 引用检查加 `strings.Contains` 预筛。
+
+### 2026-11-09：会话回答中途被强退，那一轮已记的花费补进会话总额（BUG，账不平）
+
+- **问题**：运行中每隔几秒把用量写进 `runs.cost_amount`，但会话 `cost_total` 只在这一轮结束时（`release`）累加。回答中途核心被强退 / 崩溃 / 断电，这一轮已经花了、运行记录里也有金额，会话总额却永远少这一笔；`recoverChatSessions` 只把状态改回 `idle`。
+- **改法**（`internal/app/chatsession.go`，`recoverChatTurnCosts`）：启动恢复时只找「会话仍是 `running`、`turn_index` 大于计数」的轮次——即 `release` 没来得及计入的那一轮，把它运行上**已记的花费**换成 USD 加进总额；加花费、对齐计数、改回 `idle` 是同一条 `UPDATE ... WHERE status='running'`，重复恢复不会重复加。已计入的历史轮次不重算，改过汇率也不会把总额抬高；已经是 `idle` 的会话不动。
+- 单连接池：汇率先读（冷缓存会再查库），再发查询；行读完、关掉之后才写。
+- 测试（`chatsession_recover_test.go`）：①中断轮 0.25 补进总额，起点运行（第 0 轮）不算，连续恢复两次仍是 0.75，下一轮完成后不重复计；②第 1 轮按 7 计入后汇率改成 3.5，恢复只加中断轮（1 + 2 = 3），idle 会话不动；③人民币换算；④冷汇率缓存 + 单连接不阻塞（把读汇率挪到查询之后，该测试 5 s 超时失败）；⑤去掉恢复调用后①–④均失败。`go test ./...`、`go test -race ./internal/app` 通过。
+
+**心得**：恢复只补「确定没记过的那一笔」，用当时记下的数，不按现价把整本账重算；「补账 + 标记已补」放在同一条语句里才天然幂等。
+
+**后续想法**：
+- 旧版本已经恢复成 `idle` 的会话，中断轮的花费仍未计入（无法与正常结束的轮次区分，宁少不多）。
+- `OnStart` 写轮次行失败时让这一轮直接失败（仍未做）。
+- 仍未做：WebUI 单包去注释/压空白（发现 #5）；`uninstallPinned` 引用检查加 `strings.Contains` 预筛。
