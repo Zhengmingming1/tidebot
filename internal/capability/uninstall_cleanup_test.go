@@ -2,6 +2,7 @@ package capability
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,7 +287,9 @@ func TestUninstallHistoryScanPerf(t *testing.T) {
 			}
 			oldBytes += len(raw)
 			oldRows++
-			_ = references(raw, "", one)
+			var tree any // the old per-skill full parse
+			_ = json.Unmarshal([]byte(raw), &tree)
+			_ = one
 		}
 		rows.Close()
 	}

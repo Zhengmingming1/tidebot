@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -289,12 +290,12 @@ func (s *Store) uninstallPinned(ctx context.Context, capID, versionID, actor str
 			return e
 		}
 		for rows.Next() {
-			var raw sql.NullString
+			var raw sql.RawBytes // read in place; only valid until Next
 			if e = rows.Scan(&raw); e != nil {
 				rows.Close()
 				return e
 			}
-			if references(raw.String, capID, skills) {
+			if references(raw, capID, skills) {
 				rows.Close()
 				return ErrReferenced
 			}
@@ -344,10 +345,17 @@ func (s *Store) uninstallPinned(ctx context.Context, capID, versionID, actor str
 	}
 	return tx.Commit()
 }
-func references(raw, capID string, skills map[string]bool) bool {
+func references(raw []byte, capID string, skills map[string]bool) bool {
+	// Most current definitions and sessions mention none of the ids. A JSON string
+	// equal to an id contains it literally unless one of its characters is
+	// \u-escaped, so without a match (and no such escape) only validity matters:
+	// malformed state still fails closed, but nothing is decoded into a tree.
+	if len(raw) > 0 && !mentionsAny(raw, capID, skills) {
+		return !json.Valid(raw)
+	}
 	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return raw != ""
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return len(raw) > 0
 	} // Malformed binding state fails closed.
 	var walk func(any) bool
 	walk = func(v any) bool {
@@ -370,6 +378,62 @@ func references(raw, capID string, skills map[string]bool) bool {
 		return false
 	}
 	return walk(value)
+}
+
+// mentionsAny reports whether raw might hold one of the ids as a JSON string:
+// it contains one literally, an id has characters a literal search can't vouch
+// for, or raw \u-escapes a character ids are made of (tidebot's own writers
+// never do; Go only escapes <, >, & and control characters).
+func mentionsAny(raw []byte, capID string, skills map[string]bool) bool {
+	check := func(id string) bool { return !plainID(id) || bytes.Contains(raw, []byte(id)) }
+	if capID != "" && check(capID) {
+		return true
+	}
+	for id := range skills {
+		if check(id) {
+			return true
+		}
+	}
+	for rest := raw; ; {
+		i := bytes.Index(rest, []byte(`\u00`))
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+4:]
+		if len(rest) < 2 {
+			return true // truncated escape: let the full parse decide
+		}
+		hi, lo := unhex(rest[0]), unhex(rest[1])
+		if hi < 0 || lo < 0 || plainIDByte(byte(hi<<4|lo)) {
+			return true
+		}
+	}
+}
+
+func unhex(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10
+	}
+	return -1
+}
+
+// plainID: ids tidebot generates (prefix_hex) and skill slugs.
+func plainID(id string) bool {
+	for i := 0; i < len(id); i++ {
+		if !plainIDByte(id[i]) {
+			return false
+		}
+	}
+	return id != ""
+}
+
+func plainIDByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.' || c == ':'
 }
 
 type Bundle struct {
