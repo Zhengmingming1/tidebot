@@ -107,7 +107,7 @@
       case "chat": p = renderChat(parts[1]); break;
       case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(params); break;
       case "skill-sets": p = renderSkillSets(); break;
-      case "skill-repositories": p = renderSkillRepositories(parts[1]); break;
+      case "skill-repositories": location.replace(repositoryHref(parts[1], true)); p = null; break;
       case "skills": p = parts[1] ? renderSkillDetail(parts[1], params) : renderSkills(); break;
       case "workflows": p = parts[1] ? renderWorkflowEditor(parts[1]) : renderWorkflows(); break;
       case "workflow-runs": p = renderWorkflowRun(parts[1]); break;

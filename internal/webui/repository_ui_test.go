@@ -118,7 +118,7 @@ assert(!ctx.repositoryPresetMatch([{...existing,root:'skills/pdf'}],p));
 assert(!ctx.repositoryPresetMatch([{...existing,url:'https://git.example.com/anthropics/skills'}],p));
 assert(!ctx.repositoryPresetMatch([{...existing,url:'https://github.com:8443/anthropics/skills'}],p));
 let html=ctx.repositoryPresetsHtml([existing]);
-assert(html.includes('sr.presets'));assert(!html.includes('data-sr-preset="0"'));assert(html.includes('#/skill-repositories/existing'));
+assert(html.includes('sr.presets'));assert(!html.includes('data-sr-preset="0"'));assert(html.includes('#/plugins/sources/existing'));
 const oldName=p.name;p.name='<img src=x onerror=bad>';
 assert(!ctx.repositoryPresetsHtml([]).includes('<img'));p.name=oldName;
 let page='',calls=[],refreshes=0,dialogs=0,progress,close;
@@ -143,7 +143,7 @@ const tick=()=>new Promise(r=>setTimeout(r,0));
  ctx.api=(url,opts)=>{calls.push([url,opts]);if(url.endsWith('/refresh'))return Promise.reject(new Error('<offline>'));return Promise.resolve(opts.method==='POST'?{id:'saved'}:[]);};
  ctx.repositoryAddPreset(p);ctx.repositoryAddPreset(p);assert.equal(dialogs,1);await tick();await tick();
  assert.equal(calls.filter(x=>x[1].method==='POST'&&!x[0].endsWith('/refresh')).length,1);
- assert(progress.innerHTML.includes('#/skill-repositories/saved'));assert(progress.innerHTML.includes('&lt;offline&gt;'));assert(!calls.some(x=>x[1].method==='DELETE'));assert.equal(ctx.location.hash,'#/skill-repositories');
+ assert(progress.innerHTML.includes('#/plugins/sources/saved'));assert(progress.innerHTML.includes('&lt;offline&gt;'));assert(!calls.some(x=>x[1].method==='DELETE'));assert.equal(ctx.location.hash,'#/skill-repositories');
  close();assert.equal(refreshes,1);assert.equal(ctx.repositoryScan,null);
  // Navigation away while adding never starts a delayed scan or redirects the new page.
  let resolve;calls=[];ctx.document.contains=()=>true;ctx.routeSeq=4;

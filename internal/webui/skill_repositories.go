@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/capability"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/skillrepo"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
@@ -383,7 +384,7 @@ func (s *Server) previewRepositorySkill(w http.ResponseWriter, r *http.Request, 
 	}
 	s.repositories.stages[stageID] = repositoryStage{RepositoryID: repo.ID, Revision: repo.Revision, Commit: in.Commit, Candidate: found.Candidate, Current: current, Expires: time.Now().Add(30 * time.Minute)}
 	s.repositories.mu.Unlock()
-	writeJSON(w, 200, map[string]any{"stage_id": stageID, "path": in.Path, "commit": in.Commit, "name": name, "description": found.Description, "skill_md": string(files["SKILL.md"]), "tree": tree, "files": len(files), "size": size, "warning": found.Warning, "source": found.Source, "expected_current_version_id": current, "diff": DiffFiles(old, files, 3), "used_by": usages})
+	writeJSON(w, 200, map[string]any{"review": capability.ReviewImport(files), "stage_id": stageID, "path": in.Path, "commit": in.Commit, "name": name, "description": found.Description, "skill_md": string(files["SKILL.md"]), "tree": tree, "files": len(files), "size": size, "warning": found.Warning, "source": found.Source, "expected_current_version_id": current, "diff": DiffFiles(old, files, 3), "used_by": usages})
 }
 func (s *Server) installRepositorySkill(w http.ResponseWriter, r *http.Request, repo skillstore.Repository) {
 	var in struct {
@@ -393,6 +394,8 @@ func (s *Server) installRepositorySkill(w http.ResponseWriter, r *http.Request, 
 		Name     string `json:"name"`
 		Copy     bool   `json:"copy"`
 		Expected string `json:"expected_current_version_id"`
+		// ConfirmRisk: the user saw the high-risk findings and chose to install anyway
+		ConfirmRisk bool `json:"confirm_risk"`
 	}
 	if decodeManifestRequest(w, r, &in) != nil {
 		writeErr(w, 400, "invalid install JSON")
@@ -408,6 +411,9 @@ func (s *Server) installRepositorySkill(w http.ResponseWriter, r *http.Request, 
 	files, err := s.repositoryClient().ReadSkill(r.Context(), repo.ID, p.Commit, p.Candidate.Path)
 	if err != nil {
 		s.repositoryError(w, err)
+		return
+	}
+	if !writeImportRisk(w, files, in.ConfirmRisk) {
 		return
 	}
 	out, err := s.deps.Skills.InstallRepositorySkill(r.Context(), skillstore.RepositoryInstallInput{RepositoryID: repo.ID, RepositoryRevision: repo.Revision, Path: p.Candidate.Path, Commit: p.Commit, TreeHash: p.Candidate.TreeHash, Name: in.Name, ExpectedCurrentVersionID: p.Current, Files: files, Copy: in.Copy})

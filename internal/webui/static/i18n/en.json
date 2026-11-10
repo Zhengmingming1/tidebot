@@ -3123,5 +3123,21 @@
   "wf.run_notice_edit": "Skill steps can edit files in {p}; the folder is locked while it runs.",
   "wf.run_notice_edit_scratch": "Can edit needs a folder.",
   "wf.run_notice_exec": "Skill steps can edit files in {p} and run commands in the system sandbox.",
-  "wf.run_notice_exec_scratch": "Skill steps share a temporary folder and run commands in the system sandbox; it is removed afterwards."
+  "wf.run_notice_exec_scratch": "Skill steps share a temporary folder and run commands in the system sandbox; it is removed afterwards.",
+  "sk.chat": "Chat",
+  "sk.chat_tip": "Start a session with “{name}” bound: tune it as you go, then adopt a version and save it as a task",
+  "sk.advanced": "Advanced",
+  "home.to_chat": "Chat",
+  "home.to_chat_tip": "Take this text into a new session to work on it back and forth",
+  "imp.importing": "Scan passed, importing…",
+  "imp.auto_done": "Imported “{n}”; the scan found nothing high-risk",
+  "imp.risk_title": "The scan found high-risk content. Take a look first:",
+  "imp.risk_ok": "I've reviewed it, import anyway",
+  "imp.risk_need": "This skill has high-risk content; tick “I've reviewed it, import anyway” first",
+  "imp.f_execution-chain": "Downloads or decodes code to run",
+  "imp.f_credential-access": "Reads credentials or sends env out",
+  "imp.f_persistence": "May persist at startup or in background",
+  "imp.f_prompt-injection": "Instruction override, concealment or hidden characters",
+  "imp.f_snapshot-limit": "Over the size limit",
+  "imp.f_finding-limit": "Too many findings; review manually"
 }

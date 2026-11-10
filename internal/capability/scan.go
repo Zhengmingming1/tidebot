@@ -83,6 +83,10 @@ func InstallPolicy(trust, verdict string, allowHighRisk bool) Policy {
 			p.Allowed = false
 			p.Reason = "High-risk community sources are disabled"
 		}
+	case TrustUser:
+		// the user's own pick: nothing to review unless the scan finds high risk
+		p.ReviewRequired = verdict == "high"
+		p.SecondConfirmationRequired = verdict == "high"
 	case "unknown":
 		p.ReviewRequired = true
 		p.SecondConfirmationRequired = verdict == "caution"

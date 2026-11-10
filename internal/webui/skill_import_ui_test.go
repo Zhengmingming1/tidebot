@@ -12,7 +12,8 @@ func TestSkillImportLatestPreview(t *testing.T) {
 	if err != nil {
 		t.Skip("node not installed")
 	}
-	script := regexpFunc(t, liveSrc(t), "  function esc(v) {") + regexpFunc(t, liveSrc(t), "  function skillImportModal(done) {") + `
+	script := regexpFunc(t, liveSrc(t), "  function esc(v) {") + regexpFunc(t, liveSrc(t), "  function importHigh(rv) {") + regexpFunc(t, liveSrc(t), "  function importRiskHtml(rv, attr, checked) {") + regexpFunc(t, liveSrc(t), "  function skillImportModal(done) {") + `
+const SKILL_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u;
 const assert=require("node:assert/strict"),fs=require("node:fs");
 const dicts={zh:JSON.parse(fs.readFileSync("static/i18n/zh-CN.json","utf8")),en:JSON.parse(fs.readFileSync("static/i18n/en.json","utf8"))};
 let lang="zh",ctx,imports=[],done=0,failures=[];
@@ -28,6 +29,7 @@ Object.defineProperty(El.prototype,"innerHTML",{get(){return this.html;},set(htm
   this.html=html;this.buttons={};
   for(const id of ["sk-go","sk-ver"])if(html.includes('id="'+id+'"'))this.buttons[id]=new El();
   this.cancel=html.includes("data-close")?new El():null;
+  this.risk=html.includes('id="sk-risk"')?new El():null;
   if(html.includes('id="sk-form"')){
     this.form=new El();this.form.name=new El();this.form.name.value=(html.match(/name="name"[^>]*value="([^"]*)"/)||[])[1]||"";
     this.form.reportValidity=()=>true;
@@ -36,6 +38,7 @@ Object.defineProperty(El.prototype,"innerHTML",{get(){return this.html;},set(htm
 function $(q,root){
   if(q==="#sk-prev")return ctx.prev;if(q==="#sk-foot")return ctx.foot;
   if(q==="#sk-form")return root.form;
+  if(q==="#sk-risk")return root.risk;
   if(q==="#sk-go"||q==="#sk-ver")return root.buttons[q.slice(1)]||null;
   throw Error("unexpected selector "+q);
 }
@@ -132,6 +135,18 @@ function open(){skillImportModal(()=>done++);return ctx;}
     if(outcome==="success")c.importReplies[0].resolve({id:"closing"});else c.importReplies[0].reject(conflict);
     await flush();assert.equal(c.prev.innerHTML,beforeClose);assert.equal(c.closed,1);assert.equal(done,finished);
   }
+  // P5: a low-risk scan imports straight away; high risk needs the box ticked, then sends confirm_risk.
+  lang="zh";c=open();c.choose("low");const low=preview("low-risk");low.review={scan:{verdict:"caution",findings:[]},policy:{allowed:true}};
+  const nImports=imports.length,nDone=done;c.requests[0].resolve(low);await flush();
+  assert.deepEqual(imports[nImports],{stage_id:"low-risk",name:"low-risk",mode:""});assert.equal(done,nDone+1);assert.equal(c.closed,1);
+  c=open();c.choose("high");const high=preview("high-risk");high.review={scan:{verdict:"high",findings:[{id:"execution-chain",file:"SKILL.md",line:3,severity:"high",note:"<b>x</b>"}]},policy:{allowed:true,second_confirmation_required:true}};
+  c.requests[0].resolve(high);await flush();
+  assert.equal(imports.length,nImports+1,"high risk must not import on its own");
+  assert.ok(c.prev.innerHTML.includes("扫描发现高风险内容"));assert.ok(c.prev.innerHTML.includes("SKILL.md:3"));assert.ok(c.prev.innerHTML.includes("下载或解码后执行代码"));assert.ok(!c.prev.innerHTML.includes("<b>x"));
+  assert.equal(c.foot.buttons["sk-go"].disabled,true);
+  c.prev.risk.checked=true;c.prev.risk.events.change();assert.equal(c.foot.buttons["sk-go"].disabled,false);
+  c.foot.buttons["sk-go"].events.click();await flush();
+  assert.deepEqual(imports[nImports+1],{stage_id:"high-risk",name:"high-risk",mode:"",confirm_risk:true});
   assert.deepEqual(failures,[]);
   console.log("skill import preview checks passed");
 })().catch(e=>{console.error(e);process.exitCode=1;});

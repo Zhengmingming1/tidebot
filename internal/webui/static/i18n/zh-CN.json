@@ -3123,5 +3123,21 @@
   "wf.run_notice_edit": "技能步骤可修改 {p} 里的文件，运行期间锁定该目录。",
   "wf.run_notice_edit_scratch": "可修改需要先选目录。",
   "wf.run_notice_exec": "技能步骤可在 {p} 里修改文件并在系统沙箱里运行命令。",
-  "wf.run_notice_exec_scratch": "技能步骤共用一个临时目录，可在系统沙箱里运行命令，结束后删除。"
+  "wf.run_notice_exec_scratch": "技能步骤共用一个临时目录，可在系统沙箱里运行命令，结束后删除。",
+  "sk.chat": "对话",
+  "sk.chat_tip": "新建一个绑定「{name}」的会话：边用边改，满意后采用版本、存为任务",
+  "sk.advanced": "进阶",
+  "home.to_chat": "对话",
+  "home.to_chat_tip": "把这段话带到新会话里，可以来回调整",
+  "imp.importing": "扫描通过，正在导入…",
+  "imp.auto_done": "已导入「{n}」，扫描未发现高风险内容",
+  "imp.risk_title": "扫描发现高风险内容，请先看一下：",
+  "imp.risk_ok": "我已看过，仍然导入",
+  "imp.risk_need": "这个技能有高风险内容，勾选「我已看过，仍然导入」后再装",
+  "imp.f_execution-chain": "下载或解码后执行代码",
+  "imp.f_credential-access": "读取凭据或外发环境变量",
+  "imp.f_persistence": "可能留下开机 / 后台常驻",
+  "imp.f_prompt-injection": "含覆盖指令、隐瞒或隐藏字符",
+  "imp.f_snapshot-limit": "超出大小限制",
+  "imp.f_finding-limit": "可疑内容太多，请手动检查"
 }

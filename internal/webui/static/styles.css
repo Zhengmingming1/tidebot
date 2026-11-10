@@ -3944,3 +3944,16 @@ button.pill.pl-sb { cursor: pointer; border: 0; font: inherit; }
 .cs-head > .btn, .cs-head > .icon-btn { flex: none; white-space: nowrap; }
 .cs-draft-lbl { flex: 1 1 auto; white-space: nowrap; }
 .cs-draft-lbl strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* P5: skill → chat main line, opt-in advanced optimizer, import risk notice */
+.sk-chat .i, #sk-chat .i, .home-chat .i { color: var(--hue-cyan); }
+#sk-chat .i { color: currentColor; }
+.sk-adv > details > summary { cursor: pointer; list-style: none; gap: 8px; }
+.sk-adv > details > summary::-webkit-details-marker { display: none; }
+.sk-adv > details > summary .muted { margin-left: auto; }
+.sk-adv > details[open] > summary { margin-bottom: 8px; }
+.imp-risk ul { margin: 4px 0 8px; }
+.imp-risk code { font-size: var(--fs-xs); }
+.table td .tag { white-space: nowrap; }
+.id-chip { flex: none; white-space: nowrap; }
+.sk-table td:first-child { min-width: 200px; }

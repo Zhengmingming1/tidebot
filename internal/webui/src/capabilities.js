@@ -262,15 +262,6 @@
       });
     });
   }
-  function capOptimizeDialog(session) {
-    return api("/api/skills").then(function (skills) {
-      modal('<div class="card-head"><h2>' + esc(T("cap.optimize")) + '</h2></div><label class="field"><span>' + esc(T("cap.skill")) + '</span><select id="cap-opt-skill">' + skills.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>'; }).join('') + '</select></label><label class="field"><span>' + esc(T("cap.optimize_reason")) + '</span><textarea id="cap-opt-reason" maxlength="12000"></textarea></label><p class="muted sm">' + esc(T("cap.optimize_proposal_note")) + '</p><p class="field-err" id="cap-opt-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="cap-opt-propose">' + esc(T("cap.preview")) + '</button></div>', function (root, close) {
-        $("#cap-opt-propose", root).addEventListener("click", function (e) { var reason = $("#cap-opt-reason", root).value.trim(); if (!reason) return; var b = e.currentTarget; b.disabled = true;
-          api("/api/capabilities/skill-optimize", { method: "POST", body: { session_id: session.id, skill_id: $("#cap-opt-skill", root).value, reason: reason } }).then(function () { close(); capRefreshSession($("#rc"), session.id, true); }).catch(function (err) { b.disabled = false; $("#cap-opt-error", root).textContent = err.message; });
-        });
-      });
-    });
-  }
   function capSecretsDialog(id) {
     return api("/api/capability-secrets?capability_id="+enc(id),{fresh:true}).then(function(fields){
       modal('<div class="card-head"><h2>'+esc(T("cap.credentials"))+'</h2></div><p class="muted sm">'+esc(T("cap.credentials_note"))+'</p>'+fields.map(function(f,i){return '<label class="field"><span>'+esc(f.name)+(f.set?' · '+esc(T("cap.secret_set")):'')+'</span><input type="password" data-cap-secret="'+i+'" autocomplete="new-password" maxlength="16384"></label>';}).join('')+'<p class="field-err" id="cap-secret-error"></p><div class="actions"><button class="btn ghost" data-close>'+esc(T("btn.cancel"))+'</button><button class="btn primary" id="cap-secret-save">'+esc(T("btn.save"))+'</button></div>',function(root,close){

@@ -8,10 +8,11 @@ assert.equal(ctx.navSection('workflow-runs'),'workflows');
 assert.equal(ctx.navSection('plugins'),'plugins');
 assert.equal(ctx.repositoryHref('a b'),'#/plugins/sources/a%20b');
 assert.equal(ctx.repositoryHref(),'#/plugins/sources');
-assert.equal(ctx.repositoryHref('a',false),'#/skill-repositories/a');
+assert.equal(ctx.repositoryHref('a',false),'#/skill-repositories/a');assert.equal(ctx.repositoryHref('a'),'#/plugins/sources/a');
 assert.deepEqual(JSON.parse(JSON.stringify(ctx.repositoryCrumbs({name:'Example'},true))),[['nav.plugins','#/plugins'],['cap.tab_sources','#/plugins/sources'],['Example']]);
 assert.deepEqual(JSON.parse(JSON.stringify(ctx.repositoryCrumbs(null,true))),[['nav.plugins','#/plugins'],['cap.tab_sources']]);
-ctx.location.hash='#/skill-repositories';assert.equal(ctx.repositoryHref('a'),'#/skill-repositories/a');
+ctx.location.hash='#/skill-repositories';assert.equal(ctx.repositoryHref('a'),'#/plugins/sources/a');
+assert(!ctx.skillTabs('skills').includes('skill-repositories'));assert(!ctx.skillTabs('skills').includes('#/workflows'));
 for (const [fn,arg] of [[ctx.capTabs,'sources'],[ctx.skillTabs,'skills']]) {
  const h=fn(arg);assert(h.includes('section-tabs'));assert.equal((h.match(/aria-current="page"/g)||[]).length,1);
 }

@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"database/sql"
 
 	"github.com/Zhengmingming1/tidebot/internal/auth"
+	"github.com/Zhengmingming1/tidebot/internal/capability"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
+	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
 )
@@ -306,13 +309,25 @@ func (a *App) rpcAmendResolve(ctx context.Context, params json.RawMessage) (any,
 
 func (a *App) rpcSkillsImport(ctx context.Context, params json.RawMessage) (any, error) {
 	var p struct {
-		Name string `json:"name"`
-		Dir  string `json:"dir"`
+		Name        string `json:"name"`
+		Dir         string `json:"dir"`
+		ConfirmRisk string `json:"confirm_risk"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil || p.Dir == "" {
 		return nil, fmt.Errorf("dir required")
 	}
 	if _, err := os.Stat(p.Dir); err != nil {
+		return nil, err
+	}
+	// same scan as extension installs; high risk needs --confirm-risk
+	files, err := skillstore.ReadTree(p.Dir)
+	if err != nil {
+		return nil, err
+	}
+	if rv, err := capability.CheckImport(files, p.ConfirmRisk == "1"); err != nil {
+		if errors.Is(err, capability.ErrRiskConfirm) {
+			return nil, fmt.Errorf("%w (%d findings, first: %s); re-run with --confirm-risk after reviewing", err, len(rv.Scan.Findings), firstFinding(rv.Scan))
+		}
 		return nil, err
 	}
 	return a.Skills.ImportDir(ctx, p.Name, p.Dir, "user")
@@ -439,4 +454,13 @@ func (a *App) rpcAuthTOTPSetup(ctx context.Context, params json.RawMessage) (any
 
 func (a *App) rpcAuthTOTPDisable(ctx context.Context, _ json.RawMessage) (any, error) {
 	return nil, a.Auth.DisableTOTP(ctx)
+}
+
+func firstFinding(sc capability.Scan) string {
+	for _, f := range sc.Findings {
+		if f.Severity == "high" {
+			return f.File + ":" + strconv.Itoa(f.Line) + " " + f.ID
+		}
+	}
+	return ""
 }

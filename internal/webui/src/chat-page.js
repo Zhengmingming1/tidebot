@@ -122,9 +122,8 @@
         });
       };
       wireCaps();
-      var opt = document.createElement("button"); opt.type="button";opt.className="btn sm ghost";opt.textContent=T("cap.optimize");
-      $(".cs-head",sec).insertBefore(opt,$("#cs-del",sec));
-      opt.addEventListener("click",function(){capOptimizeDialog(cur).catch(fail);});
+      // P5: one way to tune a skill here — 「改技能」 (the draft loop). The older AI
+      // 「优化技能」 proposal lives on the skill page under 进阶.
       var grants=document.createElement("button");grants.type="button";grants.className="btn sm ghost";grants.textContent=T("cap.external_tools");$(".cs-head",sec).insertBefore(grants,$("#cs-del",sec));grants.addEventListener("click",function(){capGrantsDialog(s.id).catch(fail);});
       $("#cs-del").addEventListener("click", function (e) {
         var b = e.currentTarget;

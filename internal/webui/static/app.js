@@ -2394,7 +2394,7 @@
     return '<section class="home-composer"><form id="home-quick"><div class="home-compose-head"><label for="home-prompt">' + esc(T("home.compose_title")) + '</label>' + draftTagHtml() + '</div>' +
       '<textarea id="home-prompt" name="prompt" rows="2" maxlength="8000" required placeholder="' + esc(T("qr.placeholder")) + '"></textarea>' +
       '<div class="home-compose-actions"><label class="home-provider"><span class="sr-only">' + esc(T("f.provider")) + '</span><select name="provider" aria-label="' + esc(T("f.provider")) + '" disabled><option>' + esc(T("home.loading_provider")) + '</option></select></label>' +
-      '<button class="btn ghost sm" type="button" id="home-advanced">' + ic("settings", "sm") + esc(T("home.run_options")) + '</button><span class="spacer"></span><button class="btn primary" id="home-submit" type="submit" disabled>' + ic("play", "sm") + esc(T("btn.run")) + '</button></div>' +
+      '<button class="btn ghost sm" type="button" id="home-advanced">' + ic("settings", "sm") + esc(T("home.run_options")) + '</button><span class="spacer"></span><button class="btn sm ghost home-chat" type="button" id="home-chat" data-tip="' + esc(T("home.to_chat_tip")) + '">' + ic("chat", "sm") + esc(T("home.to_chat")) + '</button><button class="btn primary" id="home-submit" type="submit" disabled>' + ic("play", "sm") + esc(T("btn.run")) + '</button></div>' +
       '<p class="hint home-compose-hint">' + esc(T("qr.hint")) + ' <span>' + esc(T("qr.run_key", { k: keyLabel("Mod+Enter") })) + '</span></p><p class="field-err" id="home-run-error" role="alert"></p>' +
       '<div id="home-recent-prompts" class="home-recent-prompts"></div></form></section>';
   }
@@ -2429,6 +2429,11 @@
       draftFlush(); draftSave("qr", ta.value);
       if (!form.provider.disabled) try { localStorage.setItem("tb_qr_provider", form.provider.value); } catch (e) {}
       quickRunModal();
+    });
+    // one place to start: the same text either runs once or opens a conversation (P5)
+    $("#home-chat", form).addEventListener("click", function () {
+      draftFlush(); draftSave("cs_new", ta.value); draftClear("qr");
+      location.hash = "#/chat";
     });
     ta.addEventListener("keydown", function (e) { if (submitKey(e) && !e.repeat) { e.preventDefault(); if (!submit.disabled) form.requestSubmit(); } });
     form.addEventListener("submit", function (e) {
@@ -3511,7 +3516,7 @@
   // ---------- reusable skill compositions ----------
   var skillEditorSeq = 0;
   function skillTabs(active) {
-    return sectionTabs("ss-tabs", T("ss.tabs"), [["skills", "nav.skills"], ["skill-repositories", "sr.title"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) {
+    return sectionTabs("ss-tabs", T("ss.tabs"), [["skills", "nav.skills"], ["skill-sets", "ss.title"]].map(function (x) {
       return { href: "#/" + x[0], label: T(x[1]), active: active === x[0] };
     }));
   }
@@ -3777,7 +3782,7 @@
   }
   function renderWorkflows() {
     return api('/api/workflows').then(function(items){
-      mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><div class="actions"><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div></div>'+skillTabs('workflows')+
+      mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><div class="actions"><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div></div>'+
         (items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span>'+wfTasksPill(w)+'<span class="tag" data-tip="'+esc(wfModeNotice(w.definition))+'">'+esc(T('rn.'+wfMode(w.definition)))+'</span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
       $$('[data-wf-run]').forEach(function(b){b.onclick=function(){workflowRunModal(b.dataset.wfRun);};});
       $$('[data-wf-deps]').forEach(function(b){b.onclick=function(){dependencyCheck({kind:'workflow',id:b.dataset.wfDeps});};});
@@ -3971,10 +3976,10 @@
   // ---------- SKILLS ----------
   function renderSkills() {
     return api("/api/skills").then(function (skills) {
-      var rows = skills.length ? '<table class="table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
+      var rows = skills.length ? '<table class="table sk-table"><thead><tr><th>' + esc(T("col.skill")) + "</th><th>" + esc(T("col.current")) + "</th><th>" + esc(T("col.files")) + "</th><th>" + esc(T("col.used_by")) + "</th><th>" + esc(T("col.updated")) + '</th><th></th></tr></thead><tbody>' +
         skills.map(function (s) {
           return '<tr class="click" data-href="#/skills/' + enc(s.id) + '"><td><div class="cell-main"><span class="ico" data-hue="' + iconHue("skills") + '">' + ic("skills", "sm") + "</span><div><div class=\"nm-line\"><a class=\"strong-link\" href=\"#/skills/" + enc(s.id) + '">' + esc(s.name) + "</a>" + idChip(T("sk.id"), s.id) + "</div><small>" + esc(s.description || T("sk.no_desc_short")) + '</small><span data-cap-skill="' + esc(s.id) + '"></span></div></div></td><td><span class="tag perm">v' + esc(s.version_no) + "</span></td><td>" + esc(s.files) + '</td><td class="nowrap">' + esc(plural(s.used_by, "tasks.count_one", "tasks.count_many")) +
-            '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="btn sm" data-sk-run="' + esc(s.id) + '" data-tip="' + esc(T("rn.run_skill_tip", { name: s.name })) + '">' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
+            '</td><td class="nowrap">' + esc(when(s.updated_at)) + '</td><td class="right nowrap"><div class="row-actions end"><button class="icon-btn sm" data-sk-run="' + esc(s.id) + '" data-tip="' + esc(T("rn.run_skill_tip", { name: s.name })) + '" aria-label="' + esc(T("btn.run")) + '">' + ic("play", "sm") + '</button><button class="btn sm sk-chat" data-sk-chat="' + esc(s.id) + '" data-tip="' + esc(T("sk.chat_tip", { name: s.name })) + '">' + ic("chat", "sm") + esc(T("sk.chat")) + '</button><button class="icon-btn sm" data-sk-export="' + esc(s.id) + '" data-tip="' + esc(T("sk.export_tip", { n: s.version_no })) + '" aria-label="' + esc(T("sk.export")) + '">' + ic("download", "sm") + '</button><button class="btn sm" data-versions="' + esc(s.id) + '" data-name="' + esc(s.name) + '">' + ic("branch", "sm") + esc(T("sk.versions")) + "</button></div></td></tr>";
         }).join("") + "</tbody></table>" : emptyState("skills", T("sk.none"), T("sk.none_sub"));
       mount('<div class="page-head"><div><h1>' + esc(T("nav.skills")) + "</h1><p>" + esc(T("sk.sub")) + '</p></div><div class="actions"><button class="btn primary" id="sk-import">' + ic("upload", "sm") + esc(T("sk.import")) + "</button></div></div>" +
         skillTabs("skills") + '<section class="card flush"><div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sk.library")) + "</h2></div>" + rows + "</section>", "skills", [[T("nav.skills")]]);
@@ -3985,9 +3990,18 @@
       $$("[data-sk-export]").forEach(function (b) { b.addEventListener("click", function () { exportSkill(b.getAttribute("data-sk-export"), "", b); }); });
       $$("[data-sk-run]").forEach(function (b) { var check=document.createElement("button");check.className="icon-btn sm";check.setAttribute("aria-label",T("dep.check"));check.setAttribute("data-tip",T("dep.check"));check.innerHTML=ic("shield","sm");check.onclick=function(e){e.stopPropagation();dependencyCheck({kind:"skill",id:b.getAttribute("data-sk-run")});};b.parentNode.insertBefore(check,b); });
       $$("[data-sk-run]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); quickRunModal({ skill_id: b.getAttribute("data-sk-run") }); }); });
+      $$("[data-sk-chat]").forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); startSkillChat(b.getAttribute("data-sk-chat"), b); }); });
     });
   }
 
+  // 技能 → 会话 (P5 main line): a new session with this skill bound; tune it there, adopt a
+  // version, save the session as a task.
+  function startSkillChat(skillId, btn) {
+    if (btn) btn.disabled = true;
+    return api("/api/chat-sessions", { method: "POST", body: { origin: "chat", permission_mode: "exec" } }).then(function (s) {
+      return api("/api/chat-sessions/" + enc(s.id) + "/bindings", { method: "PUT", body: { skills: [skillId], capabilities: [] } }).then(function () { location.hash = "#/chat/" + enc(s.id); });
+    }).catch(function (e) { if (btn) btn.disabled = false; fail(e); });
+  }
   // ---------- skill detail: version tree, diff, optimizer ----------
   function diffView(d) {
     var files = (d.files || []).filter(function (f) { return f.status !== "same"; });
@@ -4039,16 +4053,18 @@
           (live ? (p.status === "pending" ? '<button class="btn sm" data-canary="' + esc(p.id) + '">' + esc(T("opt.start_canary")) + "</button>" : "") + '<button class="btn sm danger" data-discard="' + esc(p.id) + '">' + esc(T("opt.discard")) + '</button><button class="btn sm primary" data-promote="' + esc(p.id) + '" data-no="' + esc(v ? v.no : "") + '">' + esc(T("opt.promote")) + "</button>" : "") + "</div></div>";
       }).join("") : '<p class="muted">' + esc(T("opt.none")) + "</p>";
       mount('<div class="grid g-detail">' +
-        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm" id="sk-manifest">' + esc(T("sm.title")) + '</button><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
+        '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm primary" id="sk-chat" data-tip="' + esc(T("sk.chat_tip", { name: sk.name })) + '">' + ic("chat", "sm") + esc(T("sk.chat")) + '</button><button class="btn sm" id="sk-run">' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="btn sm" id="sk-manifest">' + esc(T("sm.title")) + '</button><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
         '<nav class="tabs sk-tabs" role="tablist" aria-label="' + esc(sk.name) + '">' + [["diff", T("sk.tab_diff")], ["files", T("sk.tab_files")]].map(function (x) { var on = x[0] === tab; return '<button type="button" role="tab" data-sktab="' + x[0] + '" class="' + (on ? "active" : "") + '" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' + esc(x[1]) + "</button>"; }).join("") + "</nav>" +
         '<div id="pane-diff" class="sk-pane' + (tab === "diff" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></div>" +
         '<div id="pane-files" class="sk-pane' + (tab === "files" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar fb-bar"><label>' + esc(T("fb.version")) + ' <select id="fb-v">' + vopt(fv) + '</select></label><small class="muted" id="fb-sum"></small></div><div class="fb"><div class="fb-tree" id="fb-tree" role="tree" aria-label="' + esc(T("fb.tree")) + '">' + skeleton("list") + '</div><div class="fb-view" id="fb-view"></div></div></div></section>' +
         '<div class="stack">' + repositorySourceHtml(r[5]) + '<section class="card"><div class="card-head"><span class="ico">' + ic("branch") + "</span><h3>" + esc(T("ver.tree")) + "</h3></div>" + tree + '<p class="hint mt">' + ic("info", "sm") + esc(T("ver.rb_pointer")) + "</p></section>" +
-        '<section class="card"><div class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("opt.title")) + '</h3></div><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
-        '<h4 class="mt">' + esc(T("opt.proposals")) + "</h4>" + propHtml + "</section></div></div>",
+        '<section class="card sk-adv"><details id="sk-adv"' + (oset.mode !== "off" || props.some(function (p) { return p.status === "pending" || p.status === "canary"; }) ? " open" : "") + '><summary class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("sk.advanced")) + '</h3><span class="muted sm">' + esc(T("opt.title") + " · " + (modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[1]) + '</span></summary><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
+        '<h4 class="mt">' + esc(T("opt.proposals")) + "</h4>" + propHtml + "</details></section></div></div>",
         "skills", [[T("nav.skills"), "#/skills"], [sk.name]]);
       wireRepositorySource(r[5], page());
       $("#sk-manifest").onclick=function(){skillManifestModal(id);};
+      $("#sk-chat").onclick=function(){startSkillChat(id,this);};
+      $("#sk-run").onclick=function(){quickRunModal({ skill_id: id });};
       var diffLoaded = false, filesLoaded = false, fgen = 0, tcache = {}, fcache = {}, fkeys = [];
       // The address keeps the tab, the browsed version and file, so a reload or a shared link opens the same view.
       var syncHash = function () {
@@ -4248,7 +4264,9 @@
   }
   // ---------- skill repositories ----------
   var repositoryScan = null;
-  function repositoryInExtensions() { return typeof location !== "undefined" && /^#\/plugins\/sources(?:\/|$)/.test(location.hash); }
+  // P5: Git skill repositories live in one place, 扩展 › 来源 (same scan as every install);
+  // the old #/skill-repositories links redirect there.
+  function repositoryInExtensions() { return true; }
   function repositoryHref(id, extension) {
     if (extension === undefined) extension = repositoryInExtensions();
     return (extension ? "#/plugins/sources" : "#/skill-repositories") + (id ? "/" + enc(id) : "");
@@ -4498,6 +4516,7 @@
               fieldHtml(T('sr.local_name'), '<input data-sr-name="' + i + '" required maxlength="64" value="' + esc(row.name) + '"' + (source && !row.copy || row.result ? ' disabled' : '') + '>') +
               (source && !row.result ? '<label class="check"><input type="checkbox" data-sr-copy="' + i + '"' + (row.copy ? ' checked' : '') + '> ' + esc(T('sr.copy')) + '</label><p class="hint">' + esc(T('sr.download_hint')) + '</p>' : '') +
               (source && source.local_modified ? '<p class="notice">' + esc(T('sr.local_modified')) + '</p>' : '') +
+              (row.result ? '' : importRiskHtml(p.review, 'data-sr-risk="' + i + '"', row.riskOk)) +
               '<details' + (rows.length === 1 ? ' open' : '') + '><summary>SKILL.md · ' + esc(T('fb.sum', { n: p.files, size: fmtBytes(p.size || 0) })) + '</summary><div class="md sr-markdown">' + mdHtml(p.skill_md || '', null) + '</div><div class="ftree">' + fileTree(p.tree || []) + '</div></details>' +
               (source ? '<details><summary>' + esc(T('diff.compare')) + '</summary>' + repositoryDiff(p.diff) + '</details>' : '') +
               (p.used_by && p.used_by.length ? '<details><summary>' + esc(T('sr.usage')) + '</summary><ul>' + p.used_by.map(repositoryUsageHtml).join('') + '</ul></details>' : '') : '') +
@@ -4506,6 +4525,7 @@
         }).join('');
         install.disabled = !rows.some(function (row) { return row.preview && !row.preview.error && !row.result; });
         $$('[data-sr-name]', host).forEach(function (el) { el.oninput = function () { rows[+el.getAttribute('data-sr-name')].name = el.value; }; });
+        $$('[data-sr-risk]', host).forEach(function (el) { el.onchange = function () { rows[+el.getAttribute('data-sr-risk')].riskOk = el.checked; }; });
         $$('[data-sr-copy]', host).forEach(function (el) { el.onchange = function () { var row = rows[+el.getAttribute('data-sr-copy')]; row.copy = el.checked; row.name = row.copy ? (row.preview.name || row.candidate.name).slice(0, 58) + '-copy' : row.preview.name || row.candidate.name; draw(); }; });
         $$('[data-sr-deps]', host).forEach(function (el) { el.onclick = function () { var r = rows[+el.getAttribute('data-sr-deps')].result; dependencyCheck({kind:'skill',id:r.skill_id}); }; });
         $$('[data-sr-run]', host).forEach(function (el) { el.onclick = function () { var r = rows[+el.getAttribute('data-sr-run')].result; quickRunModal({skill_id:r.skill_id}); }; });
@@ -4530,12 +4550,14 @@
         for (var i = 0; i < rows.length && alive(); i++) {
           var row = rows[i]; if (!row.preview || row.preview.error || row.result) continue;
           if (!row.name.trim()) { row.error = T('sr.name_required'); continue; }
+          if (importHigh(row.preview.review) && !row.riskOk) { row.error = T('imp.risk_need'); continue; }
           try {
-            row.result = await api('/api/skill-repositories/' + enc(repo.id) + '/install', {method:'POST',body:{stage_id:row.preview.stage_id,path:row.candidate.path,commit:repo.commit,name:row.name.trim(),expected_current_version_id:row.preview.expected_current_version_id || '',copy:!!row.copy},signal:ac.signal});
+            row.result = await api('/api/skill-repositories/' + enc(repo.id) + '/install', {method:'POST',body:{stage_id:row.preview.stage_id,path:row.candidate.path,commit:repo.commit,name:row.name.trim(),expected_current_version_id:row.preview.expected_current_version_id || '',copy:!!row.copy,confirm_risk:!!row.riskOk},signal:ac.signal});
             row.error = ''; changed = true;
           } catch (e) {
             if (ac.signal.aborted) break;
-            row.error = e.message;
+            row.error = e.data && e.data.code === 'risk_confirm' ? T('imp.risk_need') : e.message;
+            if (e.data && e.data.review) row.preview.review = e.data.review;
             if (e.data && e.data.suggested_name) row.name = e.data.suggested_name;
           }
         }
@@ -4824,6 +4846,17 @@
     return '<div class="tree">' + walk(root) + "</div>";
   }
   // ---------- skill import ----------
+  // P5: imports use the extension scan. Low risk imports without a prompt; high risk shows
+  // what was found and imports only after the user ticks the box (the server checks again).
+  var SKILL_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u;
+  function importHigh(rv) { return !!(rv && rv.scan && rv.scan.verdict === "high"); }
+  function importRiskHtml(rv, attr, checked) {
+    if (!importHigh(rv)) return "";
+    var fs = (rv.scan.findings || []).filter(function (f) { return f.severity === "high"; }).slice(0, 5);
+    return '<div class="notice bad imp-risk" role="alert">' + ic("shield", "sm") + "<div><strong>" + esc(T("imp.risk_title")) + "</strong>" +
+      '<ul class="list-plain">' + fs.map(function (f) { return '<li data-tip="' + esc(f.note || "") + '"><code>' + esc((f.file || "") + (f.line ? ":" + f.line : "")) + "</code> " + esc(T("imp.f_" + f.id) === "imp.f_" + f.id ? f.id : T("imp.f_" + f.id)) + "</li>"; }).join("") + "</ul>" +
+      '<label class="check"><input type="checkbox" ' + attr + (checked ? " checked" : "") + "> " + esc(T("imp.risk_ok")) + "</label></div></div>";
+  }
   function skillImportModal(done) {
     modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("sk.import")) + "</h2></div>" + dropZone("sk-drop", ".zip,.skill,.tar.gz,.tgz", true) + '<div id="sk-prev"></div><div class="actions" id="sk-foot"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
       var prev = $("#sk-prev", root), foot = $("#sk-foot", root), uploadSeq = 0;
@@ -4841,23 +4874,27 @@
         return '<div class="notice bad" role="alert">' + ic("x", "sm") + '<div>' + esc(message) +
           (candidates.length ? '<ul class="list-plain">' + candidates.map(function (p) { return '<li><code>' + esc(p) + '</code></li>'; }).join("") + '</ul>' : "") + '</div></div>';
       }
-      var doImport = function (p, name, mode, btn) {
+      var doImport = function (p, name, mode, btn, auto) {
         var seq = uploadSeq;
-        btn.disabled = true;
-        api("/api/skills/import", { method: "POST", body: { stage_id: p.stage_id, name: name, mode: mode } }).then(function () {
+        if (btn) btn.disabled = true;
+        var body = { stage_id: p.stage_id, name: name, mode: mode };
+        if (p.riskOk) body.confirm_risk = true;
+        api("/api/skills/import", { method: "POST", body: body }).then(function () {
           if (seq !== uploadSeq || !document.contains(root)) return;
-          close(); toast(T(mode === "version" ? "toast.skill_version" : "toast.skill_imported")); done();
+          close(); toast(auto ? T("imp.auto_done", { n: name }) : T(mode === "version" ? "toast.skill_version" : "toast.skill_imported")); done();
         }).catch(function (e) {
           if (seq !== uploadSeq || !document.contains(root)) return;
-          btn.disabled = false;
+          if (btn) btn.disabled = false;
           if (e.status === 409 && e.data && e.data.existing) { p.existing = e.data.existing; show(p, name); return; }
+          if (e.status === 409 && e.data && e.data.code === "risk_confirm") { p.review = e.data.review; p.riskOk = false; show(p, name); return; }
+          if (auto) show(p, name);
           fail(e);
         });
       };
       function show(p, name) {
         var ex = p.existing, bundle = p.bundle && typeof p.bundle === "object" ? p.bundle : null;
         var bundleNotes = bundle && Array.isArray(bundle.notes) ? bundle.notes.filter(function (note) { return typeof note === "string" && note !== "components_inert"; }) : [];
-        prev.innerHTML = '<div class="preview"><form id="sk-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
+        prev.innerHTML = '<div class="preview"><form id="sk-form">' + importRiskHtml(p.review, 'id="sk-risk"', p.riskOk) + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
           '<div class="field"><span>' + esc(T("sk.desc")) + '</span><p class="desc-box">' + esc(p.description || T("sk.no_desc")) + "</p></div>" +
           (bundle ? '<div class="notice">' + ic("folder", "sm") + '<div><strong>' + esc(T("sk.bundle_summary", { name: bundle.name || p.name, skills: bundle.skill_count || 0, commands: bundle.command_count || 0 })) + '</strong>' +
             (bundle.entry ? '<p>' + esc(T("sk.bundle_entry", { name: bundle.entry })) + '</p>' : "") +
@@ -4875,6 +4912,10 @@
         f.name.addEventListener("input", function () { if (p.existing && nm() !== name) { p.existing = null; show(p, nm()); f = $("#sk-form", prev); f.name.focus(); f.name.setSelectionRange(f.name.value.length, f.name.value.length); } });
         f.addEventListener("submit", function (e) { e.preventDefault(); });
         var go = $("#sk-go", foot), ver = $("#sk-ver", foot);
+        var risk = importHigh(p.review) ? $("#sk-risk", prev) : null, gate = function () { var b = go || ver; if (b) b.disabled = importHigh(p.review) && !p.riskOk; };
+        if (risk) risk.addEventListener("change", function () { p.riskOk = risk.checked; gate(); });
+        gate();
+        if (risk && risk.scrollIntoView) risk.scrollIntoView({ block: "center" });
         if (go) go.addEventListener("click", function () { if (f.reportValidity()) doImport(p, nm(), "", go); });
         if (ver) ver.addEventListener("click", function () { doImport(p, nm(), "version", ver); });
       }
@@ -4883,7 +4924,10 @@
         cancelOnly();
         prev.innerHTML = '<p class="muted">' + esc(T("up.reading")) + "</p>";
         upload("/api/skills/upload", fd).then(function (p) {
-          if (seq === uploadSeq && document.contains(root)) show(p, p.name);
+          if (seq !== uploadSeq || !document.contains(root)) return;
+          // low risk and a new name: import right away, no extra step
+          if (p.review && !p.existing && !importHigh(p.review) && SKILL_NAME_RE.test(p.name || "")) { prev.innerHTML = '<p class="muted">' + esc(T("imp.importing")) + "</p>"; doImport(p, p.name, "", null, true); return; }
+          show(p, p.name);
         }).catch(function (e) {
           if (seq === uploadSeq && document.contains(root)) prev.innerHTML = uploadError(e);
         });
@@ -8273,15 +8317,6 @@
       });
     });
   }
-  function capOptimizeDialog(session) {
-    return api("/api/skills").then(function (skills) {
-      modal('<div class="card-head"><h2>' + esc(T("cap.optimize")) + '</h2></div><label class="field"><span>' + esc(T("cap.skill")) + '</span><select id="cap-opt-skill">' + skills.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>'; }).join('') + '</select></label><label class="field"><span>' + esc(T("cap.optimize_reason")) + '</span><textarea id="cap-opt-reason" maxlength="12000"></textarea></label><p class="muted sm">' + esc(T("cap.optimize_proposal_note")) + '</p><p class="field-err" id="cap-opt-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="cap-opt-propose">' + esc(T("cap.preview")) + '</button></div>', function (root, close) {
-        $("#cap-opt-propose", root).addEventListener("click", function (e) { var reason = $("#cap-opt-reason", root).value.trim(); if (!reason) return; var b = e.currentTarget; b.disabled = true;
-          api("/api/capabilities/skill-optimize", { method: "POST", body: { session_id: session.id, skill_id: $("#cap-opt-skill", root).value, reason: reason } }).then(function () { close(); capRefreshSession($("#rc"), session.id, true); }).catch(function (err) { b.disabled = false; $("#cap-opt-error", root).textContent = err.message; });
-        });
-      });
-    });
-  }
   function capSecretsDialog(id) {
     return api("/api/capability-secrets?capability_id="+enc(id),{fresh:true}).then(function(fields){
       modal('<div class="card-head"><h2>'+esc(T("cap.credentials"))+'</h2></div><p class="muted sm">'+esc(T("cap.credentials_note"))+'</p>'+fields.map(function(f,i){return '<label class="field"><span>'+esc(f.name)+(f.set?' · '+esc(T("cap.secret_set")):'')+'</span><input type="password" data-cap-secret="'+i+'" autocomplete="new-password" maxlength="16384"></label>';}).join('')+'<p class="field-err" id="cap-secret-error"></p><div class="actions"><button class="btn ghost" data-close>'+esc(T("btn.cancel"))+'</button><button class="btn primary" id="cap-secret-save">'+esc(T("btn.save"))+'</button></div>',function(root,close){
@@ -8641,9 +8676,8 @@
         });
       };
       wireCaps();
-      var opt = document.createElement("button"); opt.type="button";opt.className="btn sm ghost";opt.textContent=T("cap.optimize");
-      $(".cs-head",sec).insertBefore(opt,$("#cs-del",sec));
-      opt.addEventListener("click",function(){capOptimizeDialog(cur).catch(fail);});
+      // P5: one way to tune a skill here — 「改技能」 (the draft loop). The older AI
+      // 「优化技能」 proposal lives on the skill page under 进阶.
       var grants=document.createElement("button");grants.type="button";grants.className="btn sm ghost";grants.textContent=T("cap.external_tools");$(".cs-head",sec).insertBefore(grants,$("#cs-del",sec));grants.addEventListener("click",function(){capGrantsDialog(s.id).catch(fail);});
       $("#cs-del").addEventListener("click", function (e) {
         var b = e.currentTarget;
@@ -10327,7 +10361,7 @@
       case "chat": p = renderChat(parts[1]); break;
       case "tasks": p = parts[1] ? renderTaskDetail(parts[1], parts[2]) : renderTasks(params); break;
       case "skill-sets": p = renderSkillSets(); break;
-      case "skill-repositories": p = renderSkillRepositories(parts[1]); break;
+      case "skill-repositories": location.replace(repositoryHref(parts[1], true)); p = null; break;
       case "skills": p = parts[1] ? renderSkillDetail(parts[1], params) : renderSkills(); break;
       case "workflows": p = parts[1] ? renderWorkflowEditor(parts[1]) : renderWorkflows(); break;
       case "workflow-runs": p = renderWorkflowRun(parts[1]); break;

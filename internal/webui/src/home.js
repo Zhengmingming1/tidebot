@@ -34,7 +34,7 @@
     return '<section class="home-composer"><form id="home-quick"><div class="home-compose-head"><label for="home-prompt">' + esc(T("home.compose_title")) + '</label>' + draftTagHtml() + '</div>' +
       '<textarea id="home-prompt" name="prompt" rows="2" maxlength="8000" required placeholder="' + esc(T("qr.placeholder")) + '"></textarea>' +
       '<div class="home-compose-actions"><label class="home-provider"><span class="sr-only">' + esc(T("f.provider")) + '</span><select name="provider" aria-label="' + esc(T("f.provider")) + '" disabled><option>' + esc(T("home.loading_provider")) + '</option></select></label>' +
-      '<button class="btn ghost sm" type="button" id="home-advanced">' + ic("settings", "sm") + esc(T("home.run_options")) + '</button><span class="spacer"></span><button class="btn primary" id="home-submit" type="submit" disabled>' + ic("play", "sm") + esc(T("btn.run")) + '</button></div>' +
+      '<button class="btn ghost sm" type="button" id="home-advanced">' + ic("settings", "sm") + esc(T("home.run_options")) + '</button><span class="spacer"></span><button class="btn sm ghost home-chat" type="button" id="home-chat" data-tip="' + esc(T("home.to_chat_tip")) + '">' + ic("chat", "sm") + esc(T("home.to_chat")) + '</button><button class="btn primary" id="home-submit" type="submit" disabled>' + ic("play", "sm") + esc(T("btn.run")) + '</button></div>' +
       '<p class="hint home-compose-hint">' + esc(T("qr.hint")) + ' <span>' + esc(T("qr.run_key", { k: keyLabel("Mod+Enter") })) + '</span></p><p class="field-err" id="home-run-error" role="alert"></p>' +
       '<div id="home-recent-prompts" class="home-recent-prompts"></div></form></section>';
   }
@@ -69,6 +69,11 @@
       draftFlush(); draftSave("qr", ta.value);
       if (!form.provider.disabled) try { localStorage.setItem("tb_qr_provider", form.provider.value); } catch (e) {}
       quickRunModal();
+    });
+    // one place to start: the same text either runs once or opens a conversation (P5)
+    $("#home-chat", form).addEventListener("click", function () {
+      draftFlush(); draftSave("cs_new", ta.value); draftClear("qr");
+      location.hash = "#/chat";
     });
     ta.addEventListener("keydown", function (e) { if (submitKey(e) && !e.repeat) { e.preventDefault(); if (!submit.disabled) form.requestSubmit(); } });
     form.addEventListener("submit", function (e) {

@@ -126,17 +126,22 @@ func (s *Server) handleSkillsImport(w http.ResponseWriter, r *http.Request) {
 		Dir     string `json:"dir"`
 		StageID string `json:"stage_id"`
 		Mode    string `json:"mode"`
+		// ConfirmRisk is the user's explicit yes after seeing high-risk scan findings.
+		ConfirmRisk bool `json:"confirm_risk"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || (body.Dir == "" && body.StageID == "") {
 		writeErr(w, 400, "stage_id or dir required")
 		return
 	}
 	if body.StageID != "" {
-		s.importStaged(w, r, body.StageID, body.Name, body.Mode)
+		s.importStaged(w, r, body.StageID, body.Name, body.Mode, body.ConfirmRisk)
 		return
 	}
 	if st, err := os.Stat(body.Dir); err != nil || !st.IsDir() {
 		writeErr(w, 400, "dir not found")
+		return
+	}
+	if !s.importRiskOK(w, body.Dir, body.ConfirmRisk) {
 		return
 	}
 	sk, err := s.deps.Skills.ImportDir(r.Context(), body.Name, body.Dir, "user")

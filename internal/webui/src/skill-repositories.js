@@ -1,6 +1,8 @@
   // ---------- skill repositories ----------
   var repositoryScan = null;
-  function repositoryInExtensions() { return typeof location !== "undefined" && /^#\/plugins\/sources(?:\/|$)/.test(location.hash); }
+  // P5: Git skill repositories live in one place, 扩展 › 来源 (same scan as every install);
+  // the old #/skill-repositories links redirect there.
+  function repositoryInExtensions() { return true; }
   function repositoryHref(id, extension) {
     if (extension === undefined) extension = repositoryInExtensions();
     return (extension ? "#/plugins/sources" : "#/skill-repositories") + (id ? "/" + enc(id) : "");
@@ -250,6 +252,7 @@
               fieldHtml(T('sr.local_name'), '<input data-sr-name="' + i + '" required maxlength="64" value="' + esc(row.name) + '"' + (source && !row.copy || row.result ? ' disabled' : '') + '>') +
               (source && !row.result ? '<label class="check"><input type="checkbox" data-sr-copy="' + i + '"' + (row.copy ? ' checked' : '') + '> ' + esc(T('sr.copy')) + '</label><p class="hint">' + esc(T('sr.download_hint')) + '</p>' : '') +
               (source && source.local_modified ? '<p class="notice">' + esc(T('sr.local_modified')) + '</p>' : '') +
+              (row.result ? '' : importRiskHtml(p.review, 'data-sr-risk="' + i + '"', row.riskOk)) +
               '<details' + (rows.length === 1 ? ' open' : '') + '><summary>SKILL.md · ' + esc(T('fb.sum', { n: p.files, size: fmtBytes(p.size || 0) })) + '</summary><div class="md sr-markdown">' + mdHtml(p.skill_md || '', null) + '</div><div class="ftree">' + fileTree(p.tree || []) + '</div></details>' +
               (source ? '<details><summary>' + esc(T('diff.compare')) + '</summary>' + repositoryDiff(p.diff) + '</details>' : '') +
               (p.used_by && p.used_by.length ? '<details><summary>' + esc(T('sr.usage')) + '</summary><ul>' + p.used_by.map(repositoryUsageHtml).join('') + '</ul></details>' : '') : '') +
@@ -258,6 +261,7 @@
         }).join('');
         install.disabled = !rows.some(function (row) { return row.preview && !row.preview.error && !row.result; });
         $$('[data-sr-name]', host).forEach(function (el) { el.oninput = function () { rows[+el.getAttribute('data-sr-name')].name = el.value; }; });
+        $$('[data-sr-risk]', host).forEach(function (el) { el.onchange = function () { rows[+el.getAttribute('data-sr-risk')].riskOk = el.checked; }; });
         $$('[data-sr-copy]', host).forEach(function (el) { el.onchange = function () { var row = rows[+el.getAttribute('data-sr-copy')]; row.copy = el.checked; row.name = row.copy ? (row.preview.name || row.candidate.name).slice(0, 58) + '-copy' : row.preview.name || row.candidate.name; draw(); }; });
         $$('[data-sr-deps]', host).forEach(function (el) { el.onclick = function () { var r = rows[+el.getAttribute('data-sr-deps')].result; dependencyCheck({kind:'skill',id:r.skill_id}); }; });
         $$('[data-sr-run]', host).forEach(function (el) { el.onclick = function () { var r = rows[+el.getAttribute('data-sr-run')].result; quickRunModal({skill_id:r.skill_id}); }; });
@@ -282,12 +286,14 @@
         for (var i = 0; i < rows.length && alive(); i++) {
           var row = rows[i]; if (!row.preview || row.preview.error || row.result) continue;
           if (!row.name.trim()) { row.error = T('sr.name_required'); continue; }
+          if (importHigh(row.preview.review) && !row.riskOk) { row.error = T('imp.risk_need'); continue; }
           try {
-            row.result = await api('/api/skill-repositories/' + enc(repo.id) + '/install', {method:'POST',body:{stage_id:row.preview.stage_id,path:row.candidate.path,commit:repo.commit,name:row.name.trim(),expected_current_version_id:row.preview.expected_current_version_id || '',copy:!!row.copy},signal:ac.signal});
+            row.result = await api('/api/skill-repositories/' + enc(repo.id) + '/install', {method:'POST',body:{stage_id:row.preview.stage_id,path:row.candidate.path,commit:repo.commit,name:row.name.trim(),expected_current_version_id:row.preview.expected_current_version_id || '',copy:!!row.copy,confirm_risk:!!row.riskOk},signal:ac.signal});
             row.error = ''; changed = true;
           } catch (e) {
             if (ac.signal.aborted) break;
-            row.error = e.message;
+            row.error = e.data && e.data.code === 'risk_confirm' ? T('imp.risk_need') : e.message;
+            if (e.data && e.data.review) row.preview.review = e.data.review;
             if (e.data && e.data.suggested_name) row.name = e.data.suggested_name;
           }
         }

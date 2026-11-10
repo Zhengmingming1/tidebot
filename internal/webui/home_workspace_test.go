@@ -70,7 +70,7 @@ eval(grab("homePendingHtml") + "\n" + grab("homeQuickHtml") + "\n" + grab("syncH
 const flush=async()=>{await Promise.resolve();await Promise.resolve();await Promise.resolve();};
 async function setup(text, settings, store) {
   ctx={nodes:{},drafts:{qr:{text:text}},store:store||{},settings:settings,posts:[],modalCalls:[],started:[],cleared:0};
-  for(const q of ["#home-quick","#home-prompt","#home-submit","#home-advanced","#home-run-error","#home-recent-prompts","#modal-root"]) ctx.nodes[q]=new El();
+  for(const q of ["#home-quick","#home-prompt","#home-submit","#home-advanced","#home-chat","#home-run-error","#home-recent-prompts","#modal-root"]) ctx.nodes[q]=new El();
   ctx.form=ctx.nodes["#home-quick"]; ctx.ta=ctx.nodes["#home-prompt"]; ctx.submit=ctx.nodes["#home-submit"]; ctx.advanced=ctx.nodes["#home-advanced"]; ctx.modal=ctx.nodes["#modal-root"];
   ctx.form.provider=new El(); ctx.form.provider.isSelect=true; ctx.form.provider.disabled=true; ctx.submit.disabled=true;
   ctx.form.requestSubmit=()=>ctx.form.events.submit({preventDefault:()=>{}});

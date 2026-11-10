@@ -288,7 +288,7 @@ func main() {
 		case "import":
 			var out any
 			must(cli.Call("skills.import", map[string]string{
-				"name": flagOpt(args[1:], "--name", ""), "dir": needFlag(args[1:], "--dir"),
+				"name": flagOpt(args[1:], "--name", ""), "dir": needFlag(args[1:], "--dir"), "confirm_risk": confirmRiskFlag(args[1:]),
 			}, &out))
 			printJSON(out)
 		case "list", "ls":
@@ -468,4 +468,14 @@ func atoi(s string) int64 {
 	var n int64
 	fmt.Sscanf(s, "%d", &n)
 	return n
+}
+
+// confirmRiskFlag is "1" when --confirm-risk is given (import high-risk skill content anyway).
+func confirmRiskFlag(args []string) string {
+	for _, a := range args {
+		if a == "--confirm-risk" {
+			return "1"
+		}
+	}
+	return ""
 }

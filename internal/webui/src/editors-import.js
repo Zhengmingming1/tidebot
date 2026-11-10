@@ -87,6 +87,17 @@
     return '<div class="tree">' + walk(root) + "</div>";
   }
   // ---------- skill import ----------
+  // P5: imports use the extension scan. Low risk imports without a prompt; high risk shows
+  // what was found and imports only after the user ticks the box (the server checks again).
+  var SKILL_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u;
+  function importHigh(rv) { return !!(rv && rv.scan && rv.scan.verdict === "high"); }
+  function importRiskHtml(rv, attr, checked) {
+    if (!importHigh(rv)) return "";
+    var fs = (rv.scan.findings || []).filter(function (f) { return f.severity === "high"; }).slice(0, 5);
+    return '<div class="notice bad imp-risk" role="alert">' + ic("shield", "sm") + "<div><strong>" + esc(T("imp.risk_title")) + "</strong>" +
+      '<ul class="list-plain">' + fs.map(function (f) { return '<li data-tip="' + esc(f.note || "") + '"><code>' + esc((f.file || "") + (f.line ? ":" + f.line : "")) + "</code> " + esc(T("imp.f_" + f.id) === "imp.f_" + f.id ? f.id : T("imp.f_" + f.id)) + "</li>"; }).join("") + "</ul>" +
+      '<label class="check"><input type="checkbox" ' + attr + (checked ? " checked" : "") + "> " + esc(T("imp.risk_ok")) + "</label></div></div>";
+  }
   function skillImportModal(done) {
     modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("sk.import")) + "</h2></div>" + dropZone("sk-drop", ".zip,.skill,.tar.gz,.tgz", true) + '<div id="sk-prev"></div><div class="actions" id="sk-foot"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + "</button></div>", function (root, close) {
       var prev = $("#sk-prev", root), foot = $("#sk-foot", root), uploadSeq = 0;
@@ -104,23 +115,27 @@
         return '<div class="notice bad" role="alert">' + ic("x", "sm") + '<div>' + esc(message) +
           (candidates.length ? '<ul class="list-plain">' + candidates.map(function (p) { return '<li><code>' + esc(p) + '</code></li>'; }).join("") + '</ul>' : "") + '</div></div>';
       }
-      var doImport = function (p, name, mode, btn) {
+      var doImport = function (p, name, mode, btn, auto) {
         var seq = uploadSeq;
-        btn.disabled = true;
-        api("/api/skills/import", { method: "POST", body: { stage_id: p.stage_id, name: name, mode: mode } }).then(function () {
+        if (btn) btn.disabled = true;
+        var body = { stage_id: p.stage_id, name: name, mode: mode };
+        if (p.riskOk) body.confirm_risk = true;
+        api("/api/skills/import", { method: "POST", body: body }).then(function () {
           if (seq !== uploadSeq || !document.contains(root)) return;
-          close(); toast(T(mode === "version" ? "toast.skill_version" : "toast.skill_imported")); done();
+          close(); toast(auto ? T("imp.auto_done", { n: name }) : T(mode === "version" ? "toast.skill_version" : "toast.skill_imported")); done();
         }).catch(function (e) {
           if (seq !== uploadSeq || !document.contains(root)) return;
-          btn.disabled = false;
+          if (btn) btn.disabled = false;
           if (e.status === 409 && e.data && e.data.existing) { p.existing = e.data.existing; show(p, name); return; }
+          if (e.status === 409 && e.data && e.data.code === "risk_confirm") { p.review = e.data.review; p.riskOk = false; show(p, name); return; }
+          if (auto) show(p, name);
           fail(e);
         });
       };
       function show(p, name) {
         var ex = p.existing, bundle = p.bundle && typeof p.bundle === "object" ? p.bundle : null;
         var bundleNotes = bundle && Array.isArray(bundle.notes) ? bundle.notes.filter(function (note) { return typeof note === "string" && note !== "components_inert"; }) : [];
-        prev.innerHTML = '<div class="preview"><form id="sk-form">' + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
+        prev.innerHTML = '<div class="preview"><form id="sk-form">' + importRiskHtml(p.review, 'id="sk-risk"', p.riskOk) + fieldHtml(T("tf.name"), '<input name="name" required maxlength="64" value="' + esc(name || p.name) + '">', T("sk.name_hint")) +
           '<div class="field"><span>' + esc(T("sk.desc")) + '</span><p class="desc-box">' + esc(p.description || T("sk.no_desc")) + "</p></div>" +
           (bundle ? '<div class="notice">' + ic("folder", "sm") + '<div><strong>' + esc(T("sk.bundle_summary", { name: bundle.name || p.name, skills: bundle.skill_count || 0, commands: bundle.command_count || 0 })) + '</strong>' +
             (bundle.entry ? '<p>' + esc(T("sk.bundle_entry", { name: bundle.entry })) + '</p>' : "") +
@@ -138,6 +153,10 @@
         f.name.addEventListener("input", function () { if (p.existing && nm() !== name) { p.existing = null; show(p, nm()); f = $("#sk-form", prev); f.name.focus(); f.name.setSelectionRange(f.name.value.length, f.name.value.length); } });
         f.addEventListener("submit", function (e) { e.preventDefault(); });
         var go = $("#sk-go", foot), ver = $("#sk-ver", foot);
+        var risk = importHigh(p.review) ? $("#sk-risk", prev) : null, gate = function () { var b = go || ver; if (b) b.disabled = importHigh(p.review) && !p.riskOk; };
+        if (risk) risk.addEventListener("change", function () { p.riskOk = risk.checked; gate(); });
+        gate();
+        if (risk && risk.scrollIntoView) risk.scrollIntoView({ block: "center" });
         if (go) go.addEventListener("click", function () { if (f.reportValidity()) doImport(p, nm(), "", go); });
         if (ver) ver.addEventListener("click", function () { doImport(p, nm(), "version", ver); });
       }
@@ -146,7 +165,10 @@
         cancelOnly();
         prev.innerHTML = '<p class="muted">' + esc(T("up.reading")) + "</p>";
         upload("/api/skills/upload", fd).then(function (p) {
-          if (seq === uploadSeq && document.contains(root)) show(p, p.name);
+          if (seq !== uploadSeq || !document.contains(root)) return;
+          // low risk and a new name: import right away, no extra step
+          if (p.review && !p.existing && !importHigh(p.review) && SKILL_NAME_RE.test(p.name || "")) { prev.innerHTML = '<p class="muted">' + esc(T("imp.importing")) + "</p>"; doImport(p, p.name, "", null, true); return; }
+          show(p, p.name);
         }).catch(function (e) {
           if (seq === uploadSeq && document.contains(root)) prev.innerHTML = uploadError(e);
         });

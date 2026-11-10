@@ -18,7 +18,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Zhengmingming1/tidebot/internal/capability"
 	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
+	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 )
 
 // ---------- skill upload ----------
@@ -48,6 +50,9 @@ type skillPreview struct {
 	Checks      []previewCheck         `json:"checks"`
 	Existing    *skillExisting         `json:"existing,omitempty"`
 	Bundle      *skillpkg.PluginBundle `json:"bundle,omitempty"`
+	// Review is the extension install scan for a user-picked source (P5): low risk imports
+	// without a prompt, high risk only after the user confirms.
+	Review *capability.ImportReview `json:"review,omitempty"`
 }
 
 type previewFile struct {
@@ -185,6 +190,13 @@ func (s *Server) handleSkillUpload(w http.ResponseWriter, r *http.Request) {
 	})
 	p.Checks = []previewCheck{{"skill_md", true}, {"name", meta.Name != ""}, {"description", meta.Description != ""}, {"size", p.Size <= skillpkg.MaxTotalBytes}}
 	p.Existing = s.findSkill(r.Context(), p.Name)
+	if files, err := skillstore.ReadTree(root); err == nil {
+		rv := capability.ReviewImport(files)
+		p.Review = &rv
+	} else {
+		fail(400, err.Error())
+		return
+	}
 	_ = os.WriteFile(filepath.Join(dest, ".root"), []byte(root), 0o600)
 	writeJSON(w, 200, p)
 }
@@ -220,7 +232,7 @@ func (s *Server) findSkill(ctx context.Context, name string) *skillExisting {
 var skillNameRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$`)
 
 // importStaged commits a staged upload. mode "version" is required when the name exists.
-func (s *Server) importStaged(w http.ResponseWriter, r *http.Request, stageID, name, mode string) {
+func (s *Server) importStaged(w http.ResponseWriter, r *http.Request, stageID, name, mode string, confirmed bool) {
 	if !stageIDRe.MatchString(stageID) {
 		writeErr(w, 400, "bad stage id")
 		return
@@ -243,6 +255,9 @@ func (s *Server) importStaged(w http.ResponseWriter, r *http.Request, stageID, n
 	}
 	if ex := s.findSkill(r.Context(), name); ex != nil && mode != "version" {
 		writeJSON(w, 409, map[string]any{"error": "a skill with this name exists", "code": "exists", "existing": ex})
+		return
+	}
+	if !s.importRiskOK(w, root, confirmed) {
 		return
 	}
 	_ = os.Remove(filepath.Join(dest, ".root"))
@@ -525,4 +540,28 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// importRiskOK rescans a folder about to be imported (the preview is never trusted) and
+// answers 409 risk_confirm for unconfirmed high-risk content, 403 when policy refuses it.
+func (s *Server) importRiskOK(w http.ResponseWriter, dir string, confirmed bool) bool {
+	files, err := skillstore.ReadTree(dir)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return false
+	}
+	return writeImportRisk(w, files, confirmed)
+}
+
+func writeImportRisk(w http.ResponseWriter, files map[string][]byte, confirmed bool) bool {
+	rv, err := capability.CheckImport(files, confirmed)
+	switch {
+	case errors.Is(err, capability.ErrRiskConfirm):
+		writeJSON(w, 409, map[string]any{"error": err.Error(), "code": "risk_confirm", "review": rv})
+		return false
+	case err != nil:
+		writeJSON(w, 403, map[string]any{"error": err.Error(), "code": "risk_refused", "review": rv})
+		return false
+	}
+	return true
 }

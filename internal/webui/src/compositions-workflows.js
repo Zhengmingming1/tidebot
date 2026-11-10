@@ -1,7 +1,7 @@
   // ---------- reusable skill compositions ----------
   var skillEditorSeq = 0;
   function skillTabs(active) {
-    return sectionTabs("ss-tabs", T("ss.tabs"), [["skills", "nav.skills"], ["skill-repositories", "sr.title"], ["skill-sets", "ss.title"], ["workflows", "ss.workflows"]].map(function (x) {
+    return sectionTabs("ss-tabs", T("ss.tabs"), [["skills", "nav.skills"], ["skill-sets", "ss.title"]].map(function (x) {
       return { href: "#/" + x[0], label: T(x[1]), active: active === x[0] };
     }));
   }
@@ -267,7 +267,7 @@
   }
   function renderWorkflows() {
     return api('/api/workflows').then(function(items){
-      mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><div class="actions"><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div></div>'+skillTabs('workflows')+
+      mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><div class="actions"><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div></div>'+
         (items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span>'+wfTasksPill(w)+'<span class="tag" data-tip="'+esc(wfModeNotice(w.definition))+'">'+esc(T('rn.'+wfMode(w.definition)))+'</span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
       $$('[data-wf-run]').forEach(function(b){b.onclick=function(){workflowRunModal(b.dataset.wfRun);};});
       $$('[data-wf-deps]').forEach(function(b){b.onclick=function(){dependencyCheck({kind:'workflow',id:b.dataset.wfDeps});};});
