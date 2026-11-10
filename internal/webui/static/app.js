@@ -2147,7 +2147,7 @@
   // A start request answers once the new run exists, with its id: open exactly that run so
   // its log streams right away. No id means it is queued behind the concurrency limit.
   function openStarted(res, msg) {
-    if (res && res.run_id) { toast(startedText(res, msg)); location.hash = "#/runs/" + enc(res.run_id); return; }
+    if (res && res.run_id) { toast(startedText(res, msg)); location.hash = (/^wfr_/.test(res.run_id) ? "#/workflow-runs/" : "#/runs/") + enc(res.run_id); return; }
     toast(T("toast.run_queued")); location.hash = "#/runs";
   }
   // Toast for a start answer: a run waiting for a free slot says where it is in line.
@@ -3032,7 +3032,7 @@
   function exportTasks(ids, btn) {
     return downloadFile("/api/tasks/export" + (ids.length ? "?ids=" + ids.map(enc).join(",") : ""), "tidebot-tasks.json", btn);
   }
-  var TX_NOTES = { renamed: "tx.n_renamed", provider_missing: "tx.n_provider", skill_missing: "tx.n_skill", run_exec: "tx.n_exec" };
+  var TX_NOTES = { renamed: "tx.n_renamed", provider_missing: "tx.n_provider", skill_missing: "tx.n_skill", run_exec: "tx.n_exec", workflow_current: "tx.n_wf_current" };
   function taskImportModal(done) {
     modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("tx.title")) + "</h2></div>" +
       '<div class="drop" id="tx-drop">' + ic("upload", "lg") + "<strong>" + esc(T("tx.drop")) + "</strong><small>" + esc(T("tx.drop_sub")) + '</small><div class="row-actions"><label class="btn sm">' + esc(T("up.pick_file")) + '<input type="file" class="hidden" id="tx-file" accept=".json,application/json" data-noguard></label></div></div>' +
@@ -3210,7 +3210,8 @@
         "<dt>" + esc(T("td.requirements")) + "</dt><dd>" + (tk.constraints.length ? '<ul class="list-plain">' + tk.constraints.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" : '<span class="muted">' + esc(T("td.none_yet")) + "</span>") + "</dd>" +
         "<dt>" + esc(T("col.schedule")) + "</dt><dd>" + esc(cronHuman(tk.cron)) + (tk.cron ? '<span class="ov-next" id="ov-next"></span>' : "") + "</dd>" +
         "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(tk.provider || T("td.default")) + "</dd>" +
-        "<dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd>" +
+        (tk.workflow ? "<dt>" + esc(T("tf.wf")) + "</dt><dd>" + (tk.workflow.name ? '<a href="#/workflows/' + enc(tk.workflow.id) + '">' + esc(tk.workflow.name) + "</a> " + '<span class="tag" data-tip="' + esc(T("tf.wf_version")) + '">' + esc(tk.workflow.version ? "v" + tk.workflow.version : T("tf.wf_follow")) + "</span>" : '<span class="muted">' + esc(T("tf.wf_gone")) + "</span>") + "</dd>" :
+        "<dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd>") +
         "<dt>" + esc(T("td.workspace")) + '</dt><dd class="ws-row">' + (tk.workspace ? '<code class="ws-path">' + esc(tk.workspace) + "</code>" +
           (tk.workspace_default ? '<span class="tag" data-tip="' + esc(T("ws.default_tip")) + '">' + esc(T("ws.default")) + "</span>" : "") +
           '<button type="button" class="icon-btn sm" id="ws-copy" data-tip="' + esc(T("ws.copy")) + '" aria-label="' + esc(T("ws.copy")) + '">' + ic("copy", "sm") + "</button>" +
@@ -3756,37 +3757,68 @@
     var states=Object.create(null);(results||[]).forEach(function(n){states[n.node_id]=n.status;});var copy=JSON.parse(JSON.stringify(def));if(copy.nodes.some(function(n){return !n.position;}))wfArrange(copy);var scene=wfScene(copy,'',states);
     return '<div class="wf-trace-graph"><svg role="img" aria-label="'+esc(T('wf.graph'))+'" viewBox="0 0 '+scene.width+' '+scene.height+'">'+scene.html+'</svg></div>';
   }
+  // P4: a workflow's folder and permission level (every node inherits them), and what
+  // runs it on a schedule (tasks whose target is the workflow).
+  function wfMode(d) { return (d && d.run_mode) || 'read'; }
+  function wfModeNotice(d) {
+    var m = wfMode(d), dir = d.workspace_dir || '';
+    return T('wf.run_notice_' + m + (dir ? '' : '_scratch'), { p: dir }) + (m !== 'read' ? ' ' + T('wf.serial_note') : '') + (d.budget > 0 ? ' ' + T('wf.budget_note', { b: money(d.budget, d.budget_currency) }) : '');
+  }
+  function wfTasksPill(w) {
+    var ts = w.tasks || [];
+    if (!ts.length) return '';
+    var lines = ts.map(function (t) { return t.name + ' · ' + (t.cron ? cronHuman(t.cron) : T('se.manual')) + (t.status === 'paused' ? ' · ' + T('wf.task_paused') : ''); }).join('\n');
+    var first = ts[0];
+    return '<a class="pill plain sm wf-sched-pill" href="#/tasks/' + enc(first.id) + '" data-tip="' + esc(T('wf.tasks_tip', { l: lines })) + '">' + ic('clock', 'sm') + esc(ts.length > 1 ? T('wf.tasks_n', { n: ts.length }) : (first.cron ? cronHuman(first.cron) : T('se.manual'))) + '</a>';
+  }
+  function wfSchedule(w) {
+    // the task form, its target the workflow pinned to the version shown (manual until a schedule is set)
+    taskFormModal(null, { name: w.name, workflow: { id: w.id, version: w.version, current: w.version, name: w.name } });
+  }
   function renderWorkflows() {
     return api('/api/workflows').then(function(items){
       mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><div class="actions"><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div></div>'+skillTabs('workflows')+
-        (items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
+        (items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span>'+wfTasksPill(w)+'<span class="tag" data-tip="'+esc(wfModeNotice(w.definition))+'">'+esc(T('rn.'+wfMode(w.definition)))+'</span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
       $$('[data-wf-run]').forEach(function(b){b.onclick=function(){workflowRunModal(b.dataset.wfRun);};});
       $$('[data-wf-deps]').forEach(function(b){b.onclick=function(){dependencyCheck({kind:'workflow',id:b.dataset.wfDeps});};});
     });
   }
   function workflowRunModal(id) {
     Promise.all([api('/api/workflows/'+enc(id)),api('/api/settings')]).then(function(r){var w=r[0],st=r[1];
-      modal('<div class="card-head"><h2>'+esc(w.name)+'</h2><span class="tag">v'+esc(w.version)+'</span></div><form id="wf-run-form">'+fieldHtml(T('wf.input'),'<textarea name="input" rows="5" maxlength="32000" placeholder="'+esc(T('wf.input_hint'))+'"></textarea>')+fieldHtml(T('f.provider'),'<select name="provider">'+providerOptions(st, smartProvider(st), false, false)+'</select>')+'<p class="notice">'+esc(T('wf.run_notice'))+'</p><p class="field-err" id="wf-run-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="submit" class="btn primary">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></form>',function(root,close){
+      modal('<div class="card-head"><h2>'+esc(w.name)+'</h2><span class="tag">v'+esc(w.version)+'</span></div><form id="wf-run-form">'+fieldHtml(T('wf.input'),'<textarea name="input" rows="5" maxlength="32000" placeholder="'+esc(T('wf.input_hint'))+'"></textarea>')+fieldHtml(T('f.provider'),'<select name="provider">'+providerOptions(st, smartProvider(st), false, false)+'</select>')+'<p class="notice">'+esc(wfModeNotice(w.definition))+'</p><p class="field-err" id="wf-run-error"></p><div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T('btn.cancel'))+'</button><button type="submit" class="btn primary">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></form>',function(root,close){
         var f=$('#wf-run-form',root);f.onsubmit=function(e){e.preventDefault();if(!readyProviders(st).some(function(p){return p.name===f.provider.value;})){$('#wf-run-error',root).textContent=T('cc.no_provider');return;}var b=f.querySelector('[type=submit]');b.disabled=true;
-          api('/api/workflows/'+enc(id)+'/run',{method:'POST',body:{input:f.input.value,provider:f.provider.value}}).then(function(x){close();location.hash='#/workflow-runs/'+enc(x.run_id);}).catch(function(e){b.disabled=false;$('#wf-run-error',root).textContent=e.message;});};
+          (wfMode(w.definition)==='exec'?execFirstUse(st.sandbox,f):Promise.resolve(true)).then(function(ok){if(!ok){b.disabled=false;return;}
+          api('/api/workflows/'+enc(id)+'/run',{method:'POST',body:{input:f.input.value,provider:f.provider.value}}).then(function(x){close();location.hash='#/workflow-runs/'+enc(x.run_id);}).catch(function(e){b.disabled=false;var pr=e.data&&e.data.problem;$('#wf-run-error',root).textContent=pr?T('rn.ws_'+pr+'_tip'):e.message;});});};
       });
     }).catch(fail);
   }
   function renderWorkflowEditor(id) {
     var routeKey=location.hash,creating=!id||id==='new';
-    return Promise.all([api('/api/skills'),api('/api/skill-sets'),creating?Promise.resolve(null):api('/api/workflows/'+enc(id))]).then(function(r){
+    return Promise.all([api('/api/skills'),api('/api/skill-sets'),creating?Promise.resolve(null):api('/api/workflows/'+enc(id)),api('/api/settings').catch(function(){return {};})]).then(function(r){
       if(location.hash!==routeKey || workflowDraftGuard&&workflowDraftGuard.dirty())return;
-      var skills=r[0],sets=r[1],saved=r[2],def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:0,nodes:[]};
+      var skills=r[0],sets=r[1],saved=r[2],def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:0,run_mode:'exec',workspace_dir:'',nodes:[]},st=r[3]||{},cur=(st.fx||{}).display||state.currency||'USD';
+      // saved before the three levels: read-only, as it always ran (keeps its values)
+      if(!def.run_mode)def.run_mode='read';if(!def.workspace_dir)def.workspace_dir='';if(!def.budget){def.budget=0;delete def.budget_currency;}
       if(def.nodes.some(function(n){return !n.position;}))wfArrange(def);
       var selected=def.nodes.length?def.nodes[0].id:'',zoom=0.85,drag=null,link=null,baseline=JSON.stringify(def);
-      mount('<div class="page-head wf-page-head"><div><a href="#/workflows">← '+esc(T('nav.workflows'))+'</a><h1>'+esc(creating?T('wf.create'):saved.name)+'</h1></div><div class="row-actions actions"><button class="btn" id="wf-check">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" id="wf-save">'+ic('check','sm')+esc(T('btn.save'))+'</button>'+(creating?'':'<button class="btn" id="wf-run">'+ic('play','sm')+esc(T('btn.run'))+'</button>')+'</div></div>'+
-        '<form id="wf-meta" class="card wf-meta"><div class="wf-meta-name">'+fieldHtml(T('tf.name'),'<input name="name" required maxlength="80" value="'+esc(def.name)+'">')+'</div><details class="wf-options"><summary>'+esc(T('wf.options'))+'</summary><div class="form-row">'+fieldHtml(T('wf.parallel'),'<input name="max_parallel" type="number" min="1" max="4" value="'+def.max_parallel+'">')+'<div class="field wf-timeout"><label class="check"><input type="checkbox" name="timeout_enabled"'+(def.timeout_minutes>0?' checked':'')+'> '+esc(T('wf.timeout_enabled'))+tip(T('wf.timeout_tip'))+'</label><input name="timeout_minutes" type="number" min="1" max="1440" aria-label="'+esc(T('tf.timeout'))+'" placeholder="'+esc(T('tf.no_cap'))+'" value="'+(def.timeout_minutes>0?def.timeout_minutes:'')+'"'+(def.timeout_minutes>0?'':' disabled')+'></div></div>'+fieldHtml(T('sk.desc'),'<input name="description" maxlength="4096" value="'+esc(def.description||'')+'">')+'</details></form>'+
+      mount('<div class="page-head wf-page-head"><div><a href="#/workflows">← '+esc(T('nav.workflows'))+'</a><h1>'+esc(creating?T('wf.create'):saved.name)+'</h1></div><div class="row-actions actions"><button class="btn" id="wf-check">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" id="wf-save">'+ic('check','sm')+esc(T('btn.save'))+'</button>'+(creating?'':'<button class="btn" id="wf-sched" data-tip="'+esc(T('wf.sched_tip'))+'">'+ic('clock','sm')+esc(T('wf.sched'))+'</button><button class="btn" id="wf-run">'+ic('play','sm')+esc(T('btn.run'))+'</button>')+'</div></div>'+
+        '<form id="wf-meta" class="card wf-meta"><div class="wf-meta-name">'+fieldHtml(T('tf.name'),'<input name="name" required maxlength="80" value="'+esc(def.name)+'">',null,saved?wfTasksPill(saved):'')+'</div>'+
+        '<div class="field ws-field wf-ws"><span class="rn-ws-lbl"><span id="wf-wlbl">'+esc(T('rn.folder'))+'</span>'+tip(T('wf.folder_tip'))+'<span class="pill sm hidden" id="wf-ws-st"></span><span class="spacer"></span>'+modeSegHtml('run_mode',def.run_mode,st.sandbox)+'</span>'+
+        '<div class="in-group ws-in"><input name="workspace_dir" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="wf-wlbl" placeholder="'+esc(T('rn.folder_ph'))+'" value="'+esc(def.workspace_dir)+'"><button type="button" class="icon-btn sm hidden" id="wf-ws-clear" data-tip="'+esc(T('rn.folder_clear'))+'" aria-label="'+esc(T('rn.folder_clear'))+'">'+ic('x','sm')+'</button></div><p class="hint" id="wf-ws-hint" data-tip=""></p></div><details class="wf-options"><summary>'+esc(T('wf.options'))+'</summary><div class="form-row">'+fieldHtml(T('wf.parallel'),'<input name="max_parallel" type="number" min="1" max="4" value="'+def.max_parallel+'">')+'<div class="field wf-timeout"><label class="check"><input type="checkbox" name="timeout_enabled"'+(def.timeout_minutes>0?' checked':'')+'> '+esc(T('wf.timeout_enabled'))+tip(T('wf.timeout_tip'))+'</label><input name="timeout_minutes" type="number" min="1" max="1440" aria-label="'+esc(T('tf.timeout'))+'" placeholder="'+esc(T('tf.no_cap'))+'" value="'+(def.timeout_minutes>0?def.timeout_minutes:'')+'"'+(def.timeout_minutes>0?'':' disabled')+'></div><div class="field wf-timeout wf-budget"><label class="check"><input type="checkbox" name="budget_enabled"'+(def.budget>0?' checked':'')+'> '+esc(T('wf.budget_enabled'))+tip(T('wf.budget_tip'))+'</label><input name="budget" type="number" min="0.0001" max="10000" step="0.0001" aria-label="'+esc(T('wf.budget_c',{c:def.budget_currency||cur}))+'" placeholder="'+esc(T('wf.budget_c',{c:def.budget_currency||cur}))+'" value="'+(def.budget>0?def.budget:'')+'"'+(def.budget>0?'':' disabled')+'></div></div>'+fieldHtml(T('sk.desc'),'<input name="description" maxlength="4096" value="'+esc(def.description||'')+'">')+'</details></form>'+
         '<div class="wf-designer"><aside class="card wf-palette"><h2>'+esc(T('wf.palette'))+'</h2><p class="hint">'+esc(T('wf.drag_hint'))+'</p><div id="wf-palette-skills">'+skills.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="skill" data-palette-index="'+i+'">'+ic('skills','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+(skills.length?'':'<a href="#/skills">'+esc(T('wf.need_skill'))+'</a>')+'</div><h3>'+esc(T('ss.title'))+'</h3>'+sets.map(function(s,i){return '<button type="button" class="wf-palette-item" draggable="true" data-palette="set" data-palette-index="'+i+'">'+ic('layers','sm')+'<span>'+esc(s.name)+'</span></button>';}).join('')+'<h3>'+esc(T('wf.control'))+'</h3><button type="button" class="wf-palette-item" draggable="true" data-palette="condition">'+ic('branch','sm')+esc(T('wf.condition'))+'</button></aside>'+
         '<section class="card wf-canvas-panel"><div class="wf-canvas-toolbar"><button class="btn sm" id="wf-arrange">'+esc(T('wf.arrange'))+'</button><button class="btn sm" id="wf-example">'+esc(T('wf.example'))+'</button><span class="grow"></span><label>'+esc(T('wf.zoom'))+' <select id="wf-zoom">'+[50,75,85,100,125].map(function(n){return opt(n,n+'%',n===85);}).join('')+'</select></label></div><p class="hint" id="wf-canvas-hint">'+esc(T('wf.connect_hint'))+'</p><div class="wf-canvas-scroll" id="wf-canvas-scroll"><svg id="wf-canvas" role="group" aria-label="'+esc(T('wf.graph'))+'" tabindex="0"></svg></div></section>'+
         '<aside class="card wf-inspector" id="wf-inspector"></aside></div><p class="notice bad hidden" id="wf-error" role="alert"></p>'+
         (creating?'':'<section class="card"><div class="card-head"><h2>'+esc(T('wf.history'))+'</h2><span class="grow"></span><button class="btn ghost sm" id="wf-delete">'+esc(T('btn.delete'))+'</button></div><div id="wf-history"></div></section>'),'workflows',[[T('nav.workflows'),'#/workflows'],[creating?T('wf.create'):saved.name]]);
       var f=$('#wf-meta'),svg=$('#wf-canvas'),inspector=$('#wf-inspector'),host=$('#wf-canvas-scroll');
-      function read(){def.name=f.name.value.trim();def.description=f.description.value;def.max_parallel=+f.max_parallel.value;def.timeout_minutes=f.timeout_enabled.checked?+f.timeout_minutes.value||0:0;return def;}
+      function read(){def.name=f.name.value.trim();def.description=f.description.value;def.max_parallel=+f.max_parallel.value;def.timeout_minutes=f.timeout_enabled.checked?+f.timeout_minutes.value||0:0;var mc=f.querySelector('input[name="run_mode"]:checked');def.run_mode=mc?mc.value:'read';def.workspace_dir=f.workspace_dir.value.trim();var bv=f.budget_enabled.checked?+f.budget.value||0:0;if(bv>0){def.budget=bv;def.budget_currency=def.budget_currency||cur;}else{def.budget=0;delete def.budget_currency;}return def;}
+      f.budget_enabled.onchange=function(){f.budget.disabled=!this.checked;if(this.checked)f.budget.focus();};
+      // folder + permission: like the Run dialog (可修改 needs a folder); the hint says what nodes may do
+      var wsPill=$('#wf-ws-st'),wsClear=$('#wf-ws-clear'),wsHint=$('#wf-ws-hint'),wsSeq=0,wsTimer=0;
+      function paintMode(){var dir=f.workspace_dir.value.trim();$$('input[name="run_mode"]',f).forEach(function(i){i.disabled=!dir&&i.value==='edit';});var c=f.querySelector('input[name="run_mode"]:checked');if(!dir&&c&&c.value==='edit'){f.querySelector('input[name="run_mode"][value="exec"]').checked=true;}var d=read();wsHint.textContent=wfModeNotice(d);wsHint.setAttribute('data-tip',wsHint.textContent);wsClear.classList.toggle('hidden',!dir);}
+      function checkWs(){var my=++wsSeq,v=f.workspace_dir.value.trim();paintMode();if(!v){wsPill.className='pill sm hidden';return;}api('/api/tasks/workspace-check?mode=run&path='+enc(v)).then(function(x){if(my!==wsSeq)return;x=x||{};var pr=x.problem||'';wsPill.className='pill sm '+(pr?'bad':'ok');wsPill.textContent=pr?T('rn.ws_'+pr):T('rn.ws_ok');wsPill.setAttribute('data-tip',pr?T('rn.ws_'+pr+'_tip'):(x.path||''));}).catch(function(){});}
+      f.workspace_dir.addEventListener('input',function(){clearTimeout(wsTimer);wsTimer=setTimeout(checkWs,250);paintMode();});
+      wsClear.onclick=function(){f.workspace_dir.value='';checkWs();f.workspace_dir.focus();};
+      $$('input[name="run_mode"]',f).forEach(function(i){i.addEventListener('change',paintMode);});
       f.timeout_enabled.onchange=function(){f.timeout_minutes.disabled=!this.checked;if(this.checked&&!f.timeout_minutes.value)f.timeout_minutes.value=60;if(this.checked)f.timeout_minutes.focus();};
       function error(msg){var el=$('#wf-error');el.textContent=msg||'';el.classList.toggle('hidden',!msg);}
       function point(e){var p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;return p.matrixTransform(svg.getScreenCTM().inverse());}
@@ -3838,10 +3870,10 @@
         def.nodes=[step('prepare','wf.sample_prepare','{{input}}',[]),{id:'gate',name:T('wf.sample_gate'),kind:'condition',needs:[{node_id:'prepare'}],join:'all',condition:{source:'{{steps.prepare.output}}',operator:'not_empty',value:''}},step('research','wf.sample_research',T('wf.sample_research_prompt')+'\n{{steps.prepare.output}}',[{node_id:'gate',branch:'true'}]),step('review','wf.sample_review',T('wf.sample_review_prompt')+'\n{{steps.prepare.output}}',[{node_id:'gate',branch:'true'}]),step('fallback','wf.sample_fallback','{{input}}',[{node_id:'gate',branch:'false'}]),step('merge','wf.sample_merge',T('wf.sample_merge_prompt')+'\n{{steps.research.output}}\n{{steps.review.output}}\n{{steps.fallback.output}}',[{node_id:'research'},{node_id:'review'},{node_id:'fallback'}],'any')];wfArrange(def);selected='prepare';canvas();inspect();toast(T('wf.example_choose'));
       };
       $('#wf-check').onclick=function(){dependencyCheck({kind:'workflow_draft',definition:JSON.parse(JSON.stringify(read()))});};
-      function save(e){if(e)e.preventDefault();if(!f.reportValidity())return;var b=$('#wf-save'),value=JSON.parse(JSON.stringify(read())),wasCreating=creating;b.disabled=true;error('');api(creating?'/api/workflows':'/api/workflows/'+enc(id),{method:creating?'POST':'PUT',body:creating?value:{expected_version:saved.version,definition:value}}).then(function(w){if(!document.contains(f))return;saved=w;baseline=JSON.stringify(value);toast(T('wf.saved'));if(wasCreating){creating=false;id=w.id;if(JSON.stringify(read())===baseline)location.hash='#/workflows/'+enc(w.id);else{history.replaceState(null,'','#/workflows/'+enc(w.id));lastHash=location.hash;}}else if(!$('#wf-run')&&JSON.stringify(read())===baseline){refresh();}}).catch(function(e){if(document.contains(f))error(e.message);}).finally(function(){b.disabled=false;});}
+      function save(e){if(e)e.preventDefault();if(!f.reportValidity())return;var b=$('#wf-save'),value=JSON.parse(JSON.stringify(read())),wasCreating=creating;b.disabled=true;error('');api(creating?'/api/workflows':'/api/workflows/'+enc(id),{method:creating?'POST':'PUT',body:creating?value:{expected_version:saved.version,definition:value}}).then(function(w){if(!document.contains(f))return;saved=w;baseline=JSON.stringify(value);toast(T('wf.saved'));if(wasCreating){creating=false;id=w.id;if(JSON.stringify(read())===baseline)location.hash='#/workflows/'+enc(w.id);else{history.replaceState(null,'','#/workflows/'+enc(w.id));lastHash=location.hash;}}else if(!$('#wf-run')&&JSON.stringify(read())===baseline){refresh();}}).catch(function(e){if(document.contains(f)){var pr=e.data&&e.data.problem;error(pr?T('rn.ws_'+pr+'_tip'):e.message);}}).finally(function(){b.disabled=false;});}
       f.onsubmit=save;$('#wf-save').onclick=save;
-      if(!creating){$('#wf-run').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first'));return;}workflowRunModal(id);};$('#wf-delete').onclick=function(){confirmDialog({title:T('wf.delete_title'),body:T('wf.delete_hint'),ok:T('btn.delete'),danger:true}).then(function(yes){if(yes)api('/api/workflows/'+enc(id),{method:'DELETE'}).then(function(){location.hash='#/workflows';}).catch(fail);});};api('/api/workflow-runs?workflow_id='+enc(id)).then(function(rs){var h=document.contains(f)?$('#wf-history'):null;if(h)h.innerHTML=rs.length?'<ul class="wf-history">'+rs.map(function(x){return '<li><a href="#/workflow-runs/'+enc(x.id)+'">'+esc(fmtTime(x.created_at))+'</a><span class="tag">v'+esc(x.workflow_version)+'</span>'+wfStatus(x.status)+'</li>';}).join('')+'</ul>':'<p class="muted">'+esc(T('wf.no_runs'))+'</p>';}).catch(fail);}
-      baseline=JSON.stringify(read());
+      if(!creating){$('#wf-sched').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first_sched'));return;}wfSchedule(saved);};$('#wf-run').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first'));return;}workflowRunModal(id);};$('#wf-delete').onclick=function(){confirmDialog({title:T('wf.delete_title'),body:T('wf.delete_hint'),ok:T('btn.delete'),danger:true}).then(function(yes){if(yes)api('/api/workflows/'+enc(id),{method:'DELETE'}).then(function(){location.hash='#/workflows';}).catch(fail);});};api('/api/workflow-runs?workflow_id='+enc(id)).then(function(rs){var h=document.contains(f)?$('#wf-history'):null;if(h)h.innerHTML=rs.length?'<ul class="wf-history">'+rs.map(function(x){return '<li><a href="#/workflow-runs/'+enc(x.id)+'">'+esc(fmtTime(x.created_at))+'</a><span class="tag">v'+esc(x.workflow_version)+'</span>'+wfStatus(x.status)+'</li>';}).join('')+'</ul>':'<p class="muted">'+esc(T('wf.no_runs'))+'</p>';}).catch(fail);}
+      baseline=JSON.stringify(read());checkWs();
       workflowDraftGuard={dirty:function(){return document.contains(f)&&JSON.stringify(read())!==baseline;}};
       canvas();inspect();
     });
@@ -5894,6 +5926,17 @@
   // preset {prompt, provider, workspace, run_mode, effort, skill_bindings}: "Save as task" from a
   // run or a session (skills pinned to the versions used / adopted there). Autofill then
   // infers the name and budget; a schedule it reads from the request is only offered.
+  // The workflow a workflow task runs: pinned to a saved version (default, the one the
+  // editor showed) or following the current one. Name "" = the workflow was deleted.
+  function tfWorkflowHtml(wf) {
+    var cur = wf.current || wf.version || 0, v = wf.version || 0, opts = "";
+    if (cur) opts += opt(cur, T("tf.wf_pin", { v: cur }), v === cur);
+    if (v && v !== cur) opts += opt(v, T("tf.wf_pin_old", { v: v, c: cur }), true);
+    opts += opt(0, T("tf.wf_follow"), !v);
+    return '<div class="field tf-wf"><span>' + esc(T("tf.wf")) + tip(T("tf.wf_tip")) + '</span><div class="tf-wf-row"><span class="ico">' + ic("branch", "sm") + "</span>" +
+      (wf.name ? '<a class="ell" href="#/workflows/' + enc(wf.id) + '">' + esc(wf.name) + "</a>" : '<span class="bad">' + esc(T("tf.wf_gone")) + "</span>") +
+      '<select name="wf_version" aria-label="' + esc(T("tf.wf_version")) + '">' + opts + "</select></div></div>";
+  }
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings"), api("/api/tasks/tags").catch(function () { return []; })];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
@@ -5903,25 +5946,29 @@
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0, run_mode: pre.run_mode || "exec", effort: pre.effort || "" };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
+      // a workflow task (P4): the prompt is the workflow's input; folder, permission and
+      // skills come from the workflow, so those fields give way to the workflow line
+      var wf = taskId ? tf.workflow : pre.workflow;
+      if (wf && !taskId && !tf.name) tf.name = pre.name || wf.name || "";
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
-      var drafty = !taskId && !pre.prompt;
-      var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
+      var drafty = !taskId && !pre.prompt && !wf;
+      var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T(wf ? "tf.wf_input" : "tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl"' + (wf ? "" : " required") + ' maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(wf ? "tf.wf_input_ph" : taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId || wf ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
-        (taskId ? nameF + promptF : promptF + nameF) +
+        (wf ? tfWorkflowHtml(wf) + nameF + promptF : taskId ? nameF + promptF : promptF + nameF) +
         '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
-        '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
+        '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id">' + '<div id="tf-bindings"' + (wf ? " hidden" : "") + "></div>" +
         fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + (taskId ? "" : '<span class="af-pill af-sug hidden" id="af-sched"></span>') + '</span><div id="sched-host"></div></div>' +
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null) +
         '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
-        wsFieldHtml(tf.workspace || "") +
+        '<div' + (wf ? " hidden" : "") + ">" + wsFieldHtml(tf.workspace || "") + "</div>" +
         // permission level (new tasks: 可执行命令) and effort ("" = Claude Code decides)
-        '<div class="form-row tf-perm"><div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", tf.run_mode || "edit", st.sandbox) + "</div>" +
+        '<div class="form-row tf-perm"' + (wf ? " hidden" : "") + ">" + '<div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", tf.run_mode || "edit", st.sandbox) + "</div>" +
         '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + ["", "low", "medium", "high"].map(function (v) { return '<option value="' + v + '"' + ((tf.effort || "") === v ? " selected" : "") + ">" + esc(T("tf.effort_" + (v || "auto"))) + "</option>"; }).join("") + "</select></label></div>" +
         policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
-        '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
+        '<div class="actions"><button type="button" class="btn' + (wf ? " hidden" : "") + '" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
         var runMode = function () { var c = f.querySelector('input[name="run_mode"]:checked'); return c ? c.value : "edit"; };
         var syncTimeout = function () {
@@ -5939,7 +5986,7 @@
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
         if (drafty) wireDraft(root, f.prompt, "task");
-        if (!taskId) wireTaskAutofill(root, f, se, skills);
+        if (!taskId && !wf) wireTaskAutofill(root, f, se, skills);
         var ws = wireWsField(root, f.workspace, taskId);
         wirePolicyFields(root, f);
         var readCostMode = wireCostFields(root, f);
@@ -5947,9 +5994,13 @@
           e.preventDefault();
           if (!taskId && !readyProviders(st).some(function (p) { return p.name === f.provider.value; })) { toast(T("cc.no_provider"), true); return; }
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
-          if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
+          if (!wf && ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: f.timeout_enabled.checked ? Number(f.timeout_minutes.value) : 0, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value(), run_mode: runMode(), effort: f.effort.value };
+          if (wf) { // the workflow brings skills, folder and permission level
+            ["skill_id", "skill_version_id", "skill_bindings", "skill_set_source", "workspace", "run_mode", "effort"].forEach(function (k) { delete body[k]; });
+            body.workflow = { id: wf.id, version: Number(f.wf_version.value) || 0 };
+          }
           body.cost_control = {mode:readCostMode(), run_amount:f.run_amount.value === "" ? null : Number(f.run_amount.value), daily_amount:f.budget_usd.value === "" ? null : Number(f.budget_usd.value), currency:(tf.cost_control || {}).currency || (st.fx || {}).display || "USD", revision:(tf.cost_control || {}).revision || 0, fx_revision:(tf.cost_control || {}).fx_revision || st.fx_revision || ""};
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           var consent = body.cost_control.mode === "bypass" && (!tf.cost_control || tf.cost_control.mode !== "bypass") ? confirmCostBypass(root,body.name) : Promise.resolve(true);

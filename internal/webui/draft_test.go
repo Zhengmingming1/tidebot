@@ -21,7 +21,7 @@ func TestPromptDrafts(t *testing.T) {
 	for _, want := range []string{
 		`else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });`,
 		`if (!edit) draftClear("qr");`,
-		`var drafty = !taskId && !pre.prompt;`,
+		`var drafty = !taskId && !pre.prompt && !wf;`,
 		`if (drafty) wireDraft(root, f.prompt, "task");`,
 		`if (drafty) draftClear("task");`,
 		`state.csrf = ""; draftsClearAll(); showLogin();`,

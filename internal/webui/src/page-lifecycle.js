@@ -208,7 +208,7 @@
   // A start request answers once the new run exists, with its id: open exactly that run so
   // its log streams right away. No id means it is queued behind the concurrency limit.
   function openStarted(res, msg) {
-    if (res && res.run_id) { toast(startedText(res, msg)); location.hash = "#/runs/" + enc(res.run_id); return; }
+    if (res && res.run_id) { toast(startedText(res, msg)); location.hash = (/^wfr_/.test(res.run_id) ? "#/workflow-runs/" : "#/runs/") + enc(res.run_id); return; }
     toast(T("toast.run_queued")); location.hash = "#/runs";
   }
   // Toast for a start answer: a run waiting for a free slot says where it is in line.

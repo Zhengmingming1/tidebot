@@ -114,7 +114,8 @@
         "<dt>" + esc(T("td.requirements")) + "</dt><dd>" + (tk.constraints.length ? '<ul class="list-plain">' + tk.constraints.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" : '<span class="muted">' + esc(T("td.none_yet")) + "</span>") + "</dd>" +
         "<dt>" + esc(T("col.schedule")) + "</dt><dd>" + esc(cronHuman(tk.cron)) + (tk.cron ? '<span class="ov-next" id="ov-next"></span>' : "") + "</dd>" +
         "<dt>" + esc(T("f.provider")) + "</dt><dd>" + esc(tk.provider || T("td.default")) + "</dd>" +
-        "<dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd>" +
+        (tk.workflow ? "<dt>" + esc(T("tf.wf")) + "</dt><dd>" + (tk.workflow.name ? '<a href="#/workflows/' + enc(tk.workflow.id) + '">' + esc(tk.workflow.name) + "</a> " + '<span class="tag" data-tip="' + esc(T("tf.wf_version")) + '">' + esc(tk.workflow.version ? "v" + tk.workflow.version : T("tf.wf_follow")) + "</span>" : '<span class="muted">' + esc(T("tf.wf_gone")) + "</span>") + "</dd>" :
+        "<dt>" + esc(T("nav.skills")) + "</dt><dd>" + (tk.skills.length ? tk.skills.map(esc).join(", ") : '<span class="muted">' + esc(T("td.none")) + "</span>") + "</dd>") +
         "<dt>" + esc(T("td.workspace")) + '</dt><dd class="ws-row">' + (tk.workspace ? '<code class="ws-path">' + esc(tk.workspace) + "</code>" +
           (tk.workspace_default ? '<span class="tag" data-tip="' + esc(T("ws.default_tip")) + '">' + esc(T("ws.default")) + "</span>" : "") +
           '<button type="button" class="icon-btn sm" id="ws-copy" data-tip="' + esc(T("ws.copy")) + '" aria-label="' + esc(T("ws.copy")) + '">' + ic("copy", "sm") + "</button>" +

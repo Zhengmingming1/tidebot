@@ -3850,6 +3850,14 @@ button.rc-tag:hover { color: var(--text); }
 .wf-options { flex: 0 1 360px; min-width: 0; }
 .wf-options summary { cursor: pointer; padding: 10px 0; min-height: 40px; color: var(--text-2); font-weight: 500; }
 .wf-options[open] { flex-basis: 100%; }
+.wf-ws { flex: 2 1 400px; min-width: 0; }
+.wf-ws .hint { margin: 4px 0 0; font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-sched-pill { margin-left: 8px; gap: 4px; color: var(--hue-amber, var(--text-2)); text-decoration: none; }
+.wf-sched-pill .i { color: var(--hue-amber, currentColor); }
+.tf [hidden], .wf-meta [hidden] { display: none !important; }
+.tf-wf-row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.tf-wf-row .ico { color: var(--hue-violet, var(--accent)); display: inline-flex; }
+.tf-wf-row select { flex: 0 1 220px; width: auto; }
 #wf-meta .form-row { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-bottom: 12px; }
 .wf-designer { grid-template-columns: minmax(0,1fr) 280px; gap: 12px; }
 .wf-designer .wf-palette { grid-column: 1/-1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; max-height: 104px; padding: 8px 12px; }

@@ -365,6 +365,17 @@
   // preset {prompt, provider, workspace, run_mode, effort, skill_bindings}: "Save as task" from a
   // run or a session (skills pinned to the versions used / adopted there). Autofill then
   // infers the name and budget; a schedule it reads from the request is only offered.
+  // The workflow a workflow task runs: pinned to a saved version (default, the one the
+  // editor showed) or following the current one. Name "" = the workflow was deleted.
+  function tfWorkflowHtml(wf) {
+    var cur = wf.current || wf.version || 0, v = wf.version || 0, opts = "";
+    if (cur) opts += opt(cur, T("tf.wf_pin", { v: cur }), v === cur);
+    if (v && v !== cur) opts += opt(v, T("tf.wf_pin_old", { v: v, c: cur }), true);
+    opts += opt(0, T("tf.wf_follow"), !v);
+    return '<div class="field tf-wf"><span>' + esc(T("tf.wf")) + tip(T("tf.wf_tip")) + '</span><div class="tf-wf-row"><span class="ico">' + ic("branch", "sm") + "</span>" +
+      (wf.name ? '<a class="ell" href="#/workflows/' + enc(wf.id) + '">' + esc(wf.name) + "</a>" : '<span class="bad">' + esc(T("tf.wf_gone")) + "</span>") +
+      '<select name="wf_version" aria-label="' + esc(T("tf.wf_version")) + '">' + opts + "</select></div></div>";
+  }
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings"), api("/api/tasks/tags").catch(function () { return []; })];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
@@ -374,25 +385,29 @@
       var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0, run_mode: pre.run_mode || "exec", effort: pre.effort || "" };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
+      // a workflow task (P4): the prompt is the workflow's input; folder, permission and
+      // skills come from the workflow, so those fields give way to the workflow line
+      var wf = taskId ? tf.workflow : pre.workflow;
+      if (wf && !taskId && !tf.name) tf.name = pre.name || wf.name || "";
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
-      var drafty = !taskId && !pre.prompt;
-      var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T("tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl" required maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
+      var drafty = !taskId && !pre.prompt && !wf;
+      var promptF = '<div class="field"><span class="qr-lbl"><span id="tf-plbl">' + esc(T(wf ? "tf.wf_input" : "tf.prompt")) + "</span>" + (drafty ? draftTagHtml() : "") + '</span><textarea name="prompt" aria-labelledby="tf-plbl"' + (wf ? "" : " required") + ' maxlength="32000" rows="' + (taskId ? 5 : 3) + '" placeholder="' + esc(T(wf ? "tf.wf_input_ph" : taskId ? "tf.prompt_ph" : "af.prompt_ph")) + '">' + esc(tf.prompt) + "</textarea>" + (taskId || wf ? "" : '<span class="af-note" id="af-note">' + ic("sparkle", "sm") + "<span>" + esc(T("af.hint")) + "</span></span>") + "</div>";
       modal('<div class="card-head"><span class="ico">' + ic("tasks") + "</span><h2>" + esc(T(taskId ? "tf.edit" : "tf.new")) + '</h2></div><form id="tf" class="tf">' +
-        (taskId ? nameF + promptF : promptF + nameF) +
+        (wf ? tfWorkflowHtml(wf) + nameF + promptF : taskId ? nameF + promptF : promptF + nameF) +
         '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
-        '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
+        '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id">' + '<div id="tf-bindings"' + (wf ? " hidden" : "") + "></div>" +
         fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
         '<div class="field"><span>' + esc(T("tf.schedule")) + (taskId ? "" : '<span class="af-pill af-sug hidden" id="af-sched"></span>') + '</span><div id="sched-host"></div></div>' +
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null) +
         '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
-        wsFieldHtml(tf.workspace || "") +
+        '<div' + (wf ? " hidden" : "") + ">" + wsFieldHtml(tf.workspace || "") + "</div>" +
         // permission level (new tasks: 可执行命令) and effort ("" = Claude Code decides)
-        '<div class="form-row tf-perm"><div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", tf.run_mode || "edit", st.sandbox) + "</div>" +
+        '<div class="form-row tf-perm"' + (wf ? " hidden" : "") + ">" + '<div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", tf.run_mode || "edit", st.sandbox) + "</div>" +
         '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + ["", "low", "medium", "high"].map(function (v) { return '<option value="' + v + '"' + ((tf.effort || "") === v ? " selected" : "") + ">" + esc(T("tf.effort_" + (v || "auto"))) + "</option>"; }).join("") + "</select></label></div>" +
         policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
-        '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
+        '<div class="actions"><button type="button" class="btn' + (wf ? " hidden" : "") + '" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
         var runMode = function () { var c = f.querySelector('input[name="run_mode"]:checked'); return c ? c.value : "edit"; };
         var syncTimeout = function () {
@@ -410,7 +425,7 @@
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
         if (drafty) wireDraft(root, f.prompt, "task");
-        if (!taskId) wireTaskAutofill(root, f, se, skills);
+        if (!taskId && !wf) wireTaskAutofill(root, f, se, skills);
         var ws = wireWsField(root, f.workspace, taskId);
         wirePolicyFields(root, f);
         var readCostMode = wireCostFields(root, f);
@@ -418,9 +433,13 @@
           e.preventDefault();
           if (!taskId && !readyProviders(st).some(function (p) { return p.name === f.provider.value; })) { toast(T("cc.no_provider"), true); return; }
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
-          if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
+          if (!wf && ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
             budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: f.timeout_enabled.checked ? Number(f.timeout_minutes.value) : 0, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value(), run_mode: runMode(), effort: f.effort.value };
+          if (wf) { // the workflow brings skills, folder and permission level
+            ["skill_id", "skill_version_id", "skill_bindings", "skill_set_source", "workspace", "run_mode", "effort"].forEach(function (k) { delete body[k]; });
+            body.workflow = { id: wf.id, version: Number(f.wf_version.value) || 0 };
+          }
           body.cost_control = {mode:readCostMode(), run_amount:f.run_amount.value === "" ? null : Number(f.run_amount.value), daily_amount:f.budget_usd.value === "" ? null : Number(f.budget_usd.value), currency:(tf.cost_control || {}).currency || (st.fx || {}).display || "USD", revision:(tf.cost_control || {}).revision || 0, fx_revision:(tf.cost_control || {}).fx_revision || st.fx_revision || ""};
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           var consent = body.cost_control.mode === "bypass" && (!tf.cost_control || tf.cost_control.mode !== "bypass") ? confirmCostBypass(root,body.name) : Promise.resolve(true);

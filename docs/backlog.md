@@ -6141,3 +6141,25 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 工作流节点的权限档（P4）；CI 真 bwrap e2e；`dangerouslyDisableSandbox` 的直接实测。
 
 **心得**：「改完能马上试」和「不自动生效」并不冲突——草稿只在本会话生效，版本和采用分两步，影响范围在确认框里说清楚，用户就敢放手让模型改技能。
+
+### 2026-11-09：先不设限 P4——工作流对齐
+
+**做了什么**
+
+- **工作流可选目录和三档权限**：编辑器顶部「工作目录 + 只读 / 可修改 / 可执行命令」，每个技能步骤都继承；新工作流默认「可执行命令」（与运行、任务一致），可修改需要先选目录。目录过 `CheckRunDir`（敏感目录、tidebot 自己的目录拒绝），运行快照记真实路径。
+- **会写入的档位**：步骤依次运行（并行数按 1 算），选了目录时整个工作流运行期间锁住该目录（被占用 → 409「目录正被使用」）；可执行命令不选目录时所有步骤共用一个 `data/run-work/wfr-*` 临时目录，结束删除。
+- **老工作流不变**：没有 `run_mode` 的已保存工作流按原来的只读、各步骤独立空目录运行，打开编辑器也不会变成「有未保存修改」。
+- **节点没有隐藏上限**：测试确认节点运行不带 `--max-budget-usd`、`--restricted`（执行档）、也不带默认超时。
+- **定时 / 预算复用任务**：编辑器「定时 / 预算」打开新建任务表单，目标是这个工作流（默认固定当前版本，也可选「始终用最新保存版本」），指令一栏变成「输入」，目录 / 权限 / 技能字段隐藏。任务的预算、单次上限按每个步骤生效，任务超时作用于整个工作流运行，重试、通知照常。工作流卡片和编辑器名称旁显示绑定的计划（悬停列出任务）；任务详情显示工作流和版本；立即运行跳到工作流运行页。
+- **可选总预算**（默认关闭，USD / CNY）：累计花费到上限后不再启动新步骤，已经在跑的步骤以剩余额度封顶。
+- 任务导出 / 导入带上工作流（按 id，找不到按名称并改为跟随最新版本，提示一句；都找不到报错）。
+- 没有加迁移：任务 spec 本来就是 JSON。
+- 测试：workflow `TestWritingWorkflowSerializesNodes`、`TestWorkflowBudgetStopsFurtherNodes`、`TestWorkflowSettingsValidateAndVersionStart`；app `TestWorkflowExecSharesScratchAndHasNoHiddenLimits`、`TestWorkflowFolderEditAndChecks`、`TestWorkflowTotalBudget`、`TestTaskRunsWorkflow`；webui `TestWorkflowTaskAPI`、`TestWorkflowAlignmentUI`。
+
+**没做 / 留到后面**
+
+- 工作流运行本身不记录来自哪个任务（节点运行带 task_id，花费照常归到任务）。
+- 写入档按整个工作流串行，没有做「只读步骤仍并行」的细分。
+- CI 真 bwrap e2e；`dangerouslyDisableSandbox` 的直接实测；运行 / 会话不记录推理强度。
+
+**心得**：把「定时 / 预算」做成「建一个目标是工作流的任务」，比给工作流再造一套调度省事得多，重试、通知、花费归属全部自动跟上。

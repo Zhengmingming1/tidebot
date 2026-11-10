@@ -163,7 +163,7 @@ func TestTaskFormWorkspaceUI(t *testing.T) {
 		`wsFieldHtml(tf.workspace || "")`,
 		`var ws = wireWsField(root, f.workspace, taskId);`,
 		`workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value(), run_mode: runMode()`,
-		`if (ws.problem()) {`,
+		`if (!wf && ws.problem()) {`,
 		`"/api/tasks/workspace-check?path="`,
 		`api("/api/desktop/pick-folder", { method: "POST", body: { start: start } })`,
 		`input._tbTouched = true;`,

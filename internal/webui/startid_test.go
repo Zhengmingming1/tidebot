@@ -52,7 +52,7 @@ func TestStartOpensExactRun(t *testing.T) {
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`function openStarted(res, msg) {`,
-		`location.hash = "#/runs/" + enc(res.run_id)`,
+		`location.hash = (/^wfr_/.test(res.run_id) ? "#/workflow-runs/" : "#/runs/") + enc(res.run_id)`,
 		`close(); openStarted(r, "toast.quick_started");`,
 		`openStarted(res, "runs.rerun_started");`,
 	} {
