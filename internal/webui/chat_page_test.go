@@ -21,7 +21,7 @@ func TestChatPageUI(t *testing.T) {
 	for _, want := range []string{
 		`var NAV = [["home", "#/"], ["chat", "#/chat"],`,
 		`case "chat": p = renderChat(parts[1]); break;`,
-		`create: function () { return api("/api/chat-sessions", { method: "POST", body: { origin: "chat" } }); }`,
+		`create: function (mode) { return api("/api/chat-sessions", { method: "POST", body: { origin: "chat", permission_mode: mode } }); }`,
 		`confirmDialog({ title: T("cs.del_title")`,
 		`api("/api/chat-sessions/" + enc(s.id) + "/bindings", { method: "PUT", body: body })`,
 	} {

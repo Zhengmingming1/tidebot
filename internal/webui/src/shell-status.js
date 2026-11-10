@@ -87,7 +87,7 @@
     var t = triggerText(r.trigger);
     if (!r.workspace || !r.run_mode) return t;
     var nm = r.workspace.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || r.workspace;
-    return (short ? "" : t + " · ") + nm + " · " + T(r.run_mode === "edit" ? "rn.edit" : "rn.read");
+    return (short ? "" : t + " · ") + nm + " · " + T(r.run_mode === "edit" || r.run_mode === "exec" ? "rn." + r.run_mode : "rn.read");
   }
   function cronHuman(c) {
     if (!c) return T("cron.manual");

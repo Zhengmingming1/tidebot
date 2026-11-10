@@ -729,7 +729,7 @@
     var t = triggerText(r.trigger);
     if (!r.workspace || !r.run_mode) return t;
     var nm = r.workspace.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || r.workspace;
-    return (short ? "" : t + " · ") + nm + " · " + T(r.run_mode === "edit" ? "rn.edit" : "rn.read");
+    return (short ? "" : t + " · ") + nm + " · " + T(r.run_mode === "edit" || r.run_mode === "exec" ? "rn." + r.run_mode : "rn.read");
   }
   function cronHuman(c) {
     if (!c) return T("cron.manual");
@@ -2537,7 +2537,7 @@
         '<input type="hidden" name="skill_id" id="rn-skill"><div id="rn-bindings"></div><div class="rn-two">' +
         '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + providerOptions(st, lastProv, !!(edit && edit.provider), false) + "</select></label></div>" +
         '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">' + esc(T("rn.folder")) + "</span>" + tip(T("rn.folder_tip")) + '<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>' +
-          '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '"><label data-tip="' + esc(T("rn.read_tip")) + '"><input type="radio" name="mode" value="read" checked><span>' + ic("eye", "sm") + esc(T("rn.read")) + '</span></label><label data-tip="' + esc(T("rn.edit_tip")) + '"><input type="radio" name="mode" value="edit"><span>' + ic("edit", "sm") + esc(T("rn.edit")) + "</span></label></span></span>" +
+          modeSegHtml("mode", "exec", st.sandbox) + "</span>" +
           '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="rn-wlbl" placeholder="' + esc(T("rn.folder_ph")) + '">' +
           '<button type="button" class="icon-btn sm hidden" id="rn-ws-pick" data-tip="' + esc(T("tf.ws_pick")) + '" aria-label="' + esc(T("tf.ws_pick")) + '">' + ic("folder", "sm") + "</button>" +
           '<button type="button" class="icon-btn sm hidden" id="rn-ws-clear" data-tip="' + esc(T("rn.folder_clear")) + '" aria-label="' + esc(T("rn.folder_clear")) + '">' + ic("x", "sm") + "</button></div>" +
@@ -2549,22 +2549,28 @@
         function (root, close) {
           var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root), ws = form.workspace;
           var initial = pre.skill_bindings || (pre.skill_id ? [{skill_id:pre.skill_id,mode:pre.version_id?"pinned":"follow",version_id:pre.version_id||"",role:"primary"}] : []);
-          var editor = skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs){form.skill_id.value=bs.length?bs[0].skill_id:"";form.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:pre.skill_set_source,checkRequest:function(){return {kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:modeVal()};}});
+          var editor = skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs){form.skill_id.value=bs.length?bs[0].skill_id:"";form.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:pre.skill_set_source,checkRequest:function(){return {kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:sentMode()};}});
           form.skill_id.value=editor.value().length?editor.value()[0].skill_id:"";
-          $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:ws.value.trim()?modeVal():"edit"});});
+          $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:ws.value.trim()?modeVal():(modeVal()==="exec"?"exec":"edit")});});
           var pill = $("#rn-ws-st", root), pick = $("#rn-ws-pick", root), clear = $("#rn-ws-clear", root), dirsBox = $("#rn-dirs", root), hint = $("#rn-hint", root), err = $("#rn-err", root), argEl = $("#rn-arg", root);
           var wsState = { problem: "", git: null }, seq = 0, timer = 0, wsTouched = false, recentDirs = [];
           var modeVal = function () { var c = form.querySelector('input[name="mode"]:checked'); return c ? c.value : "read"; };
-          var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" ? "edit" : "read"); }); };
-          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: ws.value.trim() ? modeVal() : "" }; };
-          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : "" } : null;
+          var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" || m === "exec" ? m : "read"); }); };
+          // without a folder: 只读 = tidebot's scratch folder (""), 可执行命令 = a scratch folder that runs commands
+          var sentMode = function () { var m = modeVal(); return ws.value.trim() ? m : (m === "exec" ? "exec" : ""); };
+          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: sentMode() }; };
+          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : (edit.mode === "exec" ? "exec" : "") } : null;
           // the hint under the form says what the run may do; a dirty git folder warns before "Can edit"
           var paintHint = function () {
-            var dir = ws.value.trim(), m = modeVal(), g = wsState.git, warn = false, txt;
-            $(".rn-mode", root).classList.toggle("off", !dir);
-            $$('input[name="mode"]', form).forEach(function (i) { i.disabled = !dir; });
-            if (!dir) txt = T(form.skill_id.value ? "rn.hint_skill" : (edit ? "qr.edit_hint" : "qr.hint"));
-            else if (m === "edit") { txt = T("rn.hint_edit"); if (g && g.dirty > 0) { txt = T("rn.hint_dirty", { n: g.dirty }); warn = true; } }
+            var dir = ws.value.trim(), g = wsState.git, warn = false, txt, sb = st.sandbox || {};
+            // 可修改 needs a folder; 只读 and 可执行命令 also work in a scratch folder
+            $$('input[name="mode"]', form).forEach(function (i) { i.disabled = !dir && i.value === "edit"; });
+            if (!dir && modeVal() === "edit") setMode("exec");
+            var m = modeVal();
+            if (m === "exec" && sb.status === "missing") { txt = T("rn.hint_exec_missing", { m: (sb.missing || []).join(", ") }); warn = true; }
+            else if (!dir && m === "exec") txt = T("rn.hint_exec_scratch");
+            else if (!dir) txt = T(form.skill_id.value ? "rn.hint_skill" : (edit ? "qr.edit_hint" : "qr.hint"));
+            else if (m === "edit" || m === "exec") { txt = T(m === "exec" ? "rn.hint_exec" : "rn.hint_edit"); if (g && g.dirty > 0) { txt = T("rn.hint_dirty", { n: g.dirty }); warn = true; } }
             else txt = T("rn.hint_read");
             hint.textContent = txt;
             hint.classList.toggle("warn", warn);
@@ -2604,7 +2610,7 @@
               drawDirs();
               var l = d && d.last;
               if (fill && sk && l && !wsTouched && !ws.value.trim()) {
-                setWs(l.workspace); setMode(l.mode); drawDirs();
+                setWs(l.workspace || ""); setMode(l.mode); drawDirs();
                 if (l.provider && readyProviders(st).some(function (p) { return p.name === l.provider; })) form.provider.value = l.provider;
                 paintHint();
               }
@@ -2628,6 +2634,7 @@
           if (edit) {
             ta.value = edit.prompt; ta.setSelectionRange(ta.value.length, ta.value.length);
             if (edit.workspace) { ws.value = edit.workspace; setMode(edit.mode); wsTouched = true; }
+            else setMode(edit.mode === "exec" ? "exec" : "read");
           } else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });
           paintSkill(); filterChips(); sync(); check(); loadDefaults(!edit && !!pre.skill_id);
           ta.addEventListener("input", function () { filterChips(); sync(); });
@@ -2657,11 +2664,15 @@
             var btn = form.querySelector('button[type="submit"]');
             btn.disabled = true;
             try { localStorage.setItem("tb_qr_provider", body.provider); } catch (e2) {}
-            api("/api/runs/quick", { method: "POST", body: body }).then(function (r) {
+            (body.mode === "exec" ? execFirstUse(st.sandbox, $(".modal", root) || root) : Promise.resolve(true)).then(function (go) {
+              if (!go) { btn.disabled = false; return Promise.reject(null); }
+              return api("/api/runs/quick", { method: "POST", body: body });
+            }).then(function (r) {
               if (!edit) draftClear("qr");
               close(); openStarted(r, "toast.quick_started");
             }).catch(function (ex) {
               btn.disabled = false;
+              if (ex === null) return; // the first-use explanation was closed
               var pr = ex && ex.data && ex.data.problem;
               if (pr) { err.textContent = T("rn.ws_" + pr + "_tip"); return; }
               fail(ex);
@@ -2669,6 +2680,41 @@
           });
         }, syncHomeQuickDraft);
     }).catch(fail);
+  }
+  // modeSegHtml: the three permission levels (只读 / 可修改 / 可执行命令) as a
+  // segmented control; radios named name, cur checked. sb is the sandbox status from
+  // /api/settings: on a platform with none (Windows) 可执行命令 carries a small
+  // 「无系统沙箱」 mark, with sandbox parts missing a warning mark (details in tooltips).
+  function modeSegHtml(name, cur, sb) {
+    sb = sb || {};
+    var opt = function (v, icon, extra) {
+      return '<label data-tip="' + esc(T("rn." + v + "_tip")) + '"><input type="radio" name="' + esc(name) + '" value="' + v + '"' + (cur === v ? " checked" : "") + "><span>" + ic(icon, "sm") + esc(T("rn." + v)) + (extra || "") + "</span></label>";
+    };
+    var mark = sb.status === "none" ? '<b class="rn-nosb" data-tip="' + esc(T("rn.nosb_tip")) + '">' + esc(T("rn.nosb")) + "</b>" :
+      sb.status === "missing" ? '<b class="rn-nosb bad" data-tip="' + esc(T("pl.sb_missing_tip", { m: (sb.missing || []).join(", ") })) + '">' + esc(T("rn.sb_missing")) + "</b>" : "";
+    return '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '">' + opt("read", "eye") + opt("edit", "edit") + opt("exec", "terminal", mark) + "</span>";
+  }
+  // execFirstUse: on a platform without a system sandbox (native Windows) the first
+  // command run explains once what protects it instead; after that 可执行命令 is
+  // used normally. Inside an open dialog (box) the explanation takes the place of
+  // its buttons; elsewhere it is an in-app dialog. Resolves false if cancelled.
+  function execFirstUse(sb, box) {
+    var key = "tb_exec_nosb_ok";
+    try { if (!sb || sb.status !== "none" || localStorage.getItem(key)) return Promise.resolve(true); } catch (e) { return Promise.resolve(true); }
+    var ack = function (ok) { if (ok) { try { localStorage.setItem(key, "1"); } catch (e) {} } return ok; };
+    if (!box) return confirmDialog({ title: T("rn.nosb_title"), body: T("rn.nosb_body"), ok: T("rn.nosb_ok"), icon: "shield" }).then(ack);
+    return new Promise(function (resolve) {
+      var all = $$(".actions", box), footer = all.length ? all[all.length - 1] : null;
+      var bar = document.createElement("div");
+      bar.className = "nosb-box"; bar.setAttribute("role", "alertdialog"); bar.setAttribute("aria-labelledby", "nosb-t");
+      bar.innerHTML = '<div class="nosb-head"><span class="ico warn">' + ic("shield", "sm") + '</span><strong id="nosb-t">' + esc(T("rn.nosb_title")) + "</strong></div>" +
+        '<p class="nosb-body">' + esc(T("rn.nosb_body")) + '</p><div class="actions"><button type="button" class="btn ghost" id="nosb-no">' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="nosb-ok">' + esc(T("rn.nosb_ok")) + "</button></div>";
+      if (footer) { footer.classList.add("hidden"); footer.parentNode.insertBefore(bar, footer.nextSibling); } else box.appendChild(bar);
+      var done = function (ok) { bar.remove(); if (footer) footer.classList.remove("hidden"); resolve(ack(ok)); };
+      $("#nosb-ok", bar).addEventListener("click", function () { done(true); });
+      $("#nosb-no", bar).addEventListener("click", function () { done(false); });
+      $("#nosb-ok", bar).focus();
+    });
   }
   // rnEdited: has the edit-&-rerun form moved away from the original run? Trailing
   // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).
@@ -5857,10 +5903,15 @@
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null) +
         '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
-        wsFieldHtml(tf.workspace || "") + policyFieldsHtml(pol, streak, brkAt) +
+        wsFieldHtml(tf.workspace || "") +
+        // permission level (new tasks: 可执行命令) and effort ("" = Claude Code decides)
+        '<div class="form-row tf-perm"><div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", taskId ? (tf.run_mode || "edit") : "exec", st.sandbox) + "</div>" +
+        '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + ["", "low", "medium", "high"].map(function (v) { return '<option value="' + v + '"' + ((tf.effort || "") === v ? " selected" : "") + ">" + esc(T("tf.effort_" + (v || "auto"))) + "</option>"; }).join("") + "</select></label></div>" +
+        policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
         '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
+        var runMode = function () { var c = f.querySelector('input[name="run_mode"]:checked'); return c ? c.value : "edit"; };
         var syncTimeout = function () {
           var enabled = f.timeout_enabled.checked;
           $("#tf-timeout", root).classList.toggle("hidden", !enabled);
@@ -5870,9 +5921,9 @@
         f.timeout_enabled.addEventListener("change", syncTimeout);
         syncTimeout();
         var initial=tf.skill_bindings||(tf.skill_id?[{skill_id:tf.skill_id,mode:tf.skill_version_id?"pinned":"follow",version_id:tf.skill_version_id||"",role:"primary"}]:[]);
-        var editor=skillBindingEditor($("#tf-bindings",root),skills,initial,function(bs){f.skill_id.value=bs.length?bs[0].skill_id:"";f.skill_version_id.value=bs.length?bs[0].version_id:"";f.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:tf.skill_set_source,checkRequest:function(){return {kind:"draft",execution:"task",id:taskId||"",workspace:f.workspace.value.trim(),prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value()};}});
+        var editor=skillBindingEditor($("#tf-bindings",root),skills,initial,function(bs){f.skill_id.value=bs.length?bs[0].skill_id:"";f.skill_version_id.value=bs.length?bs[0].version_id:"";f.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:tf.skill_set_source,checkRequest:function(){return {kind:"draft",execution:"task",id:taskId||"",workspace:f.workspace.value.trim(),prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value(),mode:runMode()};}});
         var first=editor.value()[0];f.skill_id.value=first?first.skill_id:"";f.skill_version_id.value=first?first.version_id:"";
-        $("#tf-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",execution:"task",id:taskId||"",prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value(),workspace:f.workspace.value.trim()});});
+        $("#tf-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",execution:"task",id:taskId||"",prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value(),workspace:f.workspace.value.trim(),mode:runMode()});});
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
         if (drafty) wireDraft(root, f.prompt, "task");
@@ -5886,10 +5937,11 @@
           if (!se.valid()) { $("#se-err", root).scrollIntoView({ block: "center" }); return; }
           if (ws.problem()) { f.workspace.focus(); toast(T("tf.ws_err_" + ws.problem()), true); return; }
           var body = { name: f.name.value.trim(), prompt: f.prompt.value, skill_id: f.skill_id.value, skill_version_id: f.skill_version_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), expected_version_id: taskId ? tf.expected_version_id : undefined, provider: f.provider.value, cron: se.value(),
-            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: f.timeout_enabled.checked ? Number(f.timeout_minutes.value) : 0, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value() };
+            budget_usd: parseFloat(f.budget_usd.value) || 0, enabled: f.enabled.checked, timeout_minutes: f.timeout_enabled.checked ? Number(f.timeout_minutes.value) : 0, workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value(), run_mode: runMode(), effort: f.effort.value };
           body.cost_control = {mode:readCostMode(), run_amount:f.run_amount.value === "" ? null : Number(f.run_amount.value), daily_amount:f.budget_usd.value === "" ? null : Number(f.budget_usd.value), currency:(tf.cost_control || {}).currency || (st.fx || {}).display || "USD", revision:(tf.cost_control || {}).revision || 0, fx_revision:(tf.cost_control || {}).fx_revision || st.fx_revision || ""};
           var btn = f.querySelector(".btn.primary"); btn.disabled = true;
           var consent = body.cost_control.mode === "bypass" && (!tf.cost_control || tf.cost_control.mode !== "bypass") ? confirmCostBypass(root,body.name) : Promise.resolve(true);
+          if (body.run_mode === "exec") consent = consent.then(function (ok) { return ok && execFirstUse(st.sandbox, $(".modal", root) || root); });
           consent.then(function(ok){ if(!ok){btn.disabled=false;return;} return api(taskId ? "/api/tasks/" + enc(taskId) : "/api/tasks", { method: taskId ? "PUT" : "POST", body: body }).then(function (t) {
             if (drafty) draftClear("task");
             close(); toast(T(taskId ? "tf.saved" : "tf.created"));
@@ -7030,8 +7082,8 @@
     if(r.skill_set_source)out += '<dt>'+esc(T("ss.source"))+'</dt><dd><a href="#/skill-sets">'+esc(r.skill_set_source.set_id)+'</a><br><code>'+esc(r.skill_set_source.version_id)+'</code> · '+esc(T("ss.state_"+r.skill_set_source.state))+'</dd>';
     if((r.skill_evidence||[]).length)out += '<dt>'+esc(T("ss.evidence"))+'</dt><dd><p class="hint">'+esc(T("ss.evidence_hint"))+'</p><ul class="list-plain">'+r.skill_evidence.map(function(e){var b=(r.skill_bindings||[]).filter(function(x){return x.skill_id===e.skill_id;})[0]||{};return '<li>'+esc(b.skill_name||e.skill_id)+' · '+esc(T(e.role==="primary"?"ss.primary":"ss.auxiliary"))+' · '+esc(T("ss.loaded"))+'<br><code>'+esc(e.version_id)+'</code></li>';}).join('')+'</ul></dd>';
     if (r.skill_id) out += "<dt>" + esc(T("rn.skill")) + '</dt><dd><a href="#/skills/' + enc(r.skill_id) + '">' + esc(r.skill_name || r.skill_id) + "</a>" + (r.skill_version ? ' <span class="tag perm">v' + esc(r.skill_version) + "</span>" : "") + "</dd>";
-    if (r.workspace) out += "<dt>" + esc(T("rn.folder")) + '</dt><dd class="rn-kv-ws"><code class="mono" data-tip="' + esc(r.workspace) + '">' + esc(r.workspace) + "</code>" +
-      '<span class="tag ' + (r.run_mode === "edit" ? "warn" : "perm") + '" data-tip="' + esc(T(r.run_mode === "edit" ? "rn.edit_tip" : "rn.read_tip")) + '">' + ic(r.run_mode === "edit" ? "edit" : "eye", "sm") + esc(T(r.run_mode === "edit" ? "rn.edit" : "rn.read")) + "</span></dd>";
+    if (r.workspace) out += "<dt>" + esc(T("rn.folder")) + '</dt><dd class="rn-kv-ws"><code class="mono" data-tip="' + esc(r.workspace) + '">' + esc(r.workspace) + "</code>" + runModeTag(r.run_mode) + "</dd>";
+    else if (r.run_mode === "exec") out += "<dt>" + esc(T("rn.mode")) + '</dt><dd class="rn-kv-ws">' + runModeTag("exec") + "</dd>";
     return out;
   }
   // This section is explicitly current task configuration; run metadata above it is a snapshot.
@@ -7290,9 +7342,14 @@
       '<ul class="rd-acc-list">' + rows + "</ul>" + (c.length > max ? '<p class="muted rd-chg-more">' + esc(T("rd.chg_more", { n: num(c.length - max) })) + "</p>" : "") +
       '<p class="muted rd-acc-note">' + esc(T("rd.acc_note")) + "</p></section>";
   }
+  // runModeTag: a run's permission level as a small tag (details in the tooltip).
+  function runModeTag(m) {
+    var k = m === "edit" || m === "exec" ? m : "read";
+    return '<span class="tag ' + (k === "read" ? "perm" : "warn") + '" data-tip="' + esc(T("rn." + k + "_tip")) + '">' + ic({ read: "eye", edit: "edit", exec: "terminal" }[k], "sm") + esc(T("rn." + k)) + "</span>";
+  }
   function runChangesHtml(r) {
     var c = r.file_changes;
-    if (!c || r.run_mode !== "edit") return "";
+    if (!c || r.run_mode !== "edit" && r.run_mode !== "exec") return "";
     var files = c.files || [], st = { A: ["added", "ok"], D: ["removed", "bad"], M: ["modified", "info"], T: ["modified", "info"] };
     var undone = !!r.changes_undone_at, gone = {};
     (undone ? [] : r.changes_undone_files || []).forEach(function (p) { gone[p] = 1; });
@@ -7638,18 +7695,31 @@
     var pre = rcTurns(r._chat);
     return '<section class="rc" id="rc" aria-label="' + esc(T("rc.title")) + '"><div class="rc-sep" id="rc-sep"' + (pre.length || (cs && !r._chat) ? "" : " hidden") + "><span>" + esc(T("rc.title")) + '</span>' + rcOpenHtml(cs && cs.id) + '</div><div class="rc-thread" id="rc-thread" aria-live="polite">' +
       (r._chat ? pre.map(rcTurnHtml).join("") : cs ? skeleton("list") : "") + "</div>" +
-      rcBoxHtml({}) + "</section>";
+      rcBoxHtml({ mode: (r._chat && r._chat.permission_mode) || r.run_mode || "read" }) + "</section>";
   }
   // The message box (run page and session page). o.ph / o.label / o.read_tip: other words;
   // o.tags: extra tags before 只读 (the session page's folder).
   function rcBoxHtml(o) {
     return '<form class="rc-box" id="rc-form" novalidate><label class="sr-only" for="rc-in">' + esc(T(o.label || "rc.label")) + "</label>" +
       '<textarea id="rc-in" rows="1" maxlength="16384" data-noguard placeholder="' + esc(T(o.ph || "rc.ph")) + '"></textarea>' +
-      '<div class="rc-bar"><span class="rc-tags">' + (o.tags || "") + '<span class="rc-tag rc-read" tabindex="0" data-tip="' + esc(T(o.read_tip || "rc.read_tip")) + '">' + ic("eye", "sm") + esc(T("rc.read")) + "</span>" +
+      '<div class="rc-bar"><span class="rc-tags">' + (o.tags || "") + rcModeHtml(o.mode || "read", o.read_tip) +
       '<span class="rc-tag rc-noweb" id="rc-noweb" tabindex="0" data-tip="' + esc(T("rc.noweb_tip")) + '">' + ic("offline", "sm") + esc(T("rc.noweb")) + "</span></span>" +
       '<span class="rc-meta" id="rc-meta"></span>' +
       '<button type="submit" class="btn primary sm" id="rc-send">' + ic("send", "sm") + esc(T("rc.send")) + "</button></div>" +
       '<p class="field-err" id="rc-err" role="alert"></p></form>';
+  }
+  // rcModeHtml: the session's permission level (只读 / 可修改 / 可执行命令) as a small
+  // select in the message box; the tooltip says what the chosen level allows.
+  function rcModeHtml(mode, readTip) {
+    var m = mode === "edit" || mode === "exec" ? mode : "read";
+    var tipOf = function (v) { return T(v === "read" ? readTip || "rc.read_tip" : "rn." + v + "_tip"); };
+    return '<label class="rc-tag rc-mode" data-tip="' + esc(tipOf(m)) + '" data-read-tip="' + esc(readTip || "rc.read_tip") + '">' + ic({ read: "eye", edit: "edit", exec: "terminal" }[m], "sm") +
+      '<select id="rc-mode" aria-label="' + esc(T("rn.mode")) + '">' + ["read", "edit", "exec"].map(function (v) { return '<option value="' + v + '"' + (v === m ? " selected" : "") + ">" + esc(T("rn." + v)) + "</option>"; }).join("") + "</select></label>";
+  }
+  // sandboxInfo: this machine's command sandbox status (from /api/settings), fetched once.
+  function sandboxInfo() {
+    if (state.sandbox) return Promise.resolve(state.sandbox);
+    return api("/api/settings").then(function (st) { state.sandbox = st.sandbox || {}; return state.sandbox; }, function () { return {}; });
   }
   // "Open in 会话" beside the run page's divider: the same thread on the session page.
   function rcOpenHtml(id) {
@@ -7724,7 +7794,7 @@
     }
     bindChat(sec, {
       id: r.chat_session ? r.chat_session.id : "", key: rcDraftKey(r.id), pre: r._chat, turns: rcTurns,
-      create: function () { return api("/api/chat-sessions", { method: "POST", body: { run_id: r.id } }); },
+      create: function (mode) { return api("/api/chat-sessions", { method: "POST", body: { run_id: r.id, permission_mode: mode } }); },
       onPaint: function (s) { var a = $("#rc-open", sec); if (a && s && /^[\w-]{1,64}$/.test(s.id || "")) { a.href = "#/chat/" + enc(s.id); a.hidden = false; } }
     });
   }
@@ -7735,6 +7805,16 @@
   function bindChat(sec, o) {
     var thread = $("#rc-thread", sec), form = $("#rc-form", sec), ta = $("#rc-in", sec), send = $("#rc-send", sec), meta = $("#rc-meta", sec), err = $("#rc-err", sec);
     var st = { id: o.id || "", ses: null, sending: false, painted: {} }, turnsOf = o.turns || rcTurns;
+    var modeSel = $("#rc-mode", sec), modeLbl = modeSel && modeSel.parentNode;
+    var paintMode = function (m) {
+      if (!modeSel) return;
+      if (m) modeSel.value = m;
+      var v = modeSel.value, tipKey = v === "read" ? modeLbl.getAttribute("data-read-tip") : "rn." + v + "_tip";
+      modeLbl.setAttribute("data-tip", T(tipKey));
+      var icon = $(".i", modeLbl), tmp = document.createElement("span"); tmp.innerHTML = ic({ read: "eye", edit: "edit", exec: "terminal" }[v], "sm");
+      if (icon && tmp.firstChild) modeLbl.replaceChild(tmp.firstChild, icon);
+      modeLbl.classList.toggle("warn", v !== "read");
+    };
     var key = o.key, d = draftLoad(key);
     if (d) ta.value = d.text;
     var fit = function () { ta.style.height = ""; ta.style.height = Math.min(Math.round(window.innerHeight * 0.4), ta.scrollHeight) + "px"; };
@@ -7751,12 +7831,14 @@
       if (s) html = (long() ? '<span class="pill sm" tabindex="0" data-tip="' + esc(T("rc.long_tip")) + '">' + esc(T("rc.long")) + "</span>" : "") +
         '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns) })) + "</span>";
       if (meta._h !== html) { meta.innerHTML = html; meta._h = html; }
-      $("#rc-noweb", sec).hidden = !!(s && s.web_access);
+      $("#rc-noweb", sec).hidden = !!(s && s.web_access) || !!(modeSel && modeSel.value === "exec"); // command sessions have network
+      if (modeSel) modeSel.disabled = b;
     };
     // keyed by turn: only a turn whose content changed is redrawn (no flicker, the live
     // lines of the turn being answered are kept)
     var paint = function (s) {
       st.ses = s;
+      if (s && s.permission_mode && document.activeElement !== modeSel) paintMode(s.permission_mode);
       var turns = turnsOf(s), seen = {};
       if (thread.firstElementChild && !thread.firstElementChild.classList.contains("rc-turn")) thread.innerHTML = "";
       turns.forEach(function (t) {
@@ -7815,7 +7897,7 @@
       if (new Blob([v]).size > 16384) { showErr(T("rc.err_too_long")); return; }
       showErr(""); st.sending = true; sync();
       var made = null;
-      (st.id ? Promise.resolve({ id: st.id }) : o.create().then(function (s) { made = s; return s; })).then(function (s) {
+      (st.id ? Promise.resolve({ id: st.id }) : o.create(modeSel ? modeSel.value : undefined).then(function (s) { made = s; return s; })).then(function (s) {
         st.id = s.id;
         return api("/api/chat-sessions/" + enc(s.id) + "/turns", { method: "POST", body: { message: v } });
       }).then(function () {
@@ -7830,6 +7912,20 @@
       }).then(function () { st.sending = false; if (document.contains(sec)) sync(); });
     });
     ta.addEventListener("input", function () { fit(); showErr(""); draftSave(key, ta.value); sync(); });
+    // changing the level: saved on the session (the next turn uses it); 可执行命令 on a
+    // machine without a system sandbox explains itself once first
+    if (modeSel) modeSel.addEventListener("change", function () {
+      var v = modeSel.value, prev = (st.ses && st.ses.permission_mode) || modeSel._prev || "read";
+      showErr("");
+      (v === "exec" ? sandboxInfo().then(function (sb) { return execFirstUse(sb); }) : Promise.resolve(true)).then(function (ok) {
+        if (!ok) { paintMode(prev); return; }
+        paintMode(v); sync();
+        if (!st.id) { modeSel._prev = v; return; }
+        return api("/api/chat-sessions/" + enc(st.id) + "/mode", { method: "PUT", body: { mode: v } }).then(function (x) { st.ses = Object.assign(st.ses || {}, { permission_mode: x.permission_mode }); modeSel._prev = v; toast(T("rc.mode_saved", { m: T("rn." + v) })); })
+          .catch(function (e) { paintMode(prev); sync(); showErr(rcErrText(e)); });
+      });
+    });
+    paintMode();
     thread.addEventListener("click", function (e) {
       var c = e.target.closest("[data-rc-copy]"), s = e.target.closest("[data-rc-stop]");
       if (c && st.ses) { var t = (st.ses.turn_list || []).filter(function (x) { return String(x.index) === c.getAttribute("data-rc-copy"); })[0]; if (t) copyText(t.answer || "").catch(fail); }
@@ -8421,7 +8517,7 @@
     return '<h1 class="sr-only">' + esc(T("nav.chat")) + '</h1><div class="cs' + (!s ? " cs-blank" : "") + (!hasHistory ? " cs-no-history" : "") + '" id="cs">' + side +
       '<section class="cs-main" id="rc" aria-label="' + esc(csTitle(s)) + '">' + csHeadHtml(s) +
       '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">' + thread + "</div>" +
-      rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s) }) + "</section></div>";
+      rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s), mode: s ? s.permission_mode : "exec" }) + "</section></div>";
   }
   function renderChat(id) {
     if (id && !CS_ID.test(id)) id = "";
@@ -8434,7 +8530,7 @@
       if (!s) {
         bindChat(sec, {
           id: "", key: "cs_new", ph: "cs.ph_new", send_tip: "cs.send_tip", dropEmpty: true, turns: csAll,
-          create: function () { return api("/api/chat-sessions", { method: "POST", body: { origin: "chat" } }); },
+          create: function (mode) { return api("/api/chat-sessions", { method: "POST", body: { origin: "chat", permission_mode: mode } }); },
           onSent: function (x) { location.hash = "#/chat/" + enc(x.id); return true; }
         });
         $("#rc-in", sec).focus();

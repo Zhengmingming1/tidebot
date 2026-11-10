@@ -3895,3 +3895,21 @@ button.pill.pl-sb { cursor: pointer; border: 0; font: inherit; }
 .sb-cmd { display: flex; align-items: center; gap: 8px; margin: 0 0 var(--s1); padding: 8px 8px 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .sb-cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
 .sb-after { margin: 0 0 var(--s1); font-size: var(--fs-sm); }
+
+/* P2: three permission levels — 可执行命令 marks, the no-sandbox first-use panel, session level select */
+.rn-mode input[value="exec"]:checked + span { color: var(--warn); }
+.rn-mode input:disabled + span { opacity: .45; cursor: default; }
+.rn-mode .rn-nosb { margin-left: 4px; padding: 0 4px; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 14px; color: var(--warn); background: var(--warn-50); }
+.rn-mode .rn-nosb.bad { color: var(--danger); background: var(--danger-50); }
+.nosb-box { margin-top: var(--s2); padding: var(--s2); border: 1px solid var(--warn-line); border-radius: var(--radius-sm); background: var(--warn-50); }
+.nosb-head { display: flex; align-items: center; gap: 8px; }
+.nosb-head .ico.warn { width: 24px; height: 24px; }
+.nosb-body { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--text-2); white-space: pre-line; }
+.nosb-box .actions { margin-top: var(--s2); }
+.tf-perm { align-items: end; }
+.tf-perm .rn-mode { height: 32px; }
+.tf-perm .rn-mode span { height: 26px; }
+.rc-tag.rc-mode { gap: 2px; cursor: pointer; }
+.rc-tag.rc-mode select { height: 20px; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.rc-tag.rc-mode.warn, .rc-tag.rc-mode.warn .i { color: var(--warn); }
+.rc-tag.rc-mode select:disabled { cursor: default; }

@@ -147,11 +147,11 @@ func TestRunDialogUI(t *testing.T) {
 		`"/api/runs/defaults"`,
 		`data-sk-run="`,
 		`T("pal.run_skill"`,
-		`name="mode" value="edit"`,
+		`modeSegHtml("mode", "exec", st.sandbox)`,
 		`T("rn.hint_dirty", { n: g.dirty })`,
 		`r.task_name || r.skill_name || T(r.trigger === "session" ? "trig.session" : "trig.quick")`,
 		`function runCtxText(r, short)`,
-		`setWs(l.workspace); setMode(l.mode); drawDirs();`,
+		`setWs(l.workspace || ""); setMode(l.mode); drawDirs();`,
 	} {
 		if !strings.Contains(string(js), want) {
 			t.Errorf("app.js lost %q", want)

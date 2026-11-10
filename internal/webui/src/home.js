@@ -177,7 +177,7 @@
         '<input type="hidden" name="skill_id" id="rn-skill"><div id="rn-bindings"></div><div class="rn-two">' +
         '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + providerOptions(st, lastProv, !!(edit && edit.provider), false) + "</select></label></div>" +
         '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">' + esc(T("rn.folder")) + "</span>" + tip(T("rn.folder_tip")) + '<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>' +
-          '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '"><label data-tip="' + esc(T("rn.read_tip")) + '"><input type="radio" name="mode" value="read" checked><span>' + ic("eye", "sm") + esc(T("rn.read")) + '</span></label><label data-tip="' + esc(T("rn.edit_tip")) + '"><input type="radio" name="mode" value="edit"><span>' + ic("edit", "sm") + esc(T("rn.edit")) + "</span></label></span></span>" +
+          modeSegHtml("mode", "exec", st.sandbox) + "</span>" +
           '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="rn-wlbl" placeholder="' + esc(T("rn.folder_ph")) + '">' +
           '<button type="button" class="icon-btn sm hidden" id="rn-ws-pick" data-tip="' + esc(T("tf.ws_pick")) + '" aria-label="' + esc(T("tf.ws_pick")) + '">' + ic("folder", "sm") + "</button>" +
           '<button type="button" class="icon-btn sm hidden" id="rn-ws-clear" data-tip="' + esc(T("rn.folder_clear")) + '" aria-label="' + esc(T("rn.folder_clear")) + '">' + ic("x", "sm") + "</button></div>" +
@@ -189,22 +189,28 @@
         function (root, close) {
           var form = $("#qr", root), ta = form.prompt, box = $("#qr-recent", root), reset = $("#qr-reset", root), ws = form.workspace;
           var initial = pre.skill_bindings || (pre.skill_id ? [{skill_id:pre.skill_id,mode:pre.version_id?"pinned":"follow",version_id:pre.version_id||"",role:"primary"}] : []);
-          var editor = skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs){form.skill_id.value=bs.length?bs[0].skill_id:"";form.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:pre.skill_set_source,checkRequest:function(){return {kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:modeVal()};}});
+          var editor = skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs){form.skill_id.value=bs.length?bs[0].skill_id:"";form.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:pre.skill_set_source,checkRequest:function(){return {kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:sentMode()};}});
           form.skill_id.value=editor.value().length?editor.value()[0].skill_id:"";
-          $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:ws.value.trim()?modeVal():"edit"});});
+          $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:ws.value.trim()?modeVal():(modeVal()==="exec"?"exec":"edit")});});
           var pill = $("#rn-ws-st", root), pick = $("#rn-ws-pick", root), clear = $("#rn-ws-clear", root), dirsBox = $("#rn-dirs", root), hint = $("#rn-hint", root), err = $("#rn-err", root), argEl = $("#rn-arg", root);
           var wsState = { problem: "", git: null }, seq = 0, timer = 0, wsTouched = false, recentDirs = [];
           var modeVal = function () { var c = form.querySelector('input[name="mode"]:checked'); return c ? c.value : "read"; };
-          var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" ? "edit" : "read"); }); };
-          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: ws.value.trim() ? modeVal() : "" }; };
-          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : "" } : null;
+          var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" || m === "exec" ? m : "read"); }); };
+          // without a folder: 只读 = tidebot's scratch folder (""), 可执行命令 = a scratch folder that runs commands
+          var sentMode = function () { var m = modeVal(); return ws.value.trim() ? m : (m === "exec" ? "exec" : ""); };
+          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: sentMode() }; };
+          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : (edit.mode === "exec" ? "exec" : "") } : null;
           // the hint under the form says what the run may do; a dirty git folder warns before "Can edit"
           var paintHint = function () {
-            var dir = ws.value.trim(), m = modeVal(), g = wsState.git, warn = false, txt;
-            $(".rn-mode", root).classList.toggle("off", !dir);
-            $$('input[name="mode"]', form).forEach(function (i) { i.disabled = !dir; });
-            if (!dir) txt = T(form.skill_id.value ? "rn.hint_skill" : (edit ? "qr.edit_hint" : "qr.hint"));
-            else if (m === "edit") { txt = T("rn.hint_edit"); if (g && g.dirty > 0) { txt = T("rn.hint_dirty", { n: g.dirty }); warn = true; } }
+            var dir = ws.value.trim(), g = wsState.git, warn = false, txt, sb = st.sandbox || {};
+            // 可修改 needs a folder; 只读 and 可执行命令 also work in a scratch folder
+            $$('input[name="mode"]', form).forEach(function (i) { i.disabled = !dir && i.value === "edit"; });
+            if (!dir && modeVal() === "edit") setMode("exec");
+            var m = modeVal();
+            if (m === "exec" && sb.status === "missing") { txt = T("rn.hint_exec_missing", { m: (sb.missing || []).join(", ") }); warn = true; }
+            else if (!dir && m === "exec") txt = T("rn.hint_exec_scratch");
+            else if (!dir) txt = T(form.skill_id.value ? "rn.hint_skill" : (edit ? "qr.edit_hint" : "qr.hint"));
+            else if (m === "edit" || m === "exec") { txt = T(m === "exec" ? "rn.hint_exec" : "rn.hint_edit"); if (g && g.dirty > 0) { txt = T("rn.hint_dirty", { n: g.dirty }); warn = true; } }
             else txt = T("rn.hint_read");
             hint.textContent = txt;
             hint.classList.toggle("warn", warn);
@@ -244,7 +250,7 @@
               drawDirs();
               var l = d && d.last;
               if (fill && sk && l && !wsTouched && !ws.value.trim()) {
-                setWs(l.workspace); setMode(l.mode); drawDirs();
+                setWs(l.workspace || ""); setMode(l.mode); drawDirs();
                 if (l.provider && readyProviders(st).some(function (p) { return p.name === l.provider; })) form.provider.value = l.provider;
                 paintHint();
               }
@@ -268,6 +274,7 @@
           if (edit) {
             ta.value = edit.prompt; ta.setSelectionRange(ta.value.length, ta.value.length);
             if (edit.workspace) { ws.value = edit.workspace; setMode(edit.mode); wsTouched = true; }
+            else setMode(edit.mode === "exec" ? "exec" : "read");
           } else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });
           paintSkill(); filterChips(); sync(); check(); loadDefaults(!edit && !!pre.skill_id);
           ta.addEventListener("input", function () { filterChips(); sync(); });
@@ -297,11 +304,15 @@
             var btn = form.querySelector('button[type="submit"]');
             btn.disabled = true;
             try { localStorage.setItem("tb_qr_provider", body.provider); } catch (e2) {}
-            api("/api/runs/quick", { method: "POST", body: body }).then(function (r) {
+            (body.mode === "exec" ? execFirstUse(st.sandbox, $(".modal", root) || root) : Promise.resolve(true)).then(function (go) {
+              if (!go) { btn.disabled = false; return Promise.reject(null); }
+              return api("/api/runs/quick", { method: "POST", body: body });
+            }).then(function (r) {
               if (!edit) draftClear("qr");
               close(); openStarted(r, "toast.quick_started");
             }).catch(function (ex) {
               btn.disabled = false;
+              if (ex === null) return; // the first-use explanation was closed
               var pr = ex && ex.data && ex.data.problem;
               if (pr) { err.textContent = T("rn.ws_" + pr + "_tip"); return; }
               fail(ex);
@@ -309,6 +320,41 @@
           });
         }, syncHomeQuickDraft);
     }).catch(fail);
+  }
+  // modeSegHtml: the three permission levels (只读 / 可修改 / 可执行命令) as a
+  // segmented control; radios named name, cur checked. sb is the sandbox status from
+  // /api/settings: on a platform with none (Windows) 可执行命令 carries a small
+  // 「无系统沙箱」 mark, with sandbox parts missing a warning mark (details in tooltips).
+  function modeSegHtml(name, cur, sb) {
+    sb = sb || {};
+    var opt = function (v, icon, extra) {
+      return '<label data-tip="' + esc(T("rn." + v + "_tip")) + '"><input type="radio" name="' + esc(name) + '" value="' + v + '"' + (cur === v ? " checked" : "") + "><span>" + ic(icon, "sm") + esc(T("rn." + v)) + (extra || "") + "</span></label>";
+    };
+    var mark = sb.status === "none" ? '<b class="rn-nosb" data-tip="' + esc(T("rn.nosb_tip")) + '">' + esc(T("rn.nosb")) + "</b>" :
+      sb.status === "missing" ? '<b class="rn-nosb bad" data-tip="' + esc(T("pl.sb_missing_tip", { m: (sb.missing || []).join(", ") })) + '">' + esc(T("rn.sb_missing")) + "</b>" : "";
+    return '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '">' + opt("read", "eye") + opt("edit", "edit") + opt("exec", "terminal", mark) + "</span>";
+  }
+  // execFirstUse: on a platform without a system sandbox (native Windows) the first
+  // command run explains once what protects it instead; after that 可执行命令 is
+  // used normally. Inside an open dialog (box) the explanation takes the place of
+  // its buttons; elsewhere it is an in-app dialog. Resolves false if cancelled.
+  function execFirstUse(sb, box) {
+    var key = "tb_exec_nosb_ok";
+    try { if (!sb || sb.status !== "none" || localStorage.getItem(key)) return Promise.resolve(true); } catch (e) { return Promise.resolve(true); }
+    var ack = function (ok) { if (ok) { try { localStorage.setItem(key, "1"); } catch (e) {} } return ok; };
+    if (!box) return confirmDialog({ title: T("rn.nosb_title"), body: T("rn.nosb_body"), ok: T("rn.nosb_ok"), icon: "shield" }).then(ack);
+    return new Promise(function (resolve) {
+      var all = $$(".actions", box), footer = all.length ? all[all.length - 1] : null;
+      var bar = document.createElement("div");
+      bar.className = "nosb-box"; bar.setAttribute("role", "alertdialog"); bar.setAttribute("aria-labelledby", "nosb-t");
+      bar.innerHTML = '<div class="nosb-head"><span class="ico warn">' + ic("shield", "sm") + '</span><strong id="nosb-t">' + esc(T("rn.nosb_title")) + "</strong></div>" +
+        '<p class="nosb-body">' + esc(T("rn.nosb_body")) + '</p><div class="actions"><button type="button" class="btn ghost" id="nosb-no">' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="nosb-ok">' + esc(T("rn.nosb_ok")) + "</button></div>";
+      if (footer) { footer.classList.add("hidden"); footer.parentNode.insertBefore(bar, footer.nextSibling); } else box.appendChild(bar);
+      var done = function (ok) { bar.remove(); if (footer) footer.classList.remove("hidden"); resolve(ack(ok)); };
+      $("#nosb-ok", bar).addEventListener("click", function () { done(true); });
+      $("#nosb-no", bar).addEventListener("click", function () { done(false); });
+      $("#nosb-ok", bar).focus();
+    });
   }
   // rnEdited: has the edit-&-rerun form moved away from the original run? Trailing
   // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).

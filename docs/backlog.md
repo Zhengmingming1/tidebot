@@ -6101,3 +6101,23 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 **心得**：「生效了吗」只能实测——`--bare` 跳过的是钩子而不是 settings；而看起来更省事的 env scrub 开关反而悄悄关掉了 dontAsk。沙箱的边界要连「自己」一起算：tidebot 的 IPC socket 没有 token，不挡住就是沙箱的后门。
 
 **后续（P2）**：运行对话框 / 任务 / 会话的「可执行命令」入口；Windows 分段标注「无系统沙箱」和第一次使用说明框；preflight 把 exec 模式缺沙箱列为问题；可选的 `-tags e2e` 真 bwrap CI 测试；补一次 `dangerouslyDisableSandbox` 的直接实测。
+
+### 2026-11-09：先不设限 P2——三档权限上线
+
+**做了什么**
+
+- **三档权限**：运行对话框、任务表单、编辑并重新运行、会话（运行页追问和会话页）都能选「只读 / 可修改 / 可执行命令」。新运行、新任务、新会话默认「可执行命令」；老任务没有 `run_mode`，照旧按「可修改」跑（`--restricted`），不会被悄悄升级。
+- **可执行命令**：在系统沙箱里跑命令和技能脚本（P1 的底座），**默认联网**（WebFetch / WebSearch / 命令都能访问网络，产品决定：技能常要下载或调 API）。写范围、敏感目录禁读、命令环境去 API key、固定 deny（sudo / force-push / curl|sh）、运行后 agent 配置检查都保留。
+- **不选目录也能执行**：在 `data/run-work/run-*` 建一个临时目录运行，结束后删掉；运行列表、最近使用、重新运行都不显示这个内部路径。`applyExecSandbox` 额外拒绝把包含 tidebot 自己 home / data / IPC 的目录设为可写。
+- **会话**：建会话时带权限（`permission_mode`），输入框下方可随时切换（`PUT /api/chat-sessions/{id}/mode`，运行中不能切）；可修改 / 可执行命令在用户自己的目录上和改文件的运行互斥（`dir_busy`）；可执行命令档不再加「不联网」deny。
+- **任务**：表单新增「权限」和「推理强度」（默认 / 低 / 中 / 高，默认不传 `--effort`）；`run_mode`、`effort` 存在任务定义里并校验。
+- **Windows**：可执行命令旁标「无系统沙箱」；第一次使用时在对话框里展开一次说明（仍然有效的保护、只在信任的目录和技能上用），点「知道了，继续」后照常运行，以后不再出现。
+- **preflight**：可执行命令（运行或 exec 任务）多一项「命令沙箱」：缺 bwrap / socat → 阻塞并给安装命令；Windows → 不确定（无系统沙箱）；可用 → 通过。
+- 测试：app `TestStartRunExecInFolder`、`TestStartRunExecScratch`、`TestExecRefusesFolderHoldingTidebot`、`TestTaskRunModes`、`TestChatSessionModes`、`TestPreflightExecSandbox`；webui `TestPermissionModesAPI`（会话建 / 切权限、坏值 400、任务 run_mode / effort 往返）、`TestExecScratchRunHidesFolder`。
+
+**没做 / 留到后面**
+
+- CI 里真跑 bwrap 的 e2e：需要 claude 二进制和模型 key，GitHub 的 Ubuntu 24.04 还限制非特权 user namespace，不便宜，先不做；沙箱参数由单测覆盖，P1 有手工实测表。
+- 工作流节点的三档权限（P4）；会话技能草稿闭环（P3）；任务导出 / 导入带上 `run_mode`、`effort`；`dangerouslyDisableSandbox` 的直接实测。
+
+**心得**：「默认执行」最容易漏的是没有目录的情况——落回数据目录就等于把 tidebot 自己交给命令；临时目录 + 可写目录不得包含自己，两道一起才稳。

@@ -150,7 +150,7 @@ func TestTaskTagsUI(t *testing.T) {
 		`tagChipsRow(t.tags)`,
 		`if (taskView.tag) q.push("tag=" + enc(taskView.tag));`,
 		`var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);`,
-		`policy: readPolicyFields(f), tags: tgs.value() };`,
+		`policy: readPolicyFields(f), tags: tgs.value(), run_mode: runMode(), effort: f.effort.value };`,
 		`api("/api/tasks/batch", { method: "POST", body: { ids: ids, action: act, tag: t } })`,
 		`href="#/tasks?tag=' + enc(g) + '"`,
 	} {

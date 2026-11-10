@@ -38,18 +38,31 @@
     var pre = rcTurns(r._chat);
     return '<section class="rc" id="rc" aria-label="' + esc(T("rc.title")) + '"><div class="rc-sep" id="rc-sep"' + (pre.length || (cs && !r._chat) ? "" : " hidden") + "><span>" + esc(T("rc.title")) + '</span>' + rcOpenHtml(cs && cs.id) + '</div><div class="rc-thread" id="rc-thread" aria-live="polite">' +
       (r._chat ? pre.map(rcTurnHtml).join("") : cs ? skeleton("list") : "") + "</div>" +
-      rcBoxHtml({}) + "</section>";
+      rcBoxHtml({ mode: (r._chat && r._chat.permission_mode) || r.run_mode || "read" }) + "</section>";
   }
   // The message box (run page and session page). o.ph / o.label / o.read_tip: other words;
   // o.tags: extra tags before 只读 (the session page's folder).
   function rcBoxHtml(o) {
     return '<form class="rc-box" id="rc-form" novalidate><label class="sr-only" for="rc-in">' + esc(T(o.label || "rc.label")) + "</label>" +
       '<textarea id="rc-in" rows="1" maxlength="16384" data-noguard placeholder="' + esc(T(o.ph || "rc.ph")) + '"></textarea>' +
-      '<div class="rc-bar"><span class="rc-tags">' + (o.tags || "") + '<span class="rc-tag rc-read" tabindex="0" data-tip="' + esc(T(o.read_tip || "rc.read_tip")) + '">' + ic("eye", "sm") + esc(T("rc.read")) + "</span>" +
+      '<div class="rc-bar"><span class="rc-tags">' + (o.tags || "") + rcModeHtml(o.mode || "read", o.read_tip) +
       '<span class="rc-tag rc-noweb" id="rc-noweb" tabindex="0" data-tip="' + esc(T("rc.noweb_tip")) + '">' + ic("offline", "sm") + esc(T("rc.noweb")) + "</span></span>" +
       '<span class="rc-meta" id="rc-meta"></span>' +
       '<button type="submit" class="btn primary sm" id="rc-send">' + ic("send", "sm") + esc(T("rc.send")) + "</button></div>" +
       '<p class="field-err" id="rc-err" role="alert"></p></form>';
+  }
+  // rcModeHtml: the session's permission level (只读 / 可修改 / 可执行命令) as a small
+  // select in the message box; the tooltip says what the chosen level allows.
+  function rcModeHtml(mode, readTip) {
+    var m = mode === "edit" || mode === "exec" ? mode : "read";
+    var tipOf = function (v) { return T(v === "read" ? readTip || "rc.read_tip" : "rn." + v + "_tip"); };
+    return '<label class="rc-tag rc-mode" data-tip="' + esc(tipOf(m)) + '" data-read-tip="' + esc(readTip || "rc.read_tip") + '">' + ic({ read: "eye", edit: "edit", exec: "terminal" }[m], "sm") +
+      '<select id="rc-mode" aria-label="' + esc(T("rn.mode")) + '">' + ["read", "edit", "exec"].map(function (v) { return '<option value="' + v + '"' + (v === m ? " selected" : "") + ">" + esc(T("rn." + v)) + "</option>"; }).join("") + "</select></label>";
+  }
+  // sandboxInfo: this machine's command sandbox status (from /api/settings), fetched once.
+  function sandboxInfo() {
+    if (state.sandbox) return Promise.resolve(state.sandbox);
+    return api("/api/settings").then(function (st) { state.sandbox = st.sandbox || {}; return state.sandbox; }, function () { return {}; });
   }
   // "Open in 会话" beside the run page's divider: the same thread on the session page.
   function rcOpenHtml(id) {
@@ -124,7 +137,7 @@
     }
     bindChat(sec, {
       id: r.chat_session ? r.chat_session.id : "", key: rcDraftKey(r.id), pre: r._chat, turns: rcTurns,
-      create: function () { return api("/api/chat-sessions", { method: "POST", body: { run_id: r.id } }); },
+      create: function (mode) { return api("/api/chat-sessions", { method: "POST", body: { run_id: r.id, permission_mode: mode } }); },
       onPaint: function (s) { var a = $("#rc-open", sec); if (a && s && /^[\w-]{1,64}$/.test(s.id || "")) { a.href = "#/chat/" + enc(s.id); a.hidden = false; } }
     });
   }
@@ -135,6 +148,16 @@
   function bindChat(sec, o) {
     var thread = $("#rc-thread", sec), form = $("#rc-form", sec), ta = $("#rc-in", sec), send = $("#rc-send", sec), meta = $("#rc-meta", sec), err = $("#rc-err", sec);
     var st = { id: o.id || "", ses: null, sending: false, painted: {} }, turnsOf = o.turns || rcTurns;
+    var modeSel = $("#rc-mode", sec), modeLbl = modeSel && modeSel.parentNode;
+    var paintMode = function (m) {
+      if (!modeSel) return;
+      if (m) modeSel.value = m;
+      var v = modeSel.value, tipKey = v === "read" ? modeLbl.getAttribute("data-read-tip") : "rn." + v + "_tip";
+      modeLbl.setAttribute("data-tip", T(tipKey));
+      var icon = $(".i", modeLbl), tmp = document.createElement("span"); tmp.innerHTML = ic({ read: "eye", edit: "edit", exec: "terminal" }[v], "sm");
+      if (icon && tmp.firstChild) modeLbl.replaceChild(tmp.firstChild, icon);
+      modeLbl.classList.toggle("warn", v !== "read");
+    };
     var key = o.key, d = draftLoad(key);
     if (d) ta.value = d.text;
     var fit = function () { ta.style.height = ""; ta.style.height = Math.min(Math.round(window.innerHeight * 0.4), ta.scrollHeight) + "px"; };
@@ -151,12 +174,14 @@
       if (s) html = (long() ? '<span class="pill sm" tabindex="0" data-tip="' + esc(T("rc.long_tip")) + '">' + esc(T("rc.long")) + "</span>" : "") +
         '<span class="num" tabindex="0" data-tip="' + esc(T("rc.meta_tip", { n: num(s.turns), c: usd(s.cost_usd, 4) })) + '">' + esc(T("rc.meta", { n: num(s.turns) })) + "</span>";
       if (meta._h !== html) { meta.innerHTML = html; meta._h = html; }
-      $("#rc-noweb", sec).hidden = !!(s && s.web_access);
+      $("#rc-noweb", sec).hidden = !!(s && s.web_access) || !!(modeSel && modeSel.value === "exec"); // command sessions have network
+      if (modeSel) modeSel.disabled = b;
     };
     // keyed by turn: only a turn whose content changed is redrawn (no flicker, the live
     // lines of the turn being answered are kept)
     var paint = function (s) {
       st.ses = s;
+      if (s && s.permission_mode && document.activeElement !== modeSel) paintMode(s.permission_mode);
       var turns = turnsOf(s), seen = {};
       if (thread.firstElementChild && !thread.firstElementChild.classList.contains("rc-turn")) thread.innerHTML = "";
       turns.forEach(function (t) {
@@ -215,7 +240,7 @@
       if (new Blob([v]).size > 16384) { showErr(T("rc.err_too_long")); return; }
       showErr(""); st.sending = true; sync();
       var made = null;
-      (st.id ? Promise.resolve({ id: st.id }) : o.create().then(function (s) { made = s; return s; })).then(function (s) {
+      (st.id ? Promise.resolve({ id: st.id }) : o.create(modeSel ? modeSel.value : undefined).then(function (s) { made = s; return s; })).then(function (s) {
         st.id = s.id;
         return api("/api/chat-sessions/" + enc(s.id) + "/turns", { method: "POST", body: { message: v } });
       }).then(function () {
@@ -230,6 +255,20 @@
       }).then(function () { st.sending = false; if (document.contains(sec)) sync(); });
     });
     ta.addEventListener("input", function () { fit(); showErr(""); draftSave(key, ta.value); sync(); });
+    // changing the level: saved on the session (the next turn uses it); 可执行命令 on a
+    // machine without a system sandbox explains itself once first
+    if (modeSel) modeSel.addEventListener("change", function () {
+      var v = modeSel.value, prev = (st.ses && st.ses.permission_mode) || modeSel._prev || "read";
+      showErr("");
+      (v === "exec" ? sandboxInfo().then(function (sb) { return execFirstUse(sb); }) : Promise.resolve(true)).then(function (ok) {
+        if (!ok) { paintMode(prev); return; }
+        paintMode(v); sync();
+        if (!st.id) { modeSel._prev = v; return; }
+        return api("/api/chat-sessions/" + enc(st.id) + "/mode", { method: "PUT", body: { mode: v } }).then(function (x) { st.ses = Object.assign(st.ses || {}, { permission_mode: x.permission_mode }); modeSel._prev = v; toast(T("rc.mode_saved", { m: T("rn." + v) })); })
+          .catch(function (e) { paintMode(prev); sync(); showErr(rcErrText(e)); });
+      });
+    });
+    paintMode();
     thread.addEventListener("click", function (e) {
       var c = e.target.closest("[data-rc-copy]"), s = e.target.closest("[data-rc-stop]");
       if (c && st.ses) { var t = (st.ses.turn_list || []).filter(function (x) { return String(x.index) === c.getAttribute("data-rc-copy"); })[0]; if (t) copyText(t.answer || "").catch(fail); }
