@@ -55,7 +55,8 @@ type runFile struct {
 	packed bool
 }
 
-// ApplyRetention deletes old run logs/artifacts and idle/orphan chat transcripts.
+// ApplyRetention deletes old run logs/artifacts, idle/orphan chat transcripts
+// and the folders of deleted sessions.
 // Run metadata and chat_sessions rows stay in the DB. A zero LogDays/ArtifactDays
 // keeps that kind forever (orphan chat transcripts are still removed); a zero
 // MaxTotalBytes means no cap on logs+artifacts.
@@ -74,7 +75,7 @@ func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Ti
 		if ok {
 			rep.DeletedFiles++
 			rep.FreedBytes += f.size
-		} else if f.kind != "chat" {
+		} else if f.kind == "log" || f.kind == "artifact" {
 			rep.TotalBytes += f.size
 		}
 	}
@@ -152,7 +153,55 @@ func (a *App) planRetention(ctx context.Context, p RetentionPolicy, now time.Tim
 	if err := a.planChatTranscriptRetention(ctx, p, now, &plan); err != nil {
 		return plan, err
 	}
+	if err := a.planChatSessionDirRetention(ctx, &plan); err != nil {
+		return plan, err
+	}
 	return plan, nil
+}
+
+// planChatSessionDirRetention adds session folders (<data>/chat-sessions/<id>:
+// the scratch folder and skill draft) whose session row is gone. Deleting a
+// session removes its folder, but a file still held open (Windows, a process a
+// command left running) or a crash in between left it on disk for good. The
+// folders are listed before the rows are read: a session created meanwhile
+// inserts its row before its folder exists, so it is never taken for an orphan.
+func (a *App) planChatSessionDirRetention(ctx context.Context, plan *retentionPlan) error {
+	ents, err := os.ReadDir(a.chatSessionsDir())
+	if err != nil {
+		return nil
+	}
+	if len(ents) == 0 {
+		return nil
+	}
+	live := map[string]bool{}
+	rows, err := a.DB.QueryContext(ctx, `SELECT id FROM chat_sessions`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		live[safeChatID(id)] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		name := e.Name()
+		if live[name] || !e.IsDir() || safeChatID(name) != name {
+			continue
+		}
+		p := filepath.Join(a.chatSessionsDir(), name)
+		size, mod := dirSize(p)
+		plan.del = append(plan.del, runFile{runID: name, path: p, size: size, mod: mod, kind: "session"})
+		plan.FreeBytes += size
+	}
+	return nil
 }
 
 // chatSessionRef is a live session's Claude Code transcript id and idle clock.

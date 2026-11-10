@@ -682,8 +682,14 @@ func chatData(s string) string { return strings.ReplaceAll(s, "</", "<\\/") }
 
 // DeleteChatSession removes a session, its capability proposals, its scratch
 // folder and its transcript in tidebot's Claude Code config dir. The turns' runs
-// stay in the run history.
+// stay in the run history. Once the row is gone the session is deleted: a folder
+// that can't be removed now (a file still open) is logged and left to cleanup
+// (planChatSessionDirRetention), not reported as a failed delete.
 func (a *App) DeleteChatSession(ctx context.Context, sid string) error {
+	// Draft changes check the session under this lock: none can recreate the
+	// folder after it is removed.
+	chatDraftMu.Lock()
+	defer chatDraftMu.Unlock()
 	c, err := a.chatSession(ctx, sid)
 	if err != nil {
 		return err
@@ -703,7 +709,10 @@ func (a *App) DeleteChatSession(ctx context.Context, sid string) error {
 		_ = os.Remove(p)
 		_ = os.RemoveAll(strings.TrimSuffix(p, ".jsonl")) // subagent transcripts, tool results
 	}
-	return os.RemoveAll(filepath.Join(a.chatSessionsDir(), safeChatID(sid)))
+	if err := os.RemoveAll(filepath.Join(a.chatSessionsDir(), safeChatID(sid))); err != nil && a.Log != nil {
+		a.Log.Warn("delete session folder, retried by cleanup", "session", sid, "error", err)
+	}
+	return nil
 }
 
 // chatTurnCount is the number of turns a session row (chat_sessions.id) has
