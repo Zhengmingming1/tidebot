@@ -18,6 +18,19 @@ It's not a platform and doesn't want to become one. Single user, runs locally, o
 
 ![Home](docs/images/home.png)
 
+## How it works: get it running first, add limits later
+
+There is one main line: **skill → run or chat → adopt → save as a task → add limits when you need them**.
+
+- **Run it first.** Type a sentence in the home composer and hit Run for a one-off, or Chat to take it into a session and work on it back and forth. Every skill has a Chat button: it opens a session with that skill bound; click Tune and the model edits a draft of the skill as you go, "Save version" stores it, and "Adopt" makes it current (always after asking you).
+- **Three permission levels.** Runs, tasks, sessions and workflows can be Read-only, Can edit or Run commands; new ones default to Run commands. Commands run in the system sandbox (macOS Seatbelt; Linux needs bubblewrap + socat; native Windows has no system sandbox, which is labelled and explained the first time). Without a folder, a run works in a temporary folder that is removed afterwards. At every level, your local Claude Code and other agents' configuration (`~/.claude`, `.mcp.json`, `CLAUDE.md`, …) can't be changed and credential folders such as `~/.ssh` can't be read.
+- **Save as a task.** Run and session pages have "Save as task", which carries the instruction, folder and permission level and pins skills to the version you adopted. New tasks are manual until you set a schedule; a time read from the instruction is only a suggestion you click to apply. Workflows get "Schedule / budget" too.
+- **Limits come later.** New tasks have no per-run spend cap and no time limit; add per-run / daily caps or a timeout when you want them, and workflows can take a total budget. Values you set on existing tasks and workflows stay as they are.
+- **Imports are scanned.** Skill imports, Git skill repository installs and extension installs share one source and risk scan: low risk imports straight away with no prompt; high-risk findings are listed and import only after you tick "I've reviewed it, import anyway".
+- Automatic skill analysis and canary are off by default, under "Advanced" on the skill page.
+
+![Chat](docs/images/chat.png)
+
 ## Screenshots
 
 All screenshots are taken in a 1024×655 window, which is the size I actually keep it at on my Mac, in the default Graphite theme. The data comes from the demo script, not a real account.
@@ -42,7 +55,7 @@ A finished run gets a "Final answer" card: the Markdown is rendered, and you can
 
 ![Run details](docs/images/run-detail.png)
 
-Quick run. Recent prompts show up as chips you can click, the provider you used last time is preselected, and Ctrl+Enter (⌘+Enter on a Mac) runs it. Unsent prompts are kept as a draft, so closing the dialog or reloading the page doesn't lose them.
+The run dialog ("Skill & folder…" on the home page). Pick a primary skill and helpers, the provider, a folder and the permission level, then write the prompt; Ctrl+Enter (⌘+Enter on a Mac) runs it. Unsent prompts are kept as a draft, so closing the dialog or reloading the page doesn't lose them.
 
 ![Quick run](docs/images/quick-run.png)
 
@@ -54,11 +67,11 @@ Manage the single global daily monetary limit in Settings → Budget. It covers 
 
 ![Spend](docs/images/spend.png)
 
-The skill library. Every skill can be downloaded as a .zip and imported on another machine as is.
+The skill library. Chat on each row opens a session with that skill bound; ▷ runs it once. Imports are scanned first and low-risk ones go straight in. Every skill can be downloaded as a .zip and imported on another machine as is.
 
 ![Skills](docs/images/skills.png)
 
-Skill versions and diffs. Compare any two versions. Rollback only moves the pointer here too, and you have 10 seconds to undo it. Any version can be downloaded on its own.
+Skill versions and diffs. Compare any two versions. Rollback only moves the pointer here too, and you have 10 seconds to undo it. Any version can be downloaded on its own. Automatic analysis and canary sit under "Advanced" at the bottom, off by default.
 
 ![Skill diff](docs/images/skill-diff.png)
 
@@ -92,11 +105,11 @@ Skill sets and visual workflows. Combine one primary skill with supporting skill
 
 Skill package maintenance (v0.2.1). Declare required or optional skill dependencies in `tidebot.json`, preview additions before adopting them, and run a local preflight without model calls. Optional AI analysis and primary-versus-composition text evaluations incur model usage. Package versions retain documentation and examples; explicit upgrade previews protect locally edited task and node bindings. Loaded skill material is not proof of model execution. See the [dependency, upgrade and evaluation guide (Chinese)](docs/skill-manifests.md).
 
-Skill repositories (v0.2.1). Add HTTPS/SSH Git repositories from GitHub, GitLab, Gitee or a company host in the Skills area, browse and batch-install complete skill folders, then download and explicitly adopt updates while retaining provenance and history. See the [repository installation and update guide (Chinese)](docs/skill-repositories.md).
+Skill repositories (v0.2.1). Add HTTPS/SSH Git repositories from GitHub, GitLab, Gitee or a company host under Extensions → Sources (installs get the same scan), browse and batch-install complete skill folders, then download and explicitly adopt updates while retaining provenance and history. See the [repository installation and update guide (Chinese)](docs/skill-repositories.md).
 
 Skills with versions and rollback. Import a Claude Code skill directory; every re-import is a new version. A task can pin a specific skill version, and you can roll back when a new one misbehaves.
 
-Optional skill optimization (off by default). Three modes: off, suggest only, canary. Canary sends part of the runs to a candidate version and shows success rate, cost and duration side by side. It never promotes anything on its own; you confirm that.
+Optional skill optimization (off by default, under "Advanced" on the skill page). Three modes: off, suggest only, canary. Canary sends part of the runs to a candidate version and shows success rate, cost and duration side by side. It never promotes anything on its own; you confirm that.
 
 Buttons and plugins. A button is a one-click preset bound to a task or a prompt. The home page shows them in the order you set, by drag or Alt+arrow keys. When you install a plugin you tick its permissions one by one (high-risk ones start unticked), and you can revoke a single one later. Plugins with settings get a form; password-type fields can't be read back once saved.
 
@@ -106,9 +119,9 @@ Schedules you can trust. Schedules follow the timezone you set (searchable in Se
 
 Notifications that don't nag. Success notifications include the first few lines of the answer, and email gets the whole thing. You can also notify only when the answer changed, so a daily report that says the same thing every day stays quiet. Each channel shows whether its last message went out, and you get a heads-up after 3 failures in a row.
 
-Quick runs and reruns. If you don't want a task yet, hit "New quick run" on the home page, type a sentence and go. Not happy with the result? Rerun it as is, or edit the prompt and run again, and save it as a scheduled task once it's right. A running run can be stopped at any time, a queued one can be taken out of the queue, and the page shows where it is in line.
+Quick runs and reruns. If you don't want a task yet, type a sentence in the home composer and go, or hit Chat to open a session. Not happy with the result? Rerun it as is, or edit the prompt and run again, and save it as a scheduled task once it's right. A running run can be stopped at any time, a queued one can be taken out of the queue, and the page shows where it is in line.
 
-Cost caps. Daily limits per global / task / bucket (production, canary, optimization, assist). Checked before every run, checked again when a queued run gets its slot (if the budget ran out while it waited, it's skipped), with `--max-budget-usd` as a backstop during the run. Runs that start at the same time each reserve their share of what's left first, so they can't overshoot the cap together. Usage is saved every 5 seconds while a run is going, so a crash doesn't lose the bill.
+Cost caps (add them when you need them). Daily limits per global / task / bucket (production, canary, optimization, assist). Checked before every run, checked again when a queued run gets its slot (if the budget ran out while it waited, it's skipped), with `--max-budget-usd` as a backstop during the run. Runs that start at the same time each reserve their share of what's left first, so they can't overshoot the cap together. Usage is saved every 5 seconds while a run is going, so a crash doesn't lose the bill.
 
 Priced per model. Each run is priced from its actual token usage at that model's own rate, instead of applying Claude's prices to everything; subscription plans (like Kimi Coding Plan) just count tokens. The price list syncs itself weekly from a signed price catalog (source and last update live in Settings → Price catalog). The Spend page breaks things down by task, provider and model, and exports CSV.
 

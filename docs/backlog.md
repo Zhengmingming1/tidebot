@@ -6163,3 +6163,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - CI 真 bwrap e2e；`dangerouslyDisableSandbox` 的直接实测；运行 / 会话不记录推理强度。
 
 **心得**：把「定时 / 预算」做成「建一个目标是工作流的任务」，比给工作流再造一套调度省事得多，重试、通知、花费归属全部自动跟上。
+
+### 2026-11-09：先不设限 P5——收敛入口
+
+**做了什么**
+
+- **主线「技能 → 会话」**：技能列表每行加「对话」（▷ 运行改成图标按钮），技能详情顶部主按钮是「对话」；点了新建一个绑定该技能、默认「可执行命令」的会话。首页输入框加「对话」，把已写的话带进新会话。
+- **导入和扩展安装用同一套扫描**：上传、本地目录、CLI（`agentctl skills import`）、Git 技能仓库安装都走 `capability.ScanFiles` + `InstallPolicy`，来源算「用户自选」（新 trust `user`）。安全 / 需注意直接导入不弹确认（上传后名称合法、不重名就自动导入）；高风险在预览顶部列出命中位置，勾选「我已看过，仍然导入」才放行（接口 409 `risk_confirm`，CLI 加 `--confirm-risk`）。导入时服务端按实际文件重新扫描。
+- **自动分析和灰度默认关**：数据库默认本来就是 `off`，补了测试（新技能不分析、重新导入保留已有设置）；技能详情里的优化卡片收进「进阶」折叠区，开着的技能默认展开。
+- **合并重复入口**：Skill 仓库只在「扩展 → 来源」（`#/skill-repositories` 自动跳转）；技能页签去掉「工作流」（侧栏已有）；会话页头去掉「优化技能」，保留「改技能」。
+- 文档：两份 README 加「先跑通，再加限制」一节并重拍全部截图；`skills-workflows.md`、`task-cost-control.md`、`skill-repositories.md` 同步。
+- 测试：capability `TestImportPolicyUserSource`；webui `TestSkillImportScan`、`TestRepositoryInstallScan`、`TestConvergedEntriesUI`、导入 UI 的低 / 高风险用例、导航一致性；app `TestOptimizeOffByDefault`。
+
+**没做 / 留到后面**
+
+- 「会话」侧栏入口保留，作为会话列表；没有把运行和会话合成一个页面。
+- CI 真 bwrap e2e；`dangerouslyDisableSandbox` 的直接实测；运行 / 会话不记录推理强度；工作流运行不记录来自哪个任务；写入档工作流整次串行。
+
+**心得**：入口收敛靠「删」比靠「加」难——每删一个按钮都要先确认另一条路能到同一个地方，导航一致性测试把这件事变成了可检查的清单。
