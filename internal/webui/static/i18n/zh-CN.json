@@ -3012,7 +3012,22 @@
   "sp.unl_restored": "已恢复 {n} 个任务的单次上限",
   "sp.unl_fail": "操作没有成功，请重试",
   "pl.tasks_active": "启用中的任务",
+  "rd.acc": "agent 配置被改动",
+  "rd.acc_tip": "这次执行命令的运行结束后，tidebot 对比运行前后发现这些 agent 配置文件变了（~/.claude、项目的 .claude/、.mcp.json、CLAUDE.md 等）。",
+  "rd.acc_note": "tidebot 没有还原这些改动（还原本身也是改你的配置），请自己检查。",
+  "pl.sb_ok": "命令沙箱可用",
+  "pl.sb_ok_tip": "执行命令的运行会放进系统沙箱：只能写工作目录和临时目录，读不到密钥目录，默认不能联网。",
+  "pl.sb_missing": "命令沙箱缺组件",
+  "pl.sb_missing_tip": "缺少 {m}。点开查看安装方法；装好之前，执行命令的运行会被拒绝。",
+  "pl.sb_none": "无系统沙箱",
+  "pl.sb_none_tip": "Windows 上没有系统沙箱：执行命令的运行只靠权限规则和运行后的配置检查保护。",
+  "pl.sb_help_title": "安装命令沙箱组件",
+  "pl.sb_help_body": "执行命令的运行需要 Linux 的 bubblewrap 和 socat，这台电脑缺少：{m}。请在终端里运行下面的命令（tidebot 不会替你运行 sudo）：",
+  "pl.sb_help_after": "装好后重新打开这个页面即可，不用重启 tidebot。",
+  "pl.sb_copy": "复制命令",
   "ntf.agent_config_changed.t": "检测到 agent 配置被改动：{name}",
   "ntf.agent_config_changed.b": "{detail}",
-  "notif.agent_config_changed": "agent 配置被改动"
+  "notif.agent_config_changed": "agent 配置被改动",
+  "set.sandbox": "命令沙箱",
+  "set.sandbox_sub": "执行命令时使用的系统沙箱（执行命令将在后续版本开放）"
 }

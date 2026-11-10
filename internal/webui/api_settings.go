@@ -11,13 +11,15 @@ import (
 	"net/http"
 
 	"os"
-
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/auth"
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 )
 
 // ---------- spend / notifications / search / settings ----------
@@ -228,6 +230,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"timezone":         s.loc().String(),
 		"tz_offset":        tzOffsetMin(s.loc(), time.Now()),
 		"version":          Version,
+		// can command runs be sandboxed here (P1): bubblewrap/socat on Linux, Seatbelt on macOS
+		"sandbox": guard.DetectSandbox(runtime.GOOS, exec.LookPath),
 	})
 }
 

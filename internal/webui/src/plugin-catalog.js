@@ -204,6 +204,31 @@
   function rpc(method, params, timeout) { return rpcCall(method, params, timeout, RPC_READS.indexOf(method) >= 0); }
   // For a method that reads or writes depending on its params (e.g. skills.optimize_settings).
   function rpcRead(method, params) { return rpcCall(method, params, undefined, true); }
+  // Can command runs be sandboxed on this machine (Claude Code's OS sandbox): a pill in
+  // Settings › Security; on Linux with bubblewrap / socat missing it opens the install help (tidebot
+  // never runs sudo for you). Command runs themselves come with the third permission level.
+  function sandboxPill(sb) {
+    sb = sb || {};
+    if (sb.status === "missing") return '<button type="button" class="pill warn sm pl-sb" id="pl-sb" data-tip="' + esc(T("pl.sb_missing_tip", { m: (sb.missing || []).join(", ") })) + '">' + ic("shield", "sm") + esc(T("pl.sb_missing")) + "</button>";
+    if (sb.status === "none") return '<span class="pill plain sm pl-sb" tabindex="0" data-tip="' + esc(T("pl.sb_none_tip")) + '">' + ic("shield", "sm") + esc(T("pl.sb_none")) + "</span>";
+    if (sb.status === "ok") return '<span class="pill ok sm pl-sb" tabindex="0" data-tip="' + esc(T("pl.sb_ok_tip")) + '">' + ic("shield", "sm") + esc(T("pl.sb_ok")) + "</span>";
+    return "";
+  }
+  function sandboxHelp(sb) {
+    sb = sb || {};
+    var cmd = sb.install || "sudo apt-get install -y bubblewrap socat";
+    modal('<div class="card-head"><span class="ico warn">' + ic("shield") + "</span><h2>" + esc(T("pl.sb_help_title")) + "</h2></div>" +
+      '<p class="confirm-body">' + esc(T("pl.sb_help_body", { m: (sb.missing || []).join(", ") })) + "</p>" +
+      '<div class="sb-cmd"><code class="mono" id="sb-cmd">' + esc(cmd) + '</code><button type="button" class="icon-btn sm" id="sb-copy" aria-label="' + esc(T("pl.sb_copy")) + '" data-tip="' + esc(T("pl.sb_copy")) + '">' + ic("copy", "sm") + "</button></div>" +
+      '<p class="muted sb-after">' + esc(T("pl.sb_help_after")) + "</p>" +
+      '<div class="actions"><button type="button" class="btn primary" data-close autofocus>' + esc(T("btn.close")) + "</button></div>", function (root) {
+        $("#sb-copy", root).addEventListener("click", function () {
+          (navigator.clipboard ? navigator.clipboard.writeText(cmd) : Promise.reject()).then(function () { toast(T("tr.copied")); }, function () {
+            var r = document.createRange(); r.selectNodeContents($("#sb-cmd", root)); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+          });
+        });
+      });
+  }
   function renderPlugins() {
     var seq = routeSeq;
     return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; }), rpc("plugins.catalog").catch(function () { return []; })]).then(function (res) {

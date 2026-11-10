@@ -305,6 +305,7 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			AnswerSame          *answerSameDTO           `json:"answer_same,omitempty"`
 			AnswerPrev          *answerSameDTO           `json:"answer_prev,omitempty"`
 			FileChanges         json.RawMessage          `json:"file_changes,omitempty"`
+			AgentConfigChanges  json.RawMessage          `json:"agent_config_changes,omitempty"`
 			ChangesUndoneAt     string                   `json:"changes_undone_at,omitempty"`
 			ChangesUndoneFiles  []string                 `json:"changes_undone_files,omitempty"`
 			ChatSession         *runChatRef              `json:"chat_session,omitempty"`
@@ -332,6 +333,11 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		}
 		if changes != "" && json.Valid([]byte(changes)) {
 			out.FileChanges = json.RawMessage(changes)
+		}
+		// agent_config_changes: agent config a command run's after-run check found changed (not undone)
+		var acc string
+		if s.deps.DB.QueryRowContext(r.Context(), `SELECT agent_config_changes FROM runs WHERE id=?`, id).Scan(&acc) == nil && acc != "" && json.Valid([]byte(acc)) {
+			out.AgentConfigChanges = json.RawMessage(acc)
 		}
 		if sameID != "" {
 			var at string

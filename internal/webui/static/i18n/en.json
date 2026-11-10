@@ -3012,7 +3012,22 @@
   "sp.unl_restored": "Restored the per-run cap on {n} tasks",
   "sp.unl_fail": "That didn’t work, please try again",
   "pl.tasks_active": "Active tasks",
+  "rd.acc": "Agent config changed",
+  "rd.acc_tip": "After this command run, tidebot compared before and after and found these agent config files changed (~/.claude, a project’s .claude/, .mcp.json, CLAUDE.md …).",
+  "rd.acc_note": "tidebot didn’t undo these changes (putting them back would itself change your config). Please check them yourself.",
+  "pl.sb_ok": "Command sandbox ready",
+  "pl.sb_ok_tip": "Command runs go into the system sandbox: they can write only the working and temp folders, can’t read key folders, and have no network by default.",
+  "pl.sb_missing": "Sandbox parts missing",
+  "pl.sb_missing_tip": "Missing {m}. Open for how to install; until then command runs are refused.",
+  "pl.sb_none": "No system sandbox",
+  "pl.sb_none_tip": "Windows has no system sandbox: command runs are protected only by permission rules and the after-run config check.",
+  "pl.sb_help_title": "Install the command sandbox",
+  "pl.sb_help_body": "Command runs need bubblewrap and socat on Linux. This computer is missing: {m}. Run this in a terminal (tidebot never runs sudo for you):",
+  "pl.sb_help_after": "Reopen this page once installed; no need to restart tidebot.",
+  "pl.sb_copy": "Copy command",
   "ntf.agent_config_changed.t": "Agent config changed: {name}",
   "ntf.agent_config_changed.b": "{detail}",
-  "notif.agent_config_changed": "Agent config changed"
+  "notif.agent_config_changed": "Agent config changed",
+  "set.sandbox": "Command sandbox",
+  "set.sandbox_sub": "The system sandbox used when Claude runs commands (command runs arrive in a later version)"
 }

@@ -245,7 +245,7 @@
         '<button type="button" role="tab" id="rw-tab-answer" data-run-view="answer" aria-controls="rw-answer">' + esc(T("rd.answer")) + '</button>' +
         '<button type="button" role="tab" id="rw-tab-log" data-run-view="log" aria-controls="rw-log">' + esc(T("rd.log")) + '</button>' +
         '<button type="button" role="tab" id="rw-tab-diff" data-run-view="diff" aria-controls="rw-answer"' + (!r.result || !r.answer_prev ? ' disabled data-tip="' + esc(T("rw.no_previous")) + '"' : "") + '>' + esc(T("rd.ans_diff")) + '</button></div><div class="rw-panel" id="rw-answer" role="tabpanel" aria-labelledby="rw-tab-answer">' +
-        runAnswerHtml(r, ansMode(r)) +
+        runAgentCfgHtml(r) + runAnswerHtml(r, ansMode(r)) +
         runChangesHtml(r) +
         costCalcHtml(r) + contextPlanHtml(r) + costPolicySnapshotHtml(r) +
         (!r.result ? '<div class="rw-no-answer">' + emptyState("chat", T("rw.no_answer"), T(live ? "rw.answer_running" : "rw.answer_missing")) + "</div>" : "") + '</div>' +
@@ -403,6 +403,21 @@
   // cline/cline apps/vscode/src/core/controller/checkpoints/checkpointViewLatestChanges.ts
   // (what the agent changed since the checkpoint, per file) and siteboon/claudecodeui
   // server/modules/git/git-parsing.service.ts (status letter + counts per file).
+  // Agent config a command run's after-run check found changed (~/.claude, a project's
+  // .claude/, .mcp.json, CLAUDE.md …): listed here, never undone by tidebot (putting files
+  // back would itself change your config). First on the page: it needs a look.
+  function runAgentCfgHtml(r) {
+    var c = r.agent_config_changes;
+    if (!c || !c.length) return "";
+    var st = { added: "warn", removed: "bad", modified: "warn" }, max = 50;
+    var rows = c.slice(0, max).map(function (f) {
+      var k = st[f.change] ? f.change : "modified";
+      return '<li><span class="pill sm ' + st[k] + '">' + esc(T("diff.st_" + k)) + '</span><code class="ell" data-tip="' + esc(f.path) + '">' + esc(f.path) + "</code></li>";
+    }).join("");
+    return '<section class="card rd-acc" id="rd-acc" role="alert"><div class="card-head"><span class="ico warn">' + ic("shield") + '</span><h3 data-tip="' + esc(T("rd.acc_tip")) + '">' + esc(T("rd.acc")) + '</h3><span class="pill warn sm">' + esc(T("diff.files_n", { n: num(c.length) })) + "</span></div>" +
+      '<ul class="rd-acc-list">' + rows + "</ul>" + (c.length > max ? '<p class="muted rd-chg-more">' + esc(T("rd.chg_more", { n: num(c.length - max) })) + "</p>" : "") +
+      '<p class="muted rd-acc-note">' + esc(T("rd.acc_note")) + "</p></section>";
+  }
   function runChangesHtml(r) {
     var c = r.file_changes;
     if (!c || r.run_mode !== "edit") return "";

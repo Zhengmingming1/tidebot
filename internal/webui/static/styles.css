@@ -3880,3 +3880,18 @@ button.rc-tag:hover { color: var(--text); }
 /* workflow options: "limit total time" is an opt-in checkbox above the minutes */
 .wf-timeout > .check { gap: var(--sp-1); font-size: var(--fs-sm); font-weight: 500; color: var(--text-2); }
 .wf-timeout > .check input[type=checkbox] { width: auto; height: auto; flex: none; margin: 0; padding: 0; }
+
+/* run detail: agent config a command run changed (after-run check; never undone) */
+.rd-acc { border-color: var(--warn-line); }
+.ico.warn { color: var(--warn); background: var(--warn-50, transparent); }
+.rd-acc .card-head { margin-bottom: var(--s1); }
+.rd-acc-list { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow: auto; }
+.rd-acc-list li { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.rd-acc-list code { min-width: 0; font-size: 13px; }
+.rd-acc-note { margin: var(--s1) 0 0; font-size: var(--fs-sm); }
+/* plugins page: command sandbox status in the health card; install help dialog */
+.card-head .pl-sb { margin-left: auto; gap: 4px; }
+button.pill.pl-sb { cursor: pointer; border: 0; font: inherit; }
+.sb-cmd { display: flex; align-items: center; gap: 8px; margin: 0 0 var(--s1); padding: 8px 8px 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.sb-cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.sb-after { margin: 0 0 var(--s1); font-size: var(--fs-sm); }

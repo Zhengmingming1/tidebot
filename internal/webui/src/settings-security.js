@@ -358,6 +358,7 @@
             '<span class="row-gap"><span class="pill ok">' + esc(T("set.on")) + '</span><button class="btn sm" id="tf-off">' + esc(T("tf.disable")) + "</button></span>" :
             '<button class="btn primary sm" id="tf-on">' + esc(T("tf.enable")) + "</button>") +
           row("cookies", T("set.cookies"), T("set.cookies_sub"), "") +
+          row("sandbox", T("set.sandbox"), T("set.sandbox_sub"), sandboxPill(st.sandbox)) +
           row("session", T("set.session"), T("set.session_sub"), '<span class="row-gap">' + sesOthersHtml(st.other_sessions) +
             '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button></span>") +
           '<div id="ses-box">' + sesListHtml(st.sessions) + "</div></section>";
@@ -368,6 +369,7 @@
           $("#pw-change").addEventListener("click", function () { pwChange(st.password_set !== false); });
           sesWire($("#set-session"), $("#ses-box"));
           if ($("#tf-on")) $("#tf-on").addEventListener("click", twoFASetup);
+          if ($("#pl-sb")) $("#pl-sb").addEventListener("click", function () { sandboxHelp(st.sandbox); });
           if ($("#tf-off")) $("#tf-off").addEventListener("click", function () { twoFADisable(st.password_set !== false); });
         };
       } else if (section === "notifications") {

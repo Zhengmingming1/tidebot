@@ -6500,6 +6500,31 @@
   function rpc(method, params, timeout) { return rpcCall(method, params, timeout, RPC_READS.indexOf(method) >= 0); }
   // For a method that reads or writes depending on its params (e.g. skills.optimize_settings).
   function rpcRead(method, params) { return rpcCall(method, params, undefined, true); }
+  // Can command runs be sandboxed on this machine (Claude Code's OS sandbox): a pill in
+  // Settings › Security; on Linux with bubblewrap / socat missing it opens the install help (tidebot
+  // never runs sudo for you). Command runs themselves come with the third permission level.
+  function sandboxPill(sb) {
+    sb = sb || {};
+    if (sb.status === "missing") return '<button type="button" class="pill warn sm pl-sb" id="pl-sb" data-tip="' + esc(T("pl.sb_missing_tip", { m: (sb.missing || []).join(", ") })) + '">' + ic("shield", "sm") + esc(T("pl.sb_missing")) + "</button>";
+    if (sb.status === "none") return '<span class="pill plain sm pl-sb" tabindex="0" data-tip="' + esc(T("pl.sb_none_tip")) + '">' + ic("shield", "sm") + esc(T("pl.sb_none")) + "</span>";
+    if (sb.status === "ok") return '<span class="pill ok sm pl-sb" tabindex="0" data-tip="' + esc(T("pl.sb_ok_tip")) + '">' + ic("shield", "sm") + esc(T("pl.sb_ok")) + "</span>";
+    return "";
+  }
+  function sandboxHelp(sb) {
+    sb = sb || {};
+    var cmd = sb.install || "sudo apt-get install -y bubblewrap socat";
+    modal('<div class="card-head"><span class="ico warn">' + ic("shield") + "</span><h2>" + esc(T("pl.sb_help_title")) + "</h2></div>" +
+      '<p class="confirm-body">' + esc(T("pl.sb_help_body", { m: (sb.missing || []).join(", ") })) + "</p>" +
+      '<div class="sb-cmd"><code class="mono" id="sb-cmd">' + esc(cmd) + '</code><button type="button" class="icon-btn sm" id="sb-copy" aria-label="' + esc(T("pl.sb_copy")) + '" data-tip="' + esc(T("pl.sb_copy")) + '">' + ic("copy", "sm") + "</button></div>" +
+      '<p class="muted sb-after">' + esc(T("pl.sb_help_after")) + "</p>" +
+      '<div class="actions"><button type="button" class="btn primary" data-close autofocus>' + esc(T("btn.close")) + "</button></div>", function (root) {
+        $("#sb-copy", root).addEventListener("click", function () {
+          (navigator.clipboard ? navigator.clipboard.writeText(cmd) : Promise.reject()).then(function () { toast(T("tr.copied")); }, function () {
+            var r = document.createRange(); r.selectNodeContents($("#sb-cmd", root)); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+          });
+        });
+      });
+  }
   function renderPlugins() {
     var seq = routeSeq;
     return Promise.all([rpc("dashboard"), rpc("plugins.list"), rpc("triggers.list"), rpc("backup.list"), api("/api/tasks").catch(function () { return []; }), rpc("plugins.catalog").catch(function () { return []; })]).then(function (res) {
@@ -7092,7 +7117,7 @@
         '<button type="button" role="tab" id="rw-tab-answer" data-run-view="answer" aria-controls="rw-answer">' + esc(T("rd.answer")) + '</button>' +
         '<button type="button" role="tab" id="rw-tab-log" data-run-view="log" aria-controls="rw-log">' + esc(T("rd.log")) + '</button>' +
         '<button type="button" role="tab" id="rw-tab-diff" data-run-view="diff" aria-controls="rw-answer"' + (!r.result || !r.answer_prev ? ' disabled data-tip="' + esc(T("rw.no_previous")) + '"' : "") + '>' + esc(T("rd.ans_diff")) + '</button></div><div class="rw-panel" id="rw-answer" role="tabpanel" aria-labelledby="rw-tab-answer">' +
-        runAnswerHtml(r, ansMode(r)) +
+        runAgentCfgHtml(r) + runAnswerHtml(r, ansMode(r)) +
         runChangesHtml(r) +
         costCalcHtml(r) + contextPlanHtml(r) + costPolicySnapshotHtml(r) +
         (!r.result ? '<div class="rw-no-answer">' + emptyState("chat", T("rw.no_answer"), T(live ? "rw.answer_running" : "rw.answer_missing")) + "</div>" : "") + '</div>' +
@@ -7250,6 +7275,21 @@
   // cline/cline apps/vscode/src/core/controller/checkpoints/checkpointViewLatestChanges.ts
   // (what the agent changed since the checkpoint, per file) and siteboon/claudecodeui
   // server/modules/git/git-parsing.service.ts (status letter + counts per file).
+  // Agent config a command run's after-run check found changed (~/.claude, a project's
+  // .claude/, .mcp.json, CLAUDE.md …): listed here, never undone by tidebot (putting files
+  // back would itself change your config). First on the page: it needs a look.
+  function runAgentCfgHtml(r) {
+    var c = r.agent_config_changes;
+    if (!c || !c.length) return "";
+    var st = { added: "warn", removed: "bad", modified: "warn" }, max = 50;
+    var rows = c.slice(0, max).map(function (f) {
+      var k = st[f.change] ? f.change : "modified";
+      return '<li><span class="pill sm ' + st[k] + '">' + esc(T("diff.st_" + k)) + '</span><code class="ell" data-tip="' + esc(f.path) + '">' + esc(f.path) + "</code></li>";
+    }).join("");
+    return '<section class="card rd-acc" id="rd-acc" role="alert"><div class="card-head"><span class="ico warn">' + ic("shield") + '</span><h3 data-tip="' + esc(T("rd.acc_tip")) + '">' + esc(T("rd.acc")) + '</h3><span class="pill warn sm">' + esc(T("diff.files_n", { n: num(c.length) })) + "</span></div>" +
+      '<ul class="rd-acc-list">' + rows + "</ul>" + (c.length > max ? '<p class="muted rd-chg-more">' + esc(T("rd.chg_more", { n: num(c.length - max) })) + "</p>" : "") +
+      '<p class="muted rd-acc-note">' + esc(T("rd.acc_note")) + "</p></section>";
+  }
   function runChangesHtml(r) {
     var c = r.file_changes;
     if (!c || r.run_mode !== "edit") return "";
@@ -9452,6 +9492,7 @@
             '<span class="row-gap"><span class="pill ok">' + esc(T("set.on")) + '</span><button class="btn sm" id="tf-off">' + esc(T("tf.disable")) + "</button></span>" :
             '<button class="btn primary sm" id="tf-on">' + esc(T("tf.enable")) + "</button>") +
           row("cookies", T("set.cookies"), T("set.cookies_sub"), "") +
+          row("sandbox", T("set.sandbox"), T("set.sandbox_sub"), sandboxPill(st.sandbox)) +
           row("session", T("set.session"), T("set.session_sub"), '<span class="row-gap">' + sesOthersHtml(st.other_sessions) +
             '<button class="btn sm" id="btn-logout">' + ic("logout", "sm") + esc(T("set.signout")) + "</button></span>") +
           '<div id="ses-box">' + sesListHtml(st.sessions) + "</div></section>";
@@ -9462,6 +9503,7 @@
           $("#pw-change").addEventListener("click", function () { pwChange(st.password_set !== false); });
           sesWire($("#set-session"), $("#ses-box"));
           if ($("#tf-on")) $("#tf-on").addEventListener("click", twoFASetup);
+          if ($("#pl-sb")) $("#pl-sb").addEventListener("click", function () { sandboxHelp(st.sandbox); });
           if ($("#tf-off")) $("#tf-off").addEventListener("click", function () { twoFADisable(st.password_set !== false); });
         };
       } else if (section === "notifications") {

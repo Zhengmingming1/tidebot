@@ -24,6 +24,9 @@ func TestPasswordChange(t *testing.T) {
 	if st["password_set"] != true || st["other_sessions"].(float64) != 1 {
 		t.Fatalf("settings %v %v", st["password_set"], st["other_sessions"])
 	}
+	if sb, _ := st["sandbox"].(map[string]any); sb == nil || sb["status"] == "" || sb["platform"] == "" {
+		t.Fatalf("settings sandbox %v", st["sandbox"])
+	}
 	// CSRF is required.
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", strings.NewReader(`{"current":"testpass99","new":"brand-new-pass"}`))
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: c.sid})

@@ -6059,3 +6059,45 @@ a bulk edit makes undo exact without a history table.
 **后续想法**：
 - 剩下的时间主要在 `json.Valid` 和 SQLite 读 2000×8 KB；会话 `bindings_json` 已有 `capability_bindings` 规范化表（触发器同步），这一路的扫描可以只留给技能 id，能力包 id 直接查表。
 - 仍未做：WebUI 单包去注释 / 压空白（发现 #5）；会话 `OnStart` 写轮次行失败时让这一轮直接失败。
+
+### 2026-11-09：先不设限 P1——执行命令的安全底座（内部能力，用户还用不到）
+
+**先验证：`--bare` 下 `--settings` 里的沙箱和权限规则到底生不生效**
+
+Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tidebot 一样的启动方式：`--bare`、独立 `CLAUDE_CONFIG_DIR`、`--permission-mode dontAsk --permission-prompts none`、`--strict-mcp-config`，假 HOME 和假项目放在 `/tmp` 以外（沙箱里 `/tmp` 可写，放那里会误判）。`--settings` 打开 `sandbox.enabled`、`failIfUnavailable`、`allowUnsandboxedCommands:false`、`autoAllowBashIfSandboxed`，加 denyWrite / credentials / `network.strictAllowlist`。每项都跑过不带沙箱的对照组。
+
+| 试的事 | 带 `--settings` 的结果 | 对照（无沙箱） |
+|---|---|---|
+| `touch ~/probe_home` | Read-only file system | 成功 |
+| 写 `~/.claude/settings.json`、`./.mcp.json`、`./CLAUDE.md`、`./.claude/settings.json` | Read-only file system | CLAUDE.md 写成功；`.mcp.json` / `.claude/*` 被 Claude Code 自带保护拒绝 |
+| 写项目外的 `../outside_probe` | Read-only file system | 成功 |
+| 在项目里新建文件 | 成功 | 成功 |
+| `cat ~/.ssh/id_test`（`credentials.files` 拒绝） | No such file | 读到内容 |
+| Read 工具读 `~/.ssh/id_test`（`Read(~/.ssh/**)` 拒绝） | denied by your permission settings | 读到内容 |
+| `curl example.com`（不联网） | 403 host is not on the allow list | 200 |
+| 联网开（`permissions.allow ["WebFetch(domain:*)"]`，不设 strictAllowlist） | 200 | — |
+| `sudo …`、`git push --force` / `-f`、`curl … \| sh` / `\| bash` | 都被 deny 规则拒绝 | — |
+| `credentials.envVars` 拒绝 `ANTHROPIC_API_KEY`，命令里 `echo ${ANTHROPIC_API_KEY:+…}` | KEY_ABSENT | KEY_PRESENT |
+| PATH 里去掉 bwrap + `failIfUnavailable` | 退出码 1：「sandbox required but unavailable … refusing to start」 | — |
+| 沙箱里连 tidebot 的 IPC Unix socket | `socket()` EPERM | 可连 |
+| `denyRead` 应用目录 + `allowRead` 其中的技能目录 | 技能文件可读，其余不可见 | — |
+
+结论：`--bare` 只跳过钩子，`--settings` 里的 sandbox 和 permissions 照常生效，可以作为执行命令的底座。`dangerouslyDisableSandbox` 没能实测到（模型拒绝发出），只按文档：`allowUnsandboxedCommands:false` 时忽略，dontAsk 下也不会去问。
+
+**做了什么**
+
+- **系统沙箱**（`guard.SandboxSettings`，`app.applyExecSandbox`）：只用于内部的 `RunMode "exec"`（用户入口 P2 才开）。每次运行在 `data/run-sandbox/<id>.json`（0600）写一份设置，用 `--settings` 传入，运行结束删掉，启动时清空残留。可写：工作目录和 `--add-dir`；可读：`--plugin-dir`、PATH；tidebot 自己的 home / data / IPC 目录不可读（不然沙箱里的命令能连上没有 token 的 IPC socket，等于逃出去）；`TIDEBOT_IPC` 也从命令环境里去掉。Linux / macOS 上沙箱起不来就**拒绝运行**（`ErrSandboxUnavailable`），不降级。
+- **显式禁止写 agent 配置**：`~/.claude`、`~/.claude.json`（只在存在时列，避免留下占位文件），每个可写目录里的 `.claude/`、`.mcp.json`、`CLAUDE.md`、`AGENTS.md` 等其它 agent 的配置。
+- **禁止读敏感目录**：所有运行（不止 exec）都加 `SensitiveReadDeny`（`~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.kube`、`~/.docker`、`~/.config/gh` 等的 `Read(...)`），exec 运行再加沙箱 denyRead 和 `credentials.files`。
+- **命令环境里拿掉 API key**：`credentials.envVars` 拒绝 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、当前供应商的 key 和插件密钥。**不用** `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`：实测它会把权限模式改回 default（无视 dontAsk）、沙箱里的 home 变成可写、并在项目和 home 留下一堆 0 字节文件（package.json、.env*、node_modules、.bashrc…）；exec 运行会主动去掉这个变量。
+- **固定 deny**（`guard.DefaultRules`，所有运行）：sudo、`git push --force/-f`（各种位置）、`… | sh/bash/zsh`；Windows PowerShell 版本加 `| iex` / `Invoke-Expression`。
+- **运行后检查 agent 配置**（`guard.SnapshotAgentConfig` / `Diff`）：运行前后对 `~/.claude` 的设置 / CLAUDE.md / skills / agents / commands / hooks、工作目录及其上级的 agent 配置做指纹（不读 `.credentials.json`；`~/.claude.json` 不算，用户自己的会话随时在改它）。有变化就记到 `runs.agent_config_changes`（迁移 045）、写 `operation_log(agent_config_changed)`、发紧急通知「检测到 agent 配置被改动」，运行详情顶部列出改了哪些文件。**不自动还原**（还原本身就是改用户配置）。迁移 045 给原来订阅了 confirm_needed 的通知规则补上新事件。
+- **bubblewrap / socat 检测**：设置 › 安全新增「命令沙箱」一行：可用 / 缺组件 / 无系统沙箱（Windows）。缺组件时点开应用内说明框，给出按包管理器生成的安装命令（apt-get / dnf / yum / pacman / zypper / apk）和复制按钮；tidebot 不替你跑 sudo。
+- **平稳停止**：沙箱运行时 Claude Code 会在工作目录放 0 字节占位文件（.bashrc、.gitconfig、.vscode、.idea…），SIGTERM 会清掉，SIGKILL 会留下。runner 新增 `StopGrace`：exec 运行取消时先 SIGTERM，10 秒后再杀进程组（其它运行照旧立即 SIGKILL）。
+- **删掉失效的确认卡钩子**：`guard.Check` / 规则正则 / `hook.go`、`guard.check/list/approve/deny` RPC、`HookExe`、`guard-settings.json` 写入、仪表盘的待确认数和 `tidebot_pending_confirmations` 指标；`tidebot-helper hook …` 只回 `{}`，旧配置不会弹窗。`pending_confirmations` 表保留。
+- **Windows**：没有系统沙箱，不写沙箱设置；deny 规则（含 PowerShell 版本）、敏感目录 deny、环境变量处理、运行后检查照常生效。界面标注和第一次使用的说明框在 P2。
+- 测试：guard `TestDetectSandbox`、`TestSandboxSettings`（含 Private / allowRead、Windows 路径）、`TestDangerDeny`、`TestSensitiveReadDenySameSource`、`TestAgentConfigIntegrity`；runner `TestStopGraceLetsClaudeCleanUp`（SIGTERM 后子进程清理 / 0 时不清理）；app `TestExecRunArgs`、`TestExecRunRefusedWithoutSandbox`、`TestExecRunAgentConfigChange`（改 `.mcp.json` → 记录、通知、不还原）、`TestEditRunNoSandbox`、`TestExecSandboxEnv`、`TestGuardArgs`；db `TestAgentConfigCheckMigration`；webui 设置接口带 sandbox。
+
+**心得**：「生效了吗」只能实测——`--bare` 跳过的是钩子而不是 settings；而看起来更省事的 env scrub 开关反而悄悄关掉了 dontAsk。沙箱的边界要连「自己」一起算：tidebot 的 IPC socket 没有 token，不挡住就是沙箱的后门。
+
+**后续（P2）**：运行对话框 / 任务 / 会话的「可执行命令」入口；Windows 分段标注「无系统沙箱」和第一次使用说明框；preflight 把 exec 模式缺沙箱列为问题；可选的 `-tags e2e` 真 bwrap CI 测试；补一次 `dangerouslyDisableSandbox` 的直接实测。
