@@ -18,7 +18,8 @@ import (
 
 // RunRequest is what the Run dialog starts: a prompt, optionally with a skill and a
 // working folder. Without a folder the run works in a scratch folder of tidebot's;
-// with one it is read-only unless Mode is "edit".
+// with one it is read-only unless Mode is "edit" or "exec" (may run commands, in the
+// system sandbox; also without a folder).
 type RunRequest struct {
 	SkillSetSource *tasksvc.SkillSetSource `json:"skill_set_source,omitempty"`
 	SkillBindings  []tasksvc.SkillBinding  `json:"skill_bindings,omitempty"`
@@ -27,7 +28,7 @@ type RunRequest struct {
 	SkillID        string                  `json:"skill_id"`
 	VersionID      string                  `json:"version_id"`
 	Workspace      string                  `json:"workspace"`
-	Mode           string                  `json:"mode"` // "read" (default) | "edit"
+	Mode           string                  `json:"mode"` // "read" (default) | "edit" | "exec"
 }
 
 // ErrUnknownSkill: the skill (or version) asked for doesn't exist.
@@ -65,9 +66,9 @@ func (b *RunRequest) validate() string {
 		return "working folder: path too long"
 	}
 	switch b.Mode {
-	case "", "read", "edit":
+	case "", "read", "edit", "exec":
 	default:
-		return "mode must be read or edit"
+		return "mode must be read, edit or exec"
 	}
 	return ""
 }
@@ -201,6 +202,9 @@ WHERE trigger_kind='quick' AND workspace_dir<>'' AND run_mode<>''`
 		l = pick("")
 	}
 	if l != nil {
+		if appHome != "" && guard.Within(l.Workspace, appHome) {
+			l.Workspace = "" // a command run's scratch folder
+		}
 		out["last"] = l
 	}
 	rows, err := s.deps.DB.QueryContext(ctx, `SELECT workspace_dir, MAX(created_at) m, MAX(skill_id=?) k FROM runs

@@ -54,8 +54,8 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		ws := run.Workspace
-		if run.RunMode == "" {
-			ws = "" // skill run in a scratch folder
+		if run.RunMode == "" || s.internalDir(ws) {
+			ws = "" // skill or command run in a scratch folder
 		}
 		if newID, err = s.deps.StartRun(RunRequest{Prompt: run.Prompt, Provider: run.Provider, SkillID: run.SkillID,
 			VersionID: run.SkillVerID, SkillBindings: bindings, SkillSetSource: source, Workspace: ws, Mode: run.RunMode}); err != nil {

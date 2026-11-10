@@ -18,6 +18,32 @@ type Spec struct {
 	TimeoutMinutes int              `json:"timeout_minutes"`
 	AllowedTools   []string         `json:"allowed_tools,omitempty"`
 	MaxBudgetUSD   float64          `json:"max_budget_usd,omitempty"`
+	// RunMode: "read" | "edit" | "exec" (may run commands, in the system sandbox).
+	// "" = a task saved before the three levels: it runs as "edit" did.
+	RunMode string `json:"run_mode,omitempty"`
+	// Effort: "" (Claude Code decides) | "low" | "medium" | "high".
+	Effort string `json:"effort,omitempty"`
+}
+
+// RunModes are the permission levels a run can have.
+var RunModes = []string{"read", "edit", "exec"}
+
+// Efforts are the --effort values a task may set ("" = not passed).
+var Efforts = []string{"low", "medium", "high"}
+
+// ValidRunMode reports whether m is "" or one of RunModes.
+func ValidRunMode(m string) bool { return m == "" || contains(RunModes, m) }
+
+// ValidEffort reports whether e is "" or one of Efforts.
+func ValidEffort(e string) bool { return e == "" || contains(Efforts, e) }
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // SpecConstraint is a named requirement inside the spec.

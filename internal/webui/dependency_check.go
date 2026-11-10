@@ -130,8 +130,8 @@ func (r DependencyCheckRequest) Validate() error {
 	if len(r.Workspace) > 4096 || len(r.PythonEnvironment) > 4096 || strings.ContainsAny(r.Workspace+r.PythonEnvironment, "\x00\r\n") {
 		return errors.New("invalid runtime path")
 	}
-	if r.Mode != "" && r.Mode != "read" && r.Mode != "edit" {
-		return errors.New("runtime mode must be read or edit")
+	if r.Mode != "" && r.Mode != "read" && r.Mode != "edit" && r.Mode != "exec" {
+		return errors.New("runtime mode must be read, edit or exec")
 	}
 	if r.Execution != "" && r.Execution != "quick" && r.Execution != "task" {
 		return errors.New("execution must be quick or task")

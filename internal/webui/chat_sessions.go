@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,7 +18,7 @@ type ChatSession struct {
 	Origin         string  `json:"origin"` // run | chat (run_fix later)
 	OriginRunID    string  `json:"origin_run_id"`
 	WorkspaceDir   string  `json:"workspace_dir"`
-	PermissionMode string  `json:"permission_mode"` // read
+	PermissionMode string  `json:"permission_mode"` // read | edit | exec
 	Provider       string  `json:"provider"`
 	Turns          int     `json:"turns"`     // turns sent (the origin run is turn 0)
 	TurnHint       int     `json:"turn_hint"` // from this many turns the page shows a soft "long session" hint (no limit)
@@ -67,6 +68,12 @@ type ChatSessionDetail struct {
 	Sig string `json:"sig,omitempty"`
 }
 
+// chatModeSetter is optional: an app that lets the owner change a session's
+// permission level (PUT /api/chat-sessions/{id}/mode).
+type chatModeSetter interface {
+	SetChatMode(ctx context.Context, id, mode string) (ChatSession, error)
+}
+
 // chatSessionSigner is optional: an app that can fingerprint a session cheaply
 // lets the session page's 1.5 s poll skip unchanged sessions.
 type chatSessionSigner interface {
@@ -80,6 +87,8 @@ type ChatSessionCreate struct {
 	Origin    string `json:"origin,omitempty"`
 	Title     string `json:"title"`
 	WebAccess bool   `json:"web_access"`
+	// PermissionMode: read | edit | exec; "" = the run's level (blank: read).
+	PermissionMode string `json:"permission_mode,omitempty"`
 }
 
 // ChatTurnStarted is the answer to sending a turn.
@@ -142,6 +151,7 @@ func chatErr(w http.ResponseWriter, err error) {
 		{ErrChatRunNotFinished, 409, "run_not_finished"},
 		{ErrChatSessionBusy, 409, "busy"},
 		{ErrChatInvalid, 400, "invalid"},
+		{guard.ErrDirBusy, 409, "dir_busy"}, // another run is changing the session's folder
 	}
 	for _, c := range codes {
 		if errors.Is(err, c.err) {
@@ -176,7 +186,8 @@ func (s *Server) handleChatSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"sessions": list})
 	case http.MethodPost:
 		var body ChatSessionCreate
-		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || strings.TrimSpace(body.RunID) == "" && body.Origin != "chat" || body.Origin != "" && body.Origin != "chat" && body.Origin != "run" {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil || strings.TrimSpace(body.RunID) == "" && body.Origin != "chat" || body.Origin != "" && body.Origin != "chat" && body.Origin != "run" ||
+			body.PermissionMode != "" && body.PermissionMode != "read" && body.PermissionMode != "edit" && body.PermissionMode != "exec" {
 			writeJSON(w, 400, map[string]string{"error": "run_id required", "code": "invalid"})
 			return
 		}
@@ -192,7 +203,7 @@ func (s *Server) handleChatSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleChatSessionSub: GET/DELETE /api/chat-sessions/{id}, POST /api/chat-sessions/{id}/turns,
-// PUT /api/chat-sessions/{id}/bindings.
+// PUT /api/chat-sessions/{id}/bindings, PUT /api/chat-sessions/{id}/mode.
 func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 	api := s.deps.ChatSessions
 	if api == nil {
@@ -278,7 +289,26 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, ses)
-	case sub == "" || sub == "turns" || sub == "bindings":
+	case sub == "mode" && r.Method == http.MethodPut:
+		ms, ok := api.(chatModeSetter)
+		if !ok {
+			writeErr(w, 404, "not available")
+			return
+		}
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil || body.Mode != "read" && body.Mode != "edit" && body.Mode != "exec" {
+			writeJSON(w, 400, map[string]string{"error": "mode must be read, edit or exec", "code": "invalid"})
+			return
+		}
+		ses, err := ms.SetChatMode(r.Context(), id, body.Mode)
+		if err != nil {
+			chatErr(w, err)
+			return
+		}
+		writeJSON(w, 200, ses)
+	case sub == "" || sub == "turns" || sub == "bindings" || sub == "mode":
 		writeErr(w, 405, "method")
 	default:
 		writeErr(w, 404, "not found")

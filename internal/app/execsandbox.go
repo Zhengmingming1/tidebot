@@ -18,9 +18,8 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
 
-// Command runs (RunMode "exec"): the safety layers under Bash/PowerShell. Not
-// offered to users yet (P2 adds the third permission level); only internal
-// callers and tests start them.
+// Command runs (RunMode "exec", 「可执行命令」): the safety layers under
+// Bash/PowerShell. Offered in the Run dialog, tasks, re-runs and sessions.
 //
 //  1. The OS sandbox (macOS, Linux, WSL2) from a per-run --settings file,
 //     required: Claude Code refuses to start without it, commands can't retry
@@ -52,10 +51,19 @@ func (a *App) SandboxStatus() guard.SandboxStatus {
 
 func (a *App) runSandboxDir() string { return filepath.Join(a.Cfg.DataDir, "run-sandbox") }
 
+// runWorkDir holds the scratch folders of command runs started without a folder
+// (removed when the run ends).
+func (a *App) runWorkDir() string {
+	d := filepath.Join(a.Cfg.DataDir, "run-work")
+	_ = os.MkdirAll(d, 0o700)
+	return d
+}
+
 // purgeRunSandbox removes sandbox settings a crashed core left behind, and the
 // PreToolUse hook settings older versions wrote (hooks never ran under --bare).
 func (a *App) purgeRunSandbox() {
 	_ = os.RemoveAll(a.runSandboxDir())
+	_ = os.RemoveAll(filepath.Join(a.Cfg.DataDir, "run-work"))
 	_ = os.Remove(filepath.Join(a.Cfg.DataDir, "guard-settings.json"))
 }
 
@@ -67,6 +75,21 @@ func (a *App) applyExecSandbox(ctx context.Context, opts *runner.Options) (func(
 	if st.Status == guard.SandboxMissing {
 		return nop, fmt.Errorf("%w: missing %s (install: %s)", ErrSandboxUnavailable, strings.Join(st.Missing, ", "), st.Install)
 	}
+	home, _ := os.UserHomeDir()
+	dirs := runWriteDirs(opts)
+	// Never let commands write tidebot's own folders (its database, settings, IPC):
+	// a write folder may be inside them (a scratch folder) but never hold them.
+	for _, d := range dirs {
+		for _, own := range []string{a.Cfg.HomeDir, a.Cfg.DataDir, filepath.Dir(a.Cfg.IPCPath)} {
+			if own != "" && guard.Within(own, d) {
+				return nop, fmt.Errorf("command run: working folder %s contains tidebot's own folder", d)
+			}
+		}
+	}
+	// Owner decision (2026-11-09): command runs have network by default; skills
+	// download things and call APIs. Write scope, sensitive reads, key scrub and the
+	// fixed deny list still apply.
+	opts.Web = true
 	// Commands need Bash: no --restricted (it drops the code-running tools).
 	opts.ExtraArgs = dropArg(opts.ExtraArgs, "--restricted")
 	opts.ContextArgs = dropArg(opts.ContextArgs, "--restricted")
@@ -83,8 +106,6 @@ func (a *App) applyExecSandbox(ctx context.Context, opts *runner.Options) (func(
 	// Commands don't get the way to tidebot's IPC socket (the sandbox hides it too).
 	opts.EnvBase = dropEnv(opts.EnvBase, "TIDEBOT_IPC")
 	opts.StopGrace = execStopGrace
-	home, _ := os.UserHomeDir()
-	dirs := runWriteDirs(opts)
 	cleanup := nop
 	if st.Status == guard.SandboxOK {
 		spec := guard.SandboxSpec{Home: home, WriteDirs: dirs, ReadDirs: append(argValues(opts, "--plugin-dir"), envPathDirs(opts.EnvBase)...), Web: opts.Web,

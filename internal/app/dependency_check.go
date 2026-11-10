@@ -364,6 +364,9 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 	}
 	c.bindings(req.SkillBindings, "draft-bindings")
 	c.checkWorkspace()
+	if req.Mode == "exec" || req.Kind == "task" && c.taskRunMode(req.ID) == "exec" {
+		c.checkSandbox()
+	}
 	// JSON escaping can expand source text. Bound the serialized snapshot too,
 	// retaining explicit coverage warnings rather than silently losing material.
 	for len(c.snapshot.Materials) > 0 {

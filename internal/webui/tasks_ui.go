@@ -33,6 +33,10 @@ type taskForm struct {
 	BudgetUSD         float64                 `json:"budget_usd"`
 	Enabled           bool                    `json:"enabled"`
 	TimeoutMinutes    *int                    `json:"timeout_minutes"`
+	// RunMode: read | edit | exec; nil (an older page) keeps the task's.
+	RunMode *string `json:"run_mode,omitempty"`
+	// Effort: "" | low | medium | high; nil keeps the task's.
+	Effort *string `json:"effort,omitempty"`
 	// Workspace: the task's own working folder, "" = the per-task default. nil (field
 	// left out, e.g. an older page) keeps the folder the task has.
 	Workspace *string `json:"workspace,omitempty"`
@@ -178,6 +182,12 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 	if f.TimeoutMinutes != nil && (*f.TimeoutMinutes < 0 || *f.TimeoutMinutes > 24*60) {
 		return errors.New("timeout must be 0 (unlimited) or 1-1440 minutes")
 	}
+	if f.RunMode != nil && !tasksvc.ValidRunMode(*f.RunMode) {
+		return errors.New("run mode must be read, edit or exec")
+	}
+	if f.Effort != nil && !tasksvc.ValidEffort(*f.Effort) {
+		return errors.New("effort must be low, medium or high")
+	}
 	if f.SkillBindings != nil {
 		normalized, err := tasksvc.NormalizeBindings(*f.SkillBindings)
 		if err != nil {
@@ -279,6 +289,12 @@ func specFromForm(spec tasksvc.Spec, f taskForm) tasksvc.Spec {
 	if f.TimeoutMinutes != nil {
 		spec.TimeoutMinutes = *f.TimeoutMinutes
 	}
+	if f.RunMode != nil {
+		spec.RunMode = *f.RunMode
+	}
+	if f.Effort != nil {
+		spec.Effort = *f.Effort
+	}
 	if f.SkillBindings != nil {
 		spec.SkillBindings = append([]tasksvc.SkillBinding(nil), (*f.SkillBindings)...)
 	} else if f.SkillID != "" {
@@ -345,7 +361,7 @@ func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 			_ = s.deps.Tasks.SetSchedule(context.WithoutCancel(ctx), tv.Task.ID, "")
 		}
 	}()
-	if f.SkillID != "" || f.SkillBindings != nil || len(f.SkillSetSource) > 0 {
+	if f.SkillID != "" || f.SkillBindings != nil || len(f.SkillSetSource) > 0 || f.RunMode != nil && *f.RunMode != "" || f.Effort != nil && *f.Effort != "" {
 		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, specFromForm(*tv.Spec, f), "user", "bind skill"); err != nil {
 			writeErr(w, 500, err.Error())
 			return
@@ -433,7 +449,7 @@ func (s *Server) taskFormOf(ctx context.Context, id string) (map[string]any, err
 		return nil, err
 	}
 	f := taskForm{CostControl: &cp, Name: v.Task.Name, Prompt: v.Spec.Prompt, Provider: v.Spec.Provider, Cron: v.Task.CronExpr,
-		Enabled: v.Task.Status == "active", TimeoutMinutes: &v.Spec.TimeoutMinutes}
+		Enabled: v.Task.Status == "active", TimeoutMinutes: &v.Spec.TimeoutMinutes, RunMode: &v.Spec.RunMode, Effort: &v.Spec.Effort}
 	ws := v.Spec.WorkspaceDir
 	if ws == "" {
 		ws = v.Task.WorkspaceDir

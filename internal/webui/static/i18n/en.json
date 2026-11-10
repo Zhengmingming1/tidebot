@@ -2747,6 +2747,7 @@
   "rc.err_not_found": "The session no longer exists",
   "rc.err_invalid": "Invalid message, or the session is closed",
   "rc.err_too_long": "Message too long (16 KB max)",
+  "rc.err_dir_busy": "Another run that changes files is using this folder; send again once it finishes.",
   "nav.chat": "Sessions",
   "rc.open_session": "Open in Sessions",
   "cs.untitled": "New session",

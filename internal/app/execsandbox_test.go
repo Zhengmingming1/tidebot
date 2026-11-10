@@ -27,7 +27,7 @@ func sandboxDeps(t *testing.T, ok bool) {
 	t.Cleanup(func() { sandboxLook = old })
 }
 
-// A command run (internal only until P2): no --restricted, Bash allowed, the
+// A command run: no --restricted, Bash allowed, the
 // required sandbox from --settings, the provider key hidden, tidebot's own
 // folder unreadable, the deny rules still there.
 func TestExecRunArgs(t *testing.T) {
@@ -67,7 +67,8 @@ func TestExecRunArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := doc.Sandbox
-	if !s.Enabled || !s.FailIfUnavailable || s.AllowUnsandboxedCommands || s.Network["strictAllowlist"] != true {
+	// network on (owner decision 2026-11-09): no strict allowlist
+	if !s.Enabled || !s.FailIfUnavailable || s.AllowUnsandboxedCommands || s.Network["strictAllowlist"] == true {
 		t.Fatalf("%s", raw)
 	}
 	if !contains(s.Filesystem.DenyWrite, filepath.Join(work, ".mcp.json")) || !contains(s.Filesystem.DenyRead, a.Cfg.HomeDir) || !contains(s.Filesystem.AllowRead, work) {
@@ -183,7 +184,7 @@ func TestExecSandboxEnv(t *testing.T) {
 	if strings.Contains(env, "SCRUB") || strings.Contains(env, "TIDEBOT_IPC") || !strings.Contains(env, "LANG=C") {
 		t.Fatal(env)
 	}
-	if contains(opts.ExtraArgs, "--restricted") || !contains(opts.ExtraArgs, "Read,Bash") || opts.StopGrace != execStopGrace {
+	if contains(opts.ExtraArgs, "--restricted") || !contains(opts.ExtraArgs, "Read,Bash,WebFetch,WebSearch") || opts.StopGrace != execStopGrace {
 		t.Fatalf("%v %v", opts.ExtraArgs, opts.StopGrace)
 	}
 }

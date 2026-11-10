@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"database/sql"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 
 	"net/http"
 
@@ -164,9 +165,9 @@ type runChangeSum struct {
 
 // runChangeCols reads runChangeSum from runs.file_changes in SQL, so lists never load the
 // file list: -1 when there is none (or it isn't valid JSON).
-const runChangeCols = `CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.count'),0) ELSE -1 END,
- CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.add'),0) ELSE 0 END,
- CASE WHEN r.run_mode='edit' AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.del'),0) ELSE 0 END,
+const runChangeCols = `CASE WHEN r.run_mode IN ('edit','exec') AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.count'),0) ELSE -1 END,
+ CASE WHEN r.run_mode IN ('edit','exec') AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.add'),0) ELSE 0 END,
+ CASE WHEN r.run_mode IN ('edit','exec') AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.del'),0) ELSE 0 END,
  r.changes_undone_at<>'',
  CASE WHEN r.changes_undone_files<>'' AND json_valid(r.changes_undone_files) THEN json_array_length(r.changes_undone_files) ELSE 0 END`
 
@@ -214,9 +215,25 @@ func (s *Server) queryRunsOpt(ctx context.Context, promptMax int, where string, 
 		if d.Status == "queued" {
 			d.QueuePos = s.queuePos(d.ID)
 		}
+		if s.internalDir(d.Workspace) {
+			d.Workspace = "" // a scratch folder of tidebot's (command runs without a folder)
+		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// internalDir reports whether p is inside tidebot's own folders (a scratch folder).
+func (s *Server) internalDir(p string) bool {
+	if p == "" || s.deps.Cfg == nil {
+		return false
+	}
+	for _, d := range []string{s.deps.Cfg.HomeDir, s.deps.Cfg.DataDir} {
+		if d != "" && guard.Within(p, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // scanRun reads one row of runSelect().

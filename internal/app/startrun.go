@@ -56,7 +56,9 @@ func unlockEditDir(dir string) {
 
 // startRun starts a Run dialog run: the prompt, with the skill (if any) staged in
 // tidebot's own folder and invoked as its slash command, in the chosen working
-// folder (if any). With a folder the run is read-only unless Mode is "edit"; a
+// folder (if any). With a folder the run is read-only unless Mode is "edit" (may
+// change files) or "exec" (may also run commands, inside the system sandbox: see
+// execsandbox.go); "exec" without a folder works in a scratch folder of tidebot's. A
 // folder must pass guard.CheckRunDir (symlinks resolved, sensitive folders
 // refused), and only one run that may change files goes in a folder at a time.
 func (a *App) startRun(req webui.RunRequest) (string, error) {
@@ -75,9 +77,11 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 			return "", &guard.DirError{Problem: prob}
 		}
 		dir, mode = real, "read"
-		if req.Mode == "edit" {
-			mode = "edit"
+		if req.Mode == "edit" || req.Mode == "exec" {
+			mode = req.Mode
 		}
+	} else if req.Mode == "exec" {
+		mode = "exec"
 	}
 	bindings := req.SkillBindings
 	if bindings == nil && req.SkillID != "" {
@@ -93,7 +97,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 	if req.SkillSetSource != nil && len(bindings) == 0 {
 		return "", errors.New("composition source requires skill bindings")
 	}
-	if len(bindings) == 0 && dir == "" {
+	if len(bindings) == 0 && dir == "" && mode != "exec" {
 		return a.startQuickRunAsync(req.Prompt, req.Provider)
 	}
 	var st *skillStage
@@ -110,37 +114,56 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		req.SkillID = frozen[0].SkillID
 		versionID = frozen[0].VersionID
 	}
-	if dir == "" { // a skill on its own: an empty scratch folder in the stage
+	scratch := ""
+	if dir == "" && st != nil { // a skill on its own: an empty scratch folder in the stage
 		dir = filepath.Join(st.Dir, "work")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			st.Close()
 			return "", err
 		}
+	} else if dir == "" { // a command run with no folder and no skill: its own scratch folder
+		d, err := os.MkdirTemp(a.runWorkDir(), "run-")
+		if err != nil {
+			return "", err
+		}
+		dir, scratch = d, d
 	}
-	if mode == "edit" && !lockEditDir(dir) {
+	// a run that may change the owner's folder: one at a time per folder, changes tracked
+	writes := mode == "edit" || mode == "exec" && scratch == "" && guard.ExpandHome(req.Workspace) != ""
+	if writes && !lockEditDir(dir) {
+		if scratch != "" {
+			_ = os.RemoveAll(scratch)
+		}
 		st.Close()
 		return "", guard.ErrDirBusy
 	}
 	modern := a.modernClaude()
 	args, err := st.CheckedArgs(modern, true)
 	if err != nil {
-		if mode == "edit" {
+		if writes {
 			unlockEditDir(dir)
+		}
+		if scratch != "" {
+			_ = os.RemoveAll(scratch)
 		}
 		st.Close()
 		return "", err
 	}
-	if mode != "edit" {
+	if mode != "edit" && mode != "exec" {
 		args = append(args, "--disallowedTools", strings.Join(readOnlyDeny, ","))
 	}
+	prompt := st.Invoke(modern, req.Prompt)
 	return launch(startWait, func(onStart func(string)) error {
 		defer st.Close()
+		if scratch != "" {
+			defer os.RemoveAll(scratch)
+		}
 		opts := runner.Options{
-			Prompt: st.Invoke(modern, req.Prompt), DisplayPrompt: req.Prompt, WorkspaceDir: dir,
+			Prompt: prompt, DisplayPrompt: req.Prompt, WorkspaceDir: dir,
 			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, a.sourceStart(req.SkillSetSource, bindings, onStart)), ContextArgs: args, ContextRequest: st.contextRequest(modern, true),
 			SkillID: req.SkillID, SkillVersionID: versionID, RunMode: mode,
 		}
-		if mode == "edit" {
+		if writes {
 			defer unlockEditDir(dir)
 			// what the run changed in the folder (git work trees), for the run page
 			tr := &changeTracker{a: a, dir: dir}

@@ -71,7 +71,36 @@ func initialDependencyProfile(req webui.DependencyCheckRequest) webui.Dependency
 			p.DeniedTools = append([]string{}, readOnlyDeny...)
 		}
 	}
+	if req.Mode == "exec" && p.Mode != "task" {
+		// 可执行命令: no --restricted, no read-only deny; a scratch folder without one
+		p.Mode, p.Restricted, p.DeniedTools = "exec", false, nil
+		if p.WorkspaceKind == "unselected" {
+			p.WorkspaceKind = "scratch"
+		}
+	}
 	return p
+}
+
+func (c *dependencyCollector) taskRunMode(id string) string {
+	t, err := c.a.Tasks.Get(c.ctx, id)
+	if err != nil || t.Spec == nil {
+		return ""
+	}
+	return t.Spec.RunMode
+}
+
+// checkSandbox: a command run needs the system sandbox where one is expected
+// (Linux: bubblewrap + socat; macOS: Seatbelt). Without it the run is refused.
+func (c *dependencyCollector) checkSandbox() {
+	st := c.a.SandboxStatus()
+	switch st.Status {
+	case guard.SandboxMissing:
+		c.finding("命令沙箱", "runtime", "blocked", "缺少 "+strings.Join(st.Missing, "、")+"，可执行命令的运行会被拒绝", "tidebot 在这台电脑上找不到："+strings.Join(st.Missing, "、"), "在终端运行 "+st.Install+"，或改用只读 / 可修改")
+	case guard.SandboxNone:
+		c.finding("命令沙箱", "runtime", "uncertain", "这个平台没有系统沙箱，命令只受权限规则和运行后的配置检查保护", "原生 Windows 不支持 Claude Code 的系统沙箱", "只在信任的目录和技能上使用可执行命令")
+	default:
+		c.finding("命令沙箱", "runtime", "available", "命令会在系统沙箱里运行", "沙箱组件齐全", "无需处理")
+	}
 }
 
 func (c *dependencyCollector) draftTaskPolicy(id string) {

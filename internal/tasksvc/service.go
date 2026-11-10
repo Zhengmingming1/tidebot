@@ -124,6 +124,12 @@ func (s *Service) UpdateSpecExpected(ctx context.Context, taskID string, spec Sp
 	if spec.TimeoutMinutes < 0 || spec.TimeoutMinutes > 1440 {
 		return TaskView{}, fmt.Errorf("timeout must be 0 (unlimited) or 1-1440 minutes")
 	}
+	if !ValidRunMode(spec.RunMode) {
+		return TaskView{}, fmt.Errorf("run mode must be read, edit or exec")
+	}
+	if !ValidEffort(spec.Effort) {
+		return TaskView{}, fmt.Errorf("effort must be low, medium or high")
+	}
 	specWrites.Lock()
 	defer specWrites.Unlock()
 	if expected != "" {

@@ -225,7 +225,10 @@ func (a *App) stageChatSkills(ctx context.Context, c chatRow) *skillStage {
 	return nil
 }
 
-const chatSkillNote = "\nSkills are attached to this session for reference: read their instructions and files, but this session cannot run their commands. If a skill's procedure needs a command, say so and let the owner run it as a task or a run."
+const chatSkillNote = "\nSkills are attached to this session for reference: read their instructions and files, but this session cannot run their commands. If a skill's procedure needs a command, say so: the owner can switch the session to 「可执行命令」 or run it as a task."
+
+// chatSkillExecNote: in a command session a skill's scripts can run.
+const chatSkillExecNote = "\nSkills are attached to this session: follow their instructions; their scripts may be run as commands in the working folder."
 
 // chatToolsServer is the session's read-only "tidebot" MCP server: find and
 // search files in the folders the turn may read (and, with a token, the

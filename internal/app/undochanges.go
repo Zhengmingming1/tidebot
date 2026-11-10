@@ -166,7 +166,7 @@ func (a *App) loadUndo(ctx context.Context, runID string) (*undoState, error) {
 	if err != nil {
 		return nil, err
 	}
-	if mode != "edit" || fc == "" || json.Unmarshal([]byte(fc), &st.c) != nil || st.c.Count == 0 || st.patch == "" {
+	if mode != "edit" && mode != "exec" || fc == "" || json.Unmarshal([]byte(fc), &st.c) != nil || st.c.Count == 0 || st.patch == "" {
 		return nil, &webui.UndoError{Code: "none"}
 	}
 	switch status {
