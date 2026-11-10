@@ -105,6 +105,8 @@ Skill sets and visual workflows. Combine one primary skill with supporting skill
 
 Skill package maintenance (v0.2.1). Declare required or optional skill dependencies in `tidebot.json`, preview additions before adopting them, and run a local preflight without model calls. Optional AI analysis and primary-versus-composition text evaluations incur model usage. Package versions retain documentation and examples; explicit upgrade previews protect locally edited task and node bindings. Loaded skill material is not proof of model execution. See the [dependency, upgrade and evaluation guide (Chinese)](docs/skill-manifests.md).
 
+Capability packages. Search for a package (skills, MCP servers and their dependencies bundled together) under Extensions → Discover or from a session. You first get a server-built install proposal: pinned source and version, dependency plan, scan findings and permissions; nothing installs until you confirm, and dependency downloads are confirmed separately. Bind an installed package to a session, task, workflow node or button. Secrets go only into the credential form, remote MCP uses OAuth, and each MCP tool a session uses needs your approval. Updates, rollback, export and uninstall live under Manage; when the model asks for an update or uninstall it only creates a card for you to confirm. Everything stays in tidebot's own data folder and Claude Code's config is never touched. See [capability packages](docs/capability-implementation.md).
+
 Skill repositories (v0.2.1). Add HTTPS/SSH Git repositories from GitHub, GitLab, Gitee or a company host under Extensions → Sources (installs get the same scan), browse and batch-install complete skill folders, then download and explicitly adopt updates while retaining provenance and history. See the [repository installation and update guide (Chinese)](docs/skill-repositories.md).
 
 Skills with versions and rollback. Import a Claude Code skill directory; every re-import is a new version. A task can pin a specific skill version, and you can roll back when a new one misbehaves.
@@ -121,7 +123,7 @@ Notifications that don't nag. Success notifications include the first few lines 
 
 Quick runs and reruns. If you don't want a task yet, type a sentence in the home composer and go, or hit Chat to open a session. Not happy with the result? Rerun it as is, or edit the prompt and run again, and save it as a scheduled task once it's right. A running run can be stopped at any time, a queued one can be taken out of the queue, and the page shows where it is in line.
 
-Cost caps (add them when you need them). Daily limits per global / task / bucket (production, canary, optimization, assist). Checked before every run, checked again when a queued run gets its slot (if the budget ran out while it waited, it's skipped), with `--max-budget-usd` as a backstop during the run. Runs that start at the same time each reserve their share of what's left first, so they can't overshoot the cap together. Usage is saved every 5 seconds while a run is going, so a crash doesn't lose the bill.
+Cost caps (add them when you need them). One global daily cap covers every run, and with no cap set nothing is limited; a task can add its own per-run / daily caps. Checked before every run, checked again when a queued run gets its slot (if the budget ran out while it waited, it's skipped), and runs with a per-run cap get `--max-budget-usd` as a backstop. Runs that start at the same time each reserve their share of what's left first, so they can't overshoot the cap together. Usage is saved every 5 seconds while a run is going, so a crash doesn't lose the bill.
 
 Priced per model. Each run is priced from its actual token usage at that model's own rate, instead of applying Claude's prices to everything; subscription plans (like Kimi Coding Plan) just count tokens. The price list syncs itself weekly from a signed price catalog (source and last update live in Settings → Price catalog). The Spend page breaks things down by task, provider and model, and exports CSV.
 
@@ -201,11 +203,11 @@ Prebuilt packages are on the [Releases](https://github.com/Zhengmingming1/tidebo
 Whichever you pick, you still need the `claude` CLI installed to actually run tasks.
 
 - **Server (agentd + agentctl)**: grab `tidebot-server_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) and put the two binaries on your PATH.
-  On Debian/Ubuntu there's a `.deb`: `sudo apt install ./tidebot-server_0.1.9_amd64.deb`, then `systemctl --user enable --now tidebot`.
+  On Debian/Ubuntu there's a `.deb`: `sudo apt install ./tidebot-server_<version>_amd64.deb`, then `systemctl --user enable --now tidebot`.
 - **Desktop app**: `.dmg` on macOS (universal, Intel and Apple silicon), `-Windows-x64-Setup.exe` on Windows (per-user, no admin),
   `.deb` or `.AppImage` on Linux (the AppImage doesn't bundle WebKitGTK; you need `libwebkit2gtk-4.1` on the system).
   Unsigned builds: on macOS right-click → Open the first time; Windows shows a SmartScreen prompt.
-- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:0.1.9`. The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
+- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:latest` (or a version such as `0.2.8`). The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
 
 Auto-update: the desktop app and the server check for a new version once a day (you can turn that off in Settings → About → Updates). By hand it's `agentctl update check` / `agentctl update apply`: the update manifest's signature and the package's sha256 are verified, the binaries are swapped in place (the old ones stay as `.prev`), and if the new version doesn't come up within 90 seconds it rolls back. Installs owned by a package manager, like `.deb` or Docker, only get a notification. If GitHub is slow or blocked where you are, Settings → Network has proxy and download mirror options.
 
@@ -280,7 +282,7 @@ webui_addr: 127.0.0.1:7420
 shutdown_grace: 5s           # how long quitting waits for running runs before stopping them
 ```
 
-Tasks, skills, buttons, plugins and triggers can all be created in the WebUI now. Drop a skill zip or folder on the import dialog; schedules come with presets (daily, weekdays, weekly) and show the next few runs in your timezone. When you create a task, the name and schedule get filled in from what you wrote and a daily budget is suggested; the add-provider form also understands a pasted Base URL or a block of env vars. If a dialog has unsaved changes, Esc or a click outside asks before throwing them away. The CLI below still works.
+Tasks, skills, buttons, plugins and triggers can all be created in the WebUI now. Drop a skill zip or folder on the import dialog; schedules come with presets (daily, weekdays, weekly) and show the next few runs in your timezone. When you create a task, the name gets filled in from what you wrote; a time in the prompt becomes a schedule suggestion you click to apply, and new tasks stay manual until you do; the add-provider form also understands a pasted Base URL or a block of env vars. If a dialog has unsaved changes, Esc or a click outside asks before throwing them away. The CLI below still works.
 
 Skill import accepts `.zip`, `.skill`, `.tar.gz` / `.tgz` and folders. It recognizes a skill directory containing `SKILL.md`, a plugin package containing `skills/<name>/SKILL.md`, and either layout inside one download wrapper directory. The preview shows the detected directory. Only that skill and its supporting files are imported; plugin hooks and other plugin configuration are not activated. If a package contains multiple skills, the dialog lists their paths so you can select each skill folder separately. Import does not install script dependencies or configure external service credentials.
 
@@ -343,8 +345,10 @@ Works today:
 - Immutable task versions, rollback, version tree
 - Plain-language amendments: structured items, conflict detection, batch confirm; it offers to consolidate once items pile up
 - Skill import, versions, pinning, rollback; auto-optimization (off / suggest / canary), and a canary that does worse gets withdrawn automatically
-- Daily spend caps at global / task / bucket level, reset at local midnight; per-model pricing with a weekly price catalog sync; spend export to CSV
-- Execution guard: a workspace per task, tool allow-lists, dangerous commands held until you confirm, external input wrapped as data
+- A global daily spend cap (no cap set means no limit) plus per-task per-run / daily caps, reset at local midnight; per-model pricing with a weekly price catalog sync; spend export to CSV
+- Execution guard: read-only / can edit / can run commands; commands run in an OS sandbox (macOS Seatbelt, Linux bubblewrap), with fixed denies for editing Claude Code or other agents' config, reading credential folders such as `~/.ssh`, `sudo`, force-push and `curl | sh`; agent config is checked after each run; external input wrapped as data
+- Sessions: bind a skill and iterate, edit a skill draft in the session, try it, save it as a version, adopt it by hand, then save as a task
+- Capability packages: install proposals, dependency plans, risk scans, credential forms, remote MCP OAuth, per-tool MCP approval, update / rollback / uninstall
 - Plugins: separate processes speaking JSON-RPC over stdio, versioned installs, permissions approved item by item, a breaker after 3 crashes; they can add MCP tools and triggers
 - Triggers: webhook (token or HMAC), file changes, email and IM (via plugins); workflow pack import/export
 - Notifications: email, webhook, Feishu, DingTalk, WeCom, Telegram, added and tested from Settings; answer excerpts, optional "only when the answer changed"; per-channel delivery status and alerts on repeated failures; quiet hours and a daily digest
@@ -362,7 +366,8 @@ Not there yet:
 - Requirement splitting uses a local rule by default (split on semicolons). Model-based splitting needs `TIDEBOT_AMEND_AI=1` and is still being tuned.
 - No CPU limits for plugins; memory is only roughly capped with rlimit on Linux.
 - Secrets live in a local encrypted file; OS keychain support isn't wired up.
-- The guard's path checks assume Unix paths, so the write-outside-workspace check isn't reliable on Windows.
+- Windows has no OS sandbox, so "can run commands" there relies only on the fixed deny rules and the post-run check; the guard's path checks assume Unix paths, so the write-outside-workspace check isn't reliable on Windows.
+- The command sandbox hasn't been tested on a real Mac yet.
 - I've installed the Linux packages and the macOS .dmg myself. The Windows installer comes out of CI and hasn't been clicked through on a real machine yet.
 - Builds are unsigned by default.
 
