@@ -3032,7 +3032,7 @@
   function exportTasks(ids, btn) {
     return downloadFile("/api/tasks/export" + (ids.length ? "?ids=" + ids.map(enc).join(",") : ""), "tidebot-tasks.json", btn);
   }
-  var TX_NOTES = { renamed: "tx.n_renamed", provider_missing: "tx.n_provider", skill_missing: "tx.n_skill" };
+  var TX_NOTES = { renamed: "tx.n_renamed", provider_missing: "tx.n_provider", skill_missing: "tx.n_skill", run_exec: "tx.n_exec" };
   function taskImportModal(done) {
     modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("tx.title")) + "</h2></div>" +
       '<div class="drop" id="tx-drop">' + ic("upload", "lg") + "<strong>" + esc(T("tx.drop")) + "</strong><small>" + esc(T("tx.drop_sub")) + '</small><div class="row-actions"><label class="btn sm">' + esc(T("up.pick_file")) + '<input type="file" class="hidden" id="tx-file" accept=".json,application/json" data-noguard></label></div></div>' +
@@ -5728,13 +5728,23 @@
           if (my !== seq || !g) return;
           if (text.trim().length >= 4) {
             setName(g.name);
-            if (g.cron && !se.touched() && se.value() !== g.cron) { se.set(g.cron); lastCron = g.cron; }
-            else if (g.cron && se.value() === g.cron) lastCron = g.cron;
+            suggest(g.cron);
           }
           setBudget(g.budget);
           paint(lastCron);
         }).catch(function () {});
       }, delay);
+    };
+    // A schedule read from the request is a suggestion: new tasks start manual, and the
+    // owner picks it with one click (P3). It is hidden once the schedule is theirs.
+    var sPill = $("#af-sched", root), sugCron = "";
+    var suggest = function (cron) {
+      sugCron = cron && !se.touched() && se.value() !== cron ? cron : "";
+      sPill.classList.toggle("hidden", !sugCron);
+      if (!sugCron) return;
+      sPill.setAttribute("data-tip", T("af.sched_tip"));
+      sPill.innerHTML = '<button type="button" class="btn sm">' + ic("calendar", "sm") + esc(T("af.sched_use", { s: cronHuman(sugCron) })) + "</button>";
+      $("button", sPill).addEventListener("click", function () { se.set(sugCron); sPill.classList.add("hidden"); paint(lastCron); });
     };
     var nameMine = function () { var v = f.name.value.trim(); return v !== "" && v !== lastName; };
     var setName = function (v) { if (!v || nameMine()) return; f.name.value = v; lastName = v; pill.classList.remove("hidden"); filled.name = 1; };
@@ -5749,7 +5759,7 @@
     f.name.addEventListener("input", function (e) { if (e.isTrusted && f.name.value.trim() !== lastName) { pill.classList.add("hidden"); delete filled.name; paint(lastCron); } });
     f.prompt.addEventListener("input", function () { if (f.prompt.value.trim().length >= 4) ask(350); });
     f.provider.addEventListener("change", function () { ask(0); });
-    $("#sched-host", root).addEventListener("sched", function () { if (se.touched()) ask(400); });
+    $("#sched-host", root).addEventListener("sched", function () { if (se.touched()) { sPill.classList.add("hidden"); ask(400); } });
     ask(0); // budget for the default provider right away
     f.skill_id.addEventListener("change", function () {
       var sk = skills.filter(function (x) { return x.id === f.skill_id.value; })[0];
@@ -5881,14 +5891,16 @@
     f.cost_enabled.addEventListener("change",function(){if(!f.cost_enabled.checked) f.cost_off_mode.value="global";sync();});
     $$('[name="cost_off_mode"]',root).forEach(function(x){x.addEventListener("change",sync);});sync();return mode;
   }
-  // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
+  // preset {prompt, provider, workspace, run_mode, effort, skill_bindings}: "Save as task" from a
+  // run or a session (skills pinned to the versions used / adopted there). Autofill then
+  // infers the name and budget; a schedule it reads from the request is only offered.
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings"), api("/api/tasks/tags").catch(function () { return []; })];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0, run_mode: pre.run_mode || "exec", effort: pre.effort || "" };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -5899,13 +5911,13 @@
         '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
         fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
-        '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
+        '<div class="field"><span>' + esc(T("tf.schedule")) + (taskId ? "" : '<span class="af-pill af-sug hidden" id="af-sched"></span>') + '</span><div id="sched-host"></div></div>' +
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null) +
         '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
         wsFieldHtml(tf.workspace || "") +
         // permission level (new tasks: 可执行命令) and effort ("" = Claude Code decides)
-        '<div class="form-row tf-perm"><div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", taskId ? (tf.run_mode || "edit") : "exec", st.sandbox) + "</div>" +
+        '<div class="form-row tf-perm"><div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", tf.run_mode || "edit", st.sandbox) + "</div>" +
         '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + ["", "low", "medium", "high"].map(function (v) { return '<option value="' + v + '"' + ((tf.effort || "") === v ? " selected" : "") + ">" + esc(T("tf.effort_" + (v || "auto"))) + "</option>"; }).join("") + "</select></label></div>" +
         policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
@@ -7157,7 +7169,7 @@
       var turn = r.trigger === "session" || !!(r.chat_session && r.chat_session.turn > 0);
       mount('<div class="run-workspace" id="run-workspace"><header class="rw-head"><div class="rw-title"><h1>' + esc(runTitle(r)) + '</h1><div>' + statusPill(r.status, r.queue_pos, r.error) + '<span class="muted">' + esc(when(r.started_at || r.created_at)) + '</span>' + runChatOfHtml(r) + '</div></div><div class="rw-actions">' +
         (live ? '<button type="button" class="btn sm danger rd-stop" id="rd-stop" data-tip="' + esc(T(queued ? "run.dequeue_tip" : "run.stop_tip")) + '">' + ic("stop", "sm") + esc(T(queued ? "run.dequeue" : "run.stop")) + "</button>" : "") +
-        (r.task_id || turn ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
+        (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
         (turn ? "" : '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>") +
         (r.task_id || turn ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") +
         '<button type="button" class="btn sm" id="rd-inspect-toggle" aria-expanded="false" aria-controls="rd-inspector">' + ic("info", "sm") + esc(T("rw.inspector")) + '</button></div></header><div class="grid g4 rw-stats">' +
@@ -7200,7 +7212,18 @@
       bindRunPrompt(r);
       bindRunChat(r);
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, mode: r.run_mode }); });
-      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace }); });
+      // 存为任务: the run's request, folder, permission level and skills pinned to the
+      // versions it used; a run with a session takes the session's (a version adopted
+      // there is pinned instead), still with this run's own request.
+      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function (e) {
+        var b = e.currentTarget, own = { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, run_mode: r.run_mode || "" };
+        var cs = r.chat_session;
+        if (!cs || !/^[\w-]{1,64}$/.test(cs.id || "")) { taskFormModal(null, own); return; }
+        b.disabled = true;
+        api("/api/chat-sessions/" + enc(cs.id) + "/task-preset?from=run", { fresh: true }).then(function (p) {
+          taskFormModal(null, Object.assign({}, p, { prompt: r.prompt || p.prompt, provider: r.provider || p.provider, skill_set_source: own.skill_set_source }));
+        }, function () { taskFormModal(null, own); }).then(function () { b.disabled = false; });
+      });
       logView($("#lv"), id, live, function (why) {
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);
@@ -8503,6 +8526,8 @@
     if (!s) return '<header class="cs-head sr-only"><h2>' + esc(T("cs.new")) + "</h2></header>";
     var from = s.origin === "run" && CS_ID.test(s.origin_run_id || "") ? '<a class="pill plain sm rc-of" href="#/runs/' + enc(s.origin_run_id) + '" data-tip="' + esc(T("cs.from_run_tip")) + '">' + ic("runs", "sm") + esc(T("cs.from_run")) + "</a>" : "";
     return '<header class="cs-head"><h2 class="ell" data-tip="' + esc(T("cs.created_tip", { t: when(s.created_at) })) + '">' + esc(csTitle(s)) + "</h2>" + from + '<span class="rc-sp"></span>' +
+      '<button type="button" class="btn sm ghost" id="cs-tune" data-tip="' + esc(T("sd.tune_tip")) + '">' + ic("skills", "sm") + esc(T("sd.tune")) + "</button>" +
+      '<button type="button" class="btn sm ghost" id="cs-save-task" data-tip="' + esc(T("cs.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>" +
       '<button type="button" class="icon-btn sm danger-text" id="cs-del" aria-label="' + esc(T("cs.del")) + '" data-tip="' + esc(T("cs.del")) + '">' + ic("trash", "sm") + "</button></header>";
   }
   function csPageHtml(list, s) {
@@ -8517,6 +8542,7 @@
     return '<h1 class="sr-only">' + esc(T("nav.chat")) + '</h1><div class="cs' + (!s ? " cs-blank" : "") + (!hasHistory ? " cs-no-history" : "") + '" id="cs">' + side +
       '<section class="cs-main" id="rc" aria-label="' + esc(csTitle(s)) + '">' + csHeadHtml(s) +
       '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">' + thread + "</div>" +
+      (s ? '<div class="cs-draft" id="cs-draft" role="region" aria-label="' + esc(T("sd.label")) + '" hidden></div>' : "") +
       rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s), mode: s ? s.permission_mode : "exec" }) + "</section></div>";
   }
   function renderChat(id) {
@@ -8540,6 +8566,7 @@
         id: s.id, key: "cs_" + s.id, ph: "cs.ph", send_tip: "cs.send_tip", pre: s, turns: csAll,
         // the list row follows the session (busy dot, turns, title) without redrawing the list
         onPaint: function (x) {
+          if (drafts) drafts.session(x);
           var el = $('[data-cs="' + s.id + '"]'), html = csItemHtml(x, s.id);
           if (el && el._h !== html && el.outerHTML !== html) { var tmp = document.createElement("div"); tmp.innerHTML = html; el.replaceWith(tmp.firstChild); $('[data-cs="' + s.id + '"]')._h = html; }
           requestAnimationFrame(bottom);
@@ -8547,6 +8574,11 @@
         onGone: function () { location.hash = "#/chat"; }
       });
       thread.scrollTop = thread.scrollHeight;
+      var drafts = csDraftBar(sec, s);
+      $("#cs-save-task", sec).addEventListener("click", function (e) {
+        var b = e.currentTarget; b.disabled = true;
+        api("/api/chat-sessions/" + enc(s.id) + "/task-preset", { fresh: true }).then(function (p) { taskFormModal(null, p); }).catch(fail).then(function () { b.disabled = false; });
+      });
       var cur = s, wireCaps = function () {
         var btn = $("#cs-caps");
         if (btn) btn.addEventListener("click", function () {
@@ -8573,6 +8605,106 @@
             if (location.hash === "#/chat/" + enc(s.id) || location.hash === "#/chat/" + s.id) location.hash = "#/chat";
           });
         }).catch(function (x) { b.disabled = false; if (!x.auth) toast(rcErrText(x), true); });
+      });
+    });
+  }
+
+  // Skill draft bar (P3): tune a skill without leaving the session. 改技能 copies the
+  // skill into the session's draft; every later turn loads the draft (and, in a session
+  // that may change files, the model edits it). 用草稿试跑 sends the first request again;
+  // 保存为版本 stores the draft as a version without using it; 采用 (an in-app
+  // confirmation naming the tasks it changes) makes it current. Nothing adopts by itself.
+  function csDraftBar(sec, ses) {
+    var box = $("#cs-draft", sec), tune = $("#cs-tune", sec), d = null, cur = ses, wasBusy = false, busyOp = false;
+    if (!box || !tune) return null;
+    var base = "/api/chat-sessions/" + enc(ses.id) + "/draft";
+    var editable = function () { return (cur && cur.permission_mode) !== "read"; };
+    var running = function () { return !!(cur && cur.status === "running"); };
+    var paint = function () {
+      tune.hidden = !!(d && d.active);
+      if (!d || !d.active) { box.hidden = true; box.innerHTML = ""; return; }
+      var state = d.unsaved ? T("sd.st_changed") : d.saved && d.saved.status === "pending" ? T("sd.st_saved", { v: d.saved.no }) : d.changed ? T("sd.st_saved_old") : T("sd.st_same");
+      var tip = T("sd.tip", { s: d.skill_name, v: d.base_no, cur: d.current_no, n: d.files }) + (editable() ? "" : " " + T("sd.read_tip"));
+      var pend = d.saved && d.saved.status === "pending", off = running() || busyOp ? " disabled" : "";
+      var html = '<span class="cs-draft-lbl" tabindex="0" data-tip="' + esc(tip) + '">' + ic("skills", "sm") + '<strong class="ell">' + esc(T("sd.title", { s: d.skill_name })) + "</strong>" +
+        '<span class="cs-draft-v">v' + esc(String(d.base_no || "?")) + "</span>" + '<span class="cs-draft-st' + (d.unsaved ? " on" : "") + '">' + esc(state) + "</span>" +
+        (editable() ? "" : '<span class="cs-draft-ro" aria-hidden="true">' + ic("eye", "sm") + "</span>") + "</span>" +
+        '<span class="rc-sp"></span>' +
+        '<button type="button" class="btn sm" data-dr="try"' + off + ' data-tip="' + esc(T("sd.try_tip")) + '">' + ic("play", "sm") + esc(T("sd.try")) + "</button>" +
+        '<button type="button" class="btn sm" data-dr="save"' + (d.unsaved && !off ? "" : " disabled") + ' data-tip="' + esc(T("sd.save_tip")) + '">' + ic("check", "sm") + esc(T("sd.save")) + "</button>" +
+        '<button type="button" class="btn sm primary" data-dr="adopt"' + (pend && !off ? "" : " disabled") + ' data-tip="' + esc(T(pend ? "sd.adopt_tip" : "sd.adopt_none_tip")) + '">' + esc(pend ? T("sd.adopt_v", { v: d.saved.no }) : T("sd.adopt")) + "</button>" +
+        '<button type="button" class="icon-btn sm" data-dr="discard"' + off + ' aria-label="' + esc(T("sd.discard")) + '" data-tip="' + esc(T("sd.discard_tip")) + '">' + ic("x", "sm") + "</button>";
+      if (box._h !== html) { box.innerHTML = html; box._h = html; }
+      box.hidden = false;
+    };
+    var load = function () { return api(base, { fresh: true }).then(function (x) { d = x; paint(); return x; }); };
+    var act = function (p) { busyOp = true; paint(); return p.then(function (x) { d = x; return x; }).catch(function (e) { if (!e.auth) toast(csDraftErr(e), true); return null; }).then(function (x) { busyOp = false; paint(); return x; }); };
+    tune.addEventListener("click", function () {
+      if (running()) { toast(T("rc.err_busy"), true); return; }
+      (d ? Promise.resolve(d) : load()).then(function (x) {
+        var sk = x.skills || [];
+        if (!sk.length) { toast(T("sd.no_skill"), true); return; }
+        return (sk.length === 1 ? Promise.resolve(sk[0].id) : csPickSkill(sk)).then(function (id) {
+          if (!id) return;
+          return act(api(base, { method: "POST", body: { skill_id: id } })).then(function (y) { if (y) toast(T(editable() ? "sd.started" : "sd.started_ro", { s: y.skill_name })); });
+        });
+      }).catch(fail);
+    });
+    box.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-dr]");
+      if (!b || b.disabled || !d) return;
+      var what = b.getAttribute("data-dr");
+      if (what === "try") {
+        var first = csFirstRequest(cur), ta = $("#rc-in", sec), form = $("#rc-form", sec);
+        if (!ta || !form) return;
+        ta.value = first ? T("sd.try_msg", { p: first }) : T("sd.try_msg_none");
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        form.requestSubmit();
+      } else if (what === "save") {
+        act(api(base + "/save", { method: "POST", body: {} })).then(function (x) { if (x && x.saved) toast(T("sd.saved", { v: x.saved.no })); });
+      } else if (what === "adopt") {
+        var a = d.affects || { follow: [], pinned: 0 }, f = a.follow || [];
+        confirmDialog({ icon: "skills", title: T("sd.adopt_title", { s: d.skill_name, v: d.saved.no }),
+          body: T("sd.adopt_body") + "\n" + (f.length ? T("sd.adopt_follow", { n: f.length, l: f.slice(0, 8).join("、") + (f.length > 8 ? "…" : "") }) : T("sd.adopt_follow_none")) + (a.pinned ? "\n" + T("sd.adopt_pinned", { n: a.pinned }) : ""),
+          ok: T("sd.adopt_v", { v: d.saved.no }) }).then(function (y) {
+          if (!y) return;
+          return act(api(base + "/adopt", { method: "POST", body: {} })).then(function (x) { if (x) toast(T("sd.adopted", { s: x.skill_name })); });
+        });
+      } else if (what === "discard") {
+        (d.unsaved ? confirmDialog({ title: T("sd.discard_title"), body: T("sd.discard_body"), ok: T("sd.discard"), danger: true }) : Promise.resolve(true)).then(function (y) {
+          if (y) act(api(base, { method: "DELETE" }));
+        });
+      }
+    });
+    load().catch(function () {});
+    return {
+      // the session repainted: a finished turn may have changed the draft
+      session: function (x) {
+        var was = wasBusy; cur = x || cur; wasBusy = running();
+        if (was && !wasBusy && d && d.active) load().catch(function () {}); else paint();
+      }
+    };
+  }
+  function csDraftErr(e) {
+    var code = e && e.data && e.data.code;
+    if (code === "draft_checks") return T("rc.err_draft_checks") + " (" + String((e.message || "").split(": ").pop()) + ")";
+    return rcErrText(e) || T("err.generic");
+  }
+  // the request a 试跑 repeats: the run the session continues, else its first message
+  function csFirstRequest(s) {
+    var t = csAll(s).filter(function (x) { return x.message; })[0];
+    return t ? String(t.message).slice(0, 4000) : "";
+  }
+  function csPickSkill(skills) {
+    return new Promise(function (resolve) {
+      var done = false;
+      modal('<div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sd.pick_title")) + '</h2></div><p class="muted sm">' + esc(T("sd.pick_sub")) + '</p><div class="cs-cap-list">' +
+        skills.map(function (k, i) { return '<label class="cs-cap-row"><input type="radio" name="dr-pick" value="' + esc(k.id) + '"' + (i ? "" : " checked") + '><span class="ell"><strong>' + esc(k.name || k.id) + "</strong></span></label>"; }).join("") +
+        '</div><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="dr-pick-ok">' + esc(T("sd.tune")) + "</button></div>", function (root, close) {
+        var ok = $("#dr-pick-ok", root);
+        ok.addEventListener("click", function () { var c = $('input[name="dr-pick"]:checked', root); done = true; close(); resolve(c ? c.value : ""); });
+        var obs = new MutationObserver(function () { if (!root.contains(ok)) { obs.disconnect(); if (!done) resolve(""); } });
+        obs.observe(root, { childList: true });
       });
     });
   }

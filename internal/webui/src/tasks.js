@@ -242,7 +242,7 @@
   function exportTasks(ids, btn) {
     return downloadFile("/api/tasks/export" + (ids.length ? "?ids=" + ids.map(enc).join(",") : ""), "tidebot-tasks.json", btn);
   }
-  var TX_NOTES = { renamed: "tx.n_renamed", provider_missing: "tx.n_provider", skill_missing: "tx.n_skill" };
+  var TX_NOTES = { renamed: "tx.n_renamed", provider_missing: "tx.n_provider", skill_missing: "tx.n_skill", run_exec: "tx.n_exec" };
   function taskImportModal(done) {
     modal('<div class="card-head"><span class="ico">' + ic("upload") + "</span><h2>" + esc(T("tx.title")) + "</h2></div>" +
       '<div class="drop" id="tx-drop">' + ic("upload", "lg") + "<strong>" + esc(T("tx.drop")) + "</strong><small>" + esc(T("tx.drop_sub")) + '</small><div class="row-actions"><label class="btn sm">' + esc(T("up.pick_file")) + '<input type="file" class="hidden" id="tx-file" accept=".json,application/json" data-noguard></label></div></div>' +

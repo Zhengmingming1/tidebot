@@ -199,13 +199,23 @@
           if (my !== seq || !g) return;
           if (text.trim().length >= 4) {
             setName(g.name);
-            if (g.cron && !se.touched() && se.value() !== g.cron) { se.set(g.cron); lastCron = g.cron; }
-            else if (g.cron && se.value() === g.cron) lastCron = g.cron;
+            suggest(g.cron);
           }
           setBudget(g.budget);
           paint(lastCron);
         }).catch(function () {});
       }, delay);
+    };
+    // A schedule read from the request is a suggestion: new tasks start manual, and the
+    // owner picks it with one click (P3). It is hidden once the schedule is theirs.
+    var sPill = $("#af-sched", root), sugCron = "";
+    var suggest = function (cron) {
+      sugCron = cron && !se.touched() && se.value() !== cron ? cron : "";
+      sPill.classList.toggle("hidden", !sugCron);
+      if (!sugCron) return;
+      sPill.setAttribute("data-tip", T("af.sched_tip"));
+      sPill.innerHTML = '<button type="button" class="btn sm">' + ic("calendar", "sm") + esc(T("af.sched_use", { s: cronHuman(sugCron) })) + "</button>";
+      $("button", sPill).addEventListener("click", function () { se.set(sugCron); sPill.classList.add("hidden"); paint(lastCron); });
     };
     var nameMine = function () { var v = f.name.value.trim(); return v !== "" && v !== lastName; };
     var setName = function (v) { if (!v || nameMine()) return; f.name.value = v; lastName = v; pill.classList.remove("hidden"); filled.name = 1; };
@@ -220,7 +230,7 @@
     f.name.addEventListener("input", function (e) { if (e.isTrusted && f.name.value.trim() !== lastName) { pill.classList.add("hidden"); delete filled.name; paint(lastCron); } });
     f.prompt.addEventListener("input", function () { if (f.prompt.value.trim().length >= 4) ask(350); });
     f.provider.addEventListener("change", function () { ask(0); });
-    $("#sched-host", root).addEventListener("sched", function () { if (se.touched()) ask(400); });
+    $("#sched-host", root).addEventListener("sched", function () { if (se.touched()) { sPill.classList.add("hidden"); ask(400); } });
     ask(0); // budget for the default provider right away
     f.skill_id.addEventListener("change", function () {
       var sk = skills.filter(function (x) { return x.id === f.skill_id.value; })[0];
@@ -352,14 +362,16 @@
     f.cost_enabled.addEventListener("change",function(){if(!f.cost_enabled.checked) f.cost_off_mode.value="global";sync();});
     $$('[name="cost_off_mode"]',root).forEach(function(x){x.addEventListener("change",sync);});sync();return mode;
   }
-  // preset {prompt, provider}: "Save as task" from a quick run; autofill then infers name, schedule and budget.
+  // preset {prompt, provider, workspace, run_mode, effort, skill_bindings}: "Save as task" from a
+  // run or a session (skills pinned to the versions used / adopted there). Autofill then
+  // infers the name and budget; a schedule it reads from the request is only offered.
   function taskFormModal(taskId, preset) {
     var reqs = [api("/api/skills"), api("/api/settings"), api("/api/tasks/tags").catch(function () { return []; })];
     if (taskId) reqs.push(api("/api/tasks/" + enc(taskId) + "/form"));
     Promise.all(reqs).then(function (r) {
       var inUse = r[2] || [];
       r.splice(2, 1);
-      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0 };
+      var skills = r[0] || [], st = r[1], pre = preset || {}, tf = taskId ? r[2].form : { name: "", prompt: pre.prompt || "", skill_id: pre.skill_id || "", skill_bindings: pre.skill_bindings, skill_set_source: cleanSetSource(pre.skill_set_source), skill_version_id: "", workspace: pre.workspace || "", provider: pre.provider || smartProvider(st), cron: "", budget_usd: 0, enabled: true, timeout_minutes: 0, run_mode: pre.run_mode || "exec", effort: pre.effort || "" };
       // New tasks start from policy.Default (internal/policy): 2 retries, catch up once within 6 h.
       var pol = tf.policy || { retry_max: 2, catchup: "run_once", catchup_grace_minutes: 360, notify_success: false, notify_answer: true, notify_changed: false, priority: "normal" }, streak = taskId ? r[2].fail_streak || 0 : 0, brkAt = (taskId && r[2].breaker_at) || 3;
       var nameF = fieldHtml(T("tf.name"), '<input name="name" required maxlength="80" value="' + esc(tf.name) + '" placeholder="' + esc(T(taskId ? "tf.name_ph" : "af.name_ph")) + '">', "", taskId ? "" : '<span class="af-pill hidden" id="af-name" data-tip="' + esc(T("af.name_tip")) + '">' + ic("sparkle", "sm") + esc(T("af.auto")) + "</span>");
@@ -370,13 +382,13 @@
         '<div class="field"><span>' + esc(T("tg.label")) + tip(T("tg.hint")) + '</span><div id="tg-host"></div></div>' +
         '<input type="hidden" name="skill_id"><input type="hidden" name="skill_version_id"><div id="tf-bindings"></div>' +
         fieldHtml(T("f.provider"), '<select name="provider">' + providerOptions(st, tf.provider, !!taskId || !!pre.provider, true) + "</select>") +
-        '<div class="field"><span>' + esc(T("tf.schedule")) + '</span><div id="sched-host"></div></div>' +
+        '<div class="field"><span>' + esc(T("tf.schedule")) + (taskId ? "" : '<span class="af-pill af-sug hidden" id="af-sched"></span>') + '</span><div id="sched-host"></div></div>' +
         costFieldsHtml(tf.cost_control, (st.fx || {}).display || state.currency, tf.budget_usd || null) +
         '<label class="check"><input type="checkbox" name="timeout_enabled"' + (tf.timeout_minutes > 0 ? ' checked' : '') + '> ' + esc(T("tf.timeout_enabled")) + '</label><div id="tf-timeout"' + (tf.timeout_minutes > 0 ? '' : ' class="hidden"') + '>' +
         fieldHtml(T("tf.timeout"), '<input name="timeout_minutes" type="number" min="1" max="1440" value="' + esc(tf.timeout_minutes > 0 ? tf.timeout_minutes : "") + '">', T("tf.timeout_hint")) + "</div>" +
         wsFieldHtml(tf.workspace || "") +
         // permission level (new tasks: 可执行命令) and effort ("" = Claude Code decides)
-        '<div class="form-row tf-perm"><div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", taskId ? (tf.run_mode || "edit") : "exec", st.sandbox) + "</div>" +
+        '<div class="form-row tf-perm"><div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", tf.run_mode || "edit", st.sandbox) + "</div>" +
         '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + ["", "low", "medium", "high"].map(function (v) { return '<option value="' + v + '"' + ((tf.effort || "") === v ? " selected" : "") + ">" + esc(T("tf.effort_" + (v || "auto"))) + "</option>"; }).join("") + "</select></label></div>" +
         policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +

@@ -3913,3 +3913,26 @@ button.pill.pl-sb { cursor: pointer; border: 0; font: inherit; }
 .rc-tag.rc-mode select { height: 20px; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .rc-tag.rc-mode.warn, .rc-tag.rc-mode.warn .i { color: var(--warn); }
 .rc-tag.rc-mode select:disabled { cursor: default; }
+
+/* P3: the session's skill draft bar (between the thread and the message box) */
+.cs-draft { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; padding: 4px 4px 4px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--accent-50); }
+.cs-draft[hidden] { display: none; }
+.cs-draft-lbl { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; cursor: default; }
+.cs-draft-lbl > .i { color: var(--hue-violet); flex: none; }
+.cs-draft-lbl strong { min-width: 0; max-width: 220px; font-weight: 600; }
+.cs-draft-v { flex: none; padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface); color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cs-draft-st { flex: none; color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.cs-draft-st.on { color: var(--warn); font-weight: 600; }
+.cs-draft-ro { display: inline-flex; color: var(--text-3); }
+.cs-draft .btn { flex: none; }
+.cs-head .btn .i, .cs-draft .btn .i { margin-right: 2px; }
+#cs-tune .i { color: var(--hue-violet); }
+#cs-save-task .i { color: var(--hue-indigo); }
+/* task form: a schedule read from the request is a one-click suggestion */
+.af-pill.af-sug { padding: 0; background: none; cursor: default; }
+.af-pill.af-sug .btn { height: 20px; padding: 0 6px; font-size: 12px; gap: 2px; }
+/* P3: two more header buttons; the title gives way before anything wraps */
+.cs-head h2 { flex: 1 1 80px; }
+.cs-head > .btn, .cs-head > .icon-btn { flex: none; white-space: nowrap; }
+.cs-draft-lbl { flex: 1 1 auto; white-space: nowrap; }
+.cs-draft-lbl strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -17,8 +17,11 @@ func TestRunDetailActions(t *testing.T) {
 	for _, want := range []string{
 		`id="rd-rerun"' + (live ? " disabled" : "")`,
 		`api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} })`,
-		`(r.task_id || turn ? "" : '<button type="button" class="btn sm" id="rd-save-task"`,
-		`taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace })`,
+		// a session turn can be saved too (P3); its session's preset pins adopted versions
+		`(r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task"`,
+		`own = { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, run_mode: r.run_mode || "" }`,
+		`"/task-preset?from=run"`,
+		`run_mode: pre.run_mode || "exec", effort: pre.effort || ""`,
 		`prompt: pre.prompt || ""`,
 	} {
 		if !strings.Contains(src, want) {

@@ -233,7 +233,7 @@
       var turn = r.trigger === "session" || !!(r.chat_session && r.chat_session.turn > 0);
       mount('<div class="run-workspace" id="run-workspace"><header class="rw-head"><div class="rw-title"><h1>' + esc(runTitle(r)) + '</h1><div>' + statusPill(r.status, r.queue_pos, r.error) + '<span class="muted">' + esc(when(r.started_at || r.created_at)) + '</span>' + runChatOfHtml(r) + '</div></div><div class="rw-actions">' +
         (live ? '<button type="button" class="btn sm danger rd-stop" id="rd-stop" data-tip="' + esc(T(queued ? "run.dequeue_tip" : "run.stop_tip")) + '">' + ic("stop", "sm") + esc(T(queued ? "run.dequeue" : "run.stop")) + "</button>" : "") +
-        (r.task_id || turn ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
+        (r.task_id ? "" : '<button type="button" class="btn sm" id="rd-save-task" data-tip="' + esc(T("rd.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>") +
         (turn ? "" : '<button type="button" class="btn sm" id="rd-rerun"' + (live ? " disabled" : "") + ' data-tip="' + esc(T(r.task_id ? "rd.rerun_tip" : "rd.rerun_tip_q")) + ' · r">' + ic("refresh", "sm") + esc(T("runs.rerun")) + "</button>") +
         (r.task_id || turn ? "" : '<button type="button" class="icon-btn sm" id="rd-edit" aria-label="' + esc(T("qr.edit_title")) + '" data-tip="' + esc(T("rd.edit_tip")) + ' · e">' + ic("edit", "sm") + "</button>") +
         '<button type="button" class="btn sm" id="rd-inspect-toggle" aria-expanded="false" aria-controls="rd-inspector">' + ic("info", "sm") + esc(T("rw.inspector")) + '</button></div></header><div class="grid g4 rw-stats">' +
@@ -276,7 +276,18 @@
       bindRunPrompt(r);
       bindRunChat(r);
       if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, mode: r.run_mode }); });
-      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function () { taskFormModal(null, { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace }); });
+      // 存为任务: the run's request, folder, permission level and skills pinned to the
+      // versions it used; a run with a session takes the session's (a version adopted
+      // there is pinned instead), still with this run's own request.
+      if ($("#rd-save-task")) $("#rd-save-task").addEventListener("click", function (e) {
+        var b = e.currentTarget, own = { prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, run_mode: r.run_mode || "" };
+        var cs = r.chat_session;
+        if (!cs || !/^[\w-]{1,64}$/.test(cs.id || "")) { taskFormModal(null, own); return; }
+        b.disabled = true;
+        api("/api/chat-sessions/" + enc(cs.id) + "/task-preset?from=run", { fresh: true }).then(function (p) {
+          taskFormModal(null, Object.assign({}, p, { prompt: r.prompt || p.prompt, provider: r.provider || p.provider, skill_set_source: own.skill_set_source }));
+        }, function () { taskFormModal(null, own); }).then(function () { b.disabled = false; });
+      });
       logView($("#lv"), id, live, function (why) {
         if (why === "idle") { $("#live-ind").innerHTML = '<span class="muted">' + esc(T("rd.idle")) + "</span>"; return; }
         if (live) setTimeout(function () { if (location.hash === "#/runs/" + id) refresh(); }, 300);

@@ -58,6 +58,8 @@
     if (!s) return '<header class="cs-head sr-only"><h2>' + esc(T("cs.new")) + "</h2></header>";
     var from = s.origin === "run" && CS_ID.test(s.origin_run_id || "") ? '<a class="pill plain sm rc-of" href="#/runs/' + enc(s.origin_run_id) + '" data-tip="' + esc(T("cs.from_run_tip")) + '">' + ic("runs", "sm") + esc(T("cs.from_run")) + "</a>" : "";
     return '<header class="cs-head"><h2 class="ell" data-tip="' + esc(T("cs.created_tip", { t: when(s.created_at) })) + '">' + esc(csTitle(s)) + "</h2>" + from + '<span class="rc-sp"></span>' +
+      '<button type="button" class="btn sm ghost" id="cs-tune" data-tip="' + esc(T("sd.tune_tip")) + '">' + ic("skills", "sm") + esc(T("sd.tune")) + "</button>" +
+      '<button type="button" class="btn sm ghost" id="cs-save-task" data-tip="' + esc(T("cs.save_task_tip")) + '">' + ic("tasks", "sm") + esc(T("rd.save_task")) + "</button>" +
       '<button type="button" class="icon-btn sm danger-text" id="cs-del" aria-label="' + esc(T("cs.del")) + '" data-tip="' + esc(T("cs.del")) + '">' + ic("trash", "sm") + "</button></header>";
   }
   function csPageHtml(list, s) {
@@ -72,6 +74,7 @@
     return '<h1 class="sr-only">' + esc(T("nav.chat")) + '</h1><div class="cs' + (!s ? " cs-blank" : "") + (!hasHistory ? " cs-no-history" : "") + '" id="cs">' + side +
       '<section class="cs-main" id="rc" aria-label="' + esc(csTitle(s)) + '">' + csHeadHtml(s) +
       '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">' + thread + "</div>" +
+      (s ? '<div class="cs-draft" id="cs-draft" role="region" aria-label="' + esc(T("sd.label")) + '" hidden></div>' : "") +
       rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s), mode: s ? s.permission_mode : "exec" }) + "</section></div>";
   }
   function renderChat(id) {
@@ -95,6 +98,7 @@
         id: s.id, key: "cs_" + s.id, ph: "cs.ph", send_tip: "cs.send_tip", pre: s, turns: csAll,
         // the list row follows the session (busy dot, turns, title) without redrawing the list
         onPaint: function (x) {
+          if (drafts) drafts.session(x);
           var el = $('[data-cs="' + s.id + '"]'), html = csItemHtml(x, s.id);
           if (el && el._h !== html && el.outerHTML !== html) { var tmp = document.createElement("div"); tmp.innerHTML = html; el.replaceWith(tmp.firstChild); $('[data-cs="' + s.id + '"]')._h = html; }
           requestAnimationFrame(bottom);
@@ -102,6 +106,11 @@
         onGone: function () { location.hash = "#/chat"; }
       });
       thread.scrollTop = thread.scrollHeight;
+      var drafts = csDraftBar(sec, s);
+      $("#cs-save-task", sec).addEventListener("click", function (e) {
+        var b = e.currentTarget; b.disabled = true;
+        api("/api/chat-sessions/" + enc(s.id) + "/task-preset", { fresh: true }).then(function (p) { taskFormModal(null, p); }).catch(fail).then(function () { b.disabled = false; });
+      });
       var cur = s, wireCaps = function () {
         var btn = $("#cs-caps");
         if (btn) btn.addEventListener("click", function () {
@@ -128,6 +137,106 @@
             if (location.hash === "#/chat/" + enc(s.id) || location.hash === "#/chat/" + s.id) location.hash = "#/chat";
           });
         }).catch(function (x) { b.disabled = false; if (!x.auth) toast(rcErrText(x), true); });
+      });
+    });
+  }
+
+  // Skill draft bar (P3): tune a skill without leaving the session. 改技能 copies the
+  // skill into the session's draft; every later turn loads the draft (and, in a session
+  // that may change files, the model edits it). 用草稿试跑 sends the first request again;
+  // 保存为版本 stores the draft as a version without using it; 采用 (an in-app
+  // confirmation naming the tasks it changes) makes it current. Nothing adopts by itself.
+  function csDraftBar(sec, ses) {
+    var box = $("#cs-draft", sec), tune = $("#cs-tune", sec), d = null, cur = ses, wasBusy = false, busyOp = false;
+    if (!box || !tune) return null;
+    var base = "/api/chat-sessions/" + enc(ses.id) + "/draft";
+    var editable = function () { return (cur && cur.permission_mode) !== "read"; };
+    var running = function () { return !!(cur && cur.status === "running"); };
+    var paint = function () {
+      tune.hidden = !!(d && d.active);
+      if (!d || !d.active) { box.hidden = true; box.innerHTML = ""; return; }
+      var state = d.unsaved ? T("sd.st_changed") : d.saved && d.saved.status === "pending" ? T("sd.st_saved", { v: d.saved.no }) : d.changed ? T("sd.st_saved_old") : T("sd.st_same");
+      var tip = T("sd.tip", { s: d.skill_name, v: d.base_no, cur: d.current_no, n: d.files }) + (editable() ? "" : " " + T("sd.read_tip"));
+      var pend = d.saved && d.saved.status === "pending", off = running() || busyOp ? " disabled" : "";
+      var html = '<span class="cs-draft-lbl" tabindex="0" data-tip="' + esc(tip) + '">' + ic("skills", "sm") + '<strong class="ell">' + esc(T("sd.title", { s: d.skill_name })) + "</strong>" +
+        '<span class="cs-draft-v">v' + esc(String(d.base_no || "?")) + "</span>" + '<span class="cs-draft-st' + (d.unsaved ? " on" : "") + '">' + esc(state) + "</span>" +
+        (editable() ? "" : '<span class="cs-draft-ro" aria-hidden="true">' + ic("eye", "sm") + "</span>") + "</span>" +
+        '<span class="rc-sp"></span>' +
+        '<button type="button" class="btn sm" data-dr="try"' + off + ' data-tip="' + esc(T("sd.try_tip")) + '">' + ic("play", "sm") + esc(T("sd.try")) + "</button>" +
+        '<button type="button" class="btn sm" data-dr="save"' + (d.unsaved && !off ? "" : " disabled") + ' data-tip="' + esc(T("sd.save_tip")) + '">' + ic("check", "sm") + esc(T("sd.save")) + "</button>" +
+        '<button type="button" class="btn sm primary" data-dr="adopt"' + (pend && !off ? "" : " disabled") + ' data-tip="' + esc(T(pend ? "sd.adopt_tip" : "sd.adopt_none_tip")) + '">' + esc(pend ? T("sd.adopt_v", { v: d.saved.no }) : T("sd.adopt")) + "</button>" +
+        '<button type="button" class="icon-btn sm" data-dr="discard"' + off + ' aria-label="' + esc(T("sd.discard")) + '" data-tip="' + esc(T("sd.discard_tip")) + '">' + ic("x", "sm") + "</button>";
+      if (box._h !== html) { box.innerHTML = html; box._h = html; }
+      box.hidden = false;
+    };
+    var load = function () { return api(base, { fresh: true }).then(function (x) { d = x; paint(); return x; }); };
+    var act = function (p) { busyOp = true; paint(); return p.then(function (x) { d = x; return x; }).catch(function (e) { if (!e.auth) toast(csDraftErr(e), true); return null; }).then(function (x) { busyOp = false; paint(); return x; }); };
+    tune.addEventListener("click", function () {
+      if (running()) { toast(T("rc.err_busy"), true); return; }
+      (d ? Promise.resolve(d) : load()).then(function (x) {
+        var sk = x.skills || [];
+        if (!sk.length) { toast(T("sd.no_skill"), true); return; }
+        return (sk.length === 1 ? Promise.resolve(sk[0].id) : csPickSkill(sk)).then(function (id) {
+          if (!id) return;
+          return act(api(base, { method: "POST", body: { skill_id: id } })).then(function (y) { if (y) toast(T(editable() ? "sd.started" : "sd.started_ro", { s: y.skill_name })); });
+        });
+      }).catch(fail);
+    });
+    box.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-dr]");
+      if (!b || b.disabled || !d) return;
+      var what = b.getAttribute("data-dr");
+      if (what === "try") {
+        var first = csFirstRequest(cur), ta = $("#rc-in", sec), form = $("#rc-form", sec);
+        if (!ta || !form) return;
+        ta.value = first ? T("sd.try_msg", { p: first }) : T("sd.try_msg_none");
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        form.requestSubmit();
+      } else if (what === "save") {
+        act(api(base + "/save", { method: "POST", body: {} })).then(function (x) { if (x && x.saved) toast(T("sd.saved", { v: x.saved.no })); });
+      } else if (what === "adopt") {
+        var a = d.affects || { follow: [], pinned: 0 }, f = a.follow || [];
+        confirmDialog({ icon: "skills", title: T("sd.adopt_title", { s: d.skill_name, v: d.saved.no }),
+          body: T("sd.adopt_body") + "\n" + (f.length ? T("sd.adopt_follow", { n: f.length, l: f.slice(0, 8).join("、") + (f.length > 8 ? "…" : "") }) : T("sd.adopt_follow_none")) + (a.pinned ? "\n" + T("sd.adopt_pinned", { n: a.pinned }) : ""),
+          ok: T("sd.adopt_v", { v: d.saved.no }) }).then(function (y) {
+          if (!y) return;
+          return act(api(base + "/adopt", { method: "POST", body: {} })).then(function (x) { if (x) toast(T("sd.adopted", { s: x.skill_name })); });
+        });
+      } else if (what === "discard") {
+        (d.unsaved ? confirmDialog({ title: T("sd.discard_title"), body: T("sd.discard_body"), ok: T("sd.discard"), danger: true }) : Promise.resolve(true)).then(function (y) {
+          if (y) act(api(base, { method: "DELETE" }));
+        });
+      }
+    });
+    load().catch(function () {});
+    return {
+      // the session repainted: a finished turn may have changed the draft
+      session: function (x) {
+        var was = wasBusy; cur = x || cur; wasBusy = running();
+        if (was && !wasBusy && d && d.active) load().catch(function () {}); else paint();
+      }
+    };
+  }
+  function csDraftErr(e) {
+    var code = e && e.data && e.data.code;
+    if (code === "draft_checks") return T("rc.err_draft_checks") + " (" + String((e.message || "").split(": ").pop()) + ")";
+    return rcErrText(e) || T("err.generic");
+  }
+  // the request a 试跑 repeats: the run the session continues, else its first message
+  function csFirstRequest(s) {
+    var t = csAll(s).filter(function (x) { return x.message; })[0];
+    return t ? String(t.message).slice(0, 4000) : "";
+  }
+  function csPickSkill(skills) {
+    return new Promise(function (resolve) {
+      var done = false;
+      modal('<div class="card-head"><span class="ico">' + ic("skills") + "</span><h2>" + esc(T("sd.pick_title")) + '</h2></div><p class="muted sm">' + esc(T("sd.pick_sub")) + '</p><div class="cs-cap-list">' +
+        skills.map(function (k, i) { return '<label class="cs-cap-row"><input type="radio" name="dr-pick" value="' + esc(k.id) + '"' + (i ? "" : " checked") + '><span class="ell"><strong>' + esc(k.name || k.id) + "</strong></span></label>"; }).join("") +
+        '</div><div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn primary" id="dr-pick-ok">' + esc(T("sd.tune")) + "</button></div>", function (root, close) {
+        var ok = $("#dr-pick-ok", root);
+        ok.addEventListener("click", function () { var c = $('input[name="dr-pick"]:checked', root); done = true; close(); resolve(c ? c.value : ""); });
+        var obs = new MutationObserver(function () { if (!root.contains(ok)) { obs.disconnect(); if (!done) resolve(""); } });
+        obs.observe(root, { childList: true });
       });
     });
   }
