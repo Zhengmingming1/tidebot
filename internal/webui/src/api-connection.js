@@ -167,6 +167,14 @@
     if (e && e.offline) { if (!net.toast) { var c = toast(e.message, true); net.toast = function () { c(); net.toast = null; }; } return; }
     toast(e.message, true);
   }
+  // startFail: a run start refused because of its working folder (another run is
+  // changing it, or the folder is missing / sensitive) says so in the reader's
+  // language, as the Run dialog does; anything else goes to fail.
+  function startFail(e) {
+    var pr = e && e.data && e.data.problem;
+    if (pr && state.dict["rn.ws_" + pr + "_tip"] != null) { toast(T("rn.ws_" + pr + "_tip"), true); return; }
+    fail(e);
+  }
   // ---------- connection ----------
   // When tidebot can't be reached (agentd restarting or upgraded, the laptop waking from sleep,
   // Wi-Fi gone in server mode) each engine says it its own way and in English: "Failed to

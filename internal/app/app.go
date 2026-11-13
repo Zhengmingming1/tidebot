@@ -686,6 +686,7 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	if view.Spec != nil && view.Spec.WorkspaceDir != "" {
 		ws = view.Spec.WorkspaceDir
 	}
+	ownerDir := ws != "" // the owner's folder, not the task's own one in tidebot's home
 	if ws == "" {
 		ws = guard.TaskWorkspace(a.Cfg.HomeDir, task.ID)
 		_ = os.MkdirAll(ws, 0o755)
@@ -745,6 +746,18 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	}
 	if mode == "read" {
 		skillArgs = append(skillArgs, "--disallowedTools", strings.Join(readOnlyDeny, ","))
+	} else if ownerDir {
+		// A task that may change the owner's folder takes the same one-at-a-time
+		// hold as the Run dialog, sessions and workflows: before its run row, so a
+		// busy folder answers like theirs (guard.ErrDirBusy) and a scheduled run
+		// waits it out (runWithPolicy). The task's own runs share the hold: how many
+		// go at once stays its overlap policy's call (a manual run beside a queued
+		// one, "parallel"). The task's own folder in tidebot's home is left as before.
+		key := editLockKey(ws)
+		if !lockEditDirAs(key, "task:"+task.ID) {
+			return guard.ErrDirBusy
+		}
+		defer unlockEditDir(key)
 	}
 	res, err := a.RunPromptEx(ctx, runner.Options{
 		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,

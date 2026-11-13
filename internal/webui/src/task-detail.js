@@ -296,7 +296,7 @@
       wireRows();
       var depButton=document.createElement("button");depButton.className="btn";depButton.textContent=T("dep.check");depButton.id="t-dependencies";
       $("#t-run").parentNode.insertBefore(depButton,$("#t-run"));depButton.onclick=function(){dependencyCheck({kind:"task",id:id});};
-      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(fail); });
+      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(startFail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
       $("#t-dup").addEventListener("click", async function () {
         if (t.cost_control_mode === "bypass" && !await confirmDialog({title:T("costmode.confirm_title"),body:T("costmode.warning"),ok:T("costmode.confirm_ok"),danger:true})) return;

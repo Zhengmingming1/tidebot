@@ -507,6 +507,14 @@
     if (e && e.offline) { if (!net.toast) { var c = toast(e.message, true); net.toast = function () { c(); net.toast = null; }; } return; }
     toast(e.message, true);
   }
+  // startFail: a run start refused because of its working folder (another run is
+  // changing it, or the folder is missing / sensitive) says so in the reader's
+  // language, as the Run dialog does; anything else goes to fail.
+  function startFail(e) {
+    var pr = e && e.data && e.data.problem;
+    if (pr && state.dict["rn.ws_" + pr + "_tip"] != null) { toast(T("rn.ws_" + pr + "_tip"), true); return; }
+    fail(e);
+  }
   // ---------- connection ----------
   // When tidebot can't be reached (agentd restarting or upgraded, the laptop waking from sleep,
   // Wi-Fi gone in server mode) each engine says it its own way and in English: "Failed to
@@ -2106,7 +2114,7 @@
   // One-click "run now" from any list; the toast links to the live run.
   function runTaskNow(id, btn) {
     if (btn) btn.disabled = true;
-    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); if (/^#\/tasks$/.test(location.hash)) refresh(); }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); if (/^#\/tasks$/.test(location.hash)) refresh(); }).catch(startFail).then(function () { if (btn) btn.disabled = false; });
   }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 
@@ -3397,7 +3405,7 @@
       wireRows();
       var depButton=document.createElement("button");depButton.className="btn";depButton.textContent=T("dep.check");depButton.id="t-dependencies";
       $("#t-run").parentNode.insertBefore(depButton,$("#t-run"));depButton.onclick=function(){dependencyCheck({kind:"task",id:id});};
-      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(fail); });
+      $("#t-run").addEventListener("click", function () { api(base + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); reload(); }).catch(startFail); });
       $("#t-edit").addEventListener("click", function () { taskFormModal(id); });
       $("#t-dup").addEventListener("click", async function () {
         if (t.cost_control_mode === "bypass" && !await confirmDialog({title:T("costmode.confirm_title"),body:T("costmode.warning"),ok:T("costmode.confirm_ok"),danger:true})) return;
@@ -7291,7 +7299,7 @@
         var b = e.currentTarget; b.disabled = true;
         api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} }).then(function (res) {
           openStarted(res, "runs.rerun_started");
-        }).catch(function (err) { b.disabled = false; fail(err); });
+        }).catch(function (err) { b.disabled = false; startFail(err); });
       });
       if ($("#rd-stop")) $("#rd-stop").addEventListener("click", function (e) {
         var b = e.currentTarget; b.disabled = true;

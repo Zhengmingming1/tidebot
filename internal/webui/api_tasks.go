@@ -216,7 +216,7 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 			}
 			runID, err := s.deps.RunTask(id, cost.BucketProduction)
 			if err != nil {
-				writeErr(w, 500, err.Error())
+				writeStartErr(w, 500, err)
 				return
 			}
 			s.writeStarted(w, runID)

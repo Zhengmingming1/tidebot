@@ -25,33 +25,53 @@ import (
 var readOnlyDeny = []string{"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"}
 
 // editDirs: folders with a run that may change files going (one at a time).
+// The runs of one task may share a hold (lockEditDirAs): how many of them go at
+// once is the task's own overlap policy, as before.
 var editDirs = struct {
 	sync.Mutex
-	m map[string]bool
-}{m: map[string]bool{}}
+	m map[string]*editHold
+}{m: map[string]*editHold{}}
 
-func lockEditDir(dir string) bool {
-	k := dir
+type editHold struct {
+	owner string // "" = exclusive
+	n     int
+}
+
+func editDirKey(dir string) string {
 	if caseFoldPaths {
-		k = strings.ToLower(k)
+		return strings.ToLower(dir)
 	}
+	return dir
+}
+
+func lockEditDir(dir string) bool { return lockEditDirAs(dir, "") }
+
+// lockEditDirAs holds dir for owner: free, or already held by the same
+// (non-empty) owner. Every successful call is paired with one unlockEditDir.
+func lockEditDirAs(dir, owner string) bool {
+	k := editDirKey(dir)
 	editDirs.Lock()
 	defer editDirs.Unlock()
-	if editDirs.m[k] {
-		return false
+	if h := editDirs.m[k]; h != nil {
+		if owner == "" || h.owner != owner {
+			return false
+		}
+		h.n++
+		return true
 	}
-	editDirs.m[k] = true
+	editDirs.m[k] = &editHold{owner: owner, n: 1}
 	return true
 }
 
 func unlockEditDir(dir string) {
-	k := dir
-	if caseFoldPaths {
-		k = strings.ToLower(k)
-	}
+	k := editDirKey(dir)
 	editDirs.Lock()
-	delete(editDirs.m, k)
-	editDirs.Unlock()
+	defer editDirs.Unlock()
+	if h := editDirs.m[k]; h != nil {
+		if h.n--; h.n <= 0 {
+			delete(editDirs.m, k)
+		}
+	}
 }
 
 // startRun starts a Run dialog run: the prompt, with the skill (if any) staged in
@@ -176,3 +196,18 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 }
 
 var caseFoldPaths = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
+// editLockKey is the key a folder is held under (lockEditDir): its real path,
+// as the Run dialog and workflows already pass (guard.CheckRunDir resolves
+// symlinks), so a task's or session's linked or unclean path is still the same
+// folder. Taken once per run: the folder may be gone when the hold ends.
+func editLockKey(ws string) string {
+	p := filepath.Clean(ws)
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		p = real
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return p
+}

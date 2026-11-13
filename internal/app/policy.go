@@ -8,6 +8,7 @@ import (
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
 	"github.com/Zhengmingming1/tidebot/internal/db"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
@@ -33,6 +34,18 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 		return
 	}
 	err := a.runTaskTrigger(ctx, task, trigger, bucket)
+	if errors.Is(err, guard.ErrDirBusy) {
+		// Another run is changing the task's folder (a session turn, a Run dialog
+		// run, a workflow): not the task's fault and not a failed run. Wait until
+		// the folder is free and go then; no retry used, no breaker strike.
+		a.Log.Info("task waits for its folder", "task_id", task.ID)
+		for errors.Is(err, guard.ErrDirBusy) {
+			if !a.sleepPolicy(ctx, dirBusyPoll) || !a.taskStillRunnable(ctx, task.ID, trigger) {
+				return // closing, or the task was paused / deleted meanwhile
+			}
+			err = a.runTaskTrigger(ctx, task, trigger, bucket)
+		}
+	}
 	if a.policyRunsClosing() || ctx.Err() != nil {
 		return
 	}
@@ -63,6 +76,39 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 		}
 		a.Events.Emit(Event{Kind: EventBreakerTripped, TaskID: task.ID, TaskName: task.Name, Detail: class})
 	}
+}
+
+// dirBusyPoll: how often a scheduled run whose folder is busy looks again (a var for tests).
+var dirBusyPoll = 3 * time.Second
+
+// sleepPolicy waits d unless tidebot starts closing or ctx ends (false then).
+func (a *App) sleepPolicy(ctx context.Context, d time.Duration) bool {
+	t := time.NewTicker(dirBusyPollStep(d))
+	defer t.Stop()
+	end := time.Now().Add(d)
+	for {
+		if a.policyRunsClosing() || ctx.Err() != nil {
+			return false
+		}
+		if !time.Now().Before(end) {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-t.C:
+		}
+	}
+}
+
+func dirBusyPollStep(d time.Duration) time.Duration {
+	if d > 250*time.Millisecond {
+		return 250 * time.Millisecond
+	}
+	if d <= 0 {
+		return time.Millisecond
+	}
+	return d
 }
 
 // retryDelay allows tests to shrink backoff (TIDEBOT_RETRY_SCALE=0.001).

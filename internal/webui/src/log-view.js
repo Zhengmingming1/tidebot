@@ -260,7 +260,7 @@
         var b = e.currentTarget; b.disabled = true;
         api("/api/runs/" + enc(id) + "/rerun", { method: "POST", body: {} }).then(function (res) {
           openStarted(res, "runs.rerun_started");
-        }).catch(function (err) { b.disabled = false; fail(err); });
+        }).catch(function (err) { b.disabled = false; startFail(err); });
       });
       if ($("#rd-stop")) $("#rd-stop").addEventListener("click", function (e) {
         var b = e.currentTarget; b.disabled = true;

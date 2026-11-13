@@ -2,10 +2,12 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
@@ -45,7 +47,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		if newID, err = s.deps.RunTask(run.TaskID, cost.BucketProduction); err != nil {
-			writeErr(w, 400, err.Error())
+			writeStartErr(w, 400, err)
 			return
 		}
 	} else if len(bindings) > 0 || run.SkillID != "" || run.RunMode != "" {
@@ -59,7 +61,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		if newID, err = s.deps.StartRun(RunRequest{Prompt: run.Prompt, Provider: run.Provider, SkillID: run.SkillID,
 			VersionID: run.SkillVerID, SkillBindings: bindings, SkillSetSource: source, Workspace: ws, Mode: run.RunMode}); err != nil {
-			writeErr(w, 400, err.Error())
+			writeStartErr(w, 400, err)
 			return
 		}
 	} else {
@@ -68,11 +70,27 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		if newID, err = s.deps.QuickRun(run.Prompt, run.Provider); err != nil {
-			writeErr(w, 400, err.Error())
+			writeStartErr(w, 400, err)
 			return
 		}
 	}
 	s.writeStarted(w, newID)
+}
+
+// writeStartErr answers a start that was refused before its run existed. The
+// working folder's problems answer as in the Run dialog ("problem" for the page's
+// own text): 400 with guard's problem, 409 "busy" when another run is changing the
+// folder. Anything else is status with the message.
+func writeStartErr(w http.ResponseWriter, status int, err error) {
+	var de *guard.DirError
+	switch {
+	case errors.As(err, &de):
+		writeJSON(w, 400, map[string]string{"error": err.Error(), "problem": de.Problem})
+	case errors.Is(err, guard.ErrDirBusy):
+		writeJSON(w, 409, map[string]string{"error": err.Error(), "problem": "busy"})
+	default:
+		writeErr(w, status, err.Error())
+	}
 }
 
 // writeStarted answers a start request: 202 with the new run's id when its row exists

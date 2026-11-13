@@ -167,7 +167,7 @@
   // One-click "run now" from any list; the toast links to the live run.
   function runTaskNow(id, btn) {
     if (btn) btn.disabled = true;
-    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); if (/^#\/tasks$/.test(location.hash)) refresh(); }).catch(fail).then(function () { if (btn) btn.disabled = false; });
+    return api("/api/tasks/" + enc(id) + "/run", { method: "POST", body: {} }).then(function (res) { toast(startedText(res, "toast.run_started")); if (/^#\/tasks$/.test(location.hash)) refresh(); }).catch(startFail).then(function () { if (btn) btn.disabled = false; });
   }
   function wireRows(root) { $$("[data-href]", root || page()).forEach(function (el) { el.addEventListener("click", function (e) { if (e.target.closest("a,button")) return; location.hash = el.getAttribute("data-href"); }); }); }
 

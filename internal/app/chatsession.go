@@ -564,9 +564,10 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		}
 	}
 	// a turn that may change the owner's folder: one such run per folder at a time
-	locked := false
+	locked, lockKey := false, ""
 	if mode != "read" && own {
-		if !lockEditDir(ws) {
+		lockKey = editLockKey(ws)
+		if !lockEditDir(lockKey) {
 			release("", runner.Result{})
 			return webui.ChatTurnStarted{}, guard.ErrDirBusy
 		}
@@ -611,7 +612,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		defer st.Close()
 		defer a.endChatToolToken(sid)
 		if locked {
-			defer unlockEditDir(ws)
+			defer unlockEditDir(lockKey)
 		}
 		started := ""
 		opts := runner.Options{
