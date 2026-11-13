@@ -14,7 +14,7 @@ So tidebot does a few simple things:
 - Broke something? Click an older version and you're back. History never goes away.
 - Daily spend has a cap. When it's hit, things stop. No burning a month of credits overnight.
 
-It's not a platform and doesn't want to become one. Single user, runs locally, one binary, about 30 MB of memory when idle.
+It's not a platform and doesn't want to become one. Single user, runs locally, one binary, about 35 MB of memory when idle.
 
 ![Home](docs/images/home.png)
 
@@ -43,9 +43,9 @@ Task detail. The conversation with the task lives in the Requirements tab. What 
 
 ![Task detail](docs/images/task-detail.png)
 
-The version tree. Every confirmation is a new version. Rolling back just moves the "current" pointer; nothing is deleted.
+The version tree. Every confirmation is a new version. Rolling back just moves the "current" pointer; nothing is deleted. Change something after a rollback and it branches off from that version.
 
-<img src="docs/images/version-tree.png" width="320" alt="Version tree">
+<img src="docs/images/version-tree.png" width="420" alt="Version tree">
 
 Live run log. Output is pushed as soon as it's written, so new lines show up almost instantly. Copy, download and full screen sit in the title bar, a running run has a Stop button next to it, and a queued one can simply be taken out of the queue. Secrets are masked before the log ever hits disk.
 
@@ -61,9 +61,7 @@ The run dialog ("Skill & folder…" on the home page). Pick a primary skill and 
 
 Spend. Every model is priced at its own rate; subscription plans count tokens, not money. The daily budget resets at midnight in your own timezone (not UTC). Going over pauses the task and records an event. You can break it down by task, provider, model or tag, click a day in the chart to see just that day, and export the selected range as CSV.
 
-New tasks have no execution time limit by default. Enable “Limit maximum execution time” to set 1–1440 minutes. Timing starts after a run gets its execution slot; a timeout stops only that run. Existing task limits are preserved.
-
-Manage the single global daily monetary limit in Settings → Budget. It covers all run categories; task-level per-run/daily limits and control modes remain available. Token accounting and provider quotas are unchanged.
+The global daily cap lives in Settings → Budgets and covers every run; a task can add its own per-run / daily caps. There's no time limit by default; tick "Limit maximum execution time" on a task if you want one (1–1440 minutes, counted from when the run gets its slot; a timeout only stops that run).
 
 ![Spend](docs/images/spend.png)
 
@@ -79,7 +77,7 @@ Ctrl+K (⌘K on a Mac) opens a command palette. It searches tasks, skills and ru
 
 ![Command palette](docs/images/palette.png)
 
-Appearance. The three themes share the redesigned workspaces: Graphite uses native silver surfaces and blue accents, Tide adds an ice-blue background and lightly frosted navigation, and Midnight uses layered graphite surfaces with restrained blue accents. Each supports light, dark, and system modes, with existing preferences preserved. The logo uses a blue rounded tile and a Tide T monogram with a gently rising cyan tide band; run-aware acceleration, hidden-window pause, and reduced-motion support remain. Navigation and auxiliary panes adapt as the window resizes, with wide tables scrolling inside their own regions. Change the look in Settings → General → Appearance; it is shared by the browser and desktop app. See [Three-theme workspaces](docs/ui-apple.md) for the new home composer, task split view, run inspector, and screenshots.
+Appearance. Three themes: Graphite is the default, neutral grey with blue accents; Tide leans ice-blue; Midnight is a darker graphite. Each has light, dark and follow-the-system. When the window resizes, the navigation and side panes fold in and out, and wide tables scroll inside their own area. Switch it in Settings → General → Appearance; the browser and the desktop app share the setting. More screenshots in [Three-theme workspaces](docs/ui-apple.md).
 
 ![Appearance settings](docs/images/appearance.png)
 
@@ -91,7 +89,7 @@ Midnight, dark:
 
 ![Midnight dark](docs/images/dark.png)
 
-Settings are split into General / Providers / Budgets / Price catalog / Security / Notifications / Network / Data & backup / About, and every item has its own URL, e.g. `#/settings/security/2fa`. You can turn on two-factor sign-in there: scan, type one code, save the recovery codes. Nothing changes until a code checks out. Changing your password, seeing which devices are signed in and signing the others out are under Security too. Notification channels (Feishu, DingTalk, WeCom, Telegram, email, webhook) are added here as well; paste the URL and it figures out which one it is, and you can send a test before saving.
+Settings are split into General / Providers / Budgets / Price catalog / Tags / Security / Notifications / Network / Data & backup / About, and every item has its own URL, e.g. `#/settings/security/2fa`. You can turn on two-factor sign-in there: scan, type one code, save the recovery codes. Nothing changes until a code checks out. Changing your password, seeing which devices are signed in and signing the others out are under Security too. Notification channels (Feishu, DingTalk, WeCom, Telegram, email, webhook) are added here as well; paste the URL and it figures out which one it is, and you can send a test before saving.
 
 ![Settings](docs/images/settings.png)
 
@@ -113,7 +111,7 @@ Skills with versions and rollback. Import a Claude Code skill directory; every r
 
 Optional skill optimization (off by default, under "Advanced" on the skill page). Three modes: off, suggest only, canary. Canary sends part of the runs to a candidate version and shows success rate, cost and duration side by side. It never promotes anything on its own; you confirm that.
 
-Buttons and plugins. A button is a one-click preset bound to a task or a prompt. The home page shows them in the order you set, by drag or Alt+arrow keys. When you install a plugin you tick its permissions one by one (high-risk ones start unticked), and you can revoke a single one later. Plugins with settings get a form; password-type fields can't be read back once saved.
+Buttons and plugins. Plugins install from Extensions, same as capability packages. A button is a one-click preset bound to a task or a prompt. The home page shows them in the order you set, by drag or Alt+arrow keys. When you install a plugin you tick its permissions one by one (high-risk ones start unticked), and you can revoke a single one later. Plugins with settings get a form; password-type fields can't be read back once saved.
 
 Keeping lots of tasks in order. Tasks take tags, which you can filter by and add or remove in bulk. Tasks export to a JSON file you can import on another machine (with a preview of each one first; imports start paused). Need a break? Pause all schedules with one click, or pause a single task for 1 hour, 4 hours or until 9 tomorrow, and it resumes on its own. Tasks that got paused automatically say why, e.g. repeated failures or an exhausted budget.
 
@@ -131,17 +129,17 @@ Data doesn't pile up. Settings → Data & backup shows how much space tidebot us
 
 Any model provider. Anything with an Anthropic-compatible endpoint works. Built in: Anthropic, Kimi (including Coding Plan), DeepSeek, Zhipu GLM / Z.AI, Qwen DashScope, and the local magpie gateway. Keys are injected only into the `claude` child process environment. They never go into the database or the logs.
 
-Small footprint. Measured on 2026-10-30 on a Linux x86_64 box (`go build -trimpath -ldflags="-s -w"`, i.e. `make build`; `scripts/measure.sh` reproduces it):
+Small footprint. Measured on 2026-11-12 on a Linux x86_64 box (`go build -trimpath -ldflags="-s -w"`, i.e. `make build`; `scripts/measure.sh` reproduces it):
 
 | What | Number |
 |---|---|
-| `agentd` binary (stripped) | 17.9 MB |
+| `agentd` binary (stripped) | 23.8 MB |
 | `agentctl` binary | 4.1 MB |
-| Idle RSS, WebUI off | ~29 MB |
-| Idle RSS, WebUI on | ~31 MB |
-| WebUI frontend (JS + CSS, gzipped) | ~205 KB, no CDN, no framework; cached by content hash, so a second visit downloads nothing |
+| Idle RSS, WebUI off | ~35 MB |
+| Idle RSS, WebUI on | ~43 MB |
+| WebUI frontend (JS + CSS, gzipped) | ~315 KB, no CDN, no framework; cached by content hash, so a second visit downloads nothing |
 
-This version has a new UI, and the stylesheet now carries three themes, so the frontend is about 10 KB bigger than 0.1.8; memory didn't move. API responses are gzipped too: 100 runs in the runs list went from ~70 KB to 12 KB.
+That's noticeably more than the end-of-October measurement: sessions, capability packages, the workflow canvas and the permission levels all landed this month, adding about 6 MB to the binary, about 110 KB to the frontend and 6–12 MB of idle memory. The next rounds of optimization will keep an eye on it. API responses are gzipped too: 100 runs in the runs list went from ~70 KB to 12 KB.
 
 ## Architecture
 
@@ -250,9 +248,7 @@ The easy way is Settings → Providers in the WebUI: pick a preset (Anthropic, K
 
 Every provider needs a key (for official Anthropic, an API key). tidebot runs don't use Claude Code's subscription login (`claude login`) and never read, copy or pass it on: runs start with `--bare`, where Claude Code accepts only the provider's key and reads no login or keychain. What Claude Code records during a run (usage stats, session files) goes to tidebot's data folder (`CLAUDE_CONFIG_DIR=<data>/claude-config`), so your own `~/.claude`, `~/.claude.json` and subscription login are left alone.
 
-Environment variables still work:
-
-Keys live in environment variables, never in config files. The variable is `TIDEBOT_API_KEY_<PROVIDER_ID>`; Kimi Coding Plan also accepts `KIMI_API_KEY`.
+Environment variables work too; just don't put keys in config files. The variable is `TIDEBOT_API_KEY_<PROVIDER_ID>`; Kimi Coding Plan also accepts `KIMI_API_KEY`.
 
 ```bash
 export TIDEBOT_API_KEY_DEEPSEEK=...      # your own key
@@ -386,5 +382,8 @@ The source lives at [github.com/Zhengmingming1/tidebot](https://github.com/Zheng
 - [Design plan](docs/final-plan.md)
 - [Research report](docs/report.md)
 - [Model providers](docs/providers.md)
+- [Skill sets and workflows](docs/skills-workflows.md)
+- [Capability packages](docs/capability-implementation.md)
+- [Per-task cost controls](docs/task-cost-control.md)
 - [Releases and packaging](docs/release.md)
 - [Phase 0 measurements](docs/phase0-results.md)
