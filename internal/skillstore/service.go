@@ -93,14 +93,23 @@ func (s *Service) CommitFiles(ctx context.Context, skillID, name string, files m
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
 		EntityType: version.EntitySkill, EntityID: skillID, NoMove: noMove,
 		Content: man, Source: source, Actor: actor, Reason: source + " skill", Message: source + " " + name,
+		// The file list goes in with the version: a version (possibly made
+		// current) whose files failed to record would stage an empty skill.
+		// Also run for an existing version with the same content, which fills in
+		// files an older, half-written commit missed.
+		Then: func(ctx context.Context, tx *sql.Tx, res version.CommitResult) error {
+			for path, h := range hashes {
+				if _, err := tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO version_files(version_id, path, sha256, mode) VALUES(?,?,?,420)`,
+					res.Version.ID, path, h); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		return nil, Manifest{}, err
-	}
-	for path, h := range hashes {
-		_, _ = s.DB.ExecContext(ctx, `
-INSERT OR IGNORE INTO version_files(version_id, path, sha256, mode) VALUES(?,?,?,420)`,
-			res.Version.ID, path, h)
 	}
 	return res.Version, man, nil
 }
