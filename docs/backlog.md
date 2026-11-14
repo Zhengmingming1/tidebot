@@ -6270,3 +6270,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 等待中的定时运行在界面上仍看不到（只有日志）；可以在任务详情显示「等目录空出 / 等记账写入」。
 - 被丢弃的触发只记日志；如果以后做「触发历史」，可以显示为「已合并到前一次」。
 - 账本挂起时界面没有提示，仍可在设置 › 用量显示「有 N 条花费待写入」。
+
+### 2026-11-14：运行的权限档、技能版本和花费类别随运行行一次写入，不再可能丢（BUG / 资源占用）
+
+- **问题**：`runner.RunOnce` 先 `InsertRun` 写运行行，再用两条 `UPDATE` 补写 `cost_bucket` 和 `skill_id / skill_version_id / run_mode`，错误一律丢掉（`_, _ =`）。补写失败（数据库忙、退出时 context 已取消、另一个进程占着写锁）时运行照常跑完，但行里 `run_mode` 是空的：运行页不再显示「改动的文件」也不能撤销（`run_mode IN ('edit','exec')` 才算）、运行对话框「上次用的目录 / 权限」和最近目录跳过它、从这次运行「继续对话」按老任务的「可修改」建会话、「存为任务」拿不到这次用的技能版本、花费类别显示成 production。另外每次运行多两次写事务，单连接上还会和别的写入多排两次队。（11-13 那轮的后续想法。）
+- **改法**：`db.Run` 加 `CostBucket`、`SkillID`、`SkillVersionID`、`RunMode`，`InsertRun` 一条语句写入（`cost_bucket` 空时仍是 `production`），runner 删掉两条补写。行一出现（排队中）就是完整的；插入失败照旧让运行失败，不会出现「跑了但没记全」。
+- 测试（`runner/runrow_test.go`）：用触发器让之后对这几列的任何 UPDATE 失败（模拟忙），`OnStart` 时和结束后行里都是 `assist / skl_a / ver_a / exec`；都不设时是默认值。改前失败（`run_mode` 为空、bucket 为 production）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）通过。
+- 数字（本机 Linux amd64，8 核，文件数据库 WAL，`TIDEBOT_PERF=1 go test -run TestRunRowInsertPerf ./internal/runner`，每轮 2000 次，5 轮）：
+
+| 指标 | 改前 | 改后 |
+| --- | ---: | ---: |
+| 每次运行建行的写语句 / 写事务 | 3 | 1 |
+| 每次运行建行耗时 | 148–187 µs | 99–123 µs |
+
+**心得**：「先插后补」的写法只要补的那步不检查错误，就会在偶发的忙或退出时留下半条记录；能一次写进去的字段就不要分两次写——既省事务，又没有中间态。
+
+**后续想法**：
+- 仍有几处只试一次、丢掉错误的写入：`recordAgentConfigChanges`（5 s，通知照发，但运行详情里看不到改了哪些文件）、`system.go` 的 `run_flags`（claude 版本）、`tasksvc/service.go:459`；可以按影响逐个改成并进主写入或 `chatWrite` 式重试。
+- `cost_policy.go` 在准入时另写一次 `effective_cost_policy_json`（检查错误），也可以考虑并进建行，但它在 runner 之外算出，要先理清顺序。

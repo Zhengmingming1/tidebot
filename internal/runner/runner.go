@@ -308,15 +308,10 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 		row.TaskVersionID = sql.NullString{String: opts.TaskVersionID, Valid: true}
 	}
 	row.HasNextRunItems = opts.HasNextRunItems
+	row.CostBucket = opts.CostBucket
+	row.SkillID, row.SkillVersionID, row.RunMode = opts.SkillID, opts.SkillVersionID, opts.RunMode
 	if err := r.store.InsertRun(ctx, row); err != nil {
 		return Result{}, fmt.Errorf("insert run: %w", err)
-	}
-	if opts.CostBucket != "" {
-		_, _ = r.store.DB.ExecContext(ctx, `UPDATE runs SET cost_bucket=? WHERE id=?`, opts.CostBucket, runID)
-	}
-	if opts.SkillID != "" || opts.RunMode != "" {
-		_, _ = r.store.DB.ExecContext(ctx, `UPDATE runs SET skill_id=?, skill_version_id=?, run_mode=? WHERE id=?`,
-			opts.SkillID, opts.SkillVersionID, opts.RunMode, runID)
 	}
 
 	// The cause tells execute why it was canceled (user, or Drain on quit).

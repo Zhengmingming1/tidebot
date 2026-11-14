@@ -67,6 +67,12 @@ type Run struct {
 	TaskVersionID           sql.NullString
 	HasNextRunItems         bool
 	EffectiveCostPolicyJSON string
+	// Written with the row (InsertRun), not patched in afterwards: a run is
+	// never left without its permission level, skill version or cost bucket.
+	CostBucket     string // "" = production
+	SkillID        string
+	SkillVersionID string
+	RunMode        string
 }
 
 // ProviderRow is a persisted provider profile.
@@ -185,13 +191,15 @@ func (s *Store) InsertRun(ctx context.Context, r Run) error {
 	_, err := s.DB.ExecContext(ctx, `
 INSERT INTO runs(id, user_id, task_id, status, trigger_kind, provider_id, provider_name, model,
   prompt, workspace_dir, session_id, exit_code, error_message, total_cost_usd, input_tokens,
-  output_tokens, duration_ms, started_at, finished_at, created_at, task_version_id, has_next_run_items)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  output_tokens, duration_ms, started_at, finished_at, created_at, task_version_id, has_next_run_items,
+  cost_bucket, skill_id, skill_version_id, run_mode)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, nullDefault(r.UserID, "owner"), r.TaskID, nullDefault(r.Status, "queued"),
 		nullDefault(r.TriggerKind, "manual"), r.ProviderID, r.ProviderName, r.Model,
 		r.Prompt, r.WorkspaceDir, r.SessionID, r.ExitCode, r.ErrorMessage, r.TotalCostUSD,
 		r.InputTokens, r.OutputTokens, r.DurationMS, r.StartedAt, r.FinishedAt, r.CreatedAt,
 		r.TaskVersionID, boolToInt(r.HasNextRunItems),
+		nullDefault(r.CostBucket, "production"), r.SkillID, r.SkillVersionID, r.RunMode,
 	)
 	return err
 }
