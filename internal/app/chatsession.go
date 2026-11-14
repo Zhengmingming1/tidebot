@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/cost"
@@ -509,15 +510,21 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	if n, _ := res.RowsAffected(); n == 0 {
 		return webui.ChatTurnStarted{}, webui.ErrChatSessionBusy
 	}
-	release := func(runID string, r runner.Result) {
-		wctx, done := context.WithTimeout(context.Background(), 3*time.Second)
-		defer done()
+	// release ends the turn: the session back to idle (a failed write would leave
+	// it "running" and refuse every message until a restart), the turn counted,
+	// its cost added and, once there is a transcript, the Claude Code session kept.
+	release := func(runID string, r runner.Result, keepCSID string) {
 		turns := 0
 		if runID != "" {
 			turns = 1
 		}
-		_, _ = a.DB.ExecContext(wctx, `UPDATE chat_sessions SET status='idle', turns=max(turns+?, `+chatTurnCount+`), cost_total=cost_total+?, updated_at=? WHERE id=?`,
-			turns, a.RunCostUSD(r), nowUTC(), sid)
+		usd := a.RunCostUSD(r)
+		_ = a.chatWrite("session turn end", sid, func(wctx context.Context) error {
+			_, err := a.DB.ExecContext(wctx, `UPDATE chat_sessions SET status='idle', turns=max(turns+?, `+chatTurnCount+`), cost_total=cost_total+?, updated_at=?,
+claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
+				turns, usd, nowUTC(), keepCSID, keepCSID, sid)
+			return err
+		})
 	}
 
 	// The next index comes from the turn rows, not the counter: a core that
@@ -525,7 +532,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	// its index would drop the new turn (primary key) from the session.
 	var turn int
 	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(turn_index),0)+1 FROM chat_session_turns WHERE session_id=?`, sid).Scan(&turn); err != nil {
-		release("", runner.Result{})
+		release("", runner.Result{}, "")
 		return webui.ChatTurnStarted{}, err
 	}
 	prompt, csid := message, c.ClaudeSessionID
@@ -539,7 +546,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		args = append(args, "--session-id", csid)
 		seed, err := a.chatSeed(ctx, sid, message)
 		if err != nil {
-			release("", runner.Result{})
+			release("", runner.Result{}, "")
 			return webui.ChatTurnStarted{}, err
 		}
 		prompt = seed
@@ -559,7 +566,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	if fi, err := os.Stat(ws); ws == "" || err != nil || !fi.IsDir() {
 		ws, own = a.chatScratchDir(sid), false
 		if err := os.MkdirAll(ws, 0o700); err != nil {
-			release("", runner.Result{})
+			release("", runner.Result{}, "")
 			return webui.ChatTurnStarted{}, err
 		}
 	}
@@ -568,7 +575,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	if mode != "read" && own {
 		lockKey = editLockKey(ws)
 		if !lockEditDir(lockKey) {
-			release("", runner.Result{})
+			release("", runner.Result{}, "")
 			return webui.ChatTurnStarted{}, guard.ErrDirBusy
 		}
 		locked = true
@@ -614,18 +621,23 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		if locked {
 			defer unlockEditDir(lockKey)
 		}
-		started := ""
+		started, createdAt := "", ""
+		var rowSaved atomic.Bool
 		opts := runner.Options{
 			Prompt: prompt, DisplayPrompt: message, WorkspaceDir: ws, TriggerKind: "session",
 			CostBucket: cost.BucketProduction, RunMode: mode, KeepSession: true, NoPluginMCP: true, ContextArgs: args, MCPServers: mcp,
 			ContextRequest: st.contextRequest(a.modernClaude(), false),
 			OnStart: a.skillStart(st, func(rid string) {
-				started = rid
-				wctx, done := context.WithTimeout(context.Background(), 3*time.Second)
-				_, err := a.DB.ExecContext(wctx, `INSERT INTO chat_session_turns(session_id, turn_index, run_id, created_at) VALUES(?,?,?,?)`, sid, turn, rid, nowUTC())
-				done()
-				if err != nil {
-					a.Log.Warn("session turn", "session", sid, "error", err)
+				started, createdAt = rid, nowUTC()
+				// One quick try, so the run isn't held up; a busy database (one
+				// connection, a long cleanup) gets more tries in the background, and
+				// the turn's end writes the row in any case (it is the only link
+				// from the session to this turn's run).
+				if err := a.insertChatTurn(sid, turn, rid, createdAt, chatWriteWait); err == nil {
+					rowSaved.Store(true)
+				} else {
+					a.Log.Warn("session turn row, retrying", "session", sid, "error", err)
+					go func() { _ = a.chatWrite("session turn row", sid, a.chatTurnRow(sid, turn, rid, createdAt)) }()
 				}
 				onStart(rid)
 			}),
@@ -635,20 +647,69 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		runCtx := context.WithValue(context.Background(), capabilityOwnerKey{}, capabilityOwner{"session", sid})
 		r, err := a.RunPromptEx(runCtx, opts, c.Provider, 0)
 		if started == "" {
-			started = r.RunID
+			started, createdAt = r.RunID, nowUTC()
 		}
+		if started != "" && !rowSaved.Load() { // a no-op if the background try got there
+			_ = a.chatWrite("session turn row", sid, a.chatTurnRow(sid, turn, started, createdAt))
+		}
+		keep := ""
 		if r.SessionID == csid || len(a.chatTranscripts(csid)) > 0 {
-			wctx, done := context.WithTimeout(context.Background(), 3*time.Second)
-			_, _ = a.DB.ExecContext(wctx, `UPDATE chat_sessions SET claude_session_id=? WHERE id=?`, csid, sid)
-			done()
+			keep = csid
 		}
-		release(started, r)
+		release(started, r, keep)
 		return err
 	}, func(err error) { a.Log.Warn("session turn", "session", sid, "error", err) })
 	if err != nil {
 		return webui.ChatTurnStarted{}, err
 	}
 	return webui.ChatTurnStarted{Index: turn, RunID: runID}, nil
+}
+
+// A turn's bookkeeping writes share tidebot's one database connection with
+// everything else; a long cleanup or export can hold it past one try.
+var (
+	chatWriteWait  = 3 * time.Second // one try
+	chatWriteRetry = time.Second     // first pause between tries (doubles, up to 8x)
+	chatWriteFor   = 2 * time.Minute // give up after (the session is then idled at the next start)
+)
+
+// chatWrite runs a turn's bookkeeping write, retrying while the database is
+// busy. Every write passed in is safe to repeat.
+func (a *App) chatWrite(what, sid string, fn func(context.Context) error) error {
+	end := time.Now().Add(chatWriteFor)
+	pause := chatWriteRetry
+	for {
+		ctx, done := context.WithTimeout(context.Background(), chatWriteWait)
+		err := fn(ctx)
+		done()
+		if err == nil {
+			return nil
+		}
+		if a.policyRunsClosing() || time.Now().Add(pause).After(end) {
+			a.Log.Warn(what+": gave up", "session", sid, "error", err)
+			return err
+		}
+		a.Log.Warn(what+": retrying", "session", sid, "error", err)
+		time.Sleep(pause)
+		if pause < 8*chatWriteRetry {
+			pause *= 2
+		}
+	}
+}
+
+// chatTurnRow writes a turn's row once (a repeat, or one after the background
+// retry got there first, is ignored).
+func (a *App) chatTurnRow(sid string, turn int, runID, createdAt string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		_, err := a.DB.ExecContext(ctx, `INSERT OR IGNORE INTO chat_session_turns(session_id, turn_index, run_id, created_at) VALUES(?,?,?,?)`, sid, turn, runID, createdAt)
+		return err
+	}
+}
+
+func (a *App) insertChatTurn(sid string, turn int, runID, createdAt string, wait time.Duration) error {
+	ctx, done := context.WithTimeout(context.Background(), wait)
+	defer done()
+	return a.chatTurnRow(sid, turn, runID, createdAt)(ctx)
 }
 
 // chatSeed is the first turn's prompt: the record of the run the session
