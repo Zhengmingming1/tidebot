@@ -103,20 +103,22 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 		OverlapPolicy: in.OverlapPolicy, TimeoutMinutes: in.TimeoutMinutes,
 		NextRunAt: next, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := s.Store.InsertTask(ctx, task); err != nil {
+	// The row and its first version are one transaction: a task never exists
+	// without a version (it would be listed, and scheduled, but not editable).
+	res, err := s.Ver.Commit(ctx, version.CommitInput{
+		EntityType: version.EntityTask, EntityID: tid,
+		Content: spec, Source: "user_edit", Actor: in.Actor, Reason: "create task", Message: "v1",
+		Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
+			return db.InsertTaskOn(ctx, tx, task)
+		},
+	})
+	if err != nil {
 		return TaskView{}, err
 	}
 	// No per-run or daily cap of its own: a new task is limited only by the
 	// optional global daily budget until the owner adds limits.
 	task.CostControlMode = "task"
 	task.CostPolicyRevision = 1
-	res, err := s.Ver.Commit(ctx, version.CommitInput{
-		EntityType: version.EntityTask, EntityID: tid,
-		Content: spec, Source: "user_edit", Actor: in.Actor, Reason: "create task", Message: "v1",
-	})
-	if err != nil {
-		return TaskView{}, err
-	}
 	return TaskView{Task: task, CurrentVersion: res.Version, Spec: &spec}, nil
 }
 
@@ -167,21 +169,21 @@ func (s *Service) UpdateSpecExpected(ctx context.Context, taskID string, spec Sp
 	if actor == "" {
 		actor = "user"
 	}
-	res, err := s.Ver.Commit(ctx, version.CommitInput{
-		EntityType: version.EntityTask, EntityID: taskID,
-		Content: spec, Source: "user_edit", Actor: actor, Reason: reason,
-	})
-	if err != nil {
-		return TaskView{}, err
-	}
-	// Keep denormalized prompt/workspace in sync for scheduler/runner.
+	// Keep denormalized prompt/workspace in sync for scheduler/runner, in the
+	// version's transaction: a failed save changes nothing (and saving again is
+	// not refused as a conflict with a version that half went in).
 	task.Prompt = spec.Prompt
 	task.WorkspaceDir = spec.WorkspaceDir // "" = per-task default, as in Rollback
 	task.TimeoutMinutes = spec.TimeoutMinutes
 	task.UpdatedAt = nowUTC()
-	if _, err := s.Store.DB.ExecContext(ctx, `
-UPDATE tasks SET prompt=?, workspace_dir=?, timeout_minutes=?, updated_at=? WHERE id=?`,
-		task.Prompt, task.WorkspaceDir, task.TimeoutMinutes, task.UpdatedAt, taskID); err != nil {
+	res, err := s.Ver.Commit(ctx, version.CommitInput{
+		EntityType: version.EntityTask, EntityID: taskID,
+		Content: spec, Source: "user_edit", Actor: actor, Reason: reason,
+		Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
+			return syncTaskRow(ctx, tx, taskID, spec, task.UpdatedAt)
+		},
+	})
+	if err != nil {
 		return TaskView{}, err
 	}
 	return TaskView{Task: *task, CurrentVersion: res.Version, Spec: &spec}, nil
@@ -450,17 +452,22 @@ func (s *Service) Rollback(ctx context.Context, taskID, versionID, actor, reason
 	if reason == "" {
 		reason = "rollback"
 	}
-	if err := s.Ver.MovePointer(ctx, version.EntityTask, taskID, version.PointerCurrent, versionID, actor, reason, ""); err != nil {
-		return err
-	}
-	// sync denormalized fields
+	// The denormalized fields move with the pointer (one transaction); before,
+	// a failed sync was ignored and runs kept the newer version's folder.
 	spec := Spec{TimeoutMinutes: task.TimeoutMinutes}
-	if err := json.Unmarshal([]byte(ver.ContentJSON), &spec); err == nil {
-		_, _ = s.Store.DB.ExecContext(ctx, `
-UPDATE tasks SET prompt=?, workspace_dir=?, timeout_minutes=?, updated_at=? WHERE id=?`,
-			spec.Prompt, spec.WorkspaceDir, spec.TimeoutMinutes, nowUTC(), taskID)
+	if err := json.Unmarshal([]byte(ver.ContentJSON), &spec); err != nil {
+		return fmt.Errorf("version content: %w", err)
 	}
-	return nil
+	return s.Ver.MovePointerThen(ctx, version.EntityTask, taskID, version.PointerCurrent, versionID, actor, reason, "",
+		func(ctx context.Context, tx *sql.Tx) error { return syncTaskRow(ctx, tx, taskID, spec, nowUTC()) })
+}
+
+// syncTaskRow copies the fields the tasks row keeps from the current version.
+func syncTaskRow(ctx context.Context, tx *sql.Tx, taskID string, spec Spec, now string) error {
+	_, err := tx.ExecContext(ctx, `
+UPDATE tasks SET prompt=?, workspace_dir=?, timeout_minutes=?, updated_at=? WHERE id=?`,
+		spec.Prompt, spec.WorkspaceDir, spec.TimeoutMinutes, now, taskID)
+	return err
 }
 
 // Tag sets a version tag.
@@ -597,21 +604,24 @@ func (s *Service) Duplicate(ctx context.Context, srcID, name, actor string) (Tas
 		OverlapPolicy: src.Task.OverlapPolicy, TimeoutMinutes: src.Task.TimeoutMinutes,
 		NextRunAt: next, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := s.Store.InsertTask(ctx, task); err != nil {
-		return TaskView{}, err
-	}
-	if err := s.duplicateCostPolicy(ctx, srcID, task.ID, actor); err != nil {
-		return TaskView{}, err
-	}
-	task.CostControlMode = src.Task.CostControlMode
-	task.CostPolicyRevision = 1
+	// Row, budgets and first version go in together (see Create).
+	unlock := s.lockCostPolicy(ctx)
+	defer unlock()
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
 		EntityType: version.EntityTask, EntityID: task.ID,
 		Content: spec, Source: "user_edit", Actor: actor, Reason: "duplicate of " + src.Task.ID, Message: "v1",
+		Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
+			if err := db.InsertTaskOn(ctx, tx, task); err != nil {
+				return err
+			}
+			return copyCostPolicy(ctx, tx, srcID, task.ID)
+		},
 	})
 	if err != nil {
 		return TaskView{}, err
 	}
+	task.CostControlMode = src.Task.CostControlMode
+	task.CostPolicyRevision = 1
 	return TaskView{Task: task, CurrentVersion: res.Version, Spec: &spec}, nil
 }
 

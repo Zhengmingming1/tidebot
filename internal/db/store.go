@@ -101,7 +101,15 @@ func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // InsertTask inserts a task row.
 func (s *Store) InsertTask(ctx context.Context, t Task) error {
-	_, err := s.DB.ExecContext(ctx, `
+	return InsertTaskOn(ctx, s.DB, t)
+}
+
+// InsertTaskOn inserts a task row through ex (a *sql.DB or the *sql.Tx that also
+// commits the task's first version).
+func InsertTaskOn(ctx context.Context, ex interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, t Task) error {
+	_, err := ex.ExecContext(ctx, `
 INSERT INTO tasks(id, user_id, name, status, prompt, workspace_dir, provider_id, cron_expr,
   overlap_policy, timeout_minutes, next_run_at, last_fired_at, created_at, updated_at, cost_control_mode)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,

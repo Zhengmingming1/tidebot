@@ -202,22 +202,14 @@ ON CONFLICT(scope,scope_id,period,bucket) DO UPDATE SET max_usd=excluded.max_usd
 	return after, nil
 }
 
-func (s *Service) duplicateCostPolicy(ctx context.Context, source, target, actor string) error {
-	unlock := s.lockCostPolicy(ctx)
-	defer unlock()
-	tx, err := s.Store.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `UPDATE tasks SET cost_control_mode=(SELECT cost_control_mode FROM tasks WHERE id=?) WHERE id=?`, source, target)
+// copyCostPolicy gives target source's cost mode and task budgets, inside tx
+// (the caller holds the cost policy lock).
+func copyCostPolicy(ctx context.Context, tx *sql.Tx, source, target string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE tasks SET cost_control_mode=(SELECT cost_control_mode FROM tasks WHERE id=?) WHERE id=?`, source, target)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO budgets(id,scope,scope_id,period,max_usd,max_tokens,action,warn_at_pct,bucket,created_at,updated_at,currency)
 SELECT ? || '-' || id,scope,?,period,max_usd,max_tokens,action,warn_at_pct,bucket,?,?,currency FROM budgets WHERE scope='task' AND scope_id=?`, target, target, nowUTC(), nowUTC(), source)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
+	return err
 }
