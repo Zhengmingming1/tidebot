@@ -49,8 +49,12 @@ type App struct {
 	DB                *sql.DB
 	suOnce            sync.Once
 	fxCache           atomic.Pointer[pricing.FX]
-	quotaHolds        map[string]*quotaReservation // guarded by db.CostPolicyMutex
-	accountingFailure atomic.Pointer[string]       // fail closed after lost ledger persistence
+	quotaHolds        map[string]*quotaReservation  // guarded by db.CostPolicyMutex
+	accountingFailure atomic.Pointer[string]        // fail closed while a final ledger write is pending
+	pendingLedger     map[string]pendingLedgerEntry // guarded by db.CostPolicyMutex (ledger_retry.go)
+	ledgerRetrying    bool                          // guarded by db.CostPolicyMutex
+	ledgerQuit        bool                          // guarded by db.CostPolicyMutex
+	ledgerStop        chan struct{}                 // closed on quit to end the retries
 	suState           *selfUpdate
 	Store             *db.Store
 	Registry          *provider.Registry
@@ -224,6 +228,7 @@ func (a *App) Close() error {
 	a.waitWorkflows()
 	a.waitSkillSetEvals()
 	a.waitPolicyRuns()
+	a.flushLedgerOnQuit()
 	if a.WebUI != nil {
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = a.WebUI.Stop(sctx)
@@ -474,9 +479,9 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 			e.AccountingAt = time.Now()
 		}
 		if writeErr := a.Cost.RecordEntry(wctx, e); writeErr != nil {
-			a.Log.Error("final cost ledger update failed", "error", writeErr)
-			message := fmt.Sprintf("cost ledger persistence failed for %s: %v", res.RunID, writeErr)
-			a.accountingFailure.Store(&message)
+			a.Log.Error("final cost ledger update failed", "error", writeErr, "run_id", res.RunID)
+			// Kept and retried in the background; the hold stays until it lands.
+			message := a.deferLedgerEntry(e, hold.Load(), launchedID, writeErr)
 			retainReservation = true
 			err = errors.Join(err, errors.New(message))
 		}

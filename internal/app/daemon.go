@@ -124,6 +124,7 @@ func (d *Daemon) Stop() {
 		d.a.waitWorkflows()
 		d.a.waitSkillSetEvals()
 		d.a.waitPolicyRuns()
+		d.a.flushLedgerOnQuit()
 		// Bounded: an open live-log stream (SSE) never goes idle on its own.
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = d.a.WebUI.Stop(sctx)
