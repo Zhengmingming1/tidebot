@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Zhengmingming1/tidebot/internal/auth"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 )
 
 type fakeChats struct {
@@ -122,6 +123,11 @@ func TestChatSessionAPI(t *testing.T) {
 		if code, out := c.json(http.MethodPost, "/api/chat-sessions/chat_1/turns", map[string]string{"message": "m"}); code != e.code || out["code"] != e.key {
 			t.Fatalf("%v: %d %v", e.err, code, out)
 		}
+	}
+	// the session's folder can't be used now: 400 with the Run dialog's problem code
+	f.err = &guard.DirError{Problem: guard.DirNotFound}
+	if code, out := c.json(http.MethodPost, "/api/chat-sessions/chat_1/turns", map[string]string{"message": "m"}); code != 400 || out["code"] != "dir" || out["problem"] != "not_found" {
+		t.Fatalf("folder gone: %d %v", code, out)
 	}
 	f.err = nil
 	if code, _ := c.json(http.MethodDelete, "/api/chat-sessions/chat_1", nil); code != 200 {

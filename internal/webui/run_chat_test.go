@@ -110,7 +110,7 @@ func TestRunChatUI(t *testing.T) {
 	}
 
 	runNode(t, `
-var state = { dict: { "rc.err_busy": 1 } };
+var state = { dict: { "rc.err_busy": 1, "rc.err_dir": 1, "rn.ws_sensitive_tip": 1, "rn.ws_not_found_tip": 1 } };
 function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 function enc(s) { return encodeURIComponent(s); }
 function T(k, v) { return k + (v ? JSON.stringify(v) : ""); }
@@ -154,6 +154,8 @@ ok(rcTurnHtml({ index: 4, run_id: "bad id\"", message: "m", status: "" }).indexO
 ok(rcErrText({ data: { code: "busy" }, message: "x" }) === "rc.err_busy", "busy code translated");
 ok(rcErrText({ data: { code: "weird" }, message: "raw" }) === "raw", "unknown code: message as sent");
 ok(rcErrText({ message: "net" }) === "net", "no code");
+ok(rcErrText({ data: { code: "dir", problem: "sensitive" }, message: "x" }) === 'rc.err_dir{"why":"rn.ws_sensitive_tip"}', "session folder refused: the Run dialog's reason");
+ok(rcErrText({ data: { code: "dir", problem: "weird" }, message: "x" }) === 'rc.err_dir{"why":"rn.ws_not_found_tip"}', "unknown folder problem: generic reason");
 var line = rcLiveLine('assistant: tool Bash {"command":"ls <x>"}');
 ok(line.indexOf("tool-chip") > 0 && line.indexOf("ls &lt;x&gt;") > 0 && line.indexOf("{") < 0, "tool line: chip and command preview, escaped");
 ok(rcLiveLine("assistant: <b>t</b>").indexOf("&lt;b&gt;t") > 0, "text line escaped");

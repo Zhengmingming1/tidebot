@@ -7798,6 +7798,10 @@
   // Stable codes from /api/chat-sessions → the viewer's language; anything else as sent.
   function rcErrText(e) {
     var code = e && e.data && e.data.code;
+    if (code === "dir") {
+      var tip = "rn.ws_" + String(e.data.problem || "") + "_tip";
+      return T("rc.err_dir", { why: state.dict[tip] ? T(tip) : T("rn.ws_not_found_tip") });
+    }
     return code && state.dict["rc.err_" + code] ? T("rc.err_" + code) : (e && e.message) || "";
   }
   // The title row of a turn's own run page: which session it is part of, linking back.

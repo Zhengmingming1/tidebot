@@ -2748,6 +2748,7 @@
   "rc.err_invalid": "消息无效，或会话已关闭",
   "rc.err_too_long": "消息太长（最多 16 KB）",
   "rc.err_dir_busy": "这个目录正有另一个会改文件的运行，等它结束后再发送。",
+  "rc.err_dir": "这个会话的目录现在用不了：{why}把目录放回原处后再发送，或新开一个会话。",
   "nav.chat": "会话",
   "rc.open_session": "在会话中打开",
   "cs.untitled": "新会话",

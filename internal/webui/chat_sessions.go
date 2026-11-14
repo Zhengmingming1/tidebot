@@ -153,6 +153,13 @@ func chatErr(w http.ResponseWriter, err error) {
 		{ErrChatInvalid, 400, "invalid"},
 		{guard.ErrDirBusy, 409, "dir_busy"}, // another run is changing the session's folder
 	}
+	// the session's folder can't be used now (moved, deleted, not allowed): the
+	// same problem codes as the Run dialog's folder check
+	var de *guard.DirError
+	if errors.As(err, &de) {
+		writeJSON(w, 400, map[string]string{"error": err.Error(), "code": "dir", "problem": de.Problem})
+		return
+	}
 	for _, c := range codes {
 		if errors.Is(err, c.err) {
 			writeJSON(w, c.status, map[string]string{"error": err.Error(), "code": c.code})

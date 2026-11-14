@@ -363,6 +363,31 @@ func (a *App) chatWorkspace(ws, taskID string) string {
 	return ""
 }
 
+// chatTurnDir is the folder a turn runs in. A session without a folder (or whose
+// folder is tidebot's own, e.g. a task's default one, now gone) uses its scratch
+// folder. The owner's folder is checked again each turn, as the Run dialog and
+// tasks do: moved, deleted or swapped for a link into ~/.ssh, the turn is refused
+// (*guard.DirError) instead of quietly running in the scratch folder while the
+// session still names the owner's folder.
+func (a *App) chatTurnDir(sid, saved string) (dir string, own bool, err error) {
+	if saved != "" && (guard.Within(saved, a.Cfg.HomeDir) || guard.Within(saved, a.Cfg.DataDir)) {
+		if fi, err := os.Stat(saved); err == nil && fi.IsDir() {
+			return saved, true, nil
+		}
+		saved = ""
+	}
+	if saved == "" {
+		dir = a.chatScratchDir(sid)
+		return dir, false, os.MkdirAll(dir, 0o700)
+	}
+	home, _ := os.UserHomeDir()
+	real, prob := guard.CheckRunDir(saved, home, a.Cfg.HomeDir)
+	if prob != "" {
+		return "", false, &guard.DirError{Problem: prob}
+	}
+	return real, true, nil
+}
+
 // ListChatSessions lists sessions, most recently active first.
 func (a *App) ListChatSessions(ctx context.Context, limit int) ([]webui.ChatSession, error) {
 	rows, err := a.DB.QueryContext(ctx, `SELECT `+chatCols+` FROM chat_sessions ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
@@ -561,14 +586,10 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 		deny = append(deny, chatWebTools...)
 		note += chatNoWebNote
 	}
-	ws := c.WorkspaceDir
-	own := true
-	if fi, err := os.Stat(ws); ws == "" || err != nil || !fi.IsDir() {
-		ws, own = a.chatScratchDir(sid), false
-		if err := os.MkdirAll(ws, 0o700); err != nil {
-			release("", runner.Result{}, "")
-			return webui.ChatTurnStarted{}, err
-		}
+	ws, own, err := a.chatTurnDir(sid, c.WorkspaceDir)
+	if err != nil {
+		release("", runner.Result{}, "")
+		return webui.ChatTurnStarted{}, err
 	}
 	// a turn that may change the owner's folder: one such run per folder at a time
 	locked, lockKey := false, ""

@@ -2748,6 +2748,7 @@
   "rc.err_invalid": "Invalid message, or the session is closed",
   "rc.err_too_long": "Message too long (16 KB max)",
   "rc.err_dir_busy": "Another run that changes files is using this folder; send again once it finishes.",
+  "rc.err_dir": "This session's folder can't be used now: {why} Put the folder back and send again, or start a new session.",
   "nav.chat": "Sessions",
   "rc.open_session": "Open in Sessions",
   "cs.untitled": "New session",
