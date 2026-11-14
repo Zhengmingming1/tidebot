@@ -35,6 +35,7 @@ type BackupManifest struct {
 	AppVersion        string `json:"app_version"`
 	CreatedAt         string `json:"created_at"`
 	HomeDir           string `json:"home_dir"`
+	DataDir           string `json:"data_dir,omitempty"` // when not <home>/data; restored into <home>/data
 	IncludesSecrets   bool   `json:"includes_secrets"`
 	IncludesArtifacts bool   `json:"includes_artifacts"`
 }
@@ -75,7 +76,7 @@ func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error)
 	}
 	zw := zip.NewWriter(f)
 	m := BackupManifest{Format: BackupFormat, AppVersion: buildinfo.Version, CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		HomeDir: a.Cfg.HomeDir, IncludesSecrets: o.Passphrase != "", IncludesArtifacts: o.IncludeArtifacts}
+		HomeDir: a.Cfg.HomeDir, DataDir: a.Cfg.DataDir, IncludesSecrets: o.Passphrase != "", IncludesArtifacts: o.IncludeArtifacts}
 	addFile := func(name, src string) error {
 		in, err := os.Open(src)
 		if err != nil {
@@ -292,22 +293,21 @@ func RestoreBackup(file, home, passphrase string) (*BackupManifest, error) {
 			}
 		}
 	}
+	var moves []homeMove
 	if m.HomeDir != "" && m.HomeDir != home {
+		moves = append(moves, homeMove{m.HomeDir, home})
+	}
+	if m.DataDir != "" && m.DataDir != dataDir {
+		moves = append(moves, homeMove{m.DataDir, dataDir})
+	}
+	if len(moves) > 0 {
 		sqlDB, err := db.Open(dbPath)
 		if err != nil {
 			return nil, err
 		}
 		defer sqlDB.Close()
-		old := m.HomeDir
-		for _, q := range []string{
-			`UPDATE tasks SET workspace_dir = ? || substr(workspace_dir, ?) WHERE substr(workspace_dir, 1, ?) = ?`,
-			`UPDATE runs SET workspace_dir = ? || substr(workspace_dir, ?) WHERE substr(workspace_dir, 1, ?) = ?`,
-			`UPDATE plugin_versions SET dir = ? || substr(dir, ?) WHERE substr(dir, 1, ?) = ?`,
-			`UPDATE backups SET path = ? || substr(path, ?) WHERE substr(path, 1, ?) = ?`,
-		} {
-			if _, err := sqlDB.Exec(q, home, len(old)+1, len(old), old); err != nil {
-				return nil, fmt.Errorf("path mapping: %w", err)
-			}
+		if err := remapRestoredPaths(context.Background(), sqlDB, moves); err != nil {
+			return nil, err
 		}
 	}
 	return &m, nil

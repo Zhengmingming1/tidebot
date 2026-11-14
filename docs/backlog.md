@@ -6347,3 +6347,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 
 - 上一条推上去后 CI race 任务失败：`runs=2 never-started=2`。测试只等到第一个运行被计入 `Active()` 就排第二个、立刻 Drain；`Active()` 在拿到槽位之前就计数，race 下 CI 机器慢，Drain 落在第一个运行写 `started_at` 之前，两个都按「未开始」收尾。产品行为正确（退出时没开始的就记未开始）。
 - 改法：测试先等第一个运行行有 `started_at` 再排第二个。`go test -race -count=5 -run TestDrain ./internal/runner` 通过。
+
+### 2026-11-14（续）：换机恢复备份后，存下的路径不再对不上新位置（BUG / 多平台）
+
+- **问题**（11-14 那轮的后续想法）：`agentd restore` 把备份里旧 home 下的路径改到新 home，用的是 SQL `substr(col, 1, len(old)) = old`：
+  - `len(old)` 是 Go 的字节数，SQLite 的 `substr` 按字符数算：home 路径里有中文（`/Users/张三/.tidebot`、`C:\Users\张三\.tidebot`）时**一条都改不到**，恢复后任务默认目录、运行目录全指向旧机器。
+  - 前缀不看路径分隔符：`~/.tidebot-old/proj` 也会被改成 `<新 home>-old/proj`。
+  - 漏了几列：`chat_sessions.workspace_dir`（从任务运行续聊的会话，目录是旧 home 里的任务目录，恢复后不在新 home 里，按用户目录重查 → 每一轮都被拒「目录不存在」）、`capability_dependency_preferences.path`；自定义数据目录（不在 `<home>/data`）恢复到 `<home>/data` 后，里面的路径（运行临时目录、会话目录）也没改。
+  - Windows 备份恢复到 macOS / Linux（或反过来）时，剩下的部分仍是对方的分隔符。
+- **改法**（`internal/app/backup_paths.go`）：备份清单多记 `data_dir`（旧备份没有就只按 home 改）；恢复时在一个事务里逐列读出、在 Go 里匹配：整段路径元素对齐（`.tidebot-old` 不算在 `.tidebot` 里）、按字节比较（Windows 备份不分大小写）、最长的旧目录优先（数据目录在 home 里也对），剩下的部分按本机分隔符重新拼。覆盖 tasks / runs / chat_sessions / plugin_versions / backups / capability_dependency_preferences。
+- 测试（`backup_paths_test.go`）：`TestRemapPath` 11 种路径（中文 home、同前缀兄弟目录、结尾分隔符、Windows 备份含大小写不同、Unix 名字里的反斜杠、独立数据目录取最长匹配）；`TestRestoreRemapsPathsFromAnotherMachine` 手工造一份「另一台机器」的备份（中文 home + 外接盘数据目录）恢复后逐列检查，改前 5 列都没改（失败）。不依赖 mock claude，Windows CI 上也跑。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、相关测试 `-race` 通过。
+- 数字（本机 Linux amd64，10 万条运行、一半在旧 home 里，3 次）：改前一条 UPDATE 91–100 ms；改后逐行匹配 227–260 ms。只在离线的 `agentd restore` 里跑一次，可以接受。
+
+**心得**：SQL 里的字符串函数和 Go 的 `len` 单位不同（字符 / 字节），混用只在非 ASCII 数据上出错，而测试数据通常全是 ASCII；路径前缀匹配一定要对齐到分隔符。
+
+**后续想法**：
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；用户自己选的目录本来就不在 tidebot home 里，换机后需要用户自己改，可以在恢复后列出「目录不存在的任务」提示一次。
+- 运行详情里 JSON 字段（如能力包锁文件、`effective_cost_policy_json`）里可能也有旧路径，未逐一核对。
+- 运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
