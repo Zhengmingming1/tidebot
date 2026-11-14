@@ -6342,3 +6342,8 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - **问题**：`skillstore.CommitFiles`（导入、编辑、会话「采用」、Git 安装都走它）先提交版本（导入 / 编辑时直接成为当前版本），再逐条插 `version_files`，错误一律丢掉。插不进时版本照样成为当前版本，但没有文件：之后的运行、会话挂上的是空技能，内容表面上在（版本内容里有清单），实际取不出文件。
 - **改法**：文件清单的插入放进上一条的 `CommitInput.Then`，和版本同一事务，失败整体回滚、报错；内容与已有版本相同时也会执行，顺带补上以前半写的版本缺的文件。
 - 测试：`skillstore/commit_files_atomic_test.go`——文件清单写不进时提交报错、当前版本不变、没有多出版本；恢复后再提交，新版本能取出文件。改前失败（提交返回成功）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）通过。
+
+### 2026-11-14（续）：CI race 偶发失败 `TestDrainRefusesNewAndQueuedRuns`（测试时序）
+
+- 上一条推上去后 CI race 任务失败：`runs=2 never-started=2`。测试只等到第一个运行被计入 `Active()` 就排第二个、立刻 Drain；`Active()` 在拿到槽位之前就计数，race 下 CI 机器慢，Drain 落在第一个运行写 `started_at` 之前，两个都按「未开始」收尾。产品行为正确（退出时没开始的就记未开始）。
+- 改法：测试先等第一个运行行有 `started_at` 再排第二个。`go test -race -count=5 -run TestDrain ./internal/runner` 通过。

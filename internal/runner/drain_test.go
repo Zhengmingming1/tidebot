@@ -145,8 +145,23 @@ func TestDrainRefusesNewAndQueuedRuns(t *testing.T) {
 	queued := make(chan error, 1)
 	go func() { _, err := r.RunOnce(context.Background(), drainOpts(bin, dir)); first <- err }()
 	waitActive(t, r, 1)
+	// Active counts a run from before it holds a slot; under -race on a slow CI
+	// runner the drain could land before the first run was marked running, and
+	// both ended never-started. Wait until it has really started.
+	end := time.Now().Add(10 * time.Second)
+	for {
+		var running int
+		_ = sqlDB.QueryRow(`SELECT COUNT(1) FROM runs WHERE started_at IS NOT NULL`).Scan(&running)
+		if running == 1 {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("first run never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	go func() { _, err := r.RunOnce(context.Background(), drainOpts(bin, dir)); queued <- err }()
-	end := time.Now().Add(5 * time.Second)
+	end = time.Now().Add(5 * time.Second)
 	for r.Active() != 2 {
 		if time.Now().After(end) {
 			t.Fatal("second run never queued")
