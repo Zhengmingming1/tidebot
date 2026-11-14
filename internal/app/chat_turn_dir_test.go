@@ -104,3 +104,44 @@ func TestChatTurnDirOwnFolders(t *testing.T) {
 		t.Fatalf("task folder: %q %v %v", dir, own, err)
 	}
 }
+
+// A finished turn lets go of the owner's folder and removes its skill stage
+// before the session is idle again: the next message, sent the moment the page
+// sees idle, must not be refused as dir_busy (CI saw the stage still there).
+func TestChatTurnFreesBeforeIdle(t *testing.T) {
+	chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	proj := t.TempDir()
+	rid := originRun(t, a, runner.Options{Prompt: "first", RunMode: "edit", WorkspaceDir: proj})
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sk := importSkill(t, a, "weekly-notes", "Summarize the week from notes.")
+	if _, err := a.SetChatBindings(ctx, ses.ID, webui.ChatBindingsInput{Skills: []string{sk}}); err != nil {
+		t.Fatal(err)
+	}
+	type seen struct {
+		lockFree bool
+		stage    int
+	}
+	got := make(chan seen, 1)
+	chatBeforeIdle = func(sid string) {
+		key := editLockKey(ses.WorkspaceDir)
+		free := lockEditDir(key)
+		if free {
+			unlockEditDir(key)
+		}
+		left, _ := os.ReadDir(a.skillStageRoot())
+		got <- seen{free, len(left)}
+	}
+	t.Cleanup(func() { chatBeforeIdle = nil })
+	if _, err := a.SendChatTurn(ctx, ses.ID, "next"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, a, ses.ID, 1)
+	if s := <-got; !s.lockFree || s.stage != 0 {
+		t.Fatalf("at idle: folder free %v, stage entries %d", s.lockFree, s.stage)
+	}
+}

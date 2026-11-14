@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -637,11 +638,20 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 		args = append(args, "--allowedTools", "mcp__tidebot")
 	}
 	runID, err := launch(startWait, func(onStart func(string)) error {
-		defer st.Close()
-		defer a.endChatToolToken(sid)
-		if locked {
-			defer unlockEditDir(lockKey)
+		// The turn's stage, tool token and folder lock go before the session is
+		// idle again: a next message sent the moment it is would otherwise find
+		// the folder still held (dir_busy) and the last turn's stage still there.
+		var freeOnce sync.Once
+		free := func() {
+			freeOnce.Do(func() {
+				st.Close()
+				a.endChatToolToken(sid)
+				if locked {
+					unlockEditDir(lockKey)
+				}
+			})
 		}
+		defer free()
 		started, createdAt := "", ""
 		var rowSaved atomic.Bool
 		opts := runner.Options{
@@ -677,6 +687,10 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 		if r.SessionID == csid || len(a.chatTranscripts(csid)) > 0 {
 			keep = csid
 		}
+		free()
+		if chatBeforeIdle != nil {
+			chatBeforeIdle(sid)
+		}
 		release(started, r, keep)
 		return err
 	}, func(err error) { a.Log.Warn("session turn", "session", sid, "error", err) })
@@ -685,6 +699,10 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 	}
 	return webui.ChatTurnStarted{Index: turn, RunID: runID}, nil
 }
+
+// chatBeforeIdle, when set (tests), runs just before a finished turn sets the
+// session idle again.
+var chatBeforeIdle func(sid string)
 
 // A turn's bookkeeping writes share tidebot's one database connection with
 // everything else; a long cleanup or export can hold it past one try.

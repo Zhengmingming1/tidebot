@@ -6301,3 +6301,11 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 会话页可以在目录不可用时直接在输入框下方的目录标签上标红（打开会话时查一次），不用等发送才知道。
 - 「存为任务」从这样的会话预填目录时也可以先查一次，避免存出一个跑不了的任务。
 - 工作流节点的目录在保存时查过，运行时是否每次重查也值得核对一遍。
+
+### 2026-11-14（续）：会话一轮结束时先放开目录、删掉技能暂存，再把会话改回可发送（BUG，偶发「目录正被使用」）
+
+- **问题**：上一条推上去后 CI（ubuntu / Go 1.27）的 `TestChatSessionBindings` 失败：「stage left behind」。原因是一轮结束时先 `release`（会话改回 idle），技能暂存的删除、会话工具令牌、目录锁都在之后的 `defer` 里才放。页面一看到 idle 就能发下一条：可修改 / 可执行命令档的会话这时会被自己上一轮还没放开的锁拒掉（409 `dir_busy`，「这个目录正有另一个会改文件的运行」），上一轮的技能暂存也还在。
+- **改法**：这三样收进一个 `sync.Once` 的 `free()`，在 `release` 之前调用（`defer` 仍兜底）。
+- 测试：`TestChatTurnFreesBeforeIdle`（测试钩子 `chatBeforeIdle` 在改回 idle 的前一刻检查）：目录锁已空、暂存目录为空。按改前的顺序必定失败（`folder free false, stage entries 1`）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`-race -count=3 -run TestChat ./internal/app` 通过。
+
+**心得**：「对外宣布完成」的那一步要放在所有收尾之后；用 `defer` 收尾时，任何在函数体末尾的状态写入都早于它们。
