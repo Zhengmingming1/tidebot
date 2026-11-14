@@ -540,7 +540,7 @@ func (a *App) taskStillRunnable(ctx context.Context, taskID, trigger string) boo
 // It runs when a run is asked for and again when a queued run gets its slot.
 func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider.Profile, callerCap float64) (float64, *runner.CostControl, error) {
 	if failure := a.accountingFailure.Load(); failure != nil {
-		return 0, nil, fmt.Errorf("accounting unavailable: %s", *failure)
+		return 0, nil, fmt.Errorf("%w: %s", errAccountingPending, *failure)
 	}
 	mode, _, err := a.taskCostMode(ctx, taskID)
 	if err != nil {
@@ -590,6 +590,11 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 	cc.BudgetSources = sources
 	return runMax, cc, nil
 }
+
+// errAccountingPending: a finished run's cost is still waiting to be written to
+// the ledger (ledger_retry.go); no run starts until it is. Temporary: a scheduled
+// run waits it out (runWithPolicy) instead of failing.
+var errAccountingPending = errors.New("accounting unavailable")
 
 // errBudgetHeld: what is left of a daily budget is held by runs already going.
 // Not the task's fault: the run is skipped, no retry, no breaker strike, no pause.

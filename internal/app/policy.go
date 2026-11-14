@@ -34,14 +34,22 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 		return
 	}
 	err := a.runTaskTrigger(ctx, task, trigger, bucket)
-	if errors.Is(err, guard.ErrDirBusy) {
+	if waitsOut(err) {
 		// Another run is changing the task's folder (a session turn, a Run dialog
-		// run, a workflow): not the task's fault and not a failed run. Wait until
-		// the folder is free and go then; no retry used, no breaker strike.
-		a.Log.Info("task waits for its folder", "task_id", task.ID)
-		for errors.Is(err, guard.ErrDirBusy) {
-			if !a.sleepPolicy(ctx, dirBusyPoll) || !a.taskStillRunnable(ctx, task.ID, trigger) {
-				return // closing, or the task was paused / deleted meanwhile
+		// run, a workflow), or a finished run's cost is still being written to the
+		// ledger: not the task's fault and not a failed run. Wait until it clears
+		// and go then; no retry used, no breaker strike. Later firings of the task
+		// meanwhile are dropped (enterPolicyRun), so one wait ends in one run.
+		a.Log.Info("task waits before running", "task_id", task.ID, "why", err.Error())
+		defer a.markPolicyWaiting(task)()
+		for waitsOut(err) {
+			for {
+				if !a.sleepPolicy(ctx, dirBusyPoll) || !a.taskStillRunnable(ctx, task.ID, trigger) {
+					return // closing, or the task was paused / deleted meanwhile
+				}
+				if a.accountingFailure.Load() == nil {
+					break // the ledger is written (a busy folder is checked by trying)
+				}
 			}
 			err = a.runTaskTrigger(ctx, task, trigger, bucket)
 		}
@@ -76,6 +84,11 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 		}
 		a.Events.Emit(Event{Kind: EventBreakerTripped, TaskID: task.ID, TaskName: task.Name, Detail: class})
 	}
+}
+
+// waitsOut: the run could not start for a reason that clears by itself.
+func waitsOut(err error) bool {
+	return errors.Is(err, guard.ErrDirBusy) || errors.Is(err, errAccountingPending)
 }
 
 // dirBusyPoll: how often a scheduled run whose folder is busy looks again (a var for tests).
