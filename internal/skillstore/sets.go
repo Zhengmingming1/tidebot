@@ -167,20 +167,38 @@ func (s *Service) SaveSetWithDetails(ctx context.Context, setID, name, expected 
 			return SkillSet{}, ErrSetConflict
 		}
 	}
+	// The skill_sets row and its current version are one transaction: a set
+	// never exists without a version (it would be listed, but opening any set
+	// would fail), and a failed rename cannot leave a new version with the old
+	// name (saving again would then be refused as a conflict).
+	now := nowUTC()
 	if fresh {
 		setID = id.New("set")
-		if _, err = s.DB.ExecContext(ctx, `INSERT INTO skill_sets(id,name,created_at,updated_at) VALUES(?,?,?,?)`, setID, name, nowUTC(), nowUTC()); err != nil {
-			return SkillSet{}, err
-		}
 	}
-	_, err = s.Ver.Commit(ctx, version.CommitInput{EntityType: SkillSetEntity, EntityID: setID, Content: setContent{Name: name, SkillBindings: resolved, Details: metadata}, Source: "user_edit", Actor: "user", Reason: "save skill set"})
+	_, err = s.Ver.Commit(ctx, version.CommitInput{
+		EntityType: SkillSetEntity, EntityID: setID,
+		Content: setContent{Name: name, SkillBindings: resolved, Details: metadata},
+		Source:  "user_edit", Actor: "user", Reason: "save skill set",
+		Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
+			if fresh {
+				_, err := tx.ExecContext(ctx, `INSERT INTO skill_sets(id,name,created_at,updated_at) VALUES(?,?,?,?)`, setID, name, now, now)
+				return err
+			}
+			res, err := tx.ExecContext(ctx, `UPDATE skill_sets SET name=?,updated_at=? WHERE id=? AND deleted=0`, name, now, setID)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return sql.ErrNoRows
+			}
+			return nil
+		},
+	})
 	if err != nil {
-		if fresh {
-			_, _ = s.DB.ExecContext(ctx, `DELETE FROM skill_sets WHERE id=?`, setID)
-		}
-		return SkillSet{}, err
-	}
-	if _, err = s.DB.ExecContext(ctx, `UPDATE skill_sets SET name=?,updated_at=? WHERE id=?`, name, nowUTC(), setID); err != nil {
 		return SkillSet{}, err
 	}
 	return s.GetSet(ctx, setID)
