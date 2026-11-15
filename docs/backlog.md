@@ -6477,3 +6477,32 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - WebUI 单包仍带注释和空白（构建时压缩）。
 - 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
 - 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-16：换机恢复备份时改写 JSON 里的旧路径（BUG）
+
+- **问题**（11-15 用量条那轮的后续想法 / 11-14 路径改写那轮留下的）：恢复备份只改写了若干路径列（任务 / 运行 / 会话目录、插件安装目录、备份文件、依赖偏好）。运行详情和能力包锁文件等 JSON 里的绝对路径还是旧机器上的：
+  - `capability_versions.lock_json` 的 `Resolved.Directory` / `Resolved.Path`、`DependencyPreferences.*.Path` 仍指向旧数据目录。托管工具目录其实已经随备份解压到新 `data/`，但锁文件还指着旧路径：存储清理会把它们当成「不在托管目录里」，卸载也可能对不上；运行能力包会去旧机器路径找可执行文件。
+  - `capability_proposals.payload_json` 里嵌着同一份锁。
+  - `runs.agent_config_changes` 里改过的文件路径（默认工作区在 tidebot home 下时）。
+  - `trigger_bindings.config_json` 的文件监视路径若在 home 下。
+  - `effective_cost_policy_json` 核对后目前没有路径字段，但仍纳入同一套遍历，以免以后加字段再漏。
+  - `capability_versions` 有「不可变」触发器，且 `lock_sha256` 是整份 `lock_json` 的哈希；只改 JSON 不改哈希的话，存储清理和卸载会直接拒绝（integrity mismatch）。
+- **改法**：同一事务里遍历这些 JSON 列，对其中会被 `remapPath` 改写的字符串做同样的路径改写（只改旧 home / 数据目录下的绝对路径，用户自己的目录、系统路径、相对路径、仅共享前缀的目录不动）。改写 `lock_json` 时临时去掉不可变触发器，同步更新 `lock_sha256`，改完再装回触发器。版本内容（`versions.content_json`、工作流定义、插件清单）按哈希去重，仍然不改。JSON 里的数字用 `UseNumber` 原样写出，避免大整数丢精度。没有路径被改时保留原始字节。
+- 测试：`TestRemapJSON`——托管路径改到新目录，系统路径 / 相对路径 / 同前缀目录不动，没有路径的花费策略和非法 JSON 不改字节，Windows 路径可改写，旁边的大整数保持精确。`TestRestoreRemapsPathsFromAnotherMachine` 补上上述 JSON 列：恢复后锁文件的托管路径可被 `capabilityManagedReference` 接受，`lock_sha256` 与新 JSON 一致，不可变触发器仍在；提议载荷、agent 配置变更、文件监视路径已改写；花费策略 JSON 和用户自己的目录不变。改前这些 JSON 断言会失败。`go test ./...`（47 个包）、`go vet`（含 GOOS=windows/darwin）、`-race -count=3`（路径改写用例）通过。
+
+| 场景（测试里模拟） | 修复前 | 修复后 |
+| --- | --- | --- |
+| 锁文件里托管工具路径指向旧数据目录 | 仍是旧路径，存储清理 / 运行对不上新目录 | 改到新 `data/`，完整性哈希同步更新 |
+| 运行详情里默认工作区下的配置变更路径 | 仍是旧 home | 改到新 home；`~/.claude` 和用户自己的目录不动 |
+| 花费策略 JSON（没有路径） | （未改） | 字节不变 |
+
+**心得**：路径不只存在单独的列里，JSON 快照同样会被运行时当绝对路径用；改这种带完整性哈希的「不可变」行，必须在同一事务里改哈希并暂时放开触发器，否则不是改不进去，就是改完立刻被清理 / 卸载当成损坏。
+
+**后续想法**：
+- 撤销改动把文件夹改完后，给运行行打「已撤销」仍只试 5 秒，不过失败会返回给界面，用户可以再点一次。
+- `chat-sessions/<id>/work` 在会话还在时一直保留，长期不用的会话可以考虑按 `LogDays` 清空临时目录（保留会话和草稿）。
+- WebUI 单包仍带注释和空白（构建时压缩）。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；用户自己选的目录本来就不在 tidebot home 里，换机后需要用户自己改，可以在恢复后列出「目录不存在的任务」提示一次。
+- 通知渠道 / 插件配置等其他 JSON 若以后存了 home 下的路径，可以再纳入同一套遍历。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。

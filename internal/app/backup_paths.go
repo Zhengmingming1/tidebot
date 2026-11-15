@@ -1,8 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -23,6 +27,22 @@ var restorePathColumns = []struct{ table, col string }{
 	{"backups", "path"},
 	{"capability_dependency_preferences", "path"},
 }
+
+// restoreJSONColumns are JSON text columns that may embed those same absolute
+// paths (capability lock resolved/preference paths, run detail snapshots, a
+// file-watch trigger path). Immutable hashed version content (versions.content_json,
+// workflow definitions, plugin manifests) is left alone: those workspace_dir
+// values are the user's own folders and the rows are content-addressed.
+var restoreJSONColumns = []struct{ table, col string }{
+	{"capability_versions", "lock_json"},
+	{"capability_proposals", "payload_json"},
+	{"runs", "effective_cost_policy_json"},
+	{"runs", "agent_config_changes"},
+	{"trigger_bindings", "config_json"},
+}
+
+const capabilityVersionsNoUpdate = `CREATE TRIGGER capability_versions_no_update BEFORE UPDATE ON capability_versions
+BEGIN SELECT RAISE(ABORT, 'capability versions are immutable'); END`
 
 // winStyle reports whether p was written on Windows (drive letter or UNC / backslashes).
 func winStyle(p string) bool {
@@ -77,6 +97,68 @@ func remapPath(p string, moves []homeMove) (string, bool) {
 	return filepath.Join(parts...), true
 }
 
+// remapJSON rewrites any string in raw JSON that remapPath would move. Objects,
+// arrays, and non-path strings are left alone; invalid or empty JSON is unchanged.
+// Re-encoding only happens when a path actually moved, so an unchanged value keeps
+// its original bytes (key order, spacing).
+func remapJSON(raw string, moves []homeMove) (string, bool) {
+	if raw == "" || !json.Valid([]byte(raw)) {
+		return raw, false
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return raw, false
+	}
+	nv, ok := remapJSONValue(v, moves)
+	if !ok {
+		return raw, false
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(nv); err != nil {
+		return raw, false
+	}
+	return string(bytes.TrimSpace(buf.Bytes())), true
+}
+
+func remapJSONValue(v any, moves []homeMove) (any, bool) {
+	switch t := v.(type) {
+	case string:
+		if np, ok := remapPath(t, moves); ok && np != t {
+			return np, true
+		}
+		return v, false
+	case map[string]any:
+		changed := false
+		for k, child := range t {
+			if nv, ok := remapJSONValue(child, moves); ok {
+				t[k] = nv
+				changed = true
+			}
+		}
+		return t, changed
+	case []any:
+		changed := false
+		for i, child := range t {
+			if nv, ok := remapJSONValue(child, moves); ok {
+				t[i] = nv
+				changed = true
+			}
+		}
+		return t, changed
+	default:
+		return v, false
+	}
+}
+
+func sha256hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
 // remapRestoredPaths rewrites the stored paths under the backed-up install's folders
 // to the restored ones, in one transaction. Matching is done here rather than in SQL:
 // SQLite's substr / length count characters, Go's len counts bytes, so a home folder
@@ -87,10 +169,34 @@ func remapRestoredPaths(ctx context.Context, sqlDB *sql.DB, moves []homeMove) er
 		return err
 	}
 	defer tx.Rollback()
+	if err := remapRestoredTextColumns(ctx, tx, moves); err != nil {
+		return err
+	}
+	if err := remapRestoredJSONColumns(ctx, tx, moves); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func remapRestoredTextColumns(ctx context.Context, tx *sql.Tx, moves []homeMove) error {
 	for _, c := range restorePathColumns {
+		changes, err := collectRemappedText(ctx, tx, c.table, c.col, moves)
+		if err != nil {
+			return err
+		}
+		if err := applyRemappedText(ctx, tx, c.table, c.col, changes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func remapRestoredJSONColumns(ctx context.Context, tx *sql.Tx, moves []homeMove) error {
+	droppedLockTrigger := false
+	for _, c := range restoreJSONColumns {
 		rows, err := tx.QueryContext(ctx, fmt.Sprintf(`SELECT rowid, %s FROM %s WHERE %s <> ''`, c.col, c.table, c.col))
 		if err != nil {
-			return fmt.Errorf("path mapping %s: %w", c.table, err)
+			return fmt.Errorf("path mapping %s.%s: %w", c.table, c.col, err)
 		}
 		type change struct {
 			rowid int64
@@ -101,31 +207,97 @@ func remapRestoredPaths(ctx context.Context, sqlDB *sql.DB, moves []homeMove) er
 			var ch change
 			if err := rows.Scan(&ch.rowid, &ch.p); err != nil {
 				rows.Close()
-				return fmt.Errorf("path mapping %s: %w", c.table, err)
+				return fmt.Errorf("path mapping %s.%s: %w", c.table, c.col, err)
 			}
-			if np, ok := remapPath(ch.p, moves); ok && np != ch.p {
+			if np, ok := remapJSON(ch.p, moves); ok && np != ch.p {
 				changes = append(changes, change{ch.rowid, np})
 			}
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return fmt.Errorf("path mapping %s: %w", c.table, err)
+			return fmt.Errorf("path mapping %s.%s: %w", c.table, c.col, err)
 		}
 		if len(changes) == 0 {
 			continue
 		}
-		st, err := tx.PrepareContext(ctx, fmt.Sprintf(`UPDATE %s SET %s = ? WHERE rowid = ?`, c.table, c.col))
+		lockJSON := c.table == "capability_versions" && c.col == "lock_json"
+		if lockJSON && !droppedLockTrigger {
+			if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS capability_versions_no_update`); err != nil {
+				return fmt.Errorf("path mapping %s.%s: %w", c.table, c.col, err)
+			}
+			droppedLockTrigger = true
+		}
+		q := fmt.Sprintf(`UPDATE %s SET %s = ? WHERE rowid = ?`, c.table, c.col)
+		if lockJSON {
+			q = `UPDATE capability_versions SET lock_json = ?, lock_sha256 = ? WHERE rowid = ?`
+		}
+		st, err := tx.PrepareContext(ctx, q)
 		if err != nil {
-			return fmt.Errorf("path mapping %s: %w", c.table, err)
+			return fmt.Errorf("path mapping %s.%s: %w", c.table, c.col, err)
 		}
 		for _, ch := range changes {
-			if _, err := st.ExecContext(ctx, ch.p, ch.rowid); err != nil {
+			var err error
+			if lockJSON {
+				_, err = st.ExecContext(ctx, ch.p, sha256hex(ch.p), ch.rowid)
+			} else {
+				_, err = st.ExecContext(ctx, ch.p, ch.rowid)
+			}
+			if err != nil {
 				st.Close()
-				return fmt.Errorf("path mapping %s: %w", c.table, err)
+				return fmt.Errorf("path mapping %s.%s: %w", c.table, c.col, err)
 			}
 		}
 		st.Close()
 	}
-	return tx.Commit()
+	if droppedLockTrigger {
+		if _, err := tx.ExecContext(ctx, capabilityVersionsNoUpdate); err != nil {
+			return fmt.Errorf("path mapping capability_versions: %w", err)
+		}
+	}
+	return nil
+}
+
+type remappedText struct {
+	rowid int64
+	p     string
+}
+
+func collectRemappedText(ctx context.Context, tx *sql.Tx, table, col string, moves []homeMove) ([]remappedText, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`SELECT rowid, %s FROM %s WHERE %s <> ''`, col, table, col))
+	if err != nil {
+		return nil, fmt.Errorf("path mapping %s: %w", table, err)
+	}
+	defer rows.Close()
+	var changes []remappedText
+	for rows.Next() {
+		var ch remappedText
+		if err := rows.Scan(&ch.rowid, &ch.p); err != nil {
+			return nil, fmt.Errorf("path mapping %s: %w", table, err)
+		}
+		if np, ok := remapPath(ch.p, moves); ok && np != ch.p {
+			changes = append(changes, remappedText{ch.rowid, np})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("path mapping %s: %w", table, err)
+	}
+	return changes, nil
+}
+
+func applyRemappedText(ctx context.Context, tx *sql.Tx, table, col string, changes []remappedText) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	st, err := tx.PrepareContext(ctx, fmt.Sprintf(`UPDATE %s SET %s = ? WHERE rowid = ?`, table, col))
+	if err != nil {
+		return fmt.Errorf("path mapping %s: %w", table, err)
+	}
+	defer st.Close()
+	for _, ch := range changes {
+		if _, err := st.ExecContext(ctx, ch.p, ch.rowid); err != nil {
+			return fmt.Errorf("path mapping %s: %w", table, err)
+		}
+	}
+	return nil
 }
