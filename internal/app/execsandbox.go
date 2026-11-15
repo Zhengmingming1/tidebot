@@ -163,18 +163,39 @@ func (a *App) watchAgentConfig(opts *runner.Options, home string, dirs []string)
 }
 
 // recordAgentConfigChanges flags the run, logs it and notifies the owner.
-func (a *App) recordAgentConfigChanges(ctx context.Context, runID, taskID string, changes []guard.ConfigChange) {
-	b, _ := json.Marshal(changes)
-	wctx, done := context.WithTimeout(ctx, 5*time.Second)
-	defer done()
-	if _, err := a.DB.ExecContext(wctx, `UPDATE runs SET agent_config_changes=? WHERE id=?`, string(b), runID); err != nil {
-		a.Log.Warn("agent config check: save", "run_id", runID, "error", err)
-	}
-	if _, err := a.DB.ExecContext(wctx, `INSERT INTO operation_log(at,entity_type,entity_id,action,actor,detail_json) VALUES(?,'run',?,'agent_config_changed','system',?)`,
-		time.Now().UTC().Format(time.RFC3339), runID, string(b)); err != nil {
-		a.Log.Warn("agent config check: log", "run_id", runID, "error", err)
+// The run page lists the files from the row, so the notice waits until that
+// write lands; a busy database is retried (the caller's context may already
+// be done). Both the row and the operation log go in one transaction.
+func (a *App) recordAgentConfigChanges(_ context.Context, runID, taskID string, changes []guard.ConfigChange) {
+	b, err := json.Marshal(changes)
+	if err != nil {
+		a.Log.Warn("agent config check: marshal", "run_id", runID, "error", err)
+		return
 	}
 	a.Log.Warn("agent config changed during a command run", "run_id", runID, "files", len(changes))
+	at := time.Now().UTC().Format(time.RFC3339)
+	detail := string(b)
+	if err := a.retryWrite("agent config check: save", runID, func(wctx context.Context) error {
+		tx, err := a.DB.BeginTx(wctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(wctx, `UPDATE runs SET agent_config_changes=? WHERE id=?`, detail, runID); err != nil {
+			return err
+		}
+		// Safe to repeat: a retry after a commit that still returned an error
+		// must not add a second log row.
+		if _, err := tx.ExecContext(wctx, `INSERT INTO operation_log(at,entity_type,entity_id,action,actor,detail_json)
+SELECT ?, 'run', ?, 'agent_config_changed', 'system', ?
+WHERE NOT EXISTS (SELECT 1 FROM operation_log WHERE entity_type='run' AND entity_id=? AND action='agent_config_changed')`,
+			at, runID, detail, runID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}); err != nil {
+		return
+	}
 	if a.Events != nil {
 		a.Events.Emit(Event{Kind: EventAgentConfigChanged, TaskID: taskID, TaskName: a.taskName(taskID), RunID: runID, Detail: changeSummary(changes)})
 	}

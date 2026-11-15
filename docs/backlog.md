@@ -6431,3 +6431,32 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 设置 › 数据的用量条还没算会话文件夹和 tidebot 自己的 Claude Code 转录（`claude-config/projects`）；WebUI 单包仍带注释和空白（构建时压缩）。
 - 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
 - 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-15：运行结束时改动的文件、agent 配置和 Claude 版本不再只试一次就丢掉（BUG / 业务逻辑矛盾）
+
+- **问题**（11-14 / 11-15 那轮的后续想法）：运行收尾有几处写入只试一次、失败就丢掉错误。数据库忙（单连接被清理或导出占着）或调用方的 context 已取消（用户停止、退出）时，通知或运行结束照常发生，页面上却没有对应记录：
+  - `recordAgentConfigChanges`：命令运行改了 agent 配置时，5 秒超时内更新 `runs.agent_config_changes`、写 `operation_log`，两条还不是同一事务；失败只打日志，紧急通知仍发出。点进运行详情看不到改了哪些文件。
+  - `runchanges.afterExit`：同样 5 秒试一次就丢，运行页没有改动的文件、也不能撤销。这段本来就要在运行标成结束之前写完，好让页面结束时能看到。
+  - `recordRunMeta`：把这次用的 Claude Code 版本写入 `run_flags`，错误直接 `_, _ =` 丢掉，而且还用调用方可能已经取消的 context（账本那次已经改成 `WithoutCancel`，这里漏了）。用户停止或退出时版本一定写不进。
+  - `tasksvc/service.go` 约 459 行（回滚后同步任务行）已在 11-14 `9ef6384` 并进主事务，这轮不再改。
+- **改法**：抽出与会话 `chatWrite` 同一套节奏的 `retryWrite`（一次 3 秒、间隔从 1 秒倍增、最多约 2 分钟，退出中停止）。改动的文件仍在 AfterExit 里同步重试，运行标成结束时页面能看到；agent 配置的行和操作日志同一事务，通知改到写成功之后才发，放弃则不通知；Claude 版本不再用调用方的 context，upsert 可重复。`chatWrite` 改为调用同一辅助函数。
+- 测试（SQLite 触发器模拟写入失败；改前都会失败）：
+  - `app/runmeta_retry_test.go`——`recordRunMeta` 在已取消的 context 且第一次写入被锁时仍写进版本；`recordAgentConfigChanges` 解锁前不通知、行仍空，解锁后行、操作日志和通知都在，放弃则三者都没有；同一运行再记一次不会多出操作日志。
+  - `app/runchanges_test.go`——编辑运行改了文件，保存被锁时运行仍是 running、还没有 `file_changes`，解锁后结束且列表完整。
+  - 已有的会话 `chatWrite` 测试改用共用的重试间隔变量，行为不变。
+- `go test ./...`（47 个包）、`go vet`（含 GOOS=windows/darwin）、`-race -count=3`（app 包：本次用例及已有会话 chatWrite / 命令运行检查）通过。
+
+| 场景（测试里模拟） | 修复前 | 修复后 |
+| --- | --- | --- |
+| 命令运行改了 agent 配置，第一次写入被锁 | 通知已发，运行详情没有文件列表 | 解锁后才通知，详情有列表；放弃则不通知 |
+| 编辑运行改了文件，保存被锁 | 运行已结束，没有文件列表，不能撤销 | 先保持 running，解锁后列表完整 |
+| 用户停止运行后记 Claude 版本 | context 已取消，版本丢了 | 仍写入 `run_flags` |
+
+**心得**：运行结束前后的补写和主记录不是同一事务，但页面把它们当成已经在的数据（详情里的文件、通知点进去、撤销）。只试一次再发通知，等于先告诉用户一个还没写进去的事实。调用方已取消的 context 尤其不能拿来做这种补写——停止和退出时最容易丢。
+
+**后续想法**：
+- 运行详情里 JSON 字段（如能力包锁文件、`effective_cost_policy_json`）里可能也有旧路径，恢复备份时未逐一核对。
+- 设置 › 数据的用量条还没算会话文件夹和 tidebot 自己的 Claude Code 转录（`claude-config/projects`）；WebUI 单包仍带注释和空白（构建时压缩）。
+- 撤销改动把文件夹改完后，给运行行打「已撤销」仍只试 5 秒，不过失败会返回给界面，用户可以再点一次。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。

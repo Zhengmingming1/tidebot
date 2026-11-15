@@ -664,7 +664,7 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 				// connection, a long cleanup) gets more tries in the background, and
 				// the turn's end writes the row in any case (it is the only link
 				// from the session to this turn's run).
-				if err := a.insertChatTurn(sid, turn, rid, createdAt, chatWriteWait); err == nil {
+				if err := a.insertChatTurn(sid, turn, rid, createdAt, writeRetryWait); err == nil {
 					rowSaved.Store(true)
 				} else {
 					a.Log.Warn("session turn row, retrying", "session", sid, "error", err)
@@ -704,36 +704,10 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 // session idle again.
 var chatBeforeIdle func(sid string)
 
-// A turn's bookkeeping writes share tidebot's one database connection with
-// everything else; a long cleanup or export can hold it past one try.
-var (
-	chatWriteWait  = 3 * time.Second // one try
-	chatWriteRetry = time.Second     // first pause between tries (doubles, up to 8x)
-	chatWriteFor   = 2 * time.Minute // give up after (the session is then idled at the next start)
-)
-
 // chatWrite runs a turn's bookkeeping write, retrying while the database is
-// busy. Every write passed in is safe to repeat.
+// busy (see retryWrite). Every write passed in is safe to repeat.
 func (a *App) chatWrite(what, sid string, fn func(context.Context) error) error {
-	end := time.Now().Add(chatWriteFor)
-	pause := chatWriteRetry
-	for {
-		ctx, done := context.WithTimeout(context.Background(), chatWriteWait)
-		err := fn(ctx)
-		done()
-		if err == nil {
-			return nil
-		}
-		if a.policyRunsClosing() || time.Now().Add(pause).After(end) {
-			a.Log.Warn(what+": gave up", "session", sid, "error", err)
-			return err
-		}
-		a.Log.Warn(what+": retrying", "session", sid, "error", err)
-		time.Sleep(pause)
-		if pause < 8*chatWriteRetry {
-			pause *= 2
-		}
-	}
+	return a.retryWriteKey(what, "session", sid, fn)
 }
 
 // chatTurnRow writes a turn's row once (a repeat, or one after the background

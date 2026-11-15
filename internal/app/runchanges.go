@@ -92,10 +92,13 @@ func (t *changeTracker) afterExit(ctx context.Context, runID string) string {
 		return ""
 	}
 	b, _ := json.Marshal(c)
-	wctx, done := context.WithTimeout(ctx, 5*time.Second)
-	defer done()
-	if _, err := t.a.DB.ExecContext(wctx, `UPDATE runs SET file_changes=?, file_patch=? WHERE id=?`, string(b), c.Patch, runID); err != nil {
-		t.a.Log.Warn("run changes: save", "run_id", runID, "error", err)
+	// AfterExit runs before the run is marked finished, so the page sees the
+	// files (and can undo) when the run ends. Retry a busy database here
+	// rather than dropping the write after one try.
+	if err := t.a.retryWrite("run changes: save", runID, func(wctx context.Context) error {
+		_, err := t.a.DB.ExecContext(wctx, `UPDATE runs SET file_changes=?, file_patch=? WHERE id=?`, string(b), c.Patch, runID)
+		return err
+	}); err != nil {
 		return ""
 	}
 	if c.Count == 0 {

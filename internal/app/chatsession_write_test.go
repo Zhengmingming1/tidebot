@@ -10,12 +10,7 @@ import (
 )
 
 // shortChatWrites shrinks the retry pauses of a turn's bookkeeping writes.
-func shortChatWrites(t *testing.T) {
-	t.Helper()
-	wait, retry, total := chatWriteWait, chatWriteRetry, chatWriteFor
-	chatWriteWait, chatWriteRetry, chatWriteFor = time.Second, 10*time.Millisecond, 20*time.Second
-	t.Cleanup(func() { chatWriteWait, chatWriteRetry, chatWriteFor = wait, retry, total })
-}
+func shortChatWrites(t *testing.T) { shortWriteRetries(t) }
 
 // The turn's row could not be written when its run started (tidebot's one
 // database connection busy past the try): the run went ahead and cost money, but
@@ -116,9 +111,9 @@ BEGIN SELECT RAISE(ABORT, 'database is locked'); END`); err != nil {
 
 func TestChatWriteRetriesThenGivesUp(t *testing.T) {
 	a := newTestApp(t)
-	wait, retry, total := chatWriteWait, chatWriteRetry, chatWriteFor
-	t.Cleanup(func() { chatWriteWait, chatWriteRetry, chatWriteFor = wait, retry, total })
-	chatWriteWait, chatWriteRetry, chatWriteFor = time.Second, time.Millisecond, time.Second
+	wait, pause, total := writeRetryWait, writeRetryPause, writeRetryFor
+	t.Cleanup(func() { writeRetryWait, writeRetryPause, writeRetryFor = wait, pause, total })
+	writeRetryWait, writeRetryPause, writeRetryFor = time.Second, time.Millisecond, time.Second
 
 	calls := 0
 	busy := errors.New("database is locked")
@@ -131,7 +126,7 @@ func TestChatWriteRetriesThenGivesUp(t *testing.T) {
 		t.Fatalf("calls %d err %v", calls, err)
 	}
 
-	chatWriteFor = 50 * time.Millisecond
+	writeRetryFor = 50 * time.Millisecond
 	begin := time.Now()
 	if err := a.chatWrite("test", "s", func(context.Context) error { return busy }); !errors.Is(err, busy) {
 		t.Fatalf("err %v", err)

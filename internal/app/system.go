@@ -588,11 +588,17 @@ func compareSemver(x, y string) int {
 }
 
 // recordRunMeta stores the Claude Code version that executed a run.
-func (a *App) recordRunMeta(ctx context.Context, runID string) {
+// The caller's context may already be canceled (quit, user stop); a busy
+// database is retried. The upsert is safe to repeat.
+func (a *App) recordRunMeta(_ context.Context, runID string) {
 	if runID == "" {
 		return
 	}
-	_, _ = a.DB.ExecContext(ctx, `INSERT INTO run_flags(run_id, claude_version) VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET claude_version=excluded.claude_version`, runID, a.claudeVersion())
+	ver := a.claudeVersion()
+	_ = a.retryWrite("run meta: claude version", runID, func(wctx context.Context) error {
+		_, err := a.DB.ExecContext(wctx, `INSERT INTO run_flags(run_id, claude_version) VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET claude_version=excluded.claude_version`, runID, ver)
+		return err
+	})
 }
 
 // --- RPC ---------------------------------------------------------------------

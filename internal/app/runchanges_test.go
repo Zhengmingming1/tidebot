@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/gitsnap"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
@@ -98,5 +99,47 @@ func TestPurgeRunSnaps(t *testing.T) {
 	a.purgeRunSnaps()
 	if ents, _ := os.ReadDir(a.runSnapRoot()); len(ents) != 0 {
 		t.Fatal(ents)
+	}
+}
+
+// Saving the changed-file list used to try once for 5s and drop the error, so
+// the run page had no files and undo was unavailable. AfterExit must keep the
+// run unfinished until a busy write has been retried and landed.
+func TestEditRunRecordsChangedFilesWhenSaveBusy(t *testing.T) {
+	shortWriteRetries(t)
+	a := newTestApp(t)
+	fakeHome(t)
+	ws := gitRepo(t)
+	made := filepath.Join(ws, "made-by-run.txt")
+	t.Setenv("TIDEBOT_MOCK_WRITE_FILE", made)
+	blockSQL(t, a, "fc", `BEFORE UPDATE ON runs WHEN NEW.file_changes<>''`)
+
+	runID, err := a.startRun(webui.RunRequest{Prompt: "fix it", Workspace: ws, Mode: "edit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 8*time.Second, func() bool {
+		var st string
+		_ = a.DB.QueryRow(`SELECT status FROM runs WHERE id=?`, runID).Scan(&st)
+		_, statErr := os.Stat(made)
+		return st == "running" && statErr == nil
+	})
+	time.Sleep(40 * time.Millisecond)
+	var st string
+	if err := a.DB.QueryRow(`SELECT status FROM runs WHERE id=?`, runID).Scan(&st); err != nil || st != "running" {
+		t.Fatalf("run finished before unlock: status %q %v", st, err)
+	}
+	var fc string
+	_ = a.DB.QueryRow(`SELECT file_changes FROM runs WHERE id=?`, runID).Scan(&fc)
+	if fc != "" {
+		t.Fatalf("saved before unlock: %q", fc)
+	}
+
+	unblockSQL(t, a, "fc")
+	waitRunDone(t, a, runID)
+	_ = a.DB.QueryRow(`SELECT file_changes FROM runs WHERE id=?`, runID).Scan(&fc)
+	var c gitsnap.Changes
+	if err := json.Unmarshal([]byte(fc), &c); err != nil || c.Count != 1 || c.Files[0].Path != "made-by-run.txt" {
+		t.Fatalf("file_changes %q: %v %+v", fc, err, c)
 	}
 }
