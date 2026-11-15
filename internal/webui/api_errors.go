@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"errors"
+
 	"encoding/json"
 
 	"io"
@@ -54,6 +56,11 @@ func parseBudgetDetail(d string) (code, used, limit string) {
 	return "", "", ""
 }
 
+// ErrProposalStale: skills.promote would replace a current version the owner
+// did not confirm (it changed since the proposal was made, or since the
+// confirmation named it).
+var ErrProposalStale = errors.New("the skill's current version changed since this version was made")
+
 func (s *Server) handleExt(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "POST only")
@@ -70,6 +77,10 @@ func (s *Server) handleExt(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.deps.Ext(r.Context(), strings.TrimPrefix(r.URL.Path, "/api/rpc/"), json.RawMessage(raw))
 	if err != nil {
+		if errors.Is(err, ErrProposalStale) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "proposal_stale"})
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

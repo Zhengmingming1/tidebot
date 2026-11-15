@@ -361,6 +361,8 @@
   "opt.p50": "中位耗时",
   "opt.promote": "转正",
   "opt.promote_body": "“当前”指针会移到这个版本,用到这个技能的任务下次运行就会用它。之后可以回滚。",
+  "opt.promote_stale": "注意：技能当前是 v{cur}（在别处改过），这个提议是针对 v{v} 生成的。转正会替换掉 v{cur}，它的改动不会合进来（之后可以回滚）。",
+  "opt.promote_stale_err": "技能在别处更新了，已刷新；再点「转正」会先说明要替换的版本",
   "opt.promote_title": "把 v{n} 转正?",
   "opt.promoted": "已转正。",
   "opt.proposals": "候选版本",

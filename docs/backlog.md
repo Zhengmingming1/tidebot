@@ -6412,3 +6412,22 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 运行详情里 JSON 字段（如能力包锁文件、`effective_cost_policy_json`）里可能也有旧路径，恢复备份时未逐一核对。
 - 设置 › 数据的用量条还没算会话文件夹和 tidebot 自己的 Claude Code 转录（`claude-config/projects`）；WebUI 单包仍带注释和空白（构建时压缩）。
 - 运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-15：技能页转正不再悄悄盖掉别处更新的当前版本（BUG / 业务逻辑矛盾）
+
+- **问题**（11-14 会话采用那轮的后续想法）：会话「采用」草稿已经按「期望的当前版本」做乐观检查，技能页自己的依赖清单编辑、Git 来源「应用新版本」也是；技能页 进阶 的 AI 优化提议（`skills.promote`）还走不带检查的 `Promote`。提议针对 v1 生成之后，技能在别处变成了 v3（另一个会话采用了、技能页重新导入 / 编辑、回滚），点「转正」照样把当前版本移到提议上，v3 的改动就从当前版本里消失了（只在历史里）；确认框只写「当前指针会移到这个版本」，不说明要替换的是哪个版本。
+- **改法**：
+  - `skill_proposals` 增加 `base_version_id`（迁移 046）；`Propose` 记下当时的当前版本。已有行按提议版本的 `parent_version_id` 回填（Commit 当时把它设成了 current）。
+  - `Promote` 带上记下的 base 再调 `PromoteOver`：当前仍是 base、或已经是这个提议的版本、或调用方传入并确认要替换的版本，才转正，否则 `ErrStale`、什么都不改。会话采用仍直接走 `PromoteOver`（草稿起点可能是锁定的旧版本，和提议记下的「生成时的当前」不是一回事），行为不变。没有 base 的老提议（回填不到）保持原来的兼容：不传入期望就不检查。
+  - 技能页确认框在当前已变时说明要替换的版本（并从危险样式），把页面看到的当前版本作为 `expect_current` 送回；未确认或送回的版本又变了，接口 409 `proposal_stale`，页面刷新后再点会先说明。
+- 测试：`optimize/promote_atomic_test.go`——提议记下 base；当前被别处改掉后 `Promote` 拒绝且不改任何东西，传入新的当前才转正；base 为空的老提议仍能不带检查转正。`db/skill_proposal_base_test.go`——旧库回填 parent，没有 parent 的保持空。`app/promote_stale_test.go`——`skills.promote` 不带期望 返回 `ErrProposalStale`、当前仍是新版本；带上页面给的版本才转正。webui：`handleExt` 把该错误写成 409 `proposal_stale`；`promoteStale()` 在 node 下 6 种情况；文案中英文都在。前一组与 RPC 在改前都失败（`Promote` / 不带期望的 RPC 会盖掉新的当前版本）。`go test ./...`（47 个包）、`go vet`（含 GOOS=windows/darwin）、`-race -count=3`（Promote / 迁移 / RPC / UI）通过。演示实例实测：不带期望 409 `proposal_stale`，带上页面给的版本才转正。截图：`/workspace/tidebot-shots/2026-11-15-promote-stale-{zh-CN,en}-1024x655.png`。
+- 三方合并 SKILL.md 仍不做。
+
+**心得**：和会话采用那轮一样，改当前版本的入口必须说清楚要换掉哪一个，并且用记下的起点做检查；「生成时的当前」和「草稿从哪一版开始」不是同一个概念，会话采用不能改用提议上记下的 base。
+
+**后续想法**：
+- 仍有几处只试一次、丢掉错误的写入：`recordAgentConfigChanges`（5 s，通知照发，但运行详情里看不到改了哪些文件）、`system.go` 的 `run_flags`（claude 版本）、`tasksvc/service.go` 里约 459 行；可以按影响逐个改成并进主写入或 `chatWrite` 式重试。
+- 运行详情里 JSON 字段（如能力包锁文件、`effective_cost_policy_json`）里可能也有旧路径，恢复备份时未逐一核对。
+- 设置 › 数据的用量条还没算会话文件夹和 tidebot 自己的 Claude Code 转录（`claude-config/projects`）；WebUI 单包仍带注释和空白（构建时压缩）。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。

@@ -361,6 +361,8 @@
   "opt.p50": "Median time",
   "opt.promote": "Promote",
   "opt.promote_body": "The “current” pointer moves to this version and every task using the skill picks it up on the next run. You can roll back later.",
+  "opt.promote_stale": "Note: the skill is at v{cur} now (changed elsewhere) and this proposal was made from v{v}. Promoting replaces v{cur}; its changes aren't merged in (you can roll back later).",
+  "opt.promote_stale_err": "The skill was updated elsewhere; the page has been refreshed. Promote again to confirm which version you'll replace.",
   "opt.promote_title": "Promote v{n}?",
   "opt.promoted": "Promoted.",
   "opt.proposals": "Candidate versions",

@@ -131,3 +131,62 @@ func TestPromoteOverRefusesAnotherCurrent(t *testing.T) {
 		t.Fatal("not promoted")
 	}
 }
+
+// Promote records the current version at proposal time and refuses to replace
+// a later one unless that later version is passed in (the page confirmed it).
+func TestPromoteUsesRecordedBase(t *testing.T) {
+	s, skill := setup(t)
+	ctx := context.Background()
+	v1 := pointerAt(t, s, skill, version.PointerCurrent)
+	p, err := s.Propose(ctx, skill, edit("5. Report size.", "5. Report the size."), "user", "clarity", "r")
+	if err != nil || p.Status != "pending" {
+		t.Fatalf("%v %+v", err, p)
+	}
+	if p.BaseVersionID != v1 {
+		t.Fatalf("base=%q want %s", p.BaseVersionID, v1)
+	}
+	got, err := s.proposal(ctx, p.ID)
+	if err != nil || got.BaseVersionID != v1 {
+		t.Fatalf("reload base %v %+v", err, got)
+	}
+	other, _, err := s.Skills.CommitFiles(ctx, skill, "backup", edit("6. Done.", "6. Finished."), "edit", "user", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Promote(ctx, p.ID); !errors.Is(err, ErrStale) {
+		t.Fatalf("want ErrStale, got %v", err)
+	}
+	if pointerAt(t, s, skill, version.PointerCurrent) != other.ID || proposalStatus(t, s, p.ID) != "pending" {
+		t.Fatal("a refused promote changed something")
+	}
+	if err := s.Promote(ctx, p.ID, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if pointerAt(t, s, skill, version.PointerCurrent) != p.VersionID {
+		t.Fatal("not promoted")
+	}
+}
+
+// An older proposal with no recorded base still promotes without a check
+// (the skills page sends expect_current; the Go API stays compatible).
+func TestPromoteEmptyBaseStaysCompatible(t *testing.T) {
+	s, skill := setup(t)
+	ctx := context.Background()
+	p, err := s.Propose(ctx, skill, edit("5. Report size.", "5. Report the size."), "user", "clarity", "r")
+	if err != nil || p.Status != "pending" {
+		t.Fatalf("%v %+v", err, p)
+	}
+	if _, err := s.DB.Exec(`UPDATE skill_proposals SET base_version_id='' WHERE id=?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := s.Skills.CommitFiles(ctx, skill, "backup", edit("6. Done.", "6. Finished."), "edit", "user", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Promote(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if pointerAt(t, s, skill, version.PointerCurrent) != p.VersionID || other.ID == p.VersionID {
+		t.Fatal("empty-base promote should still move current")
+	}
+}

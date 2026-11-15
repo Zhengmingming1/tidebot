@@ -33,16 +33,17 @@ const (
 
 // Proposal is a candidate skill version.
 type Proposal struct {
-	ID        string  `json:"id"`
-	SkillID   string  `json:"skill_id"`
-	VersionID string  `json:"version_id"`
-	Source    string  `json:"source"`
-	Category  string  `json:"category"`
-	Rationale string  `json:"rationale"`
-	Risk      string  `json:"risk"`
-	Checks    []Check `json:"checks"`
-	Status    string  `json:"status"`
-	CreatedAt string  `json:"created_at"`
+	ID            string  `json:"id"`
+	SkillID       string  `json:"skill_id"`
+	VersionID     string  `json:"version_id"`
+	BaseVersionID string  `json:"base_version_id,omitempty"`
+	Source        string  `json:"source"`
+	Category      string  `json:"category"`
+	Rationale     string  `json:"rationale"`
+	Risk          string  `json:"risk"`
+	Checks        []Check `json:"checks"`
+	Status        string  `json:"status"`
+	CreatedAt     string  `json:"created_at"`
 }
 
 // Service ties skills, versions and run outcomes together.
@@ -134,7 +135,7 @@ func (s *Service) Propose(ctx context.Context, skillID string, files map[string]
 	}
 	var rejectedBefore int
 	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM skill_proposals WHERE skill_id=? AND version_id=? AND status IN ('rejected','discarded','withdrawn')`, skillID, ver.ID).Scan(&rejectedBefore)
-	p := &Proposal{ID: id.New("prop"), SkillID: skillID, VersionID: ver.ID, Source: source, Category: category,
+	p := &Proposal{ID: id.New("prop"), SkillID: skillID, VersionID: ver.ID, BaseVersionID: cur.ID, Source: source, Category: category,
 		Rationale: rationale, Risk: risk, Checks: checks, Status: "pending", CreatedAt: nowUTC()}
 	if !Passed(checks) || rejectedBefore > 0 {
 		p.Status = "rejected"
@@ -143,8 +144,8 @@ func (s *Service) Propose(ctx context.Context, skillID string, files map[string]
 		}
 	}
 	cj, _ := json.Marshal(p.Checks)
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO skill_proposals(id, skill_id, version_id, source, category, rationale, risk, checks_json, status, created_at)
-VALUES(?,?,?,?,?,?,?,?,?,?)`, p.ID, skillID, ver.ID, source, category, rationale, risk, string(cj), p.Status, p.CreatedAt); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO skill_proposals(id, skill_id, version_id, base_version_id, source, category, rationale, risk, checks_json, status, created_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?)`, p.ID, skillID, ver.ID, p.BaseVersionID, source, category, rationale, risk, string(cj), p.Status, p.CreatedAt); err != nil {
 		return nil, err
 	}
 	if p.Status == "rejected" {
@@ -167,8 +168,8 @@ VALUES(?,?,?,?,?,?,?,?,?,?)`, p.ID, skillID, ver.ID, source, category, rationale
 func (s *Service) proposal(ctx context.Context, pid string) (*Proposal, error) {
 	var p Proposal
 	var cj string
-	err := s.DB.QueryRowContext(ctx, `SELECT id, skill_id, version_id, source, category, rationale, risk, checks_json, status, created_at FROM skill_proposals WHERE id=?`, pid).
-		Scan(&p.ID, &p.SkillID, &p.VersionID, &p.Source, &p.Category, &p.Rationale, &p.Risk, &cj, &p.Status, &p.CreatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id, skill_id, version_id, COALESCE(base_version_id,''), source, category, rationale, risk, checks_json, status, created_at FROM skill_proposals WHERE id=?`, pid).
+		Scan(&p.ID, &p.SkillID, &p.VersionID, &p.BaseVersionID, &p.Source, &p.Category, &p.Rationale, &p.Risk, &cj, &p.Status, &p.CreatedAt)
 	if err != nil {
 		return nil, errors.New("proposal not found")
 	}
@@ -274,9 +275,19 @@ func (s *Service) activeCanaryProposal(ctx context.Context, skillID string) (*Pr
 	return s.proposal(ctx, pid)
 }
 
-// Promote makes the proposal current (directly, or ending its canary).
-func (s *Service) Promote(ctx context.Context, pid string) error {
-	return s.PromoteOver(ctx, pid)
+// Promote makes the proposal current (directly, or ending its canary),
+// only while the skill is still at the version recorded when the proposal
+// was made. Pass more version IDs (the current one the owner was shown and
+// agreed to replace) in over; otherwise see PromoteOver.
+func (s *Service) Promote(ctx context.Context, pid string, over ...string) error {
+	p, err := s.proposal(ctx, pid)
+	if err != nil {
+		return err
+	}
+	if p.BaseVersionID != "" {
+		over = append([]string{p.BaseVersionID}, over...)
+	}
+	return s.PromoteOver(ctx, pid, over...)
 }
 
 // PromoteOver is Promote only while the skill's current version is one of

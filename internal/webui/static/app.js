@@ -4023,6 +4023,11 @@
       return '<details class="diff-file" open><summary><code>' + esc(f.path) + '</code><span class="pill sm ' + (f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "info") + '">' + esc(T("diff.st_" + f.status)) + '</span><span class="grow"></span>' + (f.added ? '<span class="add">+' + f.added + "</span> " : "") + (f.removed ? '<span class="del">−' + f.removed + "</span>" : "") + "</summary>" + body + "</details>";
     }).join("");
   }
+  // A proposal is stale when the skill's current version is no longer the
+  // one it was made from (nor already this proposal's version).
+  function promoteStale(p, current) {
+    return !!(p && p.base_version_id && current && current !== p.base_version_id && current !== p.version_id);
+  }
   function renderSkillDetail(id, params) {
     var base = "/api/skills/" + enc(id);
     return Promise.all([api("/api/skills"), api(base + "/versions"), rpcRead("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), rpc("skills.proposals", { skill_id: id }).catch(function () { return []; }), rpc("skills.compare", { skill_id: id }).catch(function () { return null; }), api(base + "/repository-source").catch(function () { return null; })]).then(function (r) {
@@ -4058,7 +4063,7 @@
           (p.checks && p.checks.length ? '<ul class="checks">' + p.checks.map(function (c) { return '<li class="' + (c.ok ? "ok" : "bad") + '">' + ic(c.ok ? "check" : "x", "sm") + esc(c.name) + "</li>"; }).join("") + "</ul>" : "") +
           (p.status === "canary" && cmp && cmp.proposal_id === p.id ? cmpTable(cmp) : "") +
           '<div class="row-actions"><button class="btn sm ghost" data-cmp-pair="' + esc(p.version_id) + '">' + esc(T("opt.view_diff")) + "</button>" +
-          (live ? (p.status === "pending" ? '<button class="btn sm" data-canary="' + esc(p.id) + '">' + esc(T("opt.start_canary")) + "</button>" : "") + '<button class="btn sm danger" data-discard="' + esc(p.id) + '">' + esc(T("opt.discard")) + '</button><button class="btn sm primary" data-promote="' + esc(p.id) + '" data-no="' + esc(v ? v.no : "") + '">' + esc(T("opt.promote")) + "</button>" : "") + "</div></div>";
+          (live ? (p.status === "pending" ? '<button class="btn sm" data-canary="' + esc(p.id) + '">' + esc(T("opt.start_canary")) + "</button>" : "") + '<button class="btn sm danger" data-discard="' + esc(p.id) + '">' + esc(T("opt.discard")) + '</button><button class="btn sm primary" data-promote="' + esc(p.id) + '" data-no="' + esc(v ? v.no : "") + '" data-base="' + esc(p.base_version_id || "") + '" data-version="' + esc(p.version_id) + '">' + esc(T("opt.promote")) + "</button>" : "") + "</div></div>";
       }).join("") : '<p class="muted">' + esc(T("opt.none")) + "</p>";
       mount('<div class="grid g-detail">' +
         '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm primary" id="sk-chat" data-tip="' + esc(T("sk.chat_tip", { name: sk.name })) + '">' + ic("chat", "sm") + esc(T("sk.chat")) + '</button><button class="btn sm" id="sk-run">' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="btn sm" id="sk-manifest">' + esc(T("sm.title")) + '</button><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
@@ -4182,7 +4187,18 @@
       }); });
       $$("[data-canary]").forEach(function (bt) { bt.addEventListener("click", function () { rpc("skills.canary_start", { proposal_id: bt.getAttribute("data-canary") }).then(function () { toast(T("opt.canary_started")); reload(); }).catch(fail); }); });
       $$("[data-discard]").forEach(function (bt) { bt.addEventListener("click", function () { confirmDialog({ title: T("opt.discard_title"), body: T("opt.discard_body"), ok: T("opt.discard"), danger: true }).then(function (y) { if (y) rpc("skills.discard", { proposal_id: bt.getAttribute("data-discard") }).then(function () { toast(T("opt.discarded")); reload(); }).catch(fail); }); }); });
-      $$("[data-promote]").forEach(function (bt) { bt.addEventListener("click", function () { confirmDialog({ title: T("opt.promote_title", { n: bt.getAttribute("data-no") }), body: T("opt.promote_body"), ok: T("opt.promote") }).then(function (y) { if (y) rpc("skills.promote", { proposal_id: bt.getAttribute("data-promote") }).then(function () { toast(T("opt.promoted")); reload(); }).catch(fail); }); }); });
+      $$("[data-promote]").forEach(function (bt) { bt.addEventListener("click", function () {
+        var cur = vers.current, over = promoteStale({ base_version_id: bt.getAttribute("data-base"), version_id: bt.getAttribute("data-version") }, cur);
+        confirmDialog({ icon: "skills", title: T("opt.promote_title", { n: bt.getAttribute("data-no") }), danger: !!over,
+          body: T("opt.promote_body") + (over ? "\n" + T("opt.promote_stale", { cur: (byId[cur] || {}).no, v: (byId[bt.getAttribute("data-base")] || {}).no }) : ""),
+          ok: T("opt.promote") }).then(function (y) {
+          if (!y) return;
+          rpc("skills.promote", { proposal_id: bt.getAttribute("data-promote"), expect_current: cur }).then(function () { toast(T("opt.promoted")); reload(); }).catch(function (e) {
+            if (e && e.data && e.data.code === "proposal_stale") { toast(T("opt.promote_stale_err"), true); reload(); return; }
+            fail(e);
+          });
+        });
+      }); });
       $$("[data-sktab]").forEach(function (b) {
         b.addEventListener("click", function () { showTab(b.getAttribute("data-sktab")); });
         b.addEventListener("keydown", function (e) {

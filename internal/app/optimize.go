@@ -14,6 +14,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/version"
+	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
 
 type skillChoice struct {
@@ -138,13 +139,14 @@ func (a *App) runOptimizer(ctx context.Context) {
 }
 
 type skillReq struct {
-	SkillID     string  `json:"skill_id"`
-	ProposalID  string  `json:"proposal_id"`
-	Mode        string  `json:"mode"`
-	Ratio       float64 `json:"canary_ratio"`
-	Runs        int     `json:"canary_runs"`
-	Instruction string  `json:"instruction"`
-	N           int     `json:"n"`
+	SkillID       string  `json:"skill_id"`
+	ProposalID    string  `json:"proposal_id"`
+	Mode          string  `json:"mode"`
+	Ratio         float64 `json:"canary_ratio"`
+	Runs          int     `json:"canary_runs"`
+	Instruction   string  `json:"instruction"`
+	N             int     `json:"n"`
+	ExpectCurrent string  `json:"expect_current"`
 }
 
 func (a *App) skillRPC(f func(context.Context, skillReq) (any, error)) func(context.Context, json.RawMessage) (any, error) {
@@ -174,7 +176,13 @@ func (a *App) registerSkillRPC(reg func(string, func(context.Context, json.RawMe
 	reg("skills.canary_start", a.skillRPC(func(ctx context.Context, r skillReq) (any, error) {
 		return ok, a.Optimize.StartCanary(ctx, r.ProposalID)
 	}))
-	reg("skills.promote", a.skillRPC(func(ctx context.Context, r skillReq) (any, error) { return ok, a.Optimize.Promote(ctx, r.ProposalID) }))
+	reg("skills.promote", a.skillRPC(func(ctx context.Context, r skillReq) (any, error) {
+		err := a.Optimize.Promote(ctx, r.ProposalID, strings.TrimSpace(r.ExpectCurrent))
+		if errors.Is(err, optimize.ErrStale) {
+			return nil, webui.ErrProposalStale
+		}
+		return ok, err
+	}))
 	reg("skills.discard", a.skillRPC(func(ctx context.Context, r skillReq) (any, error) { return ok, a.Optimize.Discard(ctx, r.ProposalID) }))
 	reg("skills.extend", a.skillRPC(func(ctx context.Context, r skillReq) (any, error) { return ok, a.Optimize.Extend(ctx, r.SkillID, r.N) }))
 	reg("skills.compare", a.skillRPC(func(ctx context.Context, r skillReq) (any, error) { return a.Optimize.Compare(ctx, r.SkillID) }))
