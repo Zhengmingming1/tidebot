@@ -204,11 +204,46 @@ func (s *Service) Proposals(ctx context.Context, skillID string) ([]Proposal, er
 	return out, nil
 }
 
-func (s *Service) setStatus(ctx context.Context, pid, st string) {
-	_, _ = s.DB.ExecContext(ctx, `UPDATE skill_proposals SET status=?, decided_at=? WHERE id=?`, st, nowUTC(), pid)
+// ErrStale: the skill's current version is no longer the one the proposal
+// was made from (adopted elsewhere, edited, rolled back to another one), so
+// promoting it would silently replace those changes.
+var ErrStale = errors.New("the skill's current version changed since this version was made")
+
+func setStatusTx(ctx context.Context, tx *sql.Tx, pid, st string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE skill_proposals SET status=?, decided_at=? WHERE id=?`, st, nowUTC(), pid)
+	return err
 }
 
-// StartCanary points `canary` at the proposal (only one canary per skill).
+// statusIn re-reads the proposal's status inside the move's transaction, so
+// two clicks (two tabs) can't both promote / discard it.
+func statusIn(ctx context.Context, tx *sql.Tx, pid string, ok ...string) error {
+	var st string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM skill_proposals WHERE id=?`, pid).Scan(&st); err != nil {
+		return errors.New("proposal not found")
+	}
+	for _, o := range ok {
+		if st == o {
+			return nil
+		}
+	}
+	return errors.New("proposal is " + st)
+}
+
+// clearCanaryTx ends the skill's canary (when one is set) in tx.
+func clearCanaryTx(ctx context.Context, tx *sql.Tx, skillID, actor, reason string) error {
+	var c sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT version_id FROM pointers WHERE entity_type=? AND entity_id=? AND name=?`, version.EntitySkill, skillID, version.PointerCanary).Scan(&c)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (!c.Valid || c.String == "") {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return version.MovePointerTx(ctx, tx, version.EntitySkill, skillID, version.PointerCanary, "", actor, reason, "")
+}
+
+// StartCanary points `canary` at the proposal (only one canary per skill). The
+// pointer and the proposal's status change together.
 func (s *Service) StartCanary(ctx context.Context, pid string) error {
 	p, err := s.proposal(ctx, pid)
 	if err != nil {
@@ -217,14 +252,17 @@ func (s *Service) StartCanary(ctx context.Context, pid string) error {
 	if p.Status != "pending" && p.Status != "canary" {
 		return errors.New("proposal is " + p.Status)
 	}
-	if c, _ := s.Ver.GetPointer(ctx, version.EntitySkill, p.SkillID, version.PointerCanary); c.Valid && c.String != "" && c.String != p.VersionID {
-		return errors.New("another canary is running for this skill")
-	}
-	if err := s.Ver.MovePointer(ctx, version.EntitySkill, p.SkillID, version.PointerCanary, p.VersionID, "user", "start canary", ""); err != nil {
-		return err
-	}
-	_, _ = s.DB.ExecContext(ctx, `UPDATE skill_proposals SET status='canary' WHERE id=?`, pid)
-	return nil
+	return s.Ver.MovePointerChecked(ctx, version.EntitySkill, p.SkillID, version.PointerCanary, p.VersionID, "user", "start canary", "",
+		func(ctx context.Context, tx *sql.Tx, from string) error {
+			if from != "" && from != p.VersionID {
+				return errors.New("another canary is running for this skill")
+			}
+			return statusIn(ctx, tx, pid, "pending", "canary")
+		},
+		func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE skill_proposals SET status='canary' WHERE id=?`, pid)
+			return err
+		})
 }
 
 func (s *Service) activeCanaryProposal(ctx context.Context, skillID string) (*Proposal, error) {
@@ -238,6 +276,16 @@ func (s *Service) activeCanaryProposal(ctx context.Context, skillID string) (*Pr
 
 // Promote makes the proposal current (directly, or ending its canary).
 func (s *Service) Promote(ctx context.Context, pid string) error {
+	return s.PromoteOver(ctx, pid)
+}
+
+// PromoteOver is Promote only while the skill's current version is one of
+// over (the version the proposal was made from, or the one the owner was shown
+// and agreed to replace); otherwise ErrStale and nothing changes. No over: no
+// check. Moving current, ending the canary and marking the proposal promoted
+// are one transaction: before, a failed second or third write left a promoted
+// version still "pending" or a canary still taking runs.
+func (s *Service) PromoteOver(ctx context.Context, pid string, over ...string) error {
 	p, err := s.proposal(ctx, pid)
 	if err != nil {
 		return err
@@ -245,15 +293,31 @@ func (s *Service) Promote(ctx context.Context, pid string) error {
 	if p.Status != "pending" && p.Status != "canary" {
 		return errors.New("proposal is " + p.Status)
 	}
-	if err := s.Ver.MovePointer(ctx, version.EntitySkill, p.SkillID, version.PointerCurrent, p.VersionID, "user", "promote proposal "+pid, ""); err != nil {
-		return err
-	}
-	_ = s.Ver.MovePointer(ctx, version.EntitySkill, p.SkillID, version.PointerCanary, "", "user", "promoted", "")
-	s.setStatus(ctx, pid, "promoted")
-	return nil
+	return s.Ver.MovePointerChecked(ctx, version.EntitySkill, p.SkillID, version.PointerCurrent, p.VersionID, "user", "promote proposal "+pid, "",
+		func(ctx context.Context, tx *sql.Tx, from string) error {
+			if err := statusIn(ctx, tx, pid, "pending", "canary"); err != nil {
+				return err
+			}
+			if len(over) == 0 || from == p.VersionID {
+				return nil
+			}
+			for _, o := range over {
+				if o != "" && o == from {
+					return nil
+				}
+			}
+			return ErrStale
+		},
+		func(ctx context.Context, tx *sql.Tx) error {
+			if err := clearCanaryTx(ctx, tx, p.SkillID, "user", "promoted"); err != nil {
+				return err
+			}
+			return setStatusTx(ctx, tx, pid, "promoted")
+		})
 }
 
-// Discard rejects a pending proposal or drops a running canary.
+// Discard rejects a pending proposal or drops a running canary (the canary
+// pointer and the status together: a discarded canary never keeps taking runs).
 func (s *Service) Discard(ctx context.Context, pid string) error {
 	p, err := s.proposal(ctx, pid)
 	if err != nil {
@@ -261,14 +325,38 @@ func (s *Service) Discard(ctx context.Context, pid string) error {
 	}
 	switch p.Status {
 	case "pending":
-		s.setStatus(ctx, pid, "rejected")
+		return s.endProposal(ctx, p, false, "user", "reject proposal", "rejected", "pending")
 	case "canary":
-		_ = s.Ver.MovePointer(ctx, version.EntitySkill, p.SkillID, version.PointerCanary, "", "user", "discard canary", "")
-		s.setStatus(ctx, pid, "discarded")
+		return s.endProposal(ctx, p, true, "user", "discard canary", "discarded", "canary")
 	default:
 		return errors.New("proposal is " + p.Status)
 	}
-	return nil
+}
+
+// endProposal sets the proposal's status (and, for a canary, ends the skill's
+// canary) in one transaction, while it is still in one of from.
+func (s *Service) endProposal(ctx context.Context, p *Proposal, canary bool, actor, reason, status string, from ...string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// write lock first: the status read below stays true until the commit
+	if _, err := tx.ExecContext(ctx, `UPDATE skill_proposals SET status=status WHERE 0`); err != nil {
+		return err
+	}
+	if err := statusIn(ctx, tx, p.ID, from...); err != nil {
+		return err
+	}
+	if canary {
+		if err := clearCanaryTx(ctx, tx, p.SkillID, actor, reason); err != nil {
+			return err
+		}
+	}
+	if err := setStatusTx(ctx, tx, p.ID, status); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Extend adds n more canary runs.
@@ -330,8 +418,9 @@ VALUES(?,?,?,?,?,?,?,?,?)`, o.RunID, o.SkillID, o.VersionID, b2i(o.Candidate), b
 		return nil
 	}
 	if why := s.shouldWithdraw(ctx, p, o); why != "" {
-		_ = s.Ver.MovePointer(ctx, version.EntitySkill, p.SkillID, version.PointerCanary, "", "system", "auto-withdraw: "+why, "")
-		s.setStatus(ctx, p.ID, "withdrawn")
+		if err := s.endProposal(ctx, p, true, "system", "auto-withdraw: "+why, "withdrawn", "canary"); err != nil {
+			return err
+		}
 		s.emit(EventWithdrawn, p.SkillID, why)
 		return nil
 	}

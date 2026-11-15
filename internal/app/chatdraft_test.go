@@ -126,7 +126,7 @@ func TestChatSkillDraftLoop(t *testing.T) {
 	}
 
 	// adopt only on request
-	d, err = a.AdoptChatDraft(ctx, ses.ID)
+	d, err = a.AdoptChatDraft(ctx, ses.ID, "")
 	if err != nil || len(d.Adopted) != 1 || d.Adopted[0].No != 2 || d.Changed {
 		t.Fatalf("adopt %v %+v", err, d)
 	}

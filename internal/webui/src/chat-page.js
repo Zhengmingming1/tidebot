@@ -156,10 +156,11 @@
       if (!d || !d.active) { box.hidden = true; box.innerHTML = ""; return; }
       var state = d.unsaved ? T("sd.st_changed") : d.saved && d.saved.status === "pending" ? T("sd.st_saved", { v: d.saved.no }) : d.changed ? T("sd.st_saved_old") : T("sd.st_same");
       var tip = T("sd.tip", { s: d.skill_name, v: d.base_no, cur: d.current_no, n: d.files }) + (editable() ? "" : " " + T("sd.read_tip"));
-      var pend = d.saved && d.saved.status === "pending", off = running() || busyOp ? " disabled" : "";
+      var pend = d.saved && d.saved.status === "pending", off = running() || busyOp ? " disabled" : "", stale = draftStale(d);
       var html = '<span class="cs-draft-lbl" tabindex="0" data-tip="' + esc(tip) + '">' + ic("skills", "sm") + '<strong class="ell">' + esc(T("sd.title", { s: d.skill_name })) + "</strong>" +
         '<span class="cs-draft-v">v' + esc(String(d.base_no || "?")) + "</span>" + '<span class="cs-draft-st' + (d.unsaved ? " on" : "") + '">' + esc(state) + "</span>" +
         (editable() ? "" : '<span class="cs-draft-ro" aria-hidden="true">' + ic("eye", "sm") + "</span>") + "</span>" +
+        (stale ? '<span class="cs-draft-stale" tabindex="0" role="img" aria-label="' + esc(T("sd.stale_tip", { cur: d.current_no, v: d.base_no })) + '" data-tip="' + esc(T("sd.stale_tip", { cur: d.current_no, v: d.base_no })) + '">' + ic("info", "sm") + "</span>" : "") +
         '<span class="rc-sp"></span>' +
         '<button type="button" class="btn sm" data-dr="try"' + off + ' data-tip="' + esc(T("sd.try_tip")) + '">' + ic("play", "sm") + esc(T("sd.try")) + "</button>" +
         '<button type="button" class="btn sm" data-dr="save"' + (d.unsaved && !off ? "" : " disabled") + ' data-tip="' + esc(T("sd.save_tip")) + '">' + ic("check", "sm") + esc(T("sd.save")) + "</button>" +
@@ -169,7 +170,16 @@
       box.hidden = false;
     };
     var load = function () { return api(base, { fresh: true }).then(function (x) { d = x; paint(); return x; }); };
-    var act = function (p) { busyOp = true; paint(); return p.then(function (x) { d = x; return x; }).catch(function (e) { if (!e.auth) toast(csDraftErr(e), true); return null; }).then(function (x) { busyOp = false; paint(); return x; }); };
+    var act = function (p) {
+      busyOp = true; paint();
+      return p.then(function (x) { d = x; return x; }).catch(function (e) {
+        if (!e.auth) toast(csDraftErr(e), true);
+        // the skill changed since this page loaded: show the new current version, so
+        // the next 采用 names what it replaces
+        if (e && e.data && e.data.code === "draft_stale") load().catch(function () {});
+        return null;
+      }).then(function (x) { busyOp = false; paint(); return x; });
+    };
     tune.addEventListener("click", function () {
       if (running()) { toast(T("rc.err_busy"), true); return; }
       (d ? Promise.resolve(d) : load()).then(function (x) {
@@ -194,12 +204,12 @@
       } else if (what === "save") {
         act(api(base + "/save", { method: "POST", body: {} })).then(function (x) { if (x && x.saved) toast(T("sd.saved", { v: x.saved.no })); });
       } else if (what === "adopt") {
-        var a = d.affects || { follow: [], pinned: 0 }, f = a.follow || [];
-        confirmDialog({ icon: "skills", title: T("sd.adopt_title", { s: d.skill_name, v: d.saved.no }),
-          body: T("sd.adopt_body") + "\n" + (f.length ? T("sd.adopt_follow", { n: f.length, l: f.slice(0, 8).join("、") + (f.length > 8 ? "…" : "") }) : T("sd.adopt_follow_none")) + (a.pinned ? "\n" + T("sd.adopt_pinned", { n: a.pinned }) : ""),
+        var a = d.affects || { follow: [], pinned: 0 }, f = a.follow || [], over = draftStale(d) ? d.current_version_id : "";
+        confirmDialog({ icon: "skills", title: T("sd.adopt_title", { s: d.skill_name, v: d.saved.no }), danger: !!over,
+          body: T("sd.adopt_body") + (over ? "\n" + T("sd.adopt_stale", { cur: d.current_no, v: d.base_no }) : "") + "\n" + (f.length ? T("sd.adopt_follow", { n: f.length, l: f.slice(0, 8).join("、") + (f.length > 8 ? "…" : "") }) : T("sd.adopt_follow_none")) + (a.pinned ? "\n" + T("sd.adopt_pinned", { n: a.pinned }) : ""),
           ok: T("sd.adopt_v", { v: d.saved.no }) }).then(function (y) {
           if (!y) return;
-          return act(api(base + "/adopt", { method: "POST", body: {} })).then(function (x) { if (x) toast(T("sd.adopted", { s: x.skill_name })); });
+          return act(api(base + "/adopt", { method: "POST", body: over ? { expect_current: over } : {} })).then(function (x) { if (x) toast(T("sd.adopted", { s: x.skill_name })); });
         });
       } else if (what === "discard") {
         (d.unsaved ? confirmDialog({ title: T("sd.discard_title"), body: T("sd.discard_body"), ok: T("sd.discard"), danger: true }) : Promise.resolve(true)).then(function (y) {
@@ -216,8 +226,15 @@
       }
     };
   }
+  // The skill's current version is neither the one the draft started from nor the
+  // one saved from it (adopted in another session, edited or switched on the skill
+  // page since): 采用 would replace that version, so the bar and the confirmation say so.
+  function draftStale(d) {
+    return !!(d && d.current_version_id && d.current_version_id !== d.base_version_id && !(d.saved && d.saved.version_id === d.current_version_id));
+  }
   function csDraftErr(e) {
     var code = e && e.data && e.data.code;
+    if (code === "draft_stale") return T("rc.err_draft_stale");
     if (code === "draft_checks") return T("rc.err_draft_checks") + " (" + String((e.message || "").split(": ").pop()) + ")";
     return rcErrText(e) || T("err.generic");
   }

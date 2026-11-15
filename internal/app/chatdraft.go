@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Zhengmingming1/tidebot/internal/optimize"
 	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
@@ -176,7 +177,7 @@ func (a *App) chatDraftView(ctx context.Context, c chatRow, st chatDraftState) w
 	v.Active, v.SkillID, v.SkillName = true, st.SkillID, a.skillName(st.SkillID)
 	v.BaseVersionID, v.BaseNo = st.BaseVersionID, a.versionNo(ctx, st.BaseVersionID)
 	if cur, err := a.Ver.CurrentVersion(ctx, version.EntitySkill, st.SkillID); err == nil {
-		v.CurrentNo = cur.VersionNo
+		v.CurrentNo, v.CurrentVersionID = cur.VersionNo, cur.ID
 	}
 	files, err := a.chatDraftFiles(c.ID)
 	if err == nil {
@@ -345,8 +346,12 @@ func (a *App) SaveChatDraft(ctx context.Context, sid, note string) (webui.ChatDr
 }
 
 // AdoptChatDraft makes the saved version the skill's current one. Only on the
-// owner's click: nothing in a turn or a save ever adopts.
-func (a *App) AdoptChatDraft(ctx context.Context, sid string) (webui.ChatDraft, error) {
+// owner's click: nothing in a turn or a save ever adopts. It replaces only the
+// version the draft started from, or expectCurrent: the current version the
+// page showed the owner (the confirmation says it gets replaced). Anything else
+// (adopted in another session, edited or switched on the skill page since) is
+// webui.ErrChatDraftStale and nothing changes, like the skill page's own edits.
+func (a *App) AdoptChatDraft(ctx context.Context, sid, expectCurrent string) (webui.ChatDraft, error) {
 	chatDraftMu.Lock()
 	defer chatDraftMu.Unlock()
 	c, err := a.draftSessionIdle(ctx, sid)
@@ -360,7 +365,10 @@ func (a *App) AdoptChatDraft(ctx context.Context, sid string) (webui.ChatDraft, 
 	if st.ProposalID == "" {
 		return webui.ChatDraft{}, webui.ErrChatDraftNotSaved
 	}
-	if err := a.Optimize.Promote(ctx, st.ProposalID); err != nil {
+	if err := a.Optimize.PromoteOver(ctx, st.ProposalID, st.BaseVersionID, expectCurrent); err != nil {
+		if errors.Is(err, optimize.ErrStale) {
+			return webui.ChatDraft{}, webui.ErrChatDraftStale
+		}
 		return webui.ChatDraft{}, fmt.Errorf("%w: %v", webui.ErrChatInvalid, err)
 	}
 	if st.Adopted == nil {

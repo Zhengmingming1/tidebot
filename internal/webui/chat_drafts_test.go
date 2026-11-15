@@ -18,6 +18,7 @@ type fakeDrafts struct {
 	skill   string
 	note    string
 	fromRun bool
+	expect  string
 	derr    error
 }
 
@@ -37,8 +38,8 @@ func (f *fakeDrafts) SaveChatDraft(_ context.Context, _, note string) (ChatDraft
 	f.calls, f.note = append(f.calls, "save"), note
 	return ChatDraft{Active: true, Saved: &ChatDraftVersion{No: 2, Status: "pending"}}, f.derr
 }
-func (f *fakeDrafts) AdoptChatDraft(context.Context, string) (ChatDraft, error) {
-	f.calls = append(f.calls, "adopt")
+func (f *fakeDrafts) AdoptChatDraft(_ context.Context, _, expect string) (ChatDraft, error) {
+	f.calls, f.expect = append(f.calls, "adopt"), expect
 	return ChatDraft{Active: true}, f.derr
 }
 func (f *fakeDrafts) ChatTaskPreset(_ context.Context, _ string, fromRun bool) (ChatTaskPreset, error) {
@@ -68,8 +69,12 @@ func TestChatDraftAPI(t *testing.T) {
 	if code, _ := c.json(http.MethodPost, base+"draft/save", nil); code != 200 {
 		t.Fatalf("save without body %d", code)
 	}
-	if code, _ := c.json(http.MethodPost, base+"draft/adopt", nil); code != 200 {
-		t.Fatalf("adopt %d", code)
+	if code, _ := c.json(http.MethodPost, base+"draft/adopt", nil); code != 200 || f.expect != "" {
+		t.Fatalf("adopt %d %q", code, f.expect)
+	}
+	// the current version the confirmation named goes through to the app
+	if code, _ := c.json(http.MethodPost, base+"draft/adopt", map[string]any{"expect_current": " ver_5 "}); code != 200 || f.expect != "ver_5" {
+		t.Fatalf("adopt over %d %q", code, f.expect)
 	}
 	if code, _ := c.json(http.MethodDelete, base+"draft", nil); code != 200 {
 		t.Fatalf("discard %d", code)
@@ -80,7 +85,7 @@ func TestChatDraftAPI(t *testing.T) {
 	if code, _ := c.json(http.MethodGet, base+"draft/adopt", nil); code != 405 {
 		t.Fatalf("GET adopt %d", code)
 	}
-	for err, want := range map[error]string{ErrChatDraftUnchanged: "draft_unchanged", ErrChatDraftChecks: "draft_checks", ErrChatDraftNone: "no_draft", ErrChatDraftNotSaved: "draft_not_saved", ErrChatSessionBusy: "busy"} {
+	for err, want := range map[error]string{ErrChatDraftUnchanged: "draft_unchanged", ErrChatDraftChecks: "draft_checks", ErrChatDraftNone: "no_draft", ErrChatDraftNotSaved: "draft_not_saved", ErrChatDraftStale: "draft_stale", ErrChatSessionBusy: "busy"} {
 		f.derr = err
 		if _, out := c.json(http.MethodPost, base+"draft/adopt", nil); out["code"] != want {
 			t.Fatalf("%v → %v", err, out)

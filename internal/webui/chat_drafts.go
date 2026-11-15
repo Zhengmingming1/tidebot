@@ -27,9 +27,12 @@ type ChatDraft struct {
 	BaseVersionID string `json:"base_version_id,omitempty"`
 	BaseNo        int    `json:"base_no,omitempty"`
 	CurrentNo     int    `json:"current_no,omitempty"` // the skill's current version now
-	Files         int    `json:"files,omitempty"`
-	Changed       bool   `json:"changed"` // differs from the version it started from
-	Unsaved       bool   `json:"unsaved"` // differs from the last saved version (or none saved)
+	// CurrentVersionID: sent back by "adopt" when the owner agreed to replace a
+	// current version other than the one the draft started from.
+	CurrentVersionID string `json:"current_version_id,omitempty"`
+	Files            int    `json:"files,omitempty"`
+	Changed          bool   `json:"changed"` // differs from the version it started from
+	Unsaved          bool   `json:"unsaved"` // differs from the last saved version (or none saved)
 	// Editable: the session's level lets the model change the draft (edit / exec).
 	Editable bool              `json:"editable"`
 	Saved    *ChatDraftVersion `json:"saved,omitempty"`
@@ -73,7 +76,7 @@ type chatDrafter interface {
 	StartChatDraft(ctx context.Context, id, skillID string) (ChatDraft, error)
 	DiscardChatDraft(ctx context.Context, id string) (ChatDraft, error)
 	SaveChatDraft(ctx context.Context, id, note string) (ChatDraft, error)
-	AdoptChatDraft(ctx context.Context, id string) (ChatDraft, error)
+	AdoptChatDraft(ctx context.Context, id, expectCurrent string) (ChatDraft, error)
 	ChatTaskPreset(ctx context.Context, id string, fromRun bool) (ChatTaskPreset, error)
 }
 
@@ -83,6 +86,9 @@ var (
 	ErrChatDraftUnchanged = errors.New("the draft is the same as the skill's current version")
 	ErrChatDraftChecks    = errors.New("the draft did not pass the skill checks")
 	ErrChatDraftNotSaved  = errors.New("save the draft as a version first")
+	// ErrChatDraftStale: the skill's current version changed (not the one the
+	// draft started from, nor the one the page showed): adopting would replace it.
+	ErrChatDraftStale = errors.New("the skill's current version changed since the draft started")
 )
 
 func chatDraftErr(w http.ResponseWriter, err error) {
@@ -95,6 +101,7 @@ func chatDraftErr(w http.ResponseWriter, err error) {
 		{ErrChatDraftUnchanged, 409, "draft_unchanged"},
 		{ErrChatDraftChecks, 422, "draft_checks"},
 		{ErrChatDraftNotSaved, 409, "draft_not_saved"},
+		{ErrChatDraftStale, 409, "draft_stale"},
 	} {
 		if errors.Is(err, c.err) {
 			writeJSON(w, c.status, map[string]string{"error": err.Error(), "code": c.code})
@@ -144,7 +151,14 @@ func (s *Server) handleChatDraft(w http.ResponseWriter, r *http.Request, id, sub
 		}
 		out, err = d.SaveChatDraft(ctx, id, strings.TrimSpace(body.Note))
 	case sub == "draft/adopt" && r.Method == http.MethodPost:
-		out, err = d.AdoptChatDraft(ctx, id)
+		var body struct {
+			ExpectCurrent string `json:"expect_current"`
+		}
+		if e := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); e != nil && !errors.Is(e, io.EOF) {
+			writeJSON(w, 400, map[string]string{"error": "bad body", "code": "invalid"})
+			return
+		}
+		out, err = d.AdoptChatDraft(ctx, id, strings.TrimSpace(body.ExpectCurrent))
 	case sub == "task-preset" || sub == "draft" || sub == "draft/save" || sub == "draft/adopt":
 		writeErr(w, 405, "method")
 		return

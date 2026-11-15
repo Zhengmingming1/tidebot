@@ -242,6 +242,13 @@ func (s *Service) MovePointer(ctx context.Context, entityType, entityID, pointer
 // MovePointerThen is MovePointer with then run in the same transaction (keeping
 // the entity's own row in step with the pointer); an error from then undoes the move.
 func (s *Service) MovePointerThen(ctx context.Context, entityType, entityID, pointerName, toVersionID, actor, reason, batchID string, then func(context.Context, *sql.Tx) error) error {
+	return s.MovePointerChecked(ctx, entityType, entityID, pointerName, toVersionID, actor, reason, batchID, nil, then)
+}
+
+// MovePointerChecked is MovePointerThen with check run first, under the write
+// lock, with the version the pointer is at now ("" = none): an error from check
+// leaves the pointer where it is (optimistic "only if it is still at …" moves).
+func (s *Service) MovePointerChecked(ctx context.Context, entityType, entityID, pointerName, toVersionID, actor, reason, batchID string, check func(ctx context.Context, tx *sql.Tx, from string) error, then func(context.Context, *sql.Tx) error) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -249,6 +256,15 @@ func (s *Service) MovePointerThen(ctx context.Context, entityType, entityID, poi
 	defer tx.Rollback()
 	if err := lockWrites(ctx, tx); err != nil {
 		return err
+	}
+	if check != nil {
+		from, err := getPointer(ctx, tx, entityType, entityID, pointerName)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err := check(ctx, tx, from.String); err != nil {
+			return err
+		}
 	}
 	if err := movePointer(ctx, tx, entityType, entityID, pointerName, toVersionID, actor, reason, batchID); err != nil {
 		return err
@@ -259,6 +275,12 @@ func (s *Service) MovePointerThen(ctx context.Context, entityType, entityID, poi
 		}
 	}
 	return tx.Commit()
+}
+
+// MovePointerTx moves another pointer inside a MovePointerChecked / Commit
+// transaction (check or then), so both moves land together or not at all.
+func MovePointerTx(ctx context.Context, tx *sql.Tx, entityType, entityID, pointerName, toVersionID, actor, reason, batchID string) error {
+	return movePointer(ctx, tx, entityType, entityID, pointerName, toVersionID, actor, reason, batchID)
 }
 
 // movePointer moves a pointer inside tx (which already holds the write lock).

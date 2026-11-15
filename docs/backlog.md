@@ -6365,3 +6365,28 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；用户自己选的目录本来就不在 tidebot home 里，换机后需要用户自己改，可以在恢复后列出「目录不存在的任务」提示一次。
 - 运行详情里 JSON 字段（如能力包锁文件、`effective_cost_policy_json`）里可能也有旧路径，未逐一核对。
 - 运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-14（续）：会话「采用」不再悄悄盖掉技能在别处的新版本；推广 / 丢弃提议一次写完（业务逻辑矛盾 / BUG）
+
+- **问题**：
+  - 会话草稿从技能的 v1 开始，保存成 v2 待采用；这期间技能在别处变成了 v3（另一个会话采用了、技能页重新导入 / 编辑、或者会话本来就是从锁定旧版本的运行续聊的）。点「采用 v2」照样把当前版本移到 v2，v3 的改动就从当前版本里消失了（只在历史里）；确认框只写「采用后成为当前版本」，「当前是 v3」只藏在草稿条的提示里。技能页自己的依赖清单编辑、Git 来源「应用新版本」都已经按「期望的当前版本」做乐观检查，会话采用是唯一不查的入口。
+  - `optimize.Promote` 是三次独立写入：移 current、清 canary（错误丢掉）、改提议状态（错误丢掉）。后两步失败时版本已成为当前，提议仍是「待采用 / 灰度中」，canary 指针还在分流；`Discard` 清 canary 失败却照样标成「已丢弃」，被丢弃的候选版本继续接运行，而界面上已经没有按钮能再停它；自动撤回同样。两个标签页同时点也能把同一提议推广两次。
+- **改法**：
+  - `version.MovePointerChecked`：拿写锁后先用指针当前所在的版本跑 `check`，不通过就什么都不改；`version.MovePointerTx` 让同一事务里再移另一个指针。
+  - `optimize.PromoteOver(pid, over...)`：只有当前版本是 `over` 之一（或已经是这个提议的版本）才推广，否则 `ErrStale`；事务里重读提议状态，移 current、清 canary、标 promoted 一起提交。`Discard` / 自动撤回 / `StartCanary` 同样「指针 + 状态」一个事务；拒绝待定提议不再碰别的提议正在跑的 canary。`Promote` 不带检查，技能页 进阶 里的老入口行为不变。
+  - 会话采用：`AdoptChatDraft(sid, expectCurrent)` 只替换草稿起点或页面展示给用户的当前版本；接口 `POST …/draft/adopt` 收 `expect_current`，不符回 409 `draft_stale`。草稿视图多给 `current_version_id`。
+  - 页面：当前版本不是草稿起点（也不是本会话存的版本）时，草稿条在状态后加一个黄色提示图标（悬停说明「技能已在别处更新到 v3」），确认框多一行「采用会替换掉 v3，它的改动不会合进来」并用危险色按钮，确认后带上 `expect_current`；收到 `draft_stale`（点之前又变了）提示并刷新草稿条，再点会说明要替换哪个版本。中英文。
+- 测试：`optimize/promote_atomic_test.go`——状态写入失败时推广不移 current、不清 canary，恢复后一次完成且不能推广两次；丢弃 canary 失败时指针和状态都不变；拒绝待定提议不动正在跑的 canary；`PromoteOver` 遇到别处的新版本拒绝且不改任何东西。`app/chatdraft_stale_test.go`——v1 起的草稿存成 v2，技能被导入成 v3：不带期望时拒绝、当前仍是 v3、提议仍待采用；页面看到 v3 但点之前来了 v4 也拒绝；带上 v4 才采用。webui：`expect_current` 透传、`draft_stale` 码，`draftStale()` 在 node 下 6 种情况。前两组与会话那条在改前都失败（推广 / 丢弃返回成功、采用返回 nil）。`go test ./...`（47 个包）、`go vet`（含 GOOS=windows/darwin）、`-race -count=3`（optimize / version）通过。演示实例实测：不带期望 409 `draft_stale`，带上页面给的版本 200。截图：`/workspace/tidebot-shots/2026-11-14-draft-stale-{bar,adopt}-{zh-CN,en}-1024x655.png`。
+
+| 场景（测试里模拟） | 修复前 | 修复后 |
+| --- | --- | --- |
+| 草稿从 v1 起、技能已是 v3，直接点采用 | 盖掉 v3，无提示 | 确认框说明要替换 v3；没看到就拒绝（409） |
+| 推广时改状态失败 | current 已移、提议仍待定、canary 仍分流 | 都不变，报错 |
+| 丢弃 canary 时清指针失败 | 标成已丢弃、候选版本继续接运行 | 都不变，报错 |
+
+**心得**：同一个「把当前版本换成 X」的动作，几个入口里有的带乐观检查、有的不带，不带的那个就会悄悄盖掉别人的改动；指针移动和它的业务状态（提议状态、canary）必须同一事务，「状态写不进就算了」会造成界面和实际行为相反。
+
+**后续想法**：
+- 技能页 进阶 的 AI 优化提议（`skills.promote`）还用不带检查的 `Promote`：提议可以记下生成时的当前版本（`skill_proposals` 加列），推广时同样用 `PromoteOver`。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。

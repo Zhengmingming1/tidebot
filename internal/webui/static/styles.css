@@ -3932,6 +3932,7 @@ button.pill.pl-sb { cursor: pointer; border: 0; font: inherit; }
 .cs-draft-st { flex: none; color: var(--text-3); font-size: 12px; white-space: nowrap; }
 .cs-draft-st.on { color: var(--warn); font-weight: 600; }
 .cs-draft-ro { display: inline-flex; color: var(--text-3); }
+.cs-draft-stale { display: inline-flex; flex: none; color: var(--warn); cursor: default; }
 .cs-draft .btn { flex: none; }
 .cs-head .btn .i, .cs-draft .btn .i { margin-right: 2px; }
 #cs-tune .i { color: var(--hue-violet); }
