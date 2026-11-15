@@ -213,3 +213,51 @@ func TestRetentionTickPacksFinishedLogs(t *testing.T) {
 		t.Fatalf("packed log not planned for deletion: %+v", plan.del)
 	}
 }
+
+// Session folders and tidebot-owned Claude Code transcripts are part of the
+// usage bar total. A fixture with known sizes makes the undercount visible:
+// without them the bar would report only logs+database.
+func TestStorageUsageIncludesSessionsAndTranscripts(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	placeSessionDir(t, a, "chat_live_u", 8<<10)    // work+draft = 16 KiB
+	placeSessionDir(t, a, "chat_orphan_u", 32<<10) // 64 KiB
+	insertChatRow(t, a, "chat_live_u")
+
+	csid := "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0001"
+	placeChatTranscript(t, a, csid, "proj-usage", 40<<10, time.Hour) // jsonl 40 KiB + sidecar 20 KiB
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "runs", "r_usage.log"), 100, time.Hour)
+
+	v, err := a.StorageUsage(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSessions := int64((16 << 10) + (64 << 10) + (40 << 10) + (20 << 10))
+	sp := v.Parts["sessions"]
+	if sp.Bytes != wantSessions || sp.Folders != 2 || sp.Transcripts != 1 || sp.Count != 3 {
+		t.Fatalf("sessions part %+v, want bytes=%d folders=2 transcripts=1 count=3", sp, wantSessions)
+	}
+	if v.Parts["logs"].Bytes != 100 {
+		t.Fatalf("logs %+v", v.Parts["logs"])
+	}
+	var sum int64
+	for _, p := range v.Parts {
+		sum += p.Bytes
+	}
+	if v.TotalBytes != sum || v.TotalBytes != wantSessions+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes {
+		t.Fatalf("total %d sum %d parts %+v", v.TotalBytes, sum, v.Parts)
+	}
+	// The previous bar total (logs+artifacts+database+backups) under-counted
+	// by the whole sessions slice. Recorded so the backlog can cite a real number.
+	oldTotal := v.TotalBytes - sp.Bytes
+	if oldTotal <= 0 || v.TotalBytes-oldTotal != wantSessions {
+		t.Fatalf("old total %d new %d sessions %d", oldTotal, v.TotalBytes, wantSessions)
+	}
+	t.Logf("usage bar without sessions: %d bytes; with sessions: %d bytes (sessions %d, undercount %d)", oldTotal, v.TotalBytes, wantSessions, wantSessions)
+
+	// Orphan session folder is already in the cleanup preview (live folder stays).
+	if v.Preview.Bytes < 64<<10 {
+		t.Fatalf("preview should include the orphan session folder, got %+v", v.Preview)
+	}
+}

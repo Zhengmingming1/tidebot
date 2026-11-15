@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/runner"
@@ -87,6 +88,9 @@ type UsagePart struct {
 	Packed    int   `json:"packed,omitempty"`
 	PackedRaw int64 `json:"packed_raw,omitempty"`
 	PackedOn  int64 `json:"packed_bytes,omitempty"`
+	// Sessions only: folders under chat-sessions, plus Claude Code transcripts.
+	Folders     int `json:"folders,omitempty"`
+	Transcripts int `json:"transcripts,omitempty"`
 }
 
 // logQuiet: a finished run's log is gzipped once it has been left alone this long, so a
@@ -125,7 +129,7 @@ func (a *App) compactLogs(ctx context.Context, now time.Time) runner.CompactRepo
 type StorageView struct {
 	Policy      RetentionPolicy      `json:"policy"`
 	Defaults    RetentionPolicy      `json:"defaults"`
-	Parts       map[string]UsagePart `json:"parts"` // logs | artifacts | database | backups
+	Parts       map[string]UsagePart `json:"parts"` // logs | artifacts | sessions | database | backups
 	TotalBytes  int64                `json:"total_bytes"`
 	Reclaimable int64                `json:"db_reclaimable"` // free pages VACUUM would return
 	Preview     struct {
@@ -170,6 +174,7 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 		}
 	}
 	v.Parts["database"] = db
+	v.Parts["sessions"] = a.sessionUsage()
 	if ents, err := os.ReadDir(a.backupDir()); err == nil {
 		var b UsagePart
 		for _, e := range ents {
@@ -203,6 +208,39 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 		v.Blocked = v.MinFreeMB > 0 && d.Free < uint64(v.MinFreeMB)<<20
 	}
 	return v, nil
+}
+
+// sessionUsage sums session folders (<data>/chat-sessions/<id>, including
+// leftovers of deleted sessions) and tidebot-owned Claude Code transcripts
+// (<data>/claude-config/projects). These were left out of the usage bar, so
+// the total looked small while the folders kept growing. The size cap still
+// applies only to logs+artifacts; leftover folders and idle transcripts are
+// already in the cleanup plan (see planChatSessionDirRetention and
+// planChatTranscriptRetention).
+func (a *App) sessionUsage() UsagePart {
+	var p UsagePart
+	if ents, err := os.ReadDir(a.chatSessionsDir()); err == nil {
+		root := a.chatSessionsDir()
+		for _, e := range ents {
+			if e.IsDir() {
+				size, _ := dirSize(filepath.Join(root, e.Name()))
+				p.Bytes += size
+				p.Count++
+				p.Folders++
+				continue
+			}
+			if fi, err := e.Info(); err == nil && fi.Mode().IsRegular() {
+				p.Bytes += fi.Size()
+				p.Count++
+			}
+		}
+	}
+	for _, f := range a.chatTranscriptFiles() {
+		p.Bytes += f.size
+		p.Count++
+		p.Transcripts++
+	}
+	return p
 }
 
 // ShrinkDatabase runs VACUUM and truncates the WAL; returns bytes saved on disk.
