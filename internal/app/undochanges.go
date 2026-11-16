@@ -130,10 +130,14 @@ func (a *App) undoRunChanges(ctx context.Context, runID string, redo bool, path 
 		b, _ := json.Marshal(res.UndoneFiles)
 		files = string(b)
 	}
-	// the folder is already changed: save even if the request went away meanwhile
-	wctx, done2 := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer done2()
-	if _, err := a.DB.ExecContext(wctx, `UPDATE runs SET changes_undone_at=?, changes_undone_files=? WHERE id=?`, res.UndoneAt, files, runID); err != nil {
+	// The folder is already changed: keep trying even if the request went
+	// away, or the one database connection is busy (cleanup, export). A
+	// short try left the files taken back but the run still looking live,
+	// and a second click then refused as a conflict.
+	if err := a.retryWrite("run changes: undone", runID, func(wctx context.Context) error {
+		_, err := a.DB.ExecContext(wctx, `UPDATE runs SET changes_undone_at=?, changes_undone_files=? WHERE id=?`, res.UndoneAt, files, runID)
+		return err
+	}); err != nil {
 		return res, err
 	}
 	a.Log.Info("run changes", "run_id", runID, "undone", !redo, "one_file", path != "", "files_undone", len(done))
