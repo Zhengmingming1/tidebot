@@ -6506,3 +6506,29 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 通知渠道 / 插件配置等其他 JSON 若以后存了 home 下的路径，可以再纳入同一套遍历。
 - 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
 - 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-16（续）：换机恢复时把 Windows 8.3 短路径和长路径当成同一前缀（BUG / CI）
+
+- **问题**（11-16 JSON 路径改写刚推上 main）：Windows CI `matrix / core (windows-latest, 1.26.x)` 在 `TestRestoreRemapsPathsFromAnotherMachine` 红了（https://github.com/Zhengmingming1/tidebot/actions/runs/43777584974）。macOS、Ubuntu、race、desktop、i18n、benchmarks 都过了。失败看起来像 JSON 里还留着旧路径，其实有两件事：
+  - 测试断言：`strings.Contains(json, filepath)` 在 Windows 上对不上。恢复后的路径已经被改写到新的 `t.TempDir()`，但 JSON 会把反斜杠写成 `\\`，而且 GitHub 的 Windows runner 上 `TempDir` 本身是 8.3 短路径（`C:\Users\RUNNER~1\AppData\Local\Temp\...`）。文本列用精确相等（和同一个 `TempDir` 字符串比）是过的，只有提议载荷、`agent_config_changes`、文件监视这三处 JSON 断言失败。这一部分是测试写得不严谨，Unix 夹具里的旧路径其实已经改对了。
+  - 产品漏洞：`remapPath` 对 Windows 前缀只做不分大小写的字符串比较。备份里的路径经常是 8.3 短形式（`GetTempPath`、部分 API 会给出 `C:\Users\RUNNER~1\.tidebot\...`），清单里的 home 却可能是长形式（`C:\Users\runneradmin\.tidebot`），反过来也一样。前缀对不上，能力包锁文件、运行详情、文件监视，以及路径列都会继续指向旧机器。恢复时旧路径在新机器上不存在，不能靠 `GetLongPathName` 去展开。
+- **改法**：Windows 备份按路径元素比较：大小写、斜杠方向、以及传统 8.3 别名（`RUNNER~1` 对 `runneradmin`，`PROGRA~1` 对 `Program Files`；空格去掉、`+,;=[]` 换成 `_`）。已经能当 8.3 名字的（如 `RUNNER`）不当成别名，避免误匹配。同前缀兄弟目录、用户自己的目录、系统路径、相对路径仍不改。数据目录在 home 里时仍按匹配到的层数取最长。测试改为解码 JSON 后比较字符串值；并在 Linux 上用构造出来的 Windows 路径覆盖短/长两种方向，再加一份「清单是长路径、库里是短路径」的完整恢复用例。Windows 上另有一项用 `GetShortPathName` / `GetLongPathName` 对照真实 TempDir 的测试。
+- 测试：`TestRemapPath` / `TestRemapJSON` 补上 8.3 短路径、长短互换、大小写混用斜杠、Program Files、兄弟目录 / 用户目录 / 已是合法 8.3 的名字不改、数据目录仍优先。`TestRestoreRemapsPathsFromAnotherMachine` 的 JSON 断言改为比解码后的值（改前在 Windows 上会失败）。`TestRestoreRemapsWindowsShortAndLongPaths`：清单长路径、库和 JSON 里短路径，恢复后改到新 home，兄弟目录不动；改前产品代码会失败。`TestRemapPathRealShortAndLongTempDir`（仅 Windows）对照真实 8.3。`go test ./...`（47 个包）、`go vet`（含 GOOS=windows/darwin）、`-race -count=3`（路径改写用例）通过。
+
+| 场景（测试里模拟） | 修复前 | 修复后 |
+| --- | --- | --- |
+| 锁文件 / 提议 / 运行详情 / 文件监视里是 `C:\Users\RUNNER~1\.tidebot\...`，清单是 `C:\Users\runneradmin\.tidebot` | 前缀对不上，仍是旧短路径 | 改到新 home；兄弟目录、系统路径不动 |
+| Windows CI 上 `TempDir` 为 8.3，JSON 断言用 `strings.Contains` | 假失败（路径其实已改写） | 比较解码后的字符串，不再被 `\\` 转义误伤 |
+
+**心得**：Windows 上同一目录常有两种写法，换机恢复时旧路径又不在新机器上，只能按 8.3 规则做词法匹配，不能调本机 API。JSON 里的 Windows 路径不能拿原始 `filepath` 去做 `strings.Contains`。
+
+**后续想法**：
+- 撤销改动把文件夹改完后，给运行行打「已撤销」仍只试 5 秒，不过失败会返回给界面，用户可以再点一次。
+- `chat-sessions/<id>/work` 在会话还在时一直保留，长期不用的会话可以考虑按 `LogDays` 清空临时目录（保留会话和草稿）。
+- WebUI 单包仍带注释和空白（构建时压缩）。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；用户自己选的目录本来就不在 tidebot home 里，换机后需要用户自己改，可以在恢复后列出「目录不存在的任务」提示一次。
+- 通知渠道 / 插件配置等其他 JSON 若以后存了 home 下的路径，可以再纳入同一套遍历。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- Windows 在短名冲突很多时会改用校验和形式（前 2 个字符 + 4 位十六进制 + `~N`），词法上不敢随便匹配，目前只覆盖传统的「前 6 字 + `~N`」。
+- 在同一台机器上恢复时，若清单里的 home 和新 home 字符串相同、库里却混着另一种 8.3 写法，现在会跳过改写（`HomeDir != home`）；长短形式在同一台机器上通常都能用，若以后要统一可以再展开。
