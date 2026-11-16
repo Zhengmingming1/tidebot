@@ -116,3 +116,90 @@ VALUES('r1','succeeded','quick','p',?,'edit',?,?,datetime('now'))`, ws, string(f
 		t.Fatalf("over cap: %+v", ck)
 	}
 }
+
+// When the folder is already in the post-undo (or post-redo) state but the
+// run row was not marked, the pre-click check must say the button would work
+// (so it is not turned off). A genuine later edit still comes back as conflict.
+func TestCheckRunUndoAlreadyAppliedIsOK(t *testing.T) {
+	a := newTestApp(t)
+	fakeHome(t)
+	ws := gitRepo(t)
+	s, err := gitsnap.Start(context.Background(), ws, filepath.Join(t.TempDir(), "snap"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(ws, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(ws, "new.txt"), []byte("new\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(ws, "笔记.md"), []byte("你好\n"), 0o644)
+	c, err := s.Finish(context.Background())
+	s.Close()
+	if err != nil || c.Count != 3 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	fc, _ := json.Marshal(c)
+	if _, err := a.DB.Exec(`INSERT INTO runs(id, status, trigger_kind, prompt, workspace_dir, run_mode, file_changes, file_patch, created_at)
+VALUES('r1','succeeded','quick','p',?,'edit',?,?,datetime('now'))`, ws, string(fc), c.Patch); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// take everything back, then drop the mark: the main button and each
+	// file's button must stay on so the user can finish writing the row.
+	if err := gitsnap.Apply(ctx, ws, c.Patch, true); err != nil {
+		t.Fatal(err)
+	}
+	ck, err := a.checkRunUndo(ctx, "r1")
+	if err != nil || ck.Code != "" || ck.Whole != "ok" {
+		t.Fatalf("already undone, row unmarked: %+v %v", ck, err)
+	}
+	for p, f := range ck.Files {
+		if !f.OK {
+			t.Fatalf("already undone file %s: %+v", p, f)
+		}
+	}
+
+	_ = os.WriteFile(filepath.Join(ws, "main.go"), []byte("package other\n"), 0o644)
+	ck, err = a.checkRunUndo(ctx, "r1")
+	if err != nil || ck.Whole != "conflict" || ck.Files["main.go"].OK {
+		t.Fatalf("hand edit: %+v %v", ck, err)
+	}
+	if !ck.Files["new.txt"].OK || !ck.Files["笔记.md"].OK {
+		t.Fatalf("other files after a hand edit: %+v", ck.Files)
+	}
+	_ = os.WriteFile(filepath.Join(ws, "main.go"), []byte("package main\n"), 0o644)
+
+	// one file already taken back, the others still as the run left them,
+	// row unmarked: that file's undo button stays on.
+	if err := gitsnap.Apply(ctx, ws, c.Patch, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitsnap.Apply(ctx, ws, gitsnap.FilePatch(c.Patch, []string{"new.txt"}), true); err != nil {
+		t.Fatal(err)
+	}
+	ck, err = a.checkRunUndo(ctx, "r1")
+	if err != nil || !ck.Files["new.txt"].OK || !ck.Files["main.go"].OK || !ck.Files["笔记.md"].OK {
+		t.Fatalf("one file already undone: %+v %v", ck, err)
+	}
+
+	// wholly undone and marked, then the files put back on disk without
+	// clearing the row: the main button's action is redo and stays on.
+	if err := gitsnap.Apply(ctx, ws, gitsnap.FilePatch(c.Patch, []string{"new.txt"}), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitsnap.Apply(ctx, ws, c.Patch, true); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = a.DB.Exec(`UPDATE runs SET changes_undone_at=? WHERE id='r1'`, "2026-11-16T00:00:00Z")
+	if err := gitsnap.Apply(ctx, ws, c.Patch, false); err != nil {
+		t.Fatal(err)
+	}
+	ck, err = a.checkRunUndo(ctx, "r1")
+	if err != nil || ck.Whole != "ok" {
+		t.Fatalf("already redone, row still marked: %+v %v", ck, err)
+	}
+	for p, f := range ck.Files {
+		if !f.OK {
+			t.Fatalf("already redone file %s: %+v", p, f)
+		}
+	}
+}

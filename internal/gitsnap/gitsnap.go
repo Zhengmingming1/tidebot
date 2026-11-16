@@ -172,6 +172,22 @@ func Check(ctx context.Context, dir, patch string, reverse bool) error {
 	return apply(ctx, dir, patch, reverse, true)
 }
 
+// AlreadyApplied reports whether dir's files already match the result of
+// Apply(dir, patch, reverse): the opposite direction would fit (git apply
+// --check the other way). A previous undo or redo may have written the files
+// and then failed to mark the run row. Nothing is written.
+func AlreadyApplied(ctx context.Context, dir, patch string, reverse bool) (bool, error) {
+	err := Check(ctx, dir, patch, !reverse)
+	if err == nil {
+		return true, nil
+	}
+	var ce *ErrConflict
+	if errors.As(err, &ce) {
+		return false, nil
+	}
+	return false, err
+}
+
 func apply(ctx context.Context, dir, patch string, reverse, check bool) error {
 	bin, err := exec.LookPath("git")
 	if err != nil {

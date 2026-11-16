@@ -75,6 +75,17 @@ func (a *App) checkRunUndo(ctx context.Context, runID string) (webui.UndoCheck, 
 			return true, nil
 		}
 		err := gitsnap.Check(cctx, real, part, reverse)
+		if err != nil {
+			var ce *gitsnap.ErrConflict
+			if !errors.As(err, &ce) {
+				return true, nil // git missing / timed out: say nothing rather than block
+			}
+			// files already match the post-undo / post-redo state (a previous
+			// click wrote them, then failed to mark the run row)
+			if ok, aerr := gitsnap.AlreadyApplied(cctx, real, part, reverse); aerr == nil && ok {
+				err = nil
+			}
+		}
 		if err == nil {
 			for _, p := range paths {
 				out.Files[p] = webui.UndoFileCheck{OK: true}
@@ -82,22 +93,27 @@ func (a *App) checkRunUndo(ctx context.Context, runID string) (webui.UndoCheck, 
 			return true, nil
 		}
 		var ce *gitsnap.ErrConflict
-		if !errors.As(err, &ce) {
-			return true, nil // git missing / timed out: say nothing rather than block
-		}
 		var bad []string
 		for _, p := range paths {
 			if singles >= undoCheckMaxFiles || time.Now().After(deadline) {
 				break
 			}
 			singles++
-			ferr := gitsnap.Check(cctx, real, gitsnap.FilePatch(st.patch, []string{p}), reverse)
-			if errors.As(ferr, &ce) {
-				out.Files[p] = webui.UndoFileCheck{Detail: ce.Message}
-				bad = append(bad, p)
-			} else if ferr == nil {
+			one := gitsnap.FilePatch(st.patch, []string{p})
+			ferr := gitsnap.Check(cctx, real, one, reverse)
+			if ferr == nil {
 				out.Files[p] = webui.UndoFileCheck{OK: true}
+				continue
 			}
+			if !errors.As(ferr, &ce) {
+				continue
+			}
+			if ok, aerr := gitsnap.AlreadyApplied(cctx, real, one, reverse); aerr == nil && ok {
+				out.Files[p] = webui.UndoFileCheck{OK: true}
+				continue
+			}
+			out.Files[p] = webui.UndoFileCheck{Detail: ce.Message}
+			bad = append(bad, p)
 		}
 		return false, bad
 	}

@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/gitsnap"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
 
@@ -223,4 +225,246 @@ func TestUndoRunChangesReturnsErrorIfMarkGivesUp(t *testing.T) {
 	if at := undoneAtOf(t, a, runID); at != "" {
 		t.Fatalf("row marked after giving up: %q", at)
 	}
+}
+
+func clearUndoMark(t *testing.T, a *App, runID string) {
+	t.Helper()
+	if _, err := a.DB.Exec(`UPDATE runs SET changes_undone_at='', changes_undone_files='' WHERE id=?`, runID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setUndoMark(t *testing.T, a *App, runID, at, files string) {
+	t.Helper()
+	if _, err := a.DB.Exec(`UPDATE runs SET changes_undone_at=?, changes_undone_files=? WHERE id=?`, at, files, runID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertThreeFileRun(t *testing.T, a *App, id string) string {
+	t.Helper()
+	ws := gitRepo(t)
+	s, err := gitsnap.Start(context.Background(), ws, filepath.Join(t.TempDir(), "snap"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(ws, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(ws, "new.txt"), []byte("new\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(ws, "笔记.md"), []byte("你好\n"), 0o644)
+	c, err := s.Finish(context.Background())
+	s.Close()
+	if err != nil || c.Count != 3 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	fc, _ := json.Marshal(c)
+	if _, err := a.DB.Exec(`INSERT INTO runs(id, status, trigger_kind, prompt, workspace_dir, run_mode, file_changes, file_patch, created_at)
+VALUES(?,'succeeded','quick','p',?,'edit',?,?,datetime('now'))`, id, ws, string(fc), c.Patch); err != nil {
+		t.Fatal(err)
+	}
+	return ws
+}
+
+// Folder already in the post-undo (or post-redo) state with the run row still
+// unmarked: a second click only writes the mark and leaves the files alone.
+// A genuine later edit still returns conflict and does not mark. A mark that
+// gave up, then a second call, ends with the row marked. Same for one file.
+// The "already undone" and "failed mark then second click" cases failed on
+// the pre-change code (git apply reported a conflict).
+func TestUndoRunChangesMarksWhenFolderAlreadyMatches(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("already undone", func(t *testing.T) {
+		a := newTestApp(t)
+		fakeHome(t)
+		runID, made, _ := startUndoableRun(t, a)
+		res, err := a.undoRunChanges(ctx, runID, false, "")
+		if err != nil || res.UndoneAt == "" {
+			t.Fatalf("undo: %+v %v", res, err)
+		}
+		clearUndoMark(t, a, runID)
+		res2, err := a.undoRunChanges(ctx, runID, false, "")
+		if err != nil || res2.UndoneAt == "" {
+			t.Fatalf("second undo with files already taken back: %+v %v", res2, err)
+		}
+		if _, st := os.Stat(made); !os.IsNotExist(st) {
+			t.Fatal("second undo recreated the file")
+		}
+		if saved := undoneAtOf(t, a, runID); saved != res2.UndoneAt {
+			t.Fatalf("saved %q want %q", saved, res2.UndoneAt)
+		}
+	})
+
+	t.Run("hand edit still conflicts", func(t *testing.T) {
+		a := newTestApp(t)
+		fakeHome(t)
+		runID, made, _ := startUndoableRun(t, a)
+		if err := os.WriteFile(made, []byte("edited by hand\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.undoRunChanges(ctx, runID, false, ""); undoCode(err) != "conflict" {
+			t.Fatalf("hand edit: %v", err)
+		}
+		if b, _ := os.ReadFile(made); string(b) != "edited by hand\n" {
+			t.Fatalf("refused undo changed the file: %q", b)
+		}
+		if at := undoneAtOf(t, a, runID); at != "" {
+			t.Fatalf("row marked after conflict: %q", at)
+		}
+	})
+
+	t.Run("already redone", func(t *testing.T) {
+		a := newTestApp(t)
+		fakeHome(t)
+		runID, made, _ := startUndoableRun(t, a)
+		res, err := a.undoRunChanges(ctx, runID, false, "")
+		if err != nil || res.UndoneAt == "" {
+			t.Fatalf("undo: %+v %v", res, err)
+		}
+		if _, err := a.undoRunChanges(ctx, runID, true, ""); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(made)
+		if err != nil || len(before) == 0 {
+			t.Fatalf("redo did not bring the file back: %v", err)
+		}
+		setUndoMark(t, a, runID, res.UndoneAt, "")
+		res2, err := a.undoRunChanges(ctx, runID, true, "")
+		if err != nil || res2.UndoneAt != "" {
+			t.Fatalf("second redo with files already put back: %+v %v", res2, err)
+		}
+		if b, _ := os.ReadFile(made); string(b) != string(before) {
+			t.Fatalf("second redo changed the file: %q", b)
+		}
+		if at := undoneAtOf(t, a, runID); at != "" {
+			t.Fatalf("row still marked after redo: %q", at)
+		}
+	})
+
+	t.Run("redo hand edit still conflicts", func(t *testing.T) {
+		a := newTestApp(t)
+		fakeHome(t)
+		runID, made, _ := startUndoableRun(t, a)
+		if _, err := a.undoRunChanges(ctx, runID, false, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(made, []byte("edited by hand\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.undoRunChanges(ctx, runID, true, ""); undoCode(err) != "conflict" {
+			t.Fatalf("redo over a hand edit: %v", err)
+		}
+		if b, _ := os.ReadFile(made); string(b) != "edited by hand\n" {
+			t.Fatalf("refused redo changed the file: %q", b)
+		}
+		if at := undoneAtOf(t, a, runID); at == "" {
+			t.Fatal("conflict cleared the undone mark")
+		}
+	})
+
+	t.Run("failed mark then second click", func(t *testing.T) {
+		wait, pause, total := writeRetryWait, writeRetryPause, writeRetryFor
+		t.Cleanup(func() { writeRetryWait, writeRetryPause, writeRetryFor = wait, pause, total })
+		writeRetryWait, writeRetryPause, writeRetryFor = 20*time.Millisecond, time.Millisecond, 40*time.Millisecond
+
+		a := newTestApp(t)
+		fakeHome(t)
+		runID, made, _ := startUndoableRun(t, a)
+		blockSQL(t, a, "undoretry", `BEFORE UPDATE ON runs WHEN NEW.changes_undone_at<>''`)
+		if _, err := a.undoRunChanges(ctx, runID, false, ""); err == nil {
+			t.Fatal("expected error after giving up")
+		}
+		if _, st := os.Stat(made); !os.IsNotExist(st) {
+			t.Fatal("folder was not taken back")
+		}
+		if at := undoneAtOf(t, a, runID); at != "" {
+			t.Fatalf("row marked after giving up: %q", at)
+		}
+		unblockSQL(t, a, "undoretry")
+		res, err := a.undoRunChanges(ctx, runID, false, "")
+		if err != nil || res.UndoneAt == "" {
+			t.Fatalf("second click: %+v %v", res, err)
+		}
+		if _, st := os.Stat(made); !os.IsNotExist(st) {
+			t.Fatal("second click changed the folder")
+		}
+		if saved := undoneAtOf(t, a, runID); saved != res.UndoneAt {
+			t.Fatalf("saved %q want %q", saved, res.UndoneAt)
+		}
+	})
+
+	t.Run("one file already undone", func(t *testing.T) {
+		a := newTestApp(t)
+		fakeHome(t)
+		ws := insertThreeFileRun(t, a, "r-match")
+		if _, err := a.undoRunChanges(ctx, "r-match", false, "new.txt"); err != nil {
+			t.Fatal(err)
+		}
+		clearUndoMark(t, a, "r-match")
+		mainBefore, _ := os.ReadFile(filepath.Join(ws, "main.go"))
+		res, err := a.undoRunChanges(ctx, "r-match", false, "new.txt")
+		if err != nil || res.UndoneAt != "" || len(res.UndoneFiles) != 1 || res.UndoneFiles[0] != "new.txt" {
+			t.Fatalf("second one-file undo: %+v %v", res, err)
+		}
+		if _, st := os.Stat(filepath.Join(ws, "new.txt")); !os.IsNotExist(st) {
+			t.Fatal("second one-file undo recreated the file")
+		}
+		if b, _ := os.ReadFile(filepath.Join(ws, "main.go")); string(b) != string(mainBefore) {
+			t.Fatal("second one-file undo changed another file")
+		}
+		var files string
+		_ = a.DB.QueryRow(`SELECT changes_undone_files FROM runs WHERE id='r-match'`).Scan(&files)
+		if files != `["new.txt"]` {
+			t.Fatalf("saved files %q", files)
+		}
+	})
+
+	t.Run("one file already redone", func(t *testing.T) {
+		a := newTestApp(t)
+		fakeHome(t)
+		ws := insertThreeFileRun(t, a, "r-match")
+		if _, err := a.undoRunChanges(ctx, "r-match", false, "new.txt"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.undoRunChanges(ctx, "r-match", true, "new.txt"); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(filepath.Join(ws, "new.txt"))
+		if err != nil || string(before) != "new\n" {
+			t.Fatalf("put back: %q %v", before, err)
+		}
+		setUndoMark(t, a, "r-match", "", `["new.txt"]`)
+		res, err := a.undoRunChanges(ctx, "r-match", true, "new.txt")
+		if err != nil || len(res.UndoneFiles) != 0 {
+			t.Fatalf("second one-file redo: %+v %v", res, err)
+		}
+		if b, _ := os.ReadFile(filepath.Join(ws, "new.txt")); string(b) != string(before) {
+			t.Fatalf("second one-file redo changed the file: %q", b)
+		}
+		var at, files string
+		_ = a.DB.QueryRow(`SELECT changes_undone_at, changes_undone_files FROM runs WHERE id='r-match'`).Scan(&at, &files)
+		if at != "" || files != "" {
+			t.Fatalf("row still marked: %q %q", at, files)
+		}
+	})
+
+	t.Run("one file hand edit still conflicts", func(t *testing.T) {
+		a := newTestApp(t)
+		fakeHome(t)
+		ws := insertThreeFileRun(t, a, "r-match")
+		p := filepath.Join(ws, "new.txt")
+		if err := os.WriteFile(p, []byte("edited by hand\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.undoRunChanges(ctx, "r-match", false, "new.txt"); undoCode(err) != "conflict" {
+			t.Fatalf("one-file hand edit: %v", err)
+		}
+		if b, _ := os.ReadFile(p); string(b) != "edited by hand\n" {
+			t.Fatalf("refused one-file undo changed the file: %q", b)
+		}
+		var files string
+		_ = a.DB.QueryRow(`SELECT changes_undone_files FROM runs WHERE id='r-match'`).Scan(&files)
+		if files != "" {
+			t.Fatalf("row marked after conflict: %q", files)
+		}
+	})
 }

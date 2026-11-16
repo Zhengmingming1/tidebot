@@ -87,10 +87,19 @@ func (a *App) undoRunChanges(ctx context.Context, runID string, redo bool, path 
 	defer cancel()
 	if err := gitsnap.Apply(actx, real, part, !redo); err != nil {
 		var ce *gitsnap.ErrConflict
-		if errors.As(err, &ce) {
+		if !errors.As(err, &ce) {
+			return res, err
+		}
+		// A previous click may have already taken the patch back (or put it
+		// back) and then failed to mark the run row. The tree already matches
+		// the result, so skip rewriting files and only write the mark.
+		ok, aerr := gitsnap.AlreadyApplied(actx, real, part, !redo)
+		if aerr != nil {
+			return res, aerr
+		}
+		if !ok {
 			return res, &webui.UndoError{Code: "conflict", Detail: ce.Message}
 		}
-		return res, err
 	}
 	// the new set of files taken back
 	switch {
