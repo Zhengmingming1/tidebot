@@ -24,9 +24,10 @@ import (
 
 // --- retention ---------------------------------------------------------------
 
-// RetentionPolicy: run logs 30 d, artifacts 90 d, idle chat transcripts follow
-// log days (orphans always removed), always keep the newest 20 runs per task,
-// never touch runs flagged important, and cap logs+artifacts at 10 GB.
+// RetentionPolicy: run logs 30 d, artifacts 90 d, idle chat transcripts and
+// session scratch folders follow log days (orphans always removed), always keep
+// the newest 20 runs per task, never touch runs flagged important, and cap
+// logs+artifacts at 10 GB.
 type RetentionPolicy struct {
 	LogDays       int   `json:"log_days"`
 	ArtifactDays  int   `json:"artifact_days"`
@@ -55,10 +56,11 @@ type runFile struct {
 	packed bool
 }
 
-// ApplyRetention deletes old run logs/artifacts, idle/orphan chat transcripts
-// and the folders of deleted sessions.
-// Run metadata and chat_sessions rows stay in the DB. A zero LogDays/ArtifactDays
-// keeps that kind forever (orphan chat transcripts are still removed); a zero
+// ApplyRetention deletes old run logs/artifacts, idle/orphan chat transcripts,
+// leftover folders of deleted sessions, and the scratch folder (work/) of
+// sessions idle longer than LogDays. Session rows, turn history and skill
+// drafts stay. A zero LogDays/ArtifactDays keeps that kind forever (orphan
+// chat transcripts and leftover session folders are still removed); a zero
 // MaxTotalBytes means no cap on logs+artifacts.
 func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Time) (RetentionReport, error) {
 	plan, err := a.planRetention(ctx, p, now)
@@ -66,7 +68,13 @@ func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Ti
 		return RetentionReport{}, err
 	}
 	rep := RetentionReport{TotalBytes: plan.TotalBytes}
+	// Re-check just before deleting scratch folders: a turn may have started
+	// after the plan was built. Mid-turn deletion would surprise the user.
+	busy := a.runningChatIDs(ctx)
 	for _, f := range plan.del {
+		if f.kind == "session-work" && (busy == nil || busy[f.runID]) {
+			continue
+		}
 		ok := os.RemoveAll(f.path) == nil
 		if f.kind == "chat" {
 			// Subagent transcripts / tool results sit beside the .jsonl.
@@ -91,8 +99,9 @@ type retentionPlan struct {
 
 // planRetention decides what ApplyRetention would delete, without touching anything.
 // Important runs, the newest KeepPerTask runs of each task and runs still queued or
-// running are never selected. Chat transcripts for answering sessions are kept;
-// orphans and long-idle ones follow LogDays (see planChatTranscriptRetention).
+// running are never selected. Chat transcripts and session scratch folders for
+// answering sessions are kept; orphans and long-idle ones follow LogDays
+// (see planChatTranscriptRetention and planChatSessionDirRetention).
 func (a *App) planRetention(ctx context.Context, p RetentionPolicy, now time.Time) (retentionPlan, error) {
 	var plan retentionPlan
 	protected := map[string]bool{}
@@ -153,19 +162,22 @@ func (a *App) planRetention(ctx context.Context, p RetentionPolicy, now time.Tim
 	if err := a.planChatTranscriptRetention(ctx, p, now, &plan); err != nil {
 		return plan, err
 	}
-	if err := a.planChatSessionDirRetention(ctx, &plan); err != nil {
+	if err := a.planChatSessionDirRetention(ctx, p, now, &plan); err != nil {
 		return plan, err
 	}
 	return plan, nil
 }
 
-// planChatSessionDirRetention adds session folders (<data>/chat-sessions/<id>:
-// the scratch folder and skill draft) whose session row is gone. Deleting a
-// session removes its folder, but a file still held open (Windows, a process a
-// command left running) or a crash in between left it on disk for good. The
-// folders are listed before the rows are read: a session created meanwhile
-// inserts its row before its folder exists, so it is never taken for an orphan.
-func (a *App) planChatSessionDirRetention(ctx context.Context, plan *retentionPlan) error {
+// planChatSessionDirRetention adds session folders under <data>/chat-sessions.
+// Folders whose session row is gone are removed whole (scratch + skill draft):
+// DeleteChatSession already tries to remove them, but a file still held open
+// (Windows, a process a command left running) or a crash in between left them
+// on disk. Live sessions idle longer than LogDays (0 = keep) have only their
+// scratch folder (work/) cleared; the session row, turn history and draft stay.
+// Sessions still answering a turn are left alone. Folders are listed before
+// the rows are read: a session created meanwhile inserts its row before its
+// folder exists, so it is never taken for an orphan.
+func (a *App) planChatSessionDirRetention(ctx context.Context, p RetentionPolicy, now time.Time, plan *retentionPlan) error {
 	ents, err := os.ReadDir(a.chatSessionsDir())
 	if err != nil {
 		return nil
@@ -173,18 +185,18 @@ func (a *App) planChatSessionDirRetention(ctx context.Context, plan *retentionPl
 	if len(ents) == 0 {
 		return nil
 	}
-	live := map[string]bool{}
-	rows, err := a.DB.QueryContext(ctx, `SELECT id FROM chat_sessions`)
+	live := map[string]chatSessionRef{}
+	rows, err := a.DB.QueryContext(ctx, `SELECT id, status, updated_at FROM chat_sessions`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
+		var id, status, updated string
+		if err = rows.Scan(&id, &status, &updated); err != nil {
 			rows.Close()
 			return err
 		}
-		live[safeChatID(id)] = true
+		live[safeChatID(id)] = chatSessionRef{status: status, updatedAt: parseRetentionTime(updated, now)}
 	}
 	err = rows.Err()
 	rows.Close()
@@ -193,18 +205,74 @@ func (a *App) planChatSessionDirRetention(ctx context.Context, plan *retentionPl
 	}
 	for _, e := range ents {
 		name := e.Name()
-		if live[name] || !e.IsDir() || safeChatID(name) != name {
+		if !e.IsDir() || safeChatID(name) != name {
 			continue
 		}
-		p := filepath.Join(a.chatSessionsDir(), name)
-		size, mod := dirSize(p)
-		plan.del = append(plan.del, runFile{runID: name, path: p, size: size, mod: mod, kind: "session"})
+		dir := filepath.Join(a.chatSessionsDir(), name)
+		ref, ok := live[name]
+		if !ok {
+			size, mod := dirSize(dir)
+			plan.del = append(plan.del, runFile{runID: name, path: dir, size: size, mod: mod, kind: "session"})
+			plan.FreeBytes += size
+			continue
+		}
+		if ref.status == "running" || p.LogDays <= 0 {
+			continue
+		}
+		if now.Sub(ref.updatedAt) <= time.Duration(p.LogDays)*24*time.Hour {
+			continue
+		}
+		work := a.chatScratchDir(name)
+		fi, err := os.Lstat(work)
+		if err != nil || !fi.IsDir() {
+			continue
+		}
+		size, mod := dirSize(work)
+		if size <= 0 {
+			continue
+		}
+		plan.del = append(plan.del, runFile{runID: name, path: work, size: size, mod: mod, kind: "session-work"})
 		plan.FreeBytes += size
 	}
 	return nil
 }
 
-// chatSessionRef is a live session's Claude Code transcript id and idle clock.
+// runningChatIDs is the set of sessions currently answering a turn. A nil map
+// means the status could not be read, so scratch-folder cleanup should wait.
+func (a *App) runningChatIDs(ctx context.Context) map[string]bool {
+	rows, err := a.DB.QueryContext(ctx, `SELECT id FROM chat_sessions WHERE status='running'`)
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			out[safeChatID(id)] = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// parseRetentionTime reads a session's updated_at. An unparseable stamp is
+// treated as now so age-based cleanup leaves that session alone.
+func parseRetentionTime(s string, now time.Time) time.Time {
+	ts, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		ts, err = time.Parse(time.RFC3339, s)
+	}
+	if err != nil {
+		return now
+	}
+	return ts
+}
+
+// chatSessionRef is a live session's status and idle clock.
 type chatSessionRef struct {
 	status    string
 	updatedAt time.Time
@@ -230,14 +298,7 @@ func (a *App) planChatTranscriptRetention(ctx context.Context, p RetentionPolicy
 		if !isUUID(csid) {
 			continue
 		}
-		ts, perr := time.Parse(time.RFC3339Nano, updated)
-		if perr != nil {
-			ts, perr = time.Parse(time.RFC3339, updated)
-		}
-		if perr != nil {
-			ts = now // unparseable stamp: treat as fresh, do not age-delete
-		}
-		live[csid] = chatSessionRef{status: status, updatedAt: ts}
+		live[csid] = chatSessionRef{status: status, updatedAt: parseRetentionTime(updated, now)}
 	}
 	err = rows.Err()
 	rows.Close()

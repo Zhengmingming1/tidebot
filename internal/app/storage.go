@@ -214,9 +214,9 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 // leftovers of deleted sessions) and tidebot-owned Claude Code transcripts
 // (<data>/claude-config/projects). These were left out of the usage bar, so
 // the total looked small while the folders kept growing. The size cap still
-// applies only to logs+artifacts; leftover folders and idle transcripts are
-// already in the cleanup plan (see planChatSessionDirRetention and
-// planChatTranscriptRetention).
+// applies only to logs+artifacts; leftover folders, idle session scratch
+// folders and idle transcripts are already in the cleanup plan
+// (see planChatSessionDirRetention and planChatTranscriptRetention).
 func (a *App) sessionUsage() UsagePart {
 	var p UsagePart
 	if ents, err := os.ReadDir(a.chatSessionsDir()); err == nil {

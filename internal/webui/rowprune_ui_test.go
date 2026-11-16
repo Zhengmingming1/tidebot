@@ -84,18 +84,16 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 		}
 		where, confirm := m["st.where"], m["st.clean_confirm"]
 		if f == "static/i18n/en.json" {
-			if !strings.Contains(where, "session") || !strings.Contains(where, "transcript") {
-				t.Errorf("%s: st.where does not mention sessions/transcripts: %q", f, where)
-			}
-			if !strings.Contains(confirm, "session") || !strings.Contains(confirm, "transcript") {
-				t.Errorf("%s: st.clean_confirm does not mention sessions/transcripts: %q", f, confirm)
+			for _, w := range []string{"session", "transcript", "scratch", "draft"} {
+				if !strings.Contains(where, w) && !strings.Contains(confirm, w) {
+					t.Errorf("%s: st.where/st.clean_confirm missing %q: where=%q confirm=%q", f, w, where, confirm)
+				}
 			}
 		} else {
-			if !strings.Contains(where, "会话") || !strings.Contains(where, "转录") {
-				t.Errorf("%s: st.where does not mention 会话/转录: %q", f, where)
-			}
-			if !strings.Contains(confirm, "会话") || !strings.Contains(confirm, "转录") {
-				t.Errorf("%s: st.clean_confirm does not mention 会话/转录: %q", f, confirm)
+			for _, w := range []string{"会话", "转录", "临时", "草稿"} {
+				if !strings.Contains(where, w) && !strings.Contains(confirm, w) {
+					t.Errorf("%s: st.where/st.clean_confirm missing %q: where=%q confirm=%q", f, w, where, confirm)
+				}
 			}
 		}
 	}

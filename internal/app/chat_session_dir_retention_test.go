@@ -141,3 +141,160 @@ func TestDeleteChatSessionWaitsForDraftLock(t *testing.T) {
 		t.Fatal("deleted session's folder recreated")
 	}
 }
+
+func insertChatRowAt(t *testing.T, a *App, sid, status string, updated time.Time) {
+	t.Helper()
+	ts := updated.UTC().Format(time.RFC3339)
+	if _, err := a.DB.Exec(`INSERT INTO chat_sessions(id, status, created_at, updated_at) VALUES(?,?,?,?)`, sid, status, ts, ts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func sessionSubSize(t *testing.T, dir, sub string) int64 {
+	t.Helper()
+	n, _ := dirSize(filepath.Join(dir, sub))
+	return n
+}
+
+// A live session idle longer than LogDays has only its scratch folder cleared.
+// The session row, skill draft, fresh sessions, running sessions, and LogDays=0
+// keep their work folders. Next turn can recreate the scratch folder.
+func TestChatSessionDirRetentionIdleWork(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	day := 24 * time.Hour
+	now := time.Now()
+	policy := RetentionPolicy{LogDays: 30, ArtifactDays: 90}
+
+	idleWork, idleDraft := 1<<20, 256<<10 // 1 MiB scratch, 256 KiB draft
+	idleDir := filepath.Join(a.chatSessionsDir(), "chat_idle_w")
+	for sub, size := range map[string]int{"work": idleWork, "draft": idleDraft} {
+		if err := os.MkdirAll(filepath.Join(idleDir, sub), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(idleDir, sub, "f.bin"), make([]byte, size), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertChatRowAt(t, a, "chat_idle_w", "idle", now.Add(-40*day))
+
+	freshDir := placeSessionDir(t, a, "chat_fresh_w", 8<<10)
+	insertChatRowAt(t, a, "chat_fresh_w", "idle", now.Add(-2*day))
+
+	runDir := placeSessionDir(t, a, "chat_run_w", 8<<10)
+	insertChatRowAt(t, a, "chat_run_w", "running", now.Add(-40*day))
+
+	closedDir := filepath.Join(a.chatSessionsDir(), "chat_closed_w")
+	if err := os.MkdirAll(filepath.Join(closedDir, "work"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(closedDir, "work", "f.bin"), make([]byte, 32<<10), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	insertChatRowAt(t, a, "chat_closed_w", "closed", now.Add(-40*day))
+
+	badStampDir := placeSessionDir(t, a, "chat_badstamp_w", 8<<10)
+	if _, err := a.DB.Exec(`INSERT INTO chat_sessions(id, status, created_at, updated_at) VALUES(?,?,?,?)`,
+		"chat_badstamp_w", "idle", "not-a-time", "not-a-time"); err != nil {
+		t.Fatal(err)
+	}
+
+	emptyDir := filepath.Join(a.chatSessionsDir(), "chat_empty_w")
+	if err := os.MkdirAll(filepath.Join(emptyDir, "work"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	insertChatRowAt(t, a, "chat_empty_w", "idle", now.Add(-40*day))
+
+	// Preview under LogDays=30 includes idle + closed work, not drafts or others.
+	v, err := a.StorageUsage(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := a.planRetention(ctx, policy, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	var planned int64
+	for _, f := range plan.del {
+		got[f.runID] = f.kind
+		if f.kind == "session-work" {
+			planned += f.size
+		}
+	}
+	if got["chat_idle_w"] != "session-work" || got["chat_closed_w"] != "session-work" {
+		t.Fatalf("planned %+v", plan.del)
+	}
+	for _, id := range []string{"chat_fresh_w", "chat_run_w", "chat_badstamp_w", "chat_empty_w"} {
+		if _, ok := got[id]; ok {
+			t.Fatalf("unexpected plan entry %s: %+v", id, plan.del)
+		}
+	}
+	wantFree := int64(idleWork + (32 << 10))
+	if planned != wantFree {
+		t.Fatalf("planned work bytes %d, want %d", planned, wantFree)
+	}
+	if v.Preview.Bytes < wantFree {
+		t.Fatalf("usage preview %+v, want at least %d", v.Preview, wantFree)
+	}
+
+	beforeIdle, _ := dirSize(idleDir)
+	t.Logf("before: idle session folder %d bytes (work %d, draft %d)", beforeIdle, idleWork, idleDraft)
+
+	rep, err := a.ApplyRetention(ctx, policy, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.DeletedFiles != 2 || rep.FreedBytes != wantFree {
+		t.Fatalf("report %+v, want 2 files / %d bytes", rep, wantFree)
+	}
+	afterIdle, _ := dirSize(idleDir)
+	t.Logf("after: idle session folder %d bytes (work gone, draft %d); freed %d", afterIdle, sessionSubSize(t, idleDir, "draft"), rep.FreedBytes)
+	if afterIdle != int64(idleDraft) {
+		t.Fatalf("idle folder after cleanup %d, want draft only %d", afterIdle, idleDraft)
+	}
+	if _, err := os.Stat(filepath.Join(idleDir, "work")); !os.IsNotExist(err) {
+		t.Fatal("idle work folder kept")
+	}
+	if _, err := os.Stat(filepath.Join(idleDir, "draft", "f.bin")); err != nil {
+		t.Fatalf("idle draft removed: %v", err)
+	}
+	var n int
+	if err := a.DB.QueryRow(`SELECT COUNT(*) FROM chat_sessions WHERE id='chat_idle_w'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("idle session row lost: n=%d err=%v", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(closedDir, "work")); !os.IsNotExist(err) {
+		t.Fatal("closed session work kept")
+	}
+	for _, dir := range []string{freshDir, runDir, badStampDir} {
+		if _, err := os.Stat(filepath.Join(dir, "work", "f.bin")); err != nil {
+			t.Fatalf("%s work removed: %v", dir, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(emptyDir, "work")); err != nil {
+		t.Fatalf("empty work dir removed: %v", err)
+	}
+
+	// LogDays=0 keeps idle work forever (orphans would still go).
+	keepDir := placeSessionDir(t, a, "chat_keep0_w", 8<<10)
+	insertChatRowAt(t, a, "chat_keep0_w", "idle", now.Add(-90*day))
+	rep, err = a.ApplyRetention(ctx, RetentionPolicy{LogDays: 0, ArtifactDays: 0}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.DeletedFiles != 0 {
+		t.Fatalf("LogDays=0 deleted %+v", rep)
+	}
+	if _, err := os.Stat(filepath.Join(keepDir, "work", "f.bin")); err != nil {
+		t.Fatalf("LogDays=0 removed work: %v", err)
+	}
+
+	// Next turn on the pruned session can recreate the scratch folder.
+	dir, own, err := a.chatTurnDir("chat_idle_w", "")
+	if err != nil || own || dir != a.chatScratchDir("chat_idle_w") {
+		t.Fatalf("chatTurnDir after prune: dir=%s own=%v err=%v", dir, own, err)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("scratch folder not recreated: %v", err)
+	}
+}
