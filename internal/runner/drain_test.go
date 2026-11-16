@@ -50,12 +50,26 @@ func drainOpts(bin, dir string) Options {
 	}
 }
 
+func heldSlots(r *Runner) int {
+	r.slots.mu.Lock()
+	defer r.slots.mu.Unlock()
+	return r.slots.busy
+}
+
 func waitActive(t *testing.T, r *Runner, n int) {
 	t.Helper()
-	end := time.Now().Add(5 * time.Second)
-	for r.Active() != n || (n > 0 && len(r.cancelIDs()) == 0) {
+	// Active() increments in enter(), before the run holds a slot. A run already
+	// in cancels also has position 0 until it calls acquire, so waiting on
+	// cancelIDs was not enough: under -race on a slow CI runner the next RunOnce
+	// could take the slot instead of queueing.
+	end := time.Now().Add(10 * time.Second)
+	for {
+		active, held := r.Active(), heldSlots(r)
+		if active == n && (n == 0 || held >= 1) {
+			return
+		}
 		if time.Now().After(end) {
-			t.Fatalf("active=%d want %d", r.Active(), n)
+			t.Fatalf("active=%d want %d, held slots=%d", active, n, held)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

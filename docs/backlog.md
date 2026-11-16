@@ -6575,3 +6575,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
 - Windows 在短名冲突很多时会改用校验和形式（前 2 个字符 + 4 位十六进制 + `~N`），词法上不敢随便匹配，目前只覆盖传统的「前 6 字 + `~N`」。
 - 在同一台机器上恢复时，若清单里的 home 和新 home 字符串相同、库里却混着另一种 8.3 写法，现在会跳过改写（`HomeDir != home`）；长短形式在同一台机器上通常都能用，若以后要统一可以再展开。
+
+### 2026-11-16（续）：排队测试等第一个运行真正占住槽位，CI race 不再偶发失败（测试时序）
+
+- **问题**：`77db398` 推上 main 后 CI race 任务失败：`TestQueuedRunVisibleStoppableAndTimedFromStart` 报 `position=0 want 1`。测试用 `waitActive` 等到第一个运行「已开始」再排第二个，期望第二个在队列里（位置 1）。`Active()` 在 `enter()` 时就加一，取消回调也在 `acquire` 之前登记；`slots.position` 对还没入队的运行同样返回 0。于是 `waitActive` 把「已登记、尚未占槽」当成已经在跑。race 下 CI 机器一慢，第二个 `RunOnce` 抢到空槽，第一个反而去排队，断言就失败。产品行为正确（先到先得）；`TestOnStartAfterEnqueueOrSlot`、`TestBeforeStartRecheckOnSlot` 也是同一套等待，有同样风险。
+- **改法**：`waitActive` 额外等到 `slots.busy >= 1`（真正占住一个槽位）再返回，超时从 5 秒放到 10 秒，失败时带上已占槽位数。`TestDrainRefusesNewAndQueuedRuns` 里等 `started_at` 的那段保留——那是更后面的「已经记成开始」，退出排空要靠它区分未开始和已开始。
+- 测试：`go test -race -count=20 -run TestQueuedRunVisibleStoppableAndTimedFromStart|TestOnStartAfterEnqueueOrSlot|TestDrainRefusesNewAndQueuedRuns|TestUserCancelIsNotQuit|TestDrainStopsLongRunAndKeepsUsage|TestDrainWaitsForQuickRun|TestStopGraceLetsClaudeCleanUp|TestBeforeStartRecheckOnSlot ./internal/runner` 通过（约 290 s）。`go test -race -count=1 ./internal/runner`、`go test ./...`、`go vet`（含 GOOS=windows/darwin）通过。
+
+**心得**：`position==0` 的含义是「不在等待队列里」，包括还没调用 `acquire` 的运行，不能当成「已经占住槽位」。等并发槽位时看 `busy`，等「已经开始跑」时再看 `started_at`，两者不是同一时刻。
+
+**后续想法**：
+- 打标在重试用尽后仍失败时，第二次点击会因文件夹已还原而报冲突；以后可以在冲突时检查文件是否已经等于撤销后的状态，只补写运行行。
+- WebUI 单包仍带注释和空白（构建时压缩）。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；用户自己选的目录本来就不在 tidebot home 里，换机后需要用户自己改，可以在恢复后列出「目录不存在的任务」提示一次。
+- 通知渠道 / 插件配置等其他 JSON 若以后存了 home 下的路径，可以再纳入同一套遍历。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- Windows 在短名冲突很多时会改用校验和形式（前 2 个字符 + 4 位十六进制 + `~N`），词法上不敢随便匹配，目前只覆盖传统的「前 6 字 + `~N`」。
+- 在同一台机器上恢复时，若清单里的 home 和新 home 字符串相同、库里却混着另一种 8.3 写法，现在会跳过改写（`HomeDir != home`）；长短形式在同一台机器上通常都能用，若以后要统一可以再展开。
