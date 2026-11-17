@@ -29,6 +29,9 @@ type RunRequest struct {
 	VersionID      string                  `json:"version_id"`
 	Workspace      string                  `json:"workspace"`
 	Mode           string                  `json:"mode"` // "read" (default) | "edit" | "exec"
+	// Effort is the --effort this run should use ("" = not passed, Claude Code decides).
+	// Carried through when the dialog is opened from a previous run ("edit & rerun").
+	Effort string `json:"effort,omitempty"`
 }
 
 // ErrUnknownSkill: the skill (or version) asked for doesn't exist.
@@ -69,6 +72,9 @@ func (b *RunRequest) validate() string {
 	case "", "read", "edit", "exec":
 	default:
 		return "mode must be read, edit or exec"
+	}
+	if !tasksvc.ValidEffort(b.Effort) {
+		return "effort must be low, medium or high"
 	}
 	return ""
 }

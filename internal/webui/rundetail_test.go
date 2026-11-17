@@ -21,6 +21,7 @@ func TestRunDetailActions(t *testing.T) {
 		`prompt: pre.prompt || ""`,
 		`runModeTag(r.run_mode) + effortTag(r.effort)`,
 		`function effortTag(e)`,
+		`workspace: r.workspace, mode: r.run_mode, effort: r.effort`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lost %q", want)

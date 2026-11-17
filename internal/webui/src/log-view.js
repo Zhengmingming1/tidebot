@@ -275,7 +275,7 @@
       state.chgJump = null;
       bindRunPrompt(r);
       bindRunChat(r);
-      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, mode: r.run_mode }); });
+      if ($("#rd-edit")) $("#rd-edit").addEventListener("click", function () { quickRunModal({ prompt: r.prompt, provider: r.provider, skill_id: r.skill_id, skill_bindings: r.skill_bindings, skill_set_source: cleanSetSource(r.skill_set_source), workspace: r.workspace, mode: r.run_mode, effort: r.effort }); });
       // 存为任务: the run's request, folder, permission level and skills pinned to the
       // versions it used; a run with a session takes the session's (a version adopted
       // there is pinned instead), still with this run's own request.

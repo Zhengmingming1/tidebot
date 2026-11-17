@@ -167,7 +167,9 @@
   // a folder the run is read-only unless "Can edit files" is chosen.
   // quickRunModal(pre): pre.prompt set = "edit & rerun" from a run page (the old run's
   // fields are filled in, "Revert" appears once you change them, the original run is left
-  // alone); pre = {skill_id} alone opens it with that skill picked (skills page, palette).
+  // alone); pre.effort is submitted as-is so a rerun keeps the source run's --effort
+  // (the dialog has no effort control yet). pre = {skill_id} alone opens it with that
+  // skill picked (skills page, palette).
   function quickRunModal(pre) {
     var edit = pre && pre.prompt ? pre : null;
     pre = pre || {};
@@ -203,7 +205,7 @@
           var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" || m === "exec" ? m : "read"); }); };
           // without a folder: 只读 = tidebot's scratch folder (""), 可执行命令 = a scratch folder that runs commands
           var sentMode = function () { var m = modeVal(); return ws.value.trim() ? m : (m === "exec" ? "exec" : ""); };
-          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: sentMode() }; };
+          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: sentMode(), effort: (edit && edit.effort) || "" }; };
           var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : (edit.mode === "exec" ? "exec" : "") } : null;
           // the hint under the form says what the run may do; a dirty git folder warns before "Can edit"
           var paintHint = function () {

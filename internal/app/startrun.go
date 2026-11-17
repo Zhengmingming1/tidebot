@@ -118,7 +118,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		return "", errors.New("composition source requires skill bindings")
 	}
 	if len(bindings) == 0 && dir == "" && mode != "exec" {
-		return a.startQuickRunAsync(req.Prompt, req.Provider)
+		return a.startQuickRunWith(req.Prompt, req.Provider, req.Effort)
 	}
 	var st *skillStage
 	versionID := ""
@@ -181,7 +181,7 @@ func (a *App) startRun(req webui.RunRequest) (string, error) {
 		opts := runner.Options{
 			Prompt: prompt, DisplayPrompt: req.Prompt, WorkspaceDir: dir,
 			TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: a.skillStart(st, a.sourceStart(req.SkillSetSource, bindings, onStart)), ContextArgs: args, ContextRequest: st.contextRequest(modern, true),
-			SkillID: req.SkillID, SkillVersionID: versionID, RunMode: mode,
+			SkillID: req.SkillID, SkillVersionID: versionID, RunMode: mode, Effort: req.Effort,
 		}
 		if writes {
 			defer unlockEditDir(dir)

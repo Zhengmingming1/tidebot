@@ -162,7 +162,9 @@ func (s *Server) handleQuickRun(w http.ResponseWriter, r *http.Request) {
 	var runID string
 	var err error
 	switch {
-	case body.SkillID == "" && len(body.SkillBindings) == 0 && strings.TrimSpace(body.Workspace) == "":
+	// A plain prompt (no skill, folder, permission level, or effort) still uses
+	// QuickRun; anything else goes to StartRun so those fields are not dropped.
+	case body.SkillID == "" && len(body.SkillBindings) == 0 && strings.TrimSpace(body.Workspace) == "" && body.Mode == "" && body.Effort == "":
 		if s.deps.QuickRun == nil {
 			writeErr(w, 500, "execution not available")
 			return

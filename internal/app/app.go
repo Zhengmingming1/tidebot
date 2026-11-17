@@ -923,12 +923,18 @@ func (a *App) startTaskAsync(taskID, bucket string) (string, error) {
 
 // startQuickRunAsync runs an ad-hoc prompt in the background and returns the run id.
 func (a *App) startQuickRunAsync(prompt, providerName string) (string, error) {
+	return a.startQuickRunWith(prompt, providerName, "")
+}
+
+// startQuickRunWith is startQuickRunAsync plus an optional --effort ("" = not passed).
+func (a *App) startQuickRunWith(prompt, providerName, effort string) (string, error) {
 	if _, err := a.ResolveProfile(providerName); err != nil {
 		return "", err
 	}
 	return launch(startWait, func(onStart func(string)) error {
 		_, err := a.RunPromptEx(context.Background(), runner.Options{
 			Prompt: prompt, TriggerKind: "quick", CostBucket: cost.BucketProduction, OnStart: onStart,
+			Effort: effort,
 		}, providerName, 0)
 		return err
 	}, func(err error) { a.Log.Warn("quick run", "error", err) })

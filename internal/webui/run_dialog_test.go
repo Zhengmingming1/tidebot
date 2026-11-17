@@ -69,6 +69,37 @@ func TestRunDialogStart(t *testing.T) {
 
 // workspace-check?mode=run reports git state without touching the repository,
 // and refuses sensitive folders.
+// Effort and a command run without a folder are not a plain prompt: they go to
+// StartRun so those fields are not dropped. A bad effort is rejected.
+func TestRunDialogPassesEffort(t *testing.T) {
+	c := login(t)
+	var got []RunRequest
+	quick := 0
+	c.s.deps.QuickRun = func(p, prov string) (string, error) { quick++; return "q", nil }
+	c.s.deps.StartRun = func(req RunRequest) (string, error) {
+		got = append(got, req)
+		return "r", nil
+	}
+	if code, _ := c.json(http.MethodPost, "/api/runs/quick", map[string]any{"prompt": "plan it", "effort": "high"}); code != 202 || quick != 0 || len(got) != 1 {
+		t.Fatalf("effort: %d quick=%d start=%d", code, quick, len(got))
+	}
+	if g := got[0]; g.Prompt != "plan it" || g.Effort != "high" || g.Mode != "" {
+		t.Fatalf("effort request %+v", g)
+	}
+	if code, _ := c.json(http.MethodPost, "/api/runs/quick", map[string]any{"prompt": "download", "mode": "exec"}); code != 202 || len(got) != 2 {
+		t.Fatalf("exec scratch: %d start=%d", code, len(got))
+	}
+	if g := got[1]; g.Mode != "exec" || g.Effort != "" || g.Workspace != "" {
+		t.Fatalf("exec request %+v", g)
+	}
+	if code, _ := c.json(http.MethodPost, "/api/runs/quick", map[string]any{"prompt": "x", "effort": "max"}); code != 400 || len(got) != 2 || quick != 0 {
+		t.Fatalf("bad effort accepted: %d start=%d quick=%d", code, len(got), quick)
+	}
+	if code, _ := c.json(http.MethodPost, "/api/runs/quick", map[string]any{"prompt": "hi"}); code != 202 || quick != 1 || len(got) != 2 {
+		t.Fatalf("plain prompt: %d quick=%d start=%d", code, quick, len(got))
+	}
+}
+
 func TestRunDirCheck(t *testing.T) {
 	c := login(t)
 	home := t.TempDir()
@@ -146,6 +177,9 @@ func TestRunDialogUI(t *testing.T) {
 		`r.task_name || r.skill_name || T(r.trigger === "session" ? "trig.session" : "trig.quick")`,
 		`function runCtxText(r, short)`,
 		`setWs(l.workspace || ""); setMode(l.mode); drawDirs();`,
+		// edit & rerun keeps the source run's --effort (no picker yet)
+		`effort: (edit && edit.effort) || ""`,
+		`workspace: r.workspace, mode: r.run_mode, effort: r.effort`,
 	} {
 		if !strings.Contains(string(js), want) {
 			t.Errorf("app.js lost %q", want)

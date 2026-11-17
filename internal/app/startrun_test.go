@@ -131,3 +131,54 @@ func contains(xs []string, s string) bool {
 	}
 	return false
 }
+
+// A Run dialog request that carries effort writes it on the run row and
+// passes --effort; without it Claude Code still decides.
+func TestStartRunKeepsEffort(t *testing.T) {
+	a := newTestApp(t)
+	fakeHome(t)
+	ws := userProject(t)
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", argsFile)
+
+	runID, err := a.startRun(webui.RunRequest{Prompt: "plan it", Workspace: ws, Mode: "edit", Effort: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRunDone(t, a, runID)
+	if argAfter(readArgs(t, argsFile), "--effort") != "high" {
+		t.Fatal("folder run lost --effort")
+	}
+	var ef, mode string
+	_ = a.DB.QueryRow(`SELECT effort, run_mode FROM runs WHERE id=?`, runID).Scan(&ef, &mode)
+	if ef != "high" || mode != "edit" {
+		t.Fatalf("folder row %q %q", ef, mode)
+	}
+
+	runID, err = a.startRun(webui.RunRequest{Prompt: "just ask", Effort: "medium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRunDone(t, a, runID)
+	if argAfter(readArgs(t, argsFile), "--effort") != "medium" {
+		t.Fatal("prompt-only run lost --effort")
+	}
+	_ = a.DB.QueryRow(`SELECT effort, run_mode FROM runs WHERE id=?`, runID).Scan(&ef, &mode)
+	if ef != "medium" || mode != "" {
+		t.Fatalf("prompt-only row %q %q", ef, mode)
+	}
+
+	runID, err = a.startRun(webui.RunRequest{Prompt: "plain", Workspace: ws})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRunDone(t, a, runID)
+	args := readArgs(t, argsFile)
+	if contains(args, "--effort") {
+		t.Fatalf("plain run got --effort: %q", args)
+	}
+	_ = a.DB.QueryRow(`SELECT effort FROM runs WHERE id=?`, runID).Scan(&ef)
+	if ef != "" {
+		t.Fatalf("plain row %q", ef)
+	}
+}

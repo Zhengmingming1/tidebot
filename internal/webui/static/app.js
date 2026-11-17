@@ -2206,7 +2206,7 @@ var wsState={problem:"",git:null},seq=0,timer=0,wsTouched=false,recentDirs=[];
 var modeVal=function(){var c=form.querySelector('input[name="mode"]:checked');return c?c.value:"read";};
 var setMode=function(m){$$('input[name="mode"]',form).forEach(function(i){i.checked=i.value===(m==="edit"||m==="exec"?m:"read");});};
 var sentMode=function(){var m=modeVal();return ws.value.trim()?m:(m==="exec"?"exec":"");};
-var cur=function(){return{prompt:ta.value,provider:form.provider.value,skill_id:form.skill_id.value,skill_bindings:editor.value(),skill_set_source:editor.source(),workspace:ws.value.trim(),mode:sentMode()};};
+var cur=function(){return{prompt:ta.value,provider:form.provider.value,skill_id:form.skill_id.value,skill_bindings:editor.value(),skill_set_source:editor.source(),workspace:ws.value.trim(),mode:sentMode(),effort:(edit&&edit.effort)||""};};
 var orig=edit?{prompt:edit.prompt,provider:form.provider.value,skill_id:form.skill_id.value,skill_bindings:editor.value(),skill_set_source:editor.source(),workspace:edit.workspace||"",mode:edit.workspace?(edit.mode||"read"):(edit.mode==="exec"?"exec":"")}:null;
 var paintHint=function(){
 var dir=ws.value.trim(),g=wsState.git,warn=false,txt,sb=st.sandbox||{};
@@ -6668,7 +6668,7 @@ if(state.chgJump===id&&$("#rd-chg"))$("#rd-chg").scrollIntoView({block:"start"})
 state.chgJump=null;
 bindRunPrompt(r);
 bindRunChat(r);
-if($("#rd-edit"))$("#rd-edit").addEventListener("click",function(){quickRunModal({prompt:r.prompt,provider:r.provider,skill_id:r.skill_id,skill_bindings:r.skill_bindings,skill_set_source:cleanSetSource(r.skill_set_source),workspace:r.workspace,mode:r.run_mode});});
+if($("#rd-edit"))$("#rd-edit").addEventListener("click",function(){quickRunModal({prompt:r.prompt,provider:r.provider,skill_id:r.skill_id,skill_bindings:r.skill_bindings,skill_set_source:cleanSetSource(r.skill_set_source),workspace:r.workspace,mode:r.run_mode,effort:r.effort});});
 if($("#rd-save-task"))$("#rd-save-task").addEventListener("click",function(e){
 var b=e.currentTarget,own={prompt:r.prompt,provider:r.provider,skill_id:r.skill_id,skill_bindings:r.skill_bindings,skill_set_source:cleanSetSource(r.skill_set_source),workspace:r.workspace,run_mode:r.run_mode||""};
 var cs=r.chat_session;

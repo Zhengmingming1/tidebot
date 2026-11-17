@@ -50,7 +50,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			writeStartErr(w, 400, err)
 			return
 		}
-	} else if len(bindings) > 0 || run.SkillID != "" || run.RunMode != "" {
+	} else if len(bindings) > 0 || run.SkillID != "" || run.RunMode != "" || run.Effort != "" {
 		if s.deps.StartRun == nil {
 			writeErr(w, 503, "runner not available")
 			return
@@ -60,7 +60,7 @@ func (s *Server) rerun(w http.ResponseWriter, r *http.Request, id string) {
 			ws = "" // skill or command run in a scratch folder
 		}
 		if newID, err = s.deps.StartRun(RunRequest{Prompt: run.Prompt, Provider: run.Provider, SkillID: run.SkillID,
-			VersionID: run.SkillVerID, SkillBindings: bindings, SkillSetSource: source, Workspace: ws, Mode: run.RunMode}); err != nil {
+			VersionID: run.SkillVerID, SkillBindings: bindings, SkillSetSource: source, Workspace: ws, Mode: run.RunMode, Effort: run.Effort}); err != nil {
 			writeStartErr(w, 400, err)
 			return
 		}

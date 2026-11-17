@@ -131,3 +131,39 @@ func TestRunEffortInAPI(t *testing.T) {
 		t.Fatalf("empty effort should be omitted: %v", out["effort"])
 	}
 }
+
+// Rerunning an ad-hoc run that recorded effort starts it with the same value.
+// A plain prompt without effort still uses QuickRun.
+func TestRerunKeepsEffort(t *testing.T) {
+	c := login(t)
+	dir := t.TempDir()
+	seedRun(t, c, "ef1", "plan it", "succeeded", 0.01, time.Now())
+	if _, err := c.s.deps.DB.Exec(`UPDATE runs SET trigger_kind='quick', run_mode='edit', effort='high', workspace_dir=? WHERE id='ef1'`, dir); err != nil {
+		t.Fatal(err)
+	}
+	var got RunRequest
+	c.s.deps.StartRun = func(r RunRequest) (string, error) { got = r; return "run_new", nil }
+	if code, out := c.json(http.MethodPost, "/api/runs/ef1/rerun", map[string]any{}); code >= 300 || got.Effort != "high" || got.Mode != "edit" || got.Workspace != dir || got.Prompt != "plan it" {
+		t.Fatalf("rerun with folder %d %v %+v", code, out, got)
+	}
+
+	seedRun(t, c, "ef2", "just ask", "succeeded", 0.01, time.Now())
+	if _, err := c.s.deps.DB.Exec(`UPDATE runs SET trigger_kind='quick', effort='medium' WHERE id='ef2'`); err != nil {
+		t.Fatal(err)
+	}
+	got = RunRequest{}
+	if code, out := c.json(http.MethodPost, "/api/runs/ef2/rerun", map[string]any{}); code >= 300 || got.Effort != "medium" || got.Mode != "" || got.Workspace != "" || got.Prompt != "just ask" {
+		t.Fatalf("rerun prompt-only %d %v %+v", code, out, got)
+	}
+
+	seedRun(t, c, "ef3", "plain", "succeeded", 0.01, time.Now())
+	if _, err := c.s.deps.DB.Exec(`UPDATE runs SET trigger_kind='quick' WHERE id='ef3'`); err != nil {
+		t.Fatal(err)
+	}
+	quick := 0
+	c.s.deps.QuickRun = func(p, prov string) (string, error) { quick++; return "q", nil }
+	c.s.deps.StartRun = func(r RunRequest) (string, error) { t.Fatalf("plain rerun used StartRun: %+v", r); return "", nil }
+	if code, out := c.json(http.MethodPost, "/api/runs/ef3/rerun", map[string]any{}); code >= 300 || quick != 1 {
+		t.Fatalf("plain rerun %d %v quick=%d", code, out, quick)
+	}
+}
