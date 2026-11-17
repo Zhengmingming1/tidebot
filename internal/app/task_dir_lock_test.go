@@ -172,3 +172,75 @@ func TestTaskRunsShareFolderHold(t *testing.T) {
 	}
 	unlockEditDir(dir)
 }
+
+// A task in the owner's folder is checked again at run time, like the Run
+// dialog, sessions and workflows: a folder swapped for a link into ~/.ssh, a
+// still-missing path under ~/.ssh, or a missing folder, is refused before a
+// run row is created (and before the missing path would be mkdir'd). A new
+// folder under a normal project is still created and used.
+func TestTaskRunChecksOwnerFolder(t *testing.T) {
+	home := fakeHome(t)
+	a := newTestApp(t)
+	sandboxDeps(t, true)
+	ctx := context.Background()
+	ssh := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	refused := func(tid, want string) {
+		t.Helper()
+		v, err := a.Tasks.Get(ctx, tid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = a.runTaskTrigger(ctx, v.Task, "manual", "production")
+		var de *guard.DirError
+		if !errors.As(err, &de) || de.Problem != want {
+			t.Fatalf("want folder problem %q, got %v", want, err)
+		}
+		if n := runCount(a, tid); n != 0 {
+			t.Fatalf("refused run left %d run rows", n)
+		}
+	}
+
+	proj := filepath.Join(t.TempDir(), "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "proj-link")
+	if err := os.Symlink(ssh, link); err != nil {
+		t.Skip("no symlinks here")
+	}
+	refused(taskInFolder(t, a, "link-ssh", link, "edit"), guard.DirSensitive)
+	refused(taskInFolder(t, a, "under-ssh", filepath.Join(ssh, "new"), "exec"), guard.DirSensitive)
+
+	was := filepath.Join(t.TempDir(), "was-ok")
+	if err := os.MkdirAll(was, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tidSwap := taskInFolder(t, a, "swapped", was, "edit")
+	if err := os.Rename(was, was+"-moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(ssh, was); err != nil {
+		t.Fatal(err)
+	}
+	refused(tidSwap, guard.DirSensitive)
+
+	// A folder that does not exist yet under a normal project is created and used.
+	fresh := filepath.Join(proj, "new")
+	tid := taskInFolder(t, a, "fresh", fresh, "edit")
+	v, _ := a.Tasks.Get(ctx, tid)
+	if err := a.runTaskTrigger(ctx, v.Task, "manual", "production"); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ws string
+	_ = a.DB.QueryRow(`SELECT workspace_dir FROM runs WHERE task_id=?`, tid).Scan(&ws)
+	if ws != real {
+		t.Fatalf("ran in %q, want %q", ws, real)
+	}
+}

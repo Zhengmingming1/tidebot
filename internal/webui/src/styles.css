@@ -3673,6 +3673,8 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 .rc-tag.rc-dir { max-width: 200px; }
 .rc-tag.rc-dir .ell { min-width: 0; }
 .rc-tag.rc-dir .i { color: var(--hue-orange); }
+.rc-tag.rc-dir.bad { color: var(--danger); background: var(--danger-50); }
+.rc-tag.rc-dir.bad .i { color: var(--danger); }
 .rc-tag.rc-read .i { color: var(--hue-teal); }
 .rc-tag.rc-noweb .i { color: var(--hue-amber); }
 .rc-sep .rc-open { flex: none; display: inline-flex; align-items: center; gap: 4px; order: 2; font-weight: 400; color: var(--text-3); text-decoration: none; }

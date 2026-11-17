@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/optimize"
 	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
@@ -393,6 +394,15 @@ func (a *App) ChatTaskPreset(ctx context.Context, sid string, fromRun bool) (web
 		return webui.ChatTaskPreset{}, err
 	}
 	p := webui.ChatTaskPreset{Workspace: c.WorkspaceDir, RunMode: chatMode(c.PermissionMode), Provider: c.Provider, SkillBindings: []tasksvc.SkillBinding{}}
+	if prob := a.chatWorkspaceProblem(c.WorkspaceDir); prob != "" {
+		p.WorkspaceProblem = prob
+		if prob != guard.DirNotFound {
+			// Don't prefill an unsafe path (a link into ~/.ssh, the home
+			// folder, tidebot's own folder). A missing folder is left in so
+			// the form can show it and the owner can pick another.
+			p.Workspace = ""
+		}
+	}
 	if !fromRun {
 		_ = a.DB.QueryRowContext(ctx, `SELECT COALESCE(r.prompt,'') FROM chat_session_turns t JOIN runs r ON r.id=t.run_id
 WHERE t.session_id=? AND t.turn_index>0 ORDER BY t.turn_index DESC LIMIT 1`, sid).Scan(&p.Prompt)

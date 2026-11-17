@@ -145,3 +145,77 @@ func TestChatTurnFreesBeforeIdle(t *testing.T) {
 		t.Fatalf("at idle: folder free %v, stage entries %d", s.lockFree, s.stage)
 	}
 }
+
+// Opening a session and "save as task" check the owner's folder the same way a
+// turn does: a folder that was moved or swapped for a link into ~/.ssh is
+// reported (the directory tag can go red, and an unsafe path is not prefilled).
+func TestChatSessionFolderProblemOnOpenAndPreset(t *testing.T) {
+	home := chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	proj := filepath.Join(t.TempDir(), "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rid := originRun(t, a, runner.Options{Prompt: "first", RunMode: "edit", WorkspaceDir: proj})
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := a.GetChatSession(ctx, ses.ID)
+	if err != nil || d.WorkspaceProblem != "" || d.WorkspaceDir == "" {
+		t.Fatalf("open ok: %v %+v", err, d)
+	}
+	p, err := a.ChatTaskPreset(ctx, ses.ID, false)
+	if err != nil || p.Workspace != d.WorkspaceDir || p.WorkspaceProblem != "" {
+		t.Fatalf("preset ok: %v %+v", err, p)
+	}
+
+	moved := proj + "-moved"
+	if err := os.Rename(proj, moved); err != nil {
+		t.Fatal(err)
+	}
+	d, err = a.GetChatSession(ctx, ses.ID)
+	if err != nil || d.WorkspaceProblem != guard.DirNotFound {
+		t.Fatalf("open missing: %v %+v", err, d)
+	}
+	p, err = a.ChatTaskPreset(ctx, ses.ID, false)
+	if err != nil || p.WorkspaceProblem != guard.DirNotFound || p.Workspace != d.WorkspaceDir || p.Workspace == "" {
+		t.Fatalf("preset missing: %v %+v", err, p)
+	}
+
+	ssh := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(ssh, proj); err != nil {
+		t.Skip("no symlinks here")
+	}
+	d, err = a.GetChatSession(ctx, ses.ID)
+	if err != nil || d.WorkspaceProblem != guard.DirSensitive {
+		t.Fatalf("open sensitive: %v %+v", err, d)
+	}
+	p, err = a.ChatTaskPreset(ctx, ses.ID, false)
+	if err != nil || p.WorkspaceProblem != guard.DirSensitive || p.Workspace != "" {
+		t.Fatalf("preset sensitive must not prefill: %v %+v", err, p)
+	}
+
+	sigGone, err := a.ChatSessionSig(ctx, ses.ID)
+	if err != nil || sigGone == "" {
+		t.Fatalf("sig: %v %q", err, sigGone)
+	}
+	if err := os.Remove(proj); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(moved, proj); err != nil {
+		t.Fatal(err)
+	}
+	d, err = a.GetChatSession(ctx, ses.ID)
+	if err != nil || d.WorkspaceProblem != "" {
+		t.Fatalf("open restored: %v %+v", err, d)
+	}
+	sigOK, err := a.ChatSessionSig(ctx, ses.ID)
+	if err != nil || sigOK == sigGone {
+		t.Fatalf("sig should change when the folder is usable again: %v %q %q", err, sigOK, sigGone)
+	}
+}

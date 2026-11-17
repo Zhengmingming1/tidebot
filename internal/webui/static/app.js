@@ -5315,12 +5315,14 @@ return '<div class="field ws-field"><span id="tf-wlbl">'+esc(T("tf.workspace"))+
 '<button type="button" class="icon-btn sm hidden" id="tf-ws-pick" data-tip="'+esc(T("tf.ws_pick"))+'" aria-label="'+esc(T("tf.ws_pick"))+'">'+ic("folder","sm")+"</button>"+
 '<button type="button" class="icon-btn sm'+(val?"":" hidden")+'" id="tf-ws-reset" data-tip="'+esc(T("tf.ws_reset"))+'" aria-label="'+esc(T("tf.ws_reset"))+'">'+ic("rollback","sm")+"</button></div></div>";
 }
-function wireWsField(root,input,taskId){
+function wireWsField(root,input,taskId,fromSession){
 var pill=$("#tf-ws-st",root),reset=$("#tf-ws-reset",root),pick=$("#tf-ws-pick",root),def="",problem="",seq=0,timer=0;
+var missing=!!(fromSession&&fromSession.workspace_problem==="not_found");
 var paint=function(r){
 problem=r.problem||"";
 var cls="",txt="",tipTxt="";
 if(problem){cls="bad";txt=T("tf.ws_bad");tipTxt=T("tf.ws_err_"+problem);}
+else if(missing&&r.path&&!r.exists){cls="bad";txt=T("rn.ws_not_found");tipTxt=T("cs.save_task_dir_missing_tip");}
 else if(r.path&&!r.exists){cls="info";txt=T("tf.ws_new");tipTxt=T("tf.ws_new_tip");}
 pill.className="pill sm "+(cls||"hidden");
 pill.textContent=txt;
@@ -5333,7 +5335,7 @@ var my=++seq;
 api("/api/tasks/workspace-check?path="+enc(input.value.trim())+(taskId?"&id="+enc(taskId):"")).then(function(r){if(my===seq)paint(r||{});}).catch(function(){});
 };
 var set=function(v){input.value=v;input._tbTouched=true;clearTimeout(timer);check();};
-input.addEventListener("input",function(){reset.classList.toggle("hidden",!input.value.trim());clearTimeout(timer);timer=setTimeout(check,250);});
+input.addEventListener("input",function(){missing=false;reset.classList.toggle("hidden",!input.value.trim());clearTimeout(timer);timer=setTimeout(check,250);});
 reset.addEventListener("click",function(){set("");input.focus();});
 folderPickable().then(function(ok){
 if(!ok||!root.contains(pick))return;
@@ -5469,7 +5471,11 @@ var se=scheduleEditor($("#sched-host",root),tf.cron,state.tz);
 var tgs=tagInput($("#tg-host",root),tf.tags||pre.tags||[],inUse);
 if(drafty)wireDraft(root,f.prompt,"task");
 if(!taskId&&!wf)wireTaskAutofill(root,f,se,skills);
-var ws=wireWsField(root,f.workspace,taskId);
+var ws=wireWsField(root,f.workspace,taskId,pre);
+if(!taskId&&pre.workspace_problem&&pre.workspace_problem!=="not_found"){
+var why=state.dict["rn.ws_"+pre.workspace_problem+"_tip"]?T("rn.ws_"+pre.workspace_problem+"_tip"):T("rn.ws_not_found_tip");
+toast(T("cs.save_task_dir_bad",{why:why}),true);
+}
 wirePolicyFields(root,f);
 var readCostMode=wireCostFields(root,f);
 f.addEventListener("submit",function(e){
@@ -7806,7 +7812,13 @@ return '<a class="cs-item'+(on?" active":"")+'" href="#/chat/'+enc(s.id)+'" data
 }
 function csDirTag(s){
 var p=(s&&s.workspace_dir)||"",base=p.replace(/[\\/]+$/,"").split(/[\\/]/).pop()||p;
-return '<span class="rc-tag rc-dir" tabindex="0" data-tip="'+esc(p?T("cs.dir_tip",{p:p}):T("cs.scratch_tip"))+'">'+ic("folder","sm")+'<span class="ell">'+esc(p?base:T("cs.scratch"))+"</span></span>";
+var pr=(s&&s.workspace_problem)||"";
+var tip=p?T("cs.dir_tip",{p:p}):T("cs.scratch_tip");
+if(pr){
+var why=state.dict["rn.ws_"+pr+"_tip"]?T("rn.ws_"+pr+"_tip"):T("rn.ws_not_found_tip");
+tip=T("cs.dir_bad_tip",{p:p,why:why});
+}
+return '<span class="rc-tag rc-dir'+(pr?" bad":"")+'" tabindex="0" data-tip="'+esc(tip)+'">'+ic("folder","sm")+'<span class="ell">'+esc(p?base:T("cs.scratch"))+"</span></span>";
 }
 function csCapsTag(s){
 if(!s)return "";
@@ -7880,6 +7892,11 @@ bindChat(sec,{
 id:s.id,key:"cs_"+s.id,ph:"cs.ph",send_tip:"cs.send_tip",pre:s,turns:csAll,
 onPaint:function(x){
 if(drafts)drafts.session(x);
+var dir=$(".rc-dir",sec);
+if(dir){
+var tmp=document.createElement("div");tmp.innerHTML=csDirTag(x);
+if(tmp.firstChild&&dir.outerHTML!==tmp.firstChild.outerHTML)dir.replaceWith(tmp.firstChild);
+}
 var el=$('[data-cs="'+s.id+'"]'),html=csItemHtml(x,s.id);
 if(el&&el._h!==html&&el.outerHTML!==html){var tmp=document.createElement("div");tmp.innerHTML=html;el.replaceWith(tmp.firstChild);$('[data-cs="'+s.id+'"]')._h=html;}
 requestAnimationFrame(bottom);

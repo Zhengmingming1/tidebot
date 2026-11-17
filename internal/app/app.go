@@ -663,6 +663,21 @@ func isMockBin(bin string) bool {
 	return bin != "" && (strings.Contains(bin, "mock-claude") || bin == "true")
 }
 
+// taskOwnerWorkspace is a folder the owner chose (not the per-task default in
+// tidebot's home, and not the data folder that applyGuard remaps to it).
+func (a *App) taskOwnerWorkspace(taskID, ws string) bool {
+	if ws == "" {
+		return false
+	}
+	if a.Cfg.DataDir != "" && filepath.Clean(ws) == filepath.Clean(a.Cfg.DataDir) {
+		return false
+	}
+	if taskID != "" && filepath.Clean(ws) == filepath.Clean(guard.TaskWorkspace(a.Cfg.HomeDir, taskID)) {
+		return false
+	}
+	return true
+}
+
 func (a *App) runTaskTrigger(ctx context.Context, task db.Task, trigger, bucket string) error {
 	return a.runTaskTriggerOn(ctx, task, trigger, bucket, nil)
 }
@@ -696,10 +711,23 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	if view.Spec != nil && view.Spec.WorkspaceDir != "" {
 		ws = view.Spec.WorkspaceDir
 	}
-	ownerDir := ws != "" // the owner's folder, not the task's own one in tidebot's home
+	// the owner's folder, not the task's own one in tidebot's home (or the data
+	// folder, which applyGuard remaps to that default)
+	ownerDir := a.taskOwnerWorkspace(task.ID, ws)
 	if ws == "" {
 		ws = guard.TaskWorkspace(a.Cfg.HomeDir, task.ID)
 		_ = os.MkdirAll(ws, 0o755)
+	} else if ownerDir {
+		// Check again at run time, as the Run dialog, sessions and workflows do:
+		// a folder moved away, swapped for a link into ~/.ssh, or a still-missing
+		// path under a sensitive folder, is refused before a run row is created
+		// and before applyGuard would mkdir it.
+		home, _ := os.UserHomeDir()
+		real, prob := guard.CheckPlannedDir(ws, home, a.Cfg.HomeDir)
+		if prob != "" {
+			return &guard.DirError{Problem: prob}
+		}
+		ws = real
 	}
 	var choices []skillChoice
 	var skillArgs []string

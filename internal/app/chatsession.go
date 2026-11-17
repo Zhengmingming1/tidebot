@@ -389,6 +389,21 @@ func (a *App) chatTurnDir(sid, saved string) (dir string, own bool, err error) {
 	return real, true, nil
 }
 
+// chatWorkspaceProblem is the CheckRunDir problem of the session's owner folder
+// ("" if none, a tidebot folder, or the folder is fine). Used when opening the
+// session (the directory tag) and when prefilling "save as task".
+func (a *App) chatWorkspaceProblem(saved string) string {
+	if saved == "" {
+		return ""
+	}
+	if guard.Within(saved, a.Cfg.HomeDir) || guard.Within(saved, a.Cfg.DataDir) {
+		return ""
+	}
+	home, _ := os.UserHomeDir()
+	_, prob := guard.CheckRunDir(saved, home, a.Cfg.HomeDir)
+	return prob
+}
+
 // ListChatSessions lists sessions, most recently active first.
 func (a *App) ListChatSessions(ctx context.Context, limit int) ([]webui.ChatSession, error) {
 	rows, err := a.DB.QueryContext(ctx, `SELECT `+chatCols+` FROM chat_sessions ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
@@ -429,6 +444,7 @@ func (a *App) GetChatSession(ctx context.Context, sid string) (webui.ChatSession
 		return webui.ChatSessionDetail{}, err
 	}
 	d := webui.ChatSessionDetail{ChatSession: c.ChatSession}
+	d.WorkspaceProblem = a.chatWorkspaceProblem(c.WorkspaceDir)
 	fx := a.cachedFX()
 	rows, err := a.DB.QueryContext(ctx, `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.prompt,''), COALESCE(r.status,''),
   COALESCE(r.result_text,''), COALESCE(r.result_truncated,0), COALESCE(r.error_message,''), COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,'')
@@ -482,6 +498,9 @@ func (a *App) ChatSessionSig(ctx context.Context, sid string) (string, error) {
 		return "", err
 	}
 	if err = enc.Encode(a.cachedFX()); err != nil {
+		return "", err
+	}
+	if _, err = fmt.Fprintf(h, "ws\x00%s\n", a.chatWorkspaceProblem(c.WorkspaceDir)); err != nil {
 		return "", err
 	}
 	rows, err := a.DB.QueryContext(ctx, chatTurnSigQuery, sid)

@@ -2,6 +2,7 @@ package webui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -88,6 +89,22 @@ func TestTaskFormWorkspace(t *testing.T) {
 		if _, d = c.json(http.MethodGet, "/api/tasks/"+id, nil); d["workspace"] != filepath.Join(home, "tb-proj") {
 			t.Fatalf("tilde %v", d["workspace"])
 		}
+		// Sensitive folders (and a path first run would create under one, and the
+		// home folder itself) are refused at save, same as a run.
+		for _, bad := range []string{filepath.Join(home, ".ssh"), filepath.Join(home, ".ssh", "new"), home, "~"} {
+			if code, out := edit(bad); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "working folder") {
+				t.Errorf("sensitive %q accepted: %d %v", bad, code, out)
+			}
+		}
+		if _, d = c.json(http.MethodGet, "/api/tasks/"+id, nil); d["workspace"] != filepath.Join(home, "tb-proj") {
+			t.Fatalf("sensitive edit changed the folder: %v", d["workspace"])
+		}
+		link := filepath.Join(t.TempDir(), "keys-link")
+		if err := os.Symlink(filepath.Join(home, ".ssh"), link); err == nil {
+			if code, out := edit(link); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "working folder") {
+				t.Errorf("symlink to ~/.ssh accepted: %d %v", code, out)
+			}
+		}
 	}
 }
 
@@ -120,6 +137,17 @@ func TestWorkspaceCheck(t *testing.T) {
 	for q, want := range map[string]string{"rel": "relative", filepath.Join(c.s.deps.Cfg.HomeDir, "x"): "internal"} {
 		if out := check("path=" + url.QueryEscape(q)); out["problem"] != want {
 			t.Errorf("%s: %v", q, out)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for q, want := range map[string]string{
+			filepath.Join(home, ".ssh"):        "sensitive",
+			filepath.Join(home, ".ssh", "new"): "sensitive",
+			home:                               "contains_sensitive",
+		} {
+			if out := check("path=" + url.QueryEscape(q)); out["problem"] != want {
+				t.Errorf("%s: %v", q, out)
+			}
 		}
 	}
 	if code, _ := c.json(http.MethodPost, "/api/tasks/workspace-check", nil); code != 405 {
@@ -158,9 +186,10 @@ func TestTaskFormWorkspaceUI(t *testing.T) {
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`wsFieldHtml(tf.workspace || "")`,
-		`var ws = wireWsField(root, f.workspace, taskId);`,
 		`workspace: f.workspace.value.trim(), policy: readPolicyFields(f), tags: tgs.value(), run_mode: runMode()`,
 		`if (!wf && ws.problem()) {`,
+		`var ws = wireWsField(root, f.workspace, taskId, pre);`,
+		`pre.workspace_problem`,
 		`"/api/tasks/workspace-check?path="`,
 		`api("/api/desktop/pick-folder", { method: "POST", body: { start: start } })`,
 		`input._tbTouched = true;`,
@@ -174,8 +203,11 @@ func TestTaskFormWorkspaceUI(t *testing.T) {
 		t.Error("styles.css lacks .ws-field pill")
 	}
 	keys := []string{"tf.workspace", "tf.ws_hint", "tf.ws_default_ph", "tf.ws_pick", "tf.ws_reset", "tf.ws_new", "tf.ws_new_tip", "tf.ws_bad"}
-	for _, p := range []string{"relative", "root", "internal", "not_dir", "too_long"} {
+	for _, p := range []string{"relative", "root", "internal", "not_dir", "too_long", "sensitive", "contains_sensitive", "not_found"} {
 		keys = append(keys, "tf.ws_err_"+p)
+	}
+	for _, k := range []string{"cs.save_task_dir_bad", "cs.save_task_dir_missing_tip"} {
+		keys = append(keys, k)
 	}
 	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
 		raw, _ := os.ReadFile(f)

@@ -68,6 +68,11 @@ type ChatTaskPreset struct {
 	Effort        string                 `json:"effort"`
 	Provider      string                 `json:"provider"`
 	SkillBindings []tasksvc.SkillBinding `json:"skill_bindings"`
+	// WorkspaceProblem is a CheckRunDir problem for the session's folder
+	// (moved, deleted, a link into a sensitive folder). "save as task" does
+	// not prefill an unsafe path; a missing folder is still filled in so the
+	// form can warn.
+	WorkspaceProblem string `json:"workspace_problem,omitempty"`
 }
 
 // chatDrafter is optional: an app with skill drafts in sessions.

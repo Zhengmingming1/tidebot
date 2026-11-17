@@ -13,20 +13,25 @@ import (
 
 // ChatSession is one session (会话) as the API shows it.
 type ChatSession struct {
-	ID             string  `json:"id"`
-	Title          string  `json:"title"`
-	Origin         string  `json:"origin"` // run | chat (run_fix later)
-	OriginRunID    string  `json:"origin_run_id"`
-	WorkspaceDir   string  `json:"workspace_dir"`
-	PermissionMode string  `json:"permission_mode"` // read | edit | exec
-	Provider       string  `json:"provider"`
-	Turns          int     `json:"turns"`     // turns sent (the origin run is turn 0)
-	TurnHint       int     `json:"turn_hint"` // from this many turns the page shows a soft "long session" hint (no limit)
-	CostUSD        float64 `json:"cost_usd"`  // display currency, like runs' cost_usd
-	WebAccess      bool    `json:"web_access"`
-	Status         string  `json:"status"` // idle | running | closed
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Origin       string `json:"origin"` // run | chat (run_fix later)
+	OriginRunID  string `json:"origin_run_id"`
+	WorkspaceDir string `json:"workspace_dir"`
+	// WorkspaceProblem is a CheckRunDir problem for WorkspaceDir when it is
+	// the owner's folder (moved, deleted, or a link into a sensitive folder).
+	// Empty when the folder is fine, unset, or a tidebot folder. Filled when
+	// opening a session so the directory tag can show it before Send.
+	WorkspaceProblem string  `json:"workspace_problem,omitempty"`
+	PermissionMode   string  `json:"permission_mode"` // read | edit | exec
+	Provider         string  `json:"provider"`
+	Turns            int     `json:"turns"`     // turns sent (the origin run is turn 0)
+	TurnHint         int     `json:"turn_hint"` // from this many turns the page shows a soft "long session" hint (no limit)
+	CostUSD          float64 `json:"cost_usd"`  // display currency, like runs' cost_usd
+	WebAccess        bool    `json:"web_access"`
+	Status           string  `json:"status"` // idle | running | closed
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
 	// Bindings are the skills and capabilities bound to the session: part of
 	// every later turn (read-only like the rest of the session).
 	Bindings []ChatBinding `json:"bindings"`

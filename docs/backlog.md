@@ -6655,3 +6655,27 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
 - Windows 在短名冲突很多时会改用校验和形式（前 2 个字符 + 4 位十六进制 + `~N`），词法上不敢随便匹配，目前只覆盖传统的「前 6 字 + `~N`」。
 - 在同一台机器上恢复时，若清单里的 home 和新 home 字符串相同、库里却混着另一种 8.3 写法，现在会跳过改写（`HomeDir != home`）；长短形式在同一台机器上通常都能用，若以后要统一可以再展开。
+
+### 2026-11-16：任务保存/运行与会话「存为任务」都会重查目录，会话页打开时目录标签标红（BUG / 安全）
+
+- **问题**：2026-11-14 会话每一轮会用 `CheckRunDir` 重查目录（移走、换成指向 `~/.ssh` 的链接就拒绝这一轮），但两处还滞后：
+  1. 会话页的目录标签一直是普通样式，要等发送才知道目录不可用。
+  2. 「存为任务」只是把会话里存的路径预填进任务表单：目录已经变成指向 `~/.ssh` 的链接时，会预填出不安全的任务。
+  核对时还发现，当时写的「任务在每次运行时都会重查目录」并不成立：`runTaskTriggerOn` 没有调用 `CheckRunDir`，任务保存只用 `normalizeWorkspace`（相对路径、根目录、tidebot 自己的目录、已有文件），**不拒绝 `~/.ssh`、用户主目录、指向敏感目录的链接，也不拒绝「第一次运行会在敏感目录下新建」的路径**。定时 / 手动运行会进那个目录（`applyGuard` 还会 `MkdirAll`）。工作流在保存和启动时都走 `prepareWorkflow` 的 `CheckRunDir`，对「保存后被移走 / 换成链接 / 目录不在了」已经覆盖，不是漏洞。
+- **改法**：
+  - `guard.CheckPlannedDir`：已有路径与 `CheckRunDir` 相同（先解析链接）；还不存在的路径按同一套拒绝名单判断，并解析已存在的祖先（`~/code/keys-link/new` 若 `keys-link` 指向 `~/.ssh` 也会被拒）。任务保存和运行用它；运行对话框 / 会话仍然要求目录已经存在（`CheckRunDir`）。
+  - 任务保存（`normalizeWorkspace` / 目录检查接口）：敏感目录、主目录、内部目录、指向它们的链接、将在敏感目录下新建的路径一律拒绝；还不存在的普通路径照旧允许（第一次运行时创建）。
+  - 任务运行（`runTaskTriggerOn`）：用户自己的目录在建运行行和 `MkdirAll` 之前重查，有问题就返回 `*guard.DirError`（手动运行接口已按 `problem` 展示）；tidebot 为任务分配的默认目录不走这套检查。
+  - 会话 GET 带 `workspace_problem`（打开时查一次；轮询指纹也纳入，目录恢复后标签会更新）。目录不可用时标签标红，提示复用运行对话框的原因（中英文）。
+  - 「存为任务」：敏感等不安全路径不预填（表单里空着，并 toast 说明）；目录只是不存在时仍预填路径，表单显示「不存在」而不是「将新建」，仍允许保存（第一次运行会建空目录，也可另选）。
+- 测试：`guard.TestCheckPlannedDir`；`TestTaskFormWorkspace` / `TestWorkspaceCheck` 加上 `~/.ssh`、`~/.ssh/new`、主目录、指向 `~/.ssh` 的链接；`TestTaskRunChecksOwnerFolder`（链接到 `~/.ssh`、将在其下新建、保存后目录被换成指向 `~/.ssh` 的链接 → 均拒绝且不建运行行；普通项目下还不存在的目录仍会创建并在真实路径里跑）；`TestChatSessionFolderProblemOnOpenAndPreset`（打开 / 预填：不存在、敏感不预填、放回后问题清空且指纹变化）；webui 目录标签和表单文案。`go test ./...`、`go vet`（含 GOOS=windows/darwin）通过。截图：`/workspace/tidebot-shots/2026-11-17-chat-dir-bad-{zh-CN,en}-1024x655.png`。
+
+**心得**：写「每次使用时重查」时要把所有入口都对一遍；只在运行对话框和会话发送时检查，任务保存和定时运行就是漏洞。还不存在的路径不能只当成「以后再建」——要先问「建在哪里」，否则第一次运行会在 `~/.ssh/new` 里 `mkdir`。
+
+**后续想法**：
+- `cost_policy.go` 写入 `effective_cost_policy_json` 仍只试一次（检查错误，但不重试）；`tasksvc` 里是否还有只试一次的写入值得再对一下。
+- 技能组合评估（`x.error`）和依赖检查（`r.error`）可能仍直接显示英文；运行页 `error_message` 可能仍缺 `error_info`。
+- 运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。

@@ -37,7 +37,7 @@ func TestChatPageUI(t *testing.T) {
 	}
 
 	runNode(t, `
-var state = { dict: {} };
+var state = { dict: { "rn.ws_not_found_tip": 1, "rn.ws_sensitive_tip": 1 } };
 function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 function enc(s) { return encodeURIComponent(s); }
 function T(k, v) { return k + (v ? JSON.stringify(v) : ""); }
@@ -70,6 +70,10 @@ ok(bi.indexOf("cs.untitled") > 0 && bi.indexOf("aria-current") < 0 && bi.indexOf
 ok(csDirTag(fromRun).indexOf(">tidebot<") > 0 && csDirTag(fromRun).indexOf("/home/me/code/tidebot/") > 0, "folder: base name, full path in the tooltip");
 ok(csDirTag({ workspace_dir: "C:\\Users\\me\\proj" }).indexOf(">proj<") > 0, "Windows folder");
 ok(csDirTag(blank).indexOf("cs.scratch") > 0, "own empty folder");
+var badDir = csDirTag({ workspace_dir: "/home/me/code/tidebot/", workspace_problem: "not_found" });
+ok(badDir.indexOf("rc-dir bad") > 0 && badDir.indexOf("cs.dir_bad_tip") > 0 && badDir.indexOf("rn.ws_not_found_tip") > 0 && badDir.indexOf(">tidebot<") > 0, "missing folder: red tag, reason in the tooltip");
+ok(csDirTag({ workspace_dir: "/home/me/code/tidebot/", workspace_problem: "sensitive" }).indexOf("rn.ws_sensitive_tip") > 0, "sensitive folder: that reason");
+ok(csDirTag(fromRun).indexOf("rc-dir bad") < 0 && csDirTag(fromRun).indexOf("cs.dir_tip") > 0, "a fine folder stays as it was");
 var nw = csPageHtml([blank, fromRun], null);
 ok(nw.indexOf("cs-empty") > 0 && nw.indexOf('id="rc-form"') > 0 && nw.indexOf("cs-new active") > 0 && nw.indexOf("cs-del") < 0 && nw.indexOf("cs-caps") < 0, "new session: hint, box, no delete, no capabilities yet");
 ok(nw.indexOf('placeholder="cs.ph_new"') > 0, "new session placeholder");
@@ -89,4 +93,18 @@ ok(rcBoxHtml({}).indexOf('placeholder="rc.ph"') > 0 && rcBoxHtml({}).indexOf("rc
 ok(rcOpenHtml("chat_1").indexOf('href="#/chat/chat_1"') > 0 && rcOpenHtml("").indexOf(" hidden") > 0 && rcOpenHtml("a\"b").indexOf(" hidden") > 0, "open-in-session link");
 if (bad.length) { console.error(bad.join("\n")); process.exitCode = 1; }
 `, nil)
+
+	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"cs.dir_bad_tip"`) || !strings.Contains(string(raw), "{why}") || !strings.Contains(string(raw), "{p}") {
+			t.Errorf("%s lacks cs.dir_bad_tip with {why} and {p}", f)
+		}
+	}
+	css := cssSource(t)
+	if !strings.Contains(css, ".rc-tag.rc-dir.bad") {
+		t.Error("styles.css lacks .rc-tag.rc-dir.bad")
+	}
 }

@@ -70,6 +70,64 @@ func CheckRunDir(p, userHome, appHome string) (string, string) {
 	if filepath.Dir(real) == real {
 		return "", DirRoot
 	}
+	if prob := dirDeny(real, userHome, appHome); prob != "" {
+		return "", prob
+	}
+	return real, ""
+}
+
+// CheckPlannedDir is CheckRunDir for a folder a task may create on first run.
+// A path that does not exist yet is still matched against the same deny list
+// (so ~/.ssh/new or the home folder itself cannot be saved or used), resolving
+// existing ancestors so a missing path under a link into ~/.ssh is also
+// refused. A path that already exists (including a symlink) is checked
+// exactly as CheckRunDir: dangling links are not_found.
+func CheckPlannedDir(p, userHome, appHome string) (string, string) {
+	if !filepath.IsAbs(p) {
+		return "", DirRelative
+	}
+	cleaned := filepath.Clean(p)
+	if _, err := os.Lstat(cleaned); err == nil {
+		return CheckRunDir(p, userHome, appHome)
+	}
+	abs, err := plannedAbs(cleaned)
+	if err != nil {
+		return "", DirNotFound
+	}
+	if filepath.Dir(abs) == abs {
+		return "", DirRoot
+	}
+	if prob := dirDeny(abs, userHome, appHome); prob != "" {
+		return "", prob
+	}
+	return abs, ""
+}
+
+// plannedAbs is the absolute path, with every existing ancestor resolved
+// (so a missing child of a symlink is judged by where the link points).
+func plannedAbs(p string) (string, error) {
+	abs, err := filepath.Abs(filepath.Clean(p))
+	if err != nil {
+		return "", err
+	}
+	cur := abs
+	var tail []string
+	for {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(append([]string{real}, tail...)...), nil
+		}
+		dir := filepath.Dir(cur)
+		if dir == cur {
+			return abs, nil
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		cur = dir
+	}
+}
+
+// dirDeny is the deny-list half of CheckRunDir, used for both existing and
+// planned paths (already cleaned and, where possible, resolved).
+func dirDeny(real, userHome, appHome string) string {
 	var deny []string
 	homes := []string{userHome}
 	if r, err := filepath.EvalSymlinks(userHome); userHome != "" && err == nil && r != userHome {
@@ -86,20 +144,20 @@ func CheckRunDir(p, userHome, appHome string) (string, string) {
 	deny = append(deny, sensitiveSystem()...)
 	for _, d := range expand(deny) {
 		if Within(real, d) {
-			return "", DirSensitive
+			return DirSensitive
 		}
 		if Within(d, real) {
-			return "", DirContainsSensitive
+			return DirContainsSensitive
 		}
 	}
 	if appHome != "" {
 		for _, d := range expand([]string{appHome, filepath.Join(appHome, "data")}) {
 			if Within(real, d) || Within(d, real) {
-				return "", DirInternal
+				return DirInternal
 			}
 		}
 	}
-	return real, ""
+	return ""
 }
 
 // expand adds each path's real path (e.g. /etc -> /private/etc on macOS).

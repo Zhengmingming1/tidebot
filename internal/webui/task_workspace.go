@@ -19,11 +19,14 @@ const maxWorkspacePath = 1024
 // Problems with a typed working folder. The page shows them in its own language; the
 // save answer carries the English text.
 var (
-	errWsRelative = errors.New("working folder: use a full path (e.g. /Users/me/project or C:\\Users\\me\\project)")
-	errWsRoot     = errors.New("working folder: a drive or filesystem root is too broad")
-	errWsInternal = errors.New("working folder: can't be inside tidebot's own data folder")
-	errWsNotDir   = errors.New("working folder: that path is a file, not a folder")
-	errWsTooLong  = errors.New("working folder: path too long")
+	errWsRelative          = errors.New("working folder: use a full path (e.g. /Users/me/project or C:\\Users\\me\\project)")
+	errWsRoot              = errors.New("working folder: a drive or filesystem root is too broad")
+	errWsInternal          = errors.New("working folder: can't be inside tidebot's own data folder")
+	errWsNotDir            = errors.New("working folder: that path is a file, not a folder")
+	errWsTooLong           = errors.New("working folder: path too long")
+	errWsSensitive         = errors.New("working folder: this holds keys, credentials or system files and can't be used")
+	errWsContainsSensitive = errors.New("working folder: this folder contains keys or credentials (like the home folder) and is too broad")
+	errWsNotFound          = errors.New("working folder: that path doesn't exist or can't be opened")
 )
 
 func wsProblem(err error) string {
@@ -38,8 +41,34 @@ func wsProblem(err error) string {
 		return "not_dir"
 	case errWsTooLong:
 		return "too_long"
+	case errWsSensitive:
+		return "sensitive"
+	case errWsContainsSensitive:
+		return "contains_sensitive"
+	case errWsNotFound:
+		return "not_found"
 	}
 	return ""
+}
+
+func wsErr(prob string) error {
+	switch prob {
+	case guard.DirRelative:
+		return errWsRelative
+	case guard.DirRoot:
+		return errWsRoot
+	case guard.DirInternal:
+		return errWsInternal
+	case guard.DirNotDir:
+		return errWsNotDir
+	case guard.DirSensitive:
+		return errWsSensitive
+	case guard.DirContainsSensitive:
+		return errWsContainsSensitive
+	case guard.DirNotFound:
+		return errWsNotFound
+	}
+	return errors.New("working folder: " + prob)
 }
 
 // normalizeWorkspace turns what the user typed or picked into the folder a task keeps.
@@ -83,6 +112,19 @@ func (s *Server) normalizeWorkspace(raw, taskID string) (string, error) {
 	}
 	if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 		return "", errWsNotDir
+	}
+	// Existing folders and still-missing ones both go through the same deny
+	// list as a run (symlinks resolved, sensitive folders refused), so a task
+	// cannot be saved with ~/.ssh, a link into it, or a path that first run
+	// would create under a sensitive folder. A path that simply does not exist
+	// yet is still allowed: the first run creates it.
+	home, _ := os.UserHomeDir()
+	appHome := ""
+	if cfg := s.deps.Cfg; cfg != nil {
+		appHome = cfg.HomeDir
+	}
+	if _, prob := guard.CheckPlannedDir(p, home, appHome); prob != "" {
+		return "", wsErr(prob)
 	}
 	return p, nil
 }

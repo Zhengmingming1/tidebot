@@ -21,8 +21,15 @@
   // The folder the session reads: the run's folder, or its own empty one.
   function csDirTag(s) {
     var p = (s && s.workspace_dir) || "", base = p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
-    return '<span class="rc-tag rc-dir" tabindex="0" data-tip="' + esc(p ? T("cs.dir_tip", { p: p }) : T("cs.scratch_tip")) + '">' + ic("folder", "sm") + '<span class="ell">' + esc(p ? base : T("cs.scratch")) + "</span></span>";
+    var pr = (s && s.workspace_problem) || "";
+    var tip = p ? T("cs.dir_tip", { p: p }) : T("cs.scratch_tip");
+    if (pr) {
+      var why = state.dict["rn.ws_" + pr + "_tip"] ? T("rn.ws_" + pr + "_tip") : T("rn.ws_not_found_tip");
+      tip = T("cs.dir_bad_tip", { p: p, why: why });
+    }
+    return '<span class="rc-tag rc-dir' + (pr ? " bad" : "") + '" tabindex="0" data-tip="' + esc(tip) + '">' + ic("folder", "sm") + '<span class="ell">' + esc(p ? base : T("cs.scratch")) + "</span></span>";
   }
+
   // 能力 N: what the session is bound to (skills, capabilities), applied from the next turn.
   function csCapsTag(s) {
     if (!s) return "";
@@ -99,6 +106,11 @@
         // the list row follows the session (busy dot, turns, title) without redrawing the list
         onPaint: function (x) {
           if (drafts) drafts.session(x);
+          var dir = $(".rc-dir", sec);
+          if (dir) {
+            var tmp = document.createElement("div"); tmp.innerHTML = csDirTag(x);
+            if (tmp.firstChild && dir.outerHTML !== tmp.firstChild.outerHTML) dir.replaceWith(tmp.firstChild);
+          }
           var el = $('[data-cs="' + s.id + '"]'), html = csItemHtml(x, s.id);
           if (el && el._h !== html && el.outerHTML !== html) { var tmp = document.createElement("div"); tmp.innerHTML = html; el.replaceWith(tmp.firstChild); $('[data-cs="' + s.id + '"]')._h = html; }
           requestAnimationFrame(bottom);

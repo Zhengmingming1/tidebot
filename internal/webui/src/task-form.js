@@ -252,12 +252,15 @@
       '<button type="button" class="icon-btn sm hidden" id="tf-ws-pick" data-tip="' + esc(T("tf.ws_pick")) + '" aria-label="' + esc(T("tf.ws_pick")) + '">' + ic("folder", "sm") + "</button>" +
       '<button type="button" class="icon-btn sm' + (val ? "" : " hidden") + '" id="tf-ws-reset" data-tip="' + esc(T("tf.ws_reset")) + '" aria-label="' + esc(T("tf.ws_reset")) + '">' + ic("rollback", "sm") + "</button></div></div>";
   }
-  function wireWsField(root, input, taskId) {
+  function wireWsField(root, input, taskId, fromSession) {
     var pill = $("#tf-ws-st", root), reset = $("#tf-ws-reset", root), pick = $("#tf-ws-pick", root), def = "", problem = "", seq = 0, timer = 0;
+    // A session whose folder is gone still prefills the path: show that, not "will be created".
+    var missing = !!(fromSession && fromSession.workspace_problem === "not_found");
     var paint = function (r) {
       problem = r.problem || "";
       var cls = "", txt = "", tipTxt = "";
       if (problem) { cls = "bad"; txt = T("tf.ws_bad"); tipTxt = T("tf.ws_err_" + problem); }
+      else if (missing && r.path && !r.exists) { cls = "bad"; txt = T("rn.ws_not_found"); tipTxt = T("cs.save_task_dir_missing_tip"); }
       else if (r.path && !r.exists) { cls = "info"; txt = T("tf.ws_new"); tipTxt = T("tf.ws_new_tip"); }
       pill.className = "pill sm " + (cls || "hidden");
       pill.textContent = txt;
@@ -270,7 +273,7 @@
       api("/api/tasks/workspace-check?path=" + enc(input.value.trim()) + (taskId ? "&id=" + enc(taskId) : "")).then(function (r) { if (my === seq) paint(r || {}); }).catch(function () { /* keep last state */ });
     };
     var set = function (v) { input.value = v; input._tbTouched = true; clearTimeout(timer); check(); };
-    input.addEventListener("input", function () { reset.classList.toggle("hidden", !input.value.trim()); clearTimeout(timer); timer = setTimeout(check, 250); });
+    input.addEventListener("input", function () { missing = false; reset.classList.toggle("hidden", !input.value.trim()); clearTimeout(timer); timer = setTimeout(check, 250); });
     reset.addEventListener("click", function () { set(""); input.focus(); });
     folderPickable().then(function (ok) {
       if (!ok || !root.contains(pick)) return;
@@ -426,7 +429,11 @@
         var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
         if (drafty) wireDraft(root, f.prompt, "task");
         if (!taskId && !wf) wireTaskAutofill(root, f, se, skills);
-        var ws = wireWsField(root, f.workspace, taskId);
+        var ws = wireWsField(root, f.workspace, taskId, pre);
+        if (!taskId && pre.workspace_problem && pre.workspace_problem !== "not_found") {
+          var why = state.dict["rn.ws_" + pre.workspace_problem + "_tip"] ? T("rn.ws_" + pre.workspace_problem + "_tip") : T("rn.ws_not_found_tip");
+          toast(T("cs.save_task_dir_bad", { why: why }), true);
+        }
         wirePolicyFields(root, f);
         var readCostMode = wireCostFields(root, f);
         f.addEventListener("submit", function (e) {
