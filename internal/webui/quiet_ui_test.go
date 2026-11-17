@@ -88,7 +88,7 @@ func TestQuietUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".qh-days button[aria-pressed=\"true\"]", ".spz-pill.qh-pill {", ".tl-quiet {", ".qh-range input[type=\"time\"]"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %s", want)

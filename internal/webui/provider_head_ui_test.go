@@ -11,7 +11,7 @@ import (
 // click that lands before the list has loaded (palette "n p") still opens the picker.
 func TestProviderHeadUI(t *testing.T) {
 	jsb := []byte(appJSSource(t))
-	cssb, _ := Static.ReadFile("static/styles.css")
+	cssb := []byte(cssSource(t))
 	js, css := string(jsb), string(cssb)
 	i := strings.Index(js, `section === "providers"`)
 	if i < 0 {

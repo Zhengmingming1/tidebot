@@ -75,7 +75,7 @@ func TestUndoFileUI(t *testing.T) {
 	if i := strings.Index(src, "function runUndoFile"); i < 0 || regexp.MustCompile(`\b(confirm|alert|prompt)\(`).MatchString(src[i:i+1200]) {
 		t.Error("runUndoFile missing or uses a native dialog")
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".rd-chg-fx", ".diff-file.gone", "@media (hover: none) { .rd-chg-fx", ".chg-badge.partly"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles lack %s", s)

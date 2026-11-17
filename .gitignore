@@ -16,3 +16,7 @@ coverage.out
 # Root-level binaries only (do not ignore cmd/agentd or cmd/agentctl)
 /agentd
 /agentctl
+
+# Python bytecode from scripts/build-webui.py and friends
+__pycache__/
+*.pyc

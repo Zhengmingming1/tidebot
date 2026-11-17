@@ -18,10 +18,7 @@ func TestSelectControlsClient(t *testing.T) {
 }
 
 func TestCompoundInputFocus(t *testing.T) {
-	css, err := Static.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	for _, fragment := range []string{
 		".search-in input:focus, .search-in input:focus-visible { outline: none; border: 0 !important; box-shadow: none; }",
 		".search-in:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px",

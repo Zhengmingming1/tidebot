@@ -36,9 +36,9 @@ func TestWorkflowWorkspaceLayout(t *testing.T) {
 	}
 
 	var narrow string
-	for _, match := range regexp.MustCompile(`(?s)@media\s*\(max-width:\s*900px\)\s*\{(.*?)\n\}`).FindAllStringSubmatch(css, -1) {
-		if strings.Contains(match[1], ".wf-designer") {
-			narrow = match[1]
+	for _, body := range cssAtRuleBody(css, `@media[^{]*max-width:\s*900px`) {
+		if strings.Contains(body, ".wf-designer") {
+			narrow = body
 		}
 	}
 	if narrow == "" {
@@ -105,7 +105,8 @@ func TestSelectPopupFitsOptionText(t *testing.T) {
 // avoids preserving an obsolete exact CSS block merely to satisfy a string test.
 func requireLayoutDeclaration(t *testing.T, css, selector, property, valuePattern string) {
 	t.Helper()
-	pattern := `(?s)(?:^|[}\n])\s*` + regexp.QuoteMeta(selector) + `\s*\{[^}]*?\b` + regexp.QuoteMeta(property) + `\s*:\s*` + valuePattern + `\s*[;}]`
+	sel := regexp.MustCompile(`\s+`).ReplaceAllString(regexp.QuoteMeta(selector), `\s*`)
+	pattern := `(?s)(?:^|[}\n{])\s*` + sel + `\s*\{[^}]*?\b` + regexp.QuoteMeta(property) + `\s*:\s*` + valuePattern + `\s*[;}]`
 	if !regexp.MustCompile(pattern).MatchString(css) {
 		t.Errorf("missing %s declaration %s: %s", selector, property, valuePattern)
 	}

@@ -47,7 +47,7 @@ assert.ok(!boot.includes("mk-sun"));assert.ok(!boot.includes("tw-sand"));
 	if out, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("brand geometry: %v\n%s", err, out)
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, rule := range []string{"animation: tide-level 7s", "transform: translateY(-.6px)", "html.tb-busy .tide .tw { animation-duration: 3.2s; }", "html.tb-hidden .tide * { animation-play-state: paused; }", "@media (prefers-reduced-motion: reduce) { .tide * { animation: none !important; } }"} {
 		if !strings.Contains(string(css), rule) {
 			t.Errorf("logo animation lost %s", rule)

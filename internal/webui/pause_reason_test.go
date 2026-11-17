@@ -149,7 +149,7 @@ func TestPauseReasonUI(t *testing.T) {
 			t.Errorf("pause block lacks %s", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".pill.pz-pill {", ".pz-note {", ".pz-note > .link {"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %q", want)

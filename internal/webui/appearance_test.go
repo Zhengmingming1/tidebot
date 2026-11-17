@@ -80,15 +80,10 @@ func TestThemeTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	css := strings.ReplaceAll(string(raw), "\r\n", "\n") // Windows checkouts may use CRLF
+	src := cssSource(t)
 	bg := func(sel string) string {
-		i := strings.Index(css, "\n"+sel+" {")
-		if i < 0 {
-			i = strings.Index(css, "\n"+sel+",")
-		}
-		if i < 0 {
-			t.Fatalf("missing %s", sel)
-		}
-		m := regexp.MustCompile(`--bg: (#[0-9a-f]{6});`).FindStringSubmatch(css[i:])
+		body := cssBlockBody(t, css, sel)
+		m := regexp.MustCompile(`--bg:\s*(#[0-9a-f]{6});`).FindStringSubmatch(body)
 		if m == nil {
 			t.Fatalf("%s: no --bg", sel)
 		}
@@ -105,14 +100,14 @@ func TestThemeTokens(t *testing.T) {
 		if got, want := bg(fmt.Sprintf(`html[data-theme="%s"][data-mode="dark"]`, th)), fmt.Sprintf("#%02x%02x%02x", c[1][0], c[1][1], c[1][2]); got != want {
 			t.Errorf("%s dark: css %s, window %s", th, got, want)
 		}
-		if !strings.Contains(css, fmt.Sprintf("@media (prefers-color-scheme: dark) {\nhtml[data-theme=%q][data-mode=\"system\"] {", th)) {
+		if _, ok := findCSSBlock(css, fmt.Sprintf(`html[data-theme=%q][data-mode="system"]`, th)); !ok {
 			t.Errorf("%s: no follow-the-system dark block", th)
 		}
 	}
 	// colours on accent / tooltips come from tokens, so dark palettes stay legible
 	for _, s := range []string{"background: var(--tip-bg); color: var(--tip-fg);", ".btn.primary { background: var(--primary-bg)", "input.tgl { -webkit-appearance: none;"} {
-		if !strings.Contains(css, s) {
-			t.Errorf("styles.css lacks %q", s)
+		if !strings.Contains(src, s) {
+			t.Errorf("styles.css source lacks %q", s)
 		}
 	}
 }

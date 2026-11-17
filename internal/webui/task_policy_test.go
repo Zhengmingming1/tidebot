@@ -128,7 +128,7 @@ func TestTaskFormPolicyUI(t *testing.T) {
 			t.Errorf("policy fields use %s", bad)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".tf-pol {", ".tf-pol-sum {"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %q", want)

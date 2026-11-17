@@ -61,7 +61,7 @@ func TestSchedPauseUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".spz-pill {", ".spz-menu { position: fixed;", ".timeline li.held", "@media (max-width: 960px) { .spz-pill"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %s", want)

@@ -124,7 +124,7 @@ func TestTaskListRecentRunsUI(t *testing.T) {
 			t.Errorf("app.js lacks %q", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".hbar.sm .hb { width: 6px; height: 16px;", ".table td.tl-name { width: 100%; max-width: 0; }", "html.tb-hidden .hbar.sm .hb.run { animation-play-state: paused; }", "@media (prefers-reduced-motion: reduce) { .hbar.sm .hb.run { animation: none; } }"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %q", want)
@@ -195,7 +195,7 @@ func TestTaskListFailingFilterUI(t *testing.T) {
 			t.Errorf("app.js lacks %q", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".task-f .cnt.bad { color: var(--danger);", "a.tl-rate { color: inherit;"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %q", want)

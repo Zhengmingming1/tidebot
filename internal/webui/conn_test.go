@@ -36,10 +36,7 @@ func TestConnectionBar(t *testing.T) {
 			t.Errorf("raw fetch() outside netFetch: %s", strings.TrimSpace(line))
 		}
 	}
-	css, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	for _, want := range []string{".net-bar {", "body.net-on .toasts", "@media (prefers-reduced-motion: reduce) { .net-bar { animation: none; } }"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lost %q", want)

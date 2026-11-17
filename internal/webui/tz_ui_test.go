@@ -33,7 +33,7 @@ func TestTimezoneUI(t *testing.T) {
 			t.Errorf("timezone block uses %s", bad)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".tz-open {", "#tz-list {", ".modal.tz-modal {"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

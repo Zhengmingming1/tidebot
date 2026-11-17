@@ -56,7 +56,7 @@ func TestChannelDownUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".nav-dot {", ".popover a.link-item.note {", "#nav .nav-dot { position: absolute;"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

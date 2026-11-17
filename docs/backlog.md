@@ -6633,3 +6633,25 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
 - Windows 在短名冲突很多时会改用校验和形式（前 2 个字符 + 4 位十六进制 + `~N`），词法上不敢随便匹配，目前只覆盖传统的「前 6 字 + `~N`」。
 - 在同一台机器上恢复时，若清单里的 home 和新 home 字符串相同、库里却混着另一种 8.3 写法，现在会跳过改写（`HomeDir != home`）；长短形式在同一台机器上通常都能用，若以后要统一可以再展开。
+
+### 2026-11-16（续）：WebUI 样式表构建时去掉注释和多余空白（资源占用）
+
+- **问题**（152b82a 那轮的后续想法）：`app.js` 已在构建时去掉注释和多余空白，`styles.css` 仍带注释和缩进一起发出去（293 406 B / gzip 55 569 B）。每个页面都要加载这份总表，主题 token、工作流画布、设置多栏等也都在里面。
+- **改法**：可读源文件改到 `internal/webui/src/styles.css`（含 `gen-themes.py` 维护的 `@themes` 块）；`build-webui.py` 按同样原则压缩进 `static/styles.css`：去掉 `/* */` 注释和不必要的空白，选择器、属性、字面量不改名、不改写，规则结束后保留换行。会改变分词的空格一律保留，包括后代选择器、`calc()` / `min()` / `max()` / `clamp()` 里的 `+` `-`、`and (` / `or (` / `setcol (` 这类「标识符 + 括号」（避免被当成函数）、以及 `grid-template-areas` 相邻字符串之间的空格。`gen-themes.py` 改源文件后会再跑一遍构建，避免发出去的表落后。检查格式和作者写法的测试改读源文件（`cssSource`）；对比度、窗口背景、设置栏宽度、窄屏工作流布局等用户实际看到的值，用对空白不敏感的解析读发出去的表。`--check` 同时核对 JS 和 CSS；`--self-test` 跑压缩用例，并用同一套分词核对源文件与发出去的表（68 447 个非空白 token 完全一致，压缩自身稳定，发出去的表不再含注释）。
+- 测试：`webui/appsource_test.go` 新增 `cssSource`、`TestWebUICSSMinify`（`python3 scripts/build-webui.py --self-test`，并确认发出去的表比源文件小）。`contrast` / `appearance` / `settings_width` / `workflow_narrow_layout` / `crossplat_css` 改为能读压缩后的表（或源文件里的作者写法）。其余检查片段格式的样式测试改读源文件。`assets_test` 仍核对发出去的 CSS 的类型、gzip 和缓存。`go test ./internal/webui`、`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`node --check internal/webui/static/app.js` 通过。
+- 数字（本机 Linux，仓库内文件，`gzip -9`）：
+
+| 指标 | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| `styles.css` 原始大小 | 293 406 B | 247 708 B（−45 698 B，15.6%） |
+| `styles.css` gzip -9 | 55 569 B | 44 896 B（−10 673 B，19.2%） |
+
+**心得**：和 `app.js` 同一条教训：检查「作者怎么写的」要读源文件，检查「用户拿到什么」要读发出去的表，并把解析写成对空白不敏感的。CSS 里空格有时是选择器的一部分，有时只是书写习惯；`or (` 若写成 `or(` 会被分词成函数，`calc(100% + 6px)` 的空格则是规范要求。压缩器必须按分词而不是按字符删空格。
+
+**后续想法**：
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；用户自己选的目录本来就不在 tidebot home 里，换机后需要用户自己改，可以在恢复后列出「目录不存在的任务」提示一次。
+- 通知渠道 / 插件配置等其他 JSON 若以后存了 home 下的路径，可以再纳入同一套遍历。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿；运行 / 会话不记推理强度、工作流运行不记来自哪个任务、CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- Windows 在短名冲突很多时会改用校验和形式（前 2 个字符 + 4 位十六进制 + `~N`），词法上不敢随便匹配，目前只覆盖传统的「前 6 字 + `~N`」。
+- 在同一台机器上恢复时，若清单里的 home 和新 home 字符串相同、库里却混着另一种 8.3 写法，现在会跳过改写（`HomeDir != home`）；长短形式在同一台机器上通常都能用，若以后要统一可以再展开。

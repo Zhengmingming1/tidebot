@@ -61,7 +61,7 @@ func TestProviderModelPickerUI(t *testing.T) {
 			t.Errorf("model picker uses %s", bad)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".mdl-pop {", ".mdl-pop.up {", "max-height: 208px;", "overscroll-behavior: contain;", ".model-row .in-group { position: relative; }"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

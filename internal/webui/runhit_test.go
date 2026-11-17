@@ -130,7 +130,7 @@ func TestRunsHitUI(t *testing.T) {
 			t.Errorf("app.js still has %s", bad)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".cell-main small.run-hit {") {
 		t.Error("styles.css lacks .run-hit")
 	}

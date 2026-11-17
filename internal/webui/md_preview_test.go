@@ -42,7 +42,7 @@ func TestMarkdownPreviewUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".fb-md { flex: 1; min-height: 0; overflow: auto;", ".md pre.md-code {", ".md .md-fm {", ".fb-md, .tx-list,"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles lack %s", s)

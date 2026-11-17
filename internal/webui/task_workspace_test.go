@@ -169,7 +169,7 @@ func TestTaskFormWorkspaceUI(t *testing.T) {
 			t.Errorf("app.js lacks %q", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".ws-field > span .pill {") {
 		t.Error("styles.css lacks .ws-field pill")
 	}

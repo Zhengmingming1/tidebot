@@ -144,7 +144,7 @@ func TestPasswordUI(t *testing.T) {
 			t.Errorf("app.js lacks %q", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".modal .pw-form { gap: 0; }") {
 		t.Error("styles.css lacks .pw-form")
 	}

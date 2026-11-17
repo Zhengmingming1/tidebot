@@ -25,10 +25,7 @@ func TestDialogSubmitKey(t *testing.T) {
 			t.Errorf("app.js lost %q", want)
 		}
 	}
-	css, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".modal .actions > .btn:last-child[data-tip]:hover::after") {
 		t.Error("footer tooltip not kept inside the dialog")
 	}

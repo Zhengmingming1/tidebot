@@ -171,7 +171,7 @@ func TestAnswerDiffUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".rd-ans-diff .diff-sum {", "table.diff tr.ins mark.dx {", ".rd-ans-diff tr.gap .linkish {"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

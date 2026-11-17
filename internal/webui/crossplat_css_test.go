@@ -14,10 +14,11 @@ func TestCrossPlatformCSS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	css := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	if strings.Count(css, "{") != strings.Count(css, "}") {
+	shipped := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if strings.Count(shipped, "{") != strings.Count(shipped, "}") {
 		t.Fatal("styles.css: unbalanced braces")
 	}
+	css := cssSource(t)
 
 	// Scrollbars: styled with ::-webkit-scrollbar for every Chromium / WebKit engine.
 	for _, s := range []string{
@@ -110,13 +111,15 @@ func TestCrossPlatformCSS(t *testing.T) {
 		t.Error("--mono must end with the generic monospace")
 	}
 	// Every explicit font-family list ends in a generic family (or uses the variables).
-	for _, m := range regexp.MustCompile(`font-family:\s*([^;}]+)`).FindAllStringSubmatch(css, -1) {
-		v := strings.TrimSpace(m[1])
-		if strings.HasPrefix(v, "var(") || v == "inherit" {
-			continue
-		}
-		if !strings.Contains(v, "sans-serif") && !strings.Contains(v, "monospace") {
-			t.Errorf("font-family without a generic fallback: %s", v)
+	for _, blob := range []string{css, shipped} {
+		for _, m := range regexp.MustCompile(`font-family:\s*([^;}]+)`).FindAllStringSubmatch(blob, -1) {
+			v := strings.TrimSpace(m[1])
+			if strings.HasPrefix(v, "var(") || v == "inherit" {
+				continue
+			}
+			if !strings.Contains(v, "sans-serif") && !strings.Contains(v, "monospace") {
+				t.Errorf("font-family without a generic fallback: %s", v)
+			}
 		}
 	}
 }

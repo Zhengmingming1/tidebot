@@ -52,10 +52,7 @@ func TestPromptDrafts(t *testing.T) {
 			t.Errorf("%s.json: dr.tip lost {t}", lang)
 		}
 	}
-	css, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".draft-tag {") {
 		t.Error("styles.css lost .draft-tag")
 	}

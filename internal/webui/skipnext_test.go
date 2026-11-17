@@ -111,7 +111,7 @@ func TestSkipNextUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".timeline.tl-sk li {", ".timeline li.skipped .tl-time", "@media (hover: none) { .tl-skip { opacity: 1; } }", ".skip-chip {"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %s", want)

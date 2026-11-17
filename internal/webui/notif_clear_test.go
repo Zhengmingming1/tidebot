@@ -127,7 +127,7 @@ func TestNotifClear(t *testing.T) {
 // languages carry every string.
 func TestNotifClearUI(t *testing.T) {
 	js := []byte(appJSSource(t))
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	src := string(js)
 	for _, s := range []string{
 		`id="nc-clear"`, `class="nc-x" data-clear="`, `clearNotifs(pop, { read_before: state.notifSeen })`,

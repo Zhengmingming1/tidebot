@@ -42,7 +42,7 @@ func TestBudgetHeldUI(t *testing.T) {
 	if got == nil || got[2] != "2" || got[3] != "0.2000" || got[4] != "0.8000" || got[5] != "1.0000" {
 		t.Fatalf("pattern %s → %v", m[1], got)
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".progress > span.held") || !strings.Contains(string(css), ".progress.split") {
 		t.Error("held segment style missing")
 	}

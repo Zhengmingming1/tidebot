@@ -91,7 +91,7 @@ func TestSchedulerDSTUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".sched-prev .sp-dst {") {
 		t.Error("styles.css lacks .sp-dst")
 	}

@@ -67,7 +67,7 @@ func over(fg rgb, a float64, bg rgb) rgb {
 	return c
 }
 
-var rgbaRe = regexp.MustCompile(`^rgba\((\d+), (\d+), (\d+), ([0-9.]+)\)$`)
+var rgbaRe = regexp.MustCompile(`^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9.]+)\s*\)$`)
 
 // palette holds the opaque colours of one theme block; alpha holds rgba() tiles.
 type palette struct {
@@ -75,7 +75,7 @@ type palette struct {
 	alpha map[string]float64
 }
 
-var declRe = regexp.MustCompile(`--([a-z0-9-]+): ([^;]+);`)
+var declRe = regexp.MustCompile(`--([a-z0-9-]+):\s*([^;]+);`)
 
 func themeBlocks(t *testing.T) map[string]palette {
 	t.Helper()
@@ -86,19 +86,13 @@ func themeBlocks(t *testing.T) map[string]palette {
 	css := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	out := map[string]palette{}
 	for _, th := range []string{"graphite", "tide", "midnight"} {
-		light := fmt.Sprintf("\nhtml[data-theme=%q] {\n", th)
+		light := fmt.Sprintf("html[data-theme=%q]", th)
 		if th == "graphite" {
-			light = "\n:root, html[data-theme=\"graphite\"] {\n"
+			light = `:root, html[data-theme="graphite"]`
 		}
-		dark := fmt.Sprintf("\nhtml[data-theme=%q][data-mode=\"dark\"]", th)
+		dark := fmt.Sprintf(`html[data-theme=%q][data-mode="dark"]`, th)
 		for mode, sel := range map[string]string{"light": light, "dark": dark} {
-			i := strings.Index(css, sel)
-			if i < 0 {
-				t.Fatalf("%s %s: block not found", th, mode)
-			}
-			body := css[i:]
-			body = body[strings.Index(body, "{")+1:]
-			body = body[:strings.Index(body, "\n}")]
+			body := cssBlockBody(t, css, sel)
 			p := palette{col: map[string]rgb{}, alpha: map[string]float64{}}
 			for _, m := range declRe.FindAllStringSubmatch(body, -1) {
 				if c, ok := parseHex(m[2]); ok {
@@ -263,13 +257,14 @@ func TestContrastInksUsed(t *testing.T) {
 		t.Fatal(err)
 	}
 	css := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	src := cssSource(t)
 	// Icon tiles (selectors naming an .ico) may use the plain hue: icons need 3:1, not 4.5:1.
-	for _, m := range regexp.MustCompile(`(?m)^([^{}\n]+)\{[^}]*background: var\(--hue-[a-z]+-bg\);[^}]*\bcolor: var\(--hue-[a-z]+\);`).FindAllStringSubmatch(css, -1) {
+	for _, m := range regexp.MustCompile(`(?m)^([^{}\n]+)\{[^}]*background:\s*var\(--hue-[a-z]+-bg\);[^}]*\bcolor:\s*var\(--hue-[a-z]+\);`).FindAllStringSubmatch(css, -1) {
 		if !strings.Contains(m[1], "ico") {
 			t.Errorf("text on a hue tile uses the icon hue instead of --hue-*-fg: %q", m[0])
 		}
 	}
-	if m := regexp.MustCompile(`background: var\(--(danger|ok|warn|info|hue-[a-z]+)\);[^}]*\bcolor: #fff`).FindString(css); m != "" {
+	if m := regexp.MustCompile(`background:\s*var\(--(danger|ok|warn|info|hue-[a-z]+)\);[^}]*\bcolor:\s*#fff`).FindString(css); m != "" {
 		t.Errorf("white text on a theme fill (unreadable in dark palettes): %q", m)
 	}
 	for _, s := range []string{
@@ -277,8 +272,8 @@ func TestContrastInksUsed(t *testing.T) {
 		".ttag.h0 { background: var(--hue-blue-bg); color: var(--hue-blue-fg);",
 		".log .tool-chip", "color: var(--hue-violet-fg); margin-right: 8px;",
 	} {
-		if !strings.Contains(css, s) {
-			t.Errorf("styles.css lacks %q", s)
+		if !strings.Contains(src, s) {
+			t.Errorf("styles.css source lacks %q", s)
 		}
 	}
 }

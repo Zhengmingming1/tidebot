@@ -64,7 +64,7 @@ func TestPowerUI(t *testing.T) {
 			t.Errorf("%q → %v", msg, got)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".pwr-now {") {
 		t.Error("styles.css lacks .pwr-now")
 	}

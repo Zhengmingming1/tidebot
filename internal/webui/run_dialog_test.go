@@ -135,10 +135,7 @@ func urlQ(s string) string { return url.QueryEscape(s) }
 // skill + folder runner rather than the old prompt-only quick run.
 func TestRunDialogUI(t *testing.T) {
 	js := []byte(appJSSource(t))
-	css, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	for _, want := range []string{
 		`"/api/tasks/workspace-check?mode=run&path="`,
 		`"/api/runs/defaults"`,

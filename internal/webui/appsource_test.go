@@ -37,8 +37,19 @@ func bytesCRLFToLF(b []byte) []byte {
 	return []byte(strings.ReplaceAll(string(b), "\r\n", "\n"))
 }
 
-// TestWebUIBundleCurrent: the checked-in static/app.js matches the minified
-// assembly of src/ (same check CI runs via scripts/build-webui.py --check).
+// cssSource is the unminified stylesheet. Tests that inspect comments or
+// exact authoring form read this, not the shipped (minified) static/styles.css.
+func cssSource(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("src", "styles.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(bytesCRLFToLF(raw))
+}
+
+// TestWebUIBundleCurrent: the checked-in static/app.js and static/styles.css
+// match the minified assembly of src/ (same check CI runs via scripts/build-webui.py --check).
 func TestWebUIBundleCurrent(t *testing.T) {
 	py, err := exec.LookPath("python3")
 	if err != nil {
@@ -51,5 +62,29 @@ func TestWebUIBundleCurrent(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("WebUI bundle is stale: run python3 scripts/build-webui.py\n%s", out)
+	}
+}
+
+func TestWebUICSSMinify(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		py, err = exec.LookPath("python")
+		if err != nil {
+			t.Skip("python3 not installed")
+		}
+	}
+	cmd := exec.Command(py, filepath.Join("..", "..", "scripts", "build-webui.py"), "--self-test")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("CSS minify self-test failed:\n%s", out)
+	}
+	src := cssSource(t)
+	shipped, err := os.ReadFile(filepath.Join("static", "styles.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(bytesCRLFToLF(shipped))
+	if len(got) >= len(src) {
+		t.Fatalf("shipped styles.css is not smaller than the source: %d vs %d", len(got), len(src))
 	}
 }

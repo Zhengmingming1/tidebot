@@ -107,7 +107,7 @@ func TestTaskWorkspaceUI(t *testing.T) {
 			t.Errorf("app.js lacks %q", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".kv dd.ws-row {") {
 		t.Error("styles.css lacks .ws-row")
 	}

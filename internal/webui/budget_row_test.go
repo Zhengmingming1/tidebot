@@ -117,7 +117,7 @@ func TestBudgetRowsUI(t *testing.T) {
 	if strings.Contains(src, "budget-act") || strings.Contains(src, "budget-row") {
 		t.Error("old budget row markup still in app.js")
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".bud-grid {", ".bud-head, .bud-row { display: contents; }", ".cap-edit::before", ".cap-in.bad", ".sp-events .table td { vertical-align: top; }"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

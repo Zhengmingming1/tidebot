@@ -167,7 +167,7 @@ func TestTaskTransferUI(t *testing.T) {
 			t.Errorf("app.js missing %q", want)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".tx-list", ".tag.warn", ".drop.compact"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css missing %q", want)

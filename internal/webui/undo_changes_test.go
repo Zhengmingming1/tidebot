@@ -111,7 +111,7 @@ func TestUndoChangesUI(t *testing.T) {
 			t.Errorf("runUndoChanges uses %s", bad)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".rd-chg.undone .rd-chg-list", ".chg-badge.undone"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles lack %s", s)

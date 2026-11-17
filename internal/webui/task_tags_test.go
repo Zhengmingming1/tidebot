@@ -173,7 +173,7 @@ func TestTaskTagsUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, w := range []string{".ttag.h5 {", ".tag-in:focus-within", ".tl-line {"} {
 		if !strings.Contains(string(css), w) {
 			t.Errorf("styles.css lacks %s", w)

@@ -26,10 +26,7 @@ func TestListKeyboardCursor(t *testing.T) {
 			t.Errorf("app.js lost %q", want)
 		}
 	}
-	css, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	for _, want := range []string{".table tbody tr.kb-cur td", "li.kb-cur", ".search-in input:not(:placeholder-shown) ~ .kb-hint"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lost %q", want)

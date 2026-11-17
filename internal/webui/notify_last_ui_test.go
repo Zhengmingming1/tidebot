@@ -22,7 +22,7 @@ func TestNotifyLastDeliveryUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".nt-last {", ".nt-last.bad", ".nt-dot {", ".nt-last[data-tip]:hover::after"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

@@ -120,7 +120,7 @@ func TestRunChangeBadgeUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".run-line { display: flex;", ".chg-badge { flex: none;", ".chg-badge:focus-visible", "#rd-chg { scroll-margin-top: calc(var(--topbar-h) + 16px); }"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles lack %s", s)

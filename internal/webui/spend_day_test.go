@@ -135,7 +135,7 @@ func TestSpendDayUI(t *testing.T) {
 			t.Errorf("spend page uses %s", bad)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{"button.spc-col {", ".spc-plot.has-sel .spc-col .spc-bar {", ".sp-day {", "button.spc-col:focus-visible .spc-bar {"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %q", want)

@@ -92,7 +92,7 @@ func TestNotifyChangedUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".tf-pol .tf-pol-ans.off {", ".rd-ans .rd-ans-same {"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

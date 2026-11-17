@@ -72,7 +72,7 @@ func TestRunPromptUI(t *testing.T) {
 			t.Errorf("prompt block uses %s", bad)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".rd-prompt { width: 100%; max-height: 80px;", ".rd-prompt.open { max-height: min(320px, 40vh); overflow: auto; overscroll-behavior: contain; }", "white-space: pre-wrap"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

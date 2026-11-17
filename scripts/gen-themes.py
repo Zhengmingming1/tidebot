@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Regenerate the theme tokens block of internal/webui/static/styles.css.
+"""Regenerate the theme tokens block of internal/webui/src/styles.css.
 
 Three themes (graphite = silver, tide = frosted blue, midnight = graphite studio),
 each with a light and a dark palette. Keep the saved theme IDs stable.
 <html data-theme="…" data-mode="system|light|dark"> picks one; "system" follows
 prefers-color-scheme in CSS, so the right colours are there before the first paint with no
-script. Only this block between the @themes markers is rewritten.
+script. Only this block between the @themes markers in the source stylesheet is rewritten; the shipped static/styles.css is then rebuilt.
 
     python3 scripts/gen-themes.py
 """
-import os, re
+import os, re, subprocess, sys
 
 # Colour hues for icons and tags per mode. The hue itself is for icons (≥ 3:1 on every surface);
 # tiles are the hue at low alpha so they sit on any surface; text on a tile uses --hue-*-fg,
@@ -208,7 +208,7 @@ def css():
     return "\n".join(parts)
 
 if __name__ == "__main__":
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "internal", "webui", "static", "styles.css")
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "internal", "webui", "src", "styles.css")
     s = open(p, encoding="utf-8").read()
     new = css()
     if "/* @themes:begin" in s:
@@ -216,4 +216,6 @@ if __name__ == "__main__":
     else:
         raise SystemExit("markers not found")
     open(p, "w", encoding="utf-8", newline="\n").write(s)
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build-webui.py")
+    subprocess.check_call([sys.executable, script])
     print("themes block written")

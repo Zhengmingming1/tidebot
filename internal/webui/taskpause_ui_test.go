@@ -49,7 +49,7 @@ func TestTaskPauseUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".nx.held {") {
 		t.Error("styles.css lacks .nx.held")
 	}

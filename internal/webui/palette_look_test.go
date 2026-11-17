@@ -27,7 +27,7 @@ func TestPaletteLook(t *testing.T) {
 			t.Errorf("app.js lost %q", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, th := range []string{"graphite", "tide", "midnight"} {
 		for _, sel := range []string{`.pv-dot[data-pv="` + th + `"] {`, `html[data-mode="dark"] .pv-dot[data-pv="` + th + `"] {`, `html[data-mode="system"] .pv-dot[data-pv="` + th + `"] {`} {
 			if !strings.Contains(string(css), sel) {

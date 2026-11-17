@@ -39,10 +39,7 @@ func TestStorageRowPruneUI(t *testing.T) {
 // The storage size tooltip is several lines and its card is the first on the page, so it
 // opens downward instead of past the top of the window.
 func TestStorageTotalTipOpensDown(t *testing.T) {
-	b, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(cssSource(t))
 	if !strings.Contains(string(b), ".st-total [data-tip]:hover::after, .st-total [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; top: calc(100% + 6px); bottom: auto; }") {
 		t.Error("st-total tooltip should open below")
 	}
@@ -60,10 +57,7 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 			t.Errorf("app.js lacks %q", want)
 		}
 	}
-	css, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".s-sessions { background: var(--hue-teal); }") {
 		t.Error("styles.css lacks .s-sessions")
 	}

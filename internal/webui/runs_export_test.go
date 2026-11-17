@@ -182,7 +182,7 @@ func TestRunsExportUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".rx-menu { width: 304px; }") {
 		t.Error("styles lack .rx-menu")
 	}

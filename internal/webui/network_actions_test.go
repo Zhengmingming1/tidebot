@@ -24,10 +24,7 @@ func TestNetworkActionsUseAlignedRow(t *testing.T) {
 	if strings.Count(row, `type="button"`) != 2 {
 		t.Fatal("network actions must not submit forms")
 	}
-	css, err := os.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".network-actions { display: flex; align-items: center;") {
 		t.Fatal("network row must align mixed icon/text buttons centrally")
 	}

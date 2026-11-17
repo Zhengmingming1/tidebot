@@ -69,7 +69,7 @@ func TestNotifyAnswerUI(t *testing.T) {
 			t.Errorf("app.js lacks %s", s)
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".notif-center .nc-ex {", "-webkit-line-clamp: 3;", ".tf-pol .tf-pol-checks {"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles.css lacks %s", s)

@@ -136,7 +136,7 @@ func TestRunsDateRangeUI(t *testing.T) {
 			t.Errorf("rangePicker uses %s", bad)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, want := range []string{".popover.rr-pop {", ".rr-d.start, .rr-d.end {", "a.card.stat.stat-link {"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("styles.css lacks %q", want)

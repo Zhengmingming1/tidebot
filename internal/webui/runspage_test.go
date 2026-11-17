@@ -161,7 +161,7 @@ func TestRunsPageUI(t *testing.T) {
 			t.Errorf("app.js lacks %q", want)
 		}
 	}
-	css, _ := os.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".runs-more {") {
 		t.Error("styles.css lacks .runs-more")
 	}

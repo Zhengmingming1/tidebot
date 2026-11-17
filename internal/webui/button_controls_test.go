@@ -18,10 +18,7 @@ func TestButtonControlsClient(t *testing.T) {
 
 // Main actions have one density, while compact card/table actions retain theirs.
 func TestButtonActionLayout(t *testing.T) {
-	css, err := Static.ReadFile("static/styles.css")
-	if err != nil {
-		t.Fatal(err)
-	}
+	css := []byte(cssSource(t))
 	for _, rule := range []string{
 		".page-head .actions > .btn, .modal > .actions > .btn, .modal form > .actions > .btn",
 		"height: var(--ctl-h); padding: 0 14px; gap: 6px; font-size: 13px;",

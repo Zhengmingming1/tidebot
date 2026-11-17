@@ -84,7 +84,7 @@ func TestRunAnswerUI(t *testing.T) {
 			}
 		}
 	}
-	css, _ := Static.ReadFile("static/styles.css")
+	css := []byte(cssSource(t))
 	for _, s := range []string{".rd-ans-body { max-height: min(320px, 40vh); overflow: auto;", ".rd-ans-src {", ".rd-ans-body, .desc-box"} {
 		if !strings.Contains(string(css), s) {
 			t.Errorf("styles lack %s", s)

@@ -15,9 +15,10 @@ func TestSettingsFillWideWindows(t *testing.T) {
 	cssB, _ := Static.ReadFile("static/styles.css")
 	jsB := []byte(appJSSource(t))
 	css, js := strings.ReplaceAll(string(cssB), "\r\n", "\n"), strings.ReplaceAll(string(jsB), "\r\n", "\n")
+	srcCSS := cssSource(t)
 
 	// The last max-width given to .set-main decides; it must not be the old 720px.
-	ms := regexp.MustCompile(`(?m)^\.set-main \{[^}]*max-width: (\d+)px`).FindAllStringSubmatch(css, -1)
+	ms := regexp.MustCompile(`(?m)\.set-main\s*\{[^}]*max-width:\s*(\d+)px`).FindAllStringSubmatch(css, -1)
 	if len(ms) == 0 || ms[len(ms)-1][1] == "720" {
 		t.Fatalf(".set-main still capped at 720px: %v", ms)
 	}
@@ -29,12 +30,12 @@ func TestSettingsFillWideWindows(t *testing.T) {
 		"column-span: all",
 		"@container setcol (min-width: 880px)",
 	} {
-		if !strings.Contains(css, want) {
-			t.Errorf("styles.css missing %q", want)
+		if !strings.Contains(srcCSS, want) {
+			t.Errorf("styles.css source missing %q", want)
 		}
 	}
 	// At 1024 wide the settings column is ~576px: below both thresholds.
-	for _, m := range regexp.MustCompile(`@container setcol \(min-width: (\d+)px\)`).FindAllStringSubmatch(css, -1) {
+	for _, m := range regexp.MustCompile(`@container setcol\s*\(min-width:\s*(\d+)px\)`).FindAllStringSubmatch(css, -1) {
 		if n, _ := strconv.Atoi(m[1]); n < 600 {
 			t.Errorf("container threshold %spx would change the 1024×655 layout", m[1])
 		}
