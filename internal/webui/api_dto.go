@@ -147,6 +147,8 @@ type runDTO struct {
 	SkillVersion int    `json:"skill_version,omitempty"`
 	SkillVerID   string `json:"skill_version_id,omitempty"`
 	RunMode      string `json:"run_mode,omitempty"`
+	// Effort is the --effort value used for this run (low|medium|high); omitted when not passed.
+	Effort string `json:"effort,omitempty"`
 	// QueuePos is a queued run's place in line for a free slot (1 = next).
 	QueuePos int `json:"queue_pos,omitempty"`
 	// Match: with search text, which field matched and an excerpt around the hit.
@@ -183,7 +185,7 @@ func (s *Server) runSelect() string {
  COALESCE(r.started_at,''), COALESCE(r.finished_at,''), r.created_at, COALESCE(r.error_message,''),
  r.prompt, COALESCE(v.version_no,0), COALESCE(r.cost_bucket,'production'),
  r.cost_amount, r.cost_currency, r.cost_source, r.cache_read_tokens, r.cache_write_tokens, r.requests,
- CASE WHEN r.run_mode<>'' THEN r.workspace_dir ELSE '' END, r.skill_id, COALESCE(sk.name,''), COALESCE(sv.version_no,0), r.skill_version_id, r.run_mode,
+ CASE WHEN r.run_mode<>'' THEN r.workspace_dir ELSE '' END, r.skill_id, COALESCE(sk.name,''), COALESCE(sv.version_no,0), r.skill_version_id, r.run_mode, r.effort,
  ` + runChangeCols + `
 FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN versions v ON v.id = r.task_version_id
  LEFT JOIN skills sk ON r.skill_id<>'' AND sk.id = r.skill_id LEFT JOIN versions sv ON r.skill_version_id<>'' AND sv.id = r.skill_version_id`
@@ -251,7 +253,7 @@ func scanRun(rows *sql.Rows) (runDTO, error) {
 		&d.CostUSD, &d.InputTokens, &d.OutputTokens, &d.DurationMS, &d.StartedAt, &d.FinishedAt,
 		&d.CreatedAt, &d.Error, &d.Prompt, &d.VersionNo, &d.Bucket,
 		&d.CostAmount, &d.CostCurrency, &d.CostSource, &d.CacheRead, &d.CacheWrite, &d.Requests,
-		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode, &files, &add, &del, &undone, &undoneN)
+		&d.Workspace, &d.SkillID, &d.SkillName, &d.SkillVersion, &d.SkillVerID, &d.RunMode, &d.Effort, &files, &add, &del, &undone, &undoneN)
 	if err == nil && files >= 0 {
 		d.Changes = &runChangeSum{Files: files, Add: add, Del: del, Undone: undone, UndoneN: undoneN}
 	}

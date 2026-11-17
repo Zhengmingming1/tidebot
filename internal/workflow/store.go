@@ -239,7 +239,7 @@ func (s *Service) StartWith(ctx context.Context, o StartOptions) (string, error)
 		release()
 		return "", err
 	}
-	runCtx, cancel := context.WithCancelCause(context.WithValue(context.Background(), runInfoKey{}, RunInfo{RunID: rid, TaskID: o.TaskID, Bucket: o.Bucket, Def: d}))
+	runCtx, cancel := context.WithCancelCause(context.WithValue(context.Background(), runInfoKey{}, RunInfo{RunID: rid, TaskID: o.TaskID, Bucket: o.Bucket, Effort: o.Effort, Def: d}))
 	s.active[rid] = cancel
 	finished := make(chan struct{})
 	s.done[rid] = finished

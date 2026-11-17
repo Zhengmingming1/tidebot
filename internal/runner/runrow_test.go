@@ -13,8 +13,8 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/provider"
 )
 
-// TestRunRowWrittenWhole: the permission level, skill version and cost bucket
-// go in with the run row. They used to be patched in by two follow-up UPDATEs
+// TestRunRowWrittenWhole: the permission level, skill version, cost bucket and
+// effort go in with the run row. They used to be patched in by two follow-up UPDATEs
 // whose errors were dropped; one that failed left the run with no run_mode
 // (no 「改动的文件」 / undo, a continued session at the wrong level, 存为任务
 // without the skill version). A trigger makes any later write of those
@@ -26,16 +26,16 @@ func TestRunRowWrittenWhole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlDB.Close()
-	if _, err := sqlDB.Exec(`CREATE TRIGGER runs_meta_busy BEFORE UPDATE OF run_mode, skill_id, skill_version_id, cost_bucket ON runs
+	if _, err := sqlDB.Exec(`CREATE TRIGGER runs_meta_busy BEFORE UPDATE OF run_mode, skill_id, skill_version_id, cost_bucket, effort ON runs
 BEGIN SELECT RAISE(ABORT, 'database is locked'); END`); err != nil {
 		t.Fatal(err)
 	}
 	store := db.NewStore(sqlDB)
 	r := New(store, nil, 2)
-	type meta struct{ status, bucket, skill, ver, mode string }
+	type meta struct{ status, bucket, skill, ver, mode, effort string }
 	read := func(id string) (m meta) {
-		if err := sqlDB.QueryRow(`SELECT status, cost_bucket, skill_id, skill_version_id, run_mode FROM runs WHERE id=?`, id).
-			Scan(&m.status, &m.bucket, &m.skill, &m.ver, &m.mode); err != nil {
+		if err := sqlDB.QueryRow(`SELECT status, cost_bucket, skill_id, skill_version_id, run_mode, effort FROM runs WHERE id=?`, id).
+			Scan(&m.status, &m.bucket, &m.skill, &m.ver, &m.mode, &m.effort); err != nil {
 			t.Fatal(err)
 		}
 		return m
@@ -45,13 +45,13 @@ BEGIN SELECT RAISE(ABORT, 'database is locked'); END`); err != nil {
 		ClaudeBin: mockBin(t), Prompt: "hello", WorkspaceDir: t.TempDir(), Timeout: 10 * time.Second, Bare: true,
 		Profile: provider.Profile{Name: "mock", BaseURL: "http://127.0.0.1:9", AuthEnv: "ANTHROPIC_AUTH_TOKEN", Model: "mock-model"},
 		APIKey:  "test-key-not-real", TriggerKind: "quick",
-		CostBucket: "assist", SkillID: "skl_a", SkillVersionID: "ver_a", RunMode: "exec",
+		CostBucket: "assist", SkillID: "skl_a", SkillVersionID: "ver_a", RunMode: "exec", Effort: "high",
 		OnStart: func(id string) { atStart = read(id) },
 	})
 	if err != nil || res.Status != "succeeded" {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
-	want := meta{bucket: "assist", skill: "skl_a", ver: "ver_a", mode: "exec"}
+	want := meta{bucket: "assist", skill: "skl_a", ver: "ver_a", mode: "exec", effort: "high"}
 	for name, got := range map[string]meta{"at start": atStart, "finished": read(res.RunID)} {
 		got.status = ""
 		if got != want {
@@ -68,7 +68,7 @@ BEGIN SELECT RAISE(ABORT, 'database is locked'); END`); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := read(res.RunID); got.bucket != "production" || got.skill != "" || got.ver != "" || got.mode != "" {
+	if got := read(res.RunID); got.bucket != "production" || got.skill != "" || got.ver != "" || got.mode != "" || got.effort != "" {
 		t.Fatalf("defaults: %+v", got)
 	}
 }

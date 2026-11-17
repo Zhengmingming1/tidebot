@@ -109,3 +109,25 @@ func TestExecScratchRunHidesFolder(t *testing.T) {
 		t.Fatalf("rerun %d %v %+v", code, out, got)
 	}
 }
+
+// A run that recorded effort exposes it on the list and the run page.
+func TestRunEffortInAPI(t *testing.T) {
+	c := login(t)
+	seedRun(t, c, "ef1", "plan it", "succeeded", 0.01, time.Now())
+	if _, err := c.s.deps.DB.Exec(`UPDATE runs SET run_mode='edit', effort='high', workspace_dir=? WHERE id='ef1'`, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	runs := listRuns(t, c, "")
+	if len(runs) != 1 || runs[0]["run_mode"] != "edit" || runs[0]["effort"] != "high" {
+		t.Fatalf("list %v", runs)
+	}
+	code, out := c.json(http.MethodGet, "/api/runs/ef1", nil)
+	if code != 200 || out["effort"] != "high" || out["run_mode"] != "edit" {
+		t.Fatalf("detail %d %v", code, out)
+	}
+	seedRun(t, c, "ef0", "plain", "succeeded", 0.01, time.Now())
+	_, out = c.json(http.MethodGet, "/api/runs/ef0", nil)
+	if _, ok := out["effort"]; ok && out["effort"] != "" && out["effort"] != nil {
+		t.Fatalf("empty effort should be omitted: %v", out["effort"])
+	}
+}

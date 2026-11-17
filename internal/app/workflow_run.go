@@ -248,7 +248,7 @@ func (a *App) executeWorkflowNode(ctx context.Context, n workflow.Node, prompt, 
 	opts := runner.Options{
 		Prompt: st.Invoke(modern, prompt), PromptStdin: true, DisplayPrompt: prompt,
 		WorkspaceDir: ws, TriggerKind: "workflow", TaskID: ri.TaskID, CostBucket: bucket, CapUSD: capUSD,
-		ContextArgs: args, ContextRequest: contextRequest, SkillID: primary.SkillID, SkillVersionID: primary.VersionID, RunMode: mode,
+		ContextArgs: args, ContextRequest: contextRequest, SkillID: primary.SkillID, SkillVersionID: primary.VersionID, RunMode: mode, Effort: ri.Effort,
 		OnStart: onStart,
 	}
 	if mode != "read" && d.WorkspaceDir != "" {
@@ -277,7 +277,7 @@ func (a *App) runTaskWorkflow(ctx context.Context, task db.Task, spec tasksvc.Sp
 		return errors.New("workflows unavailable")
 	}
 	rid, err := a.Workflows.StartWith(ctx, workflow.StartOptions{WorkflowID: spec.WorkflowID, Version: spec.WorkflowVersion,
-		Input: externalPrompt(ctx, spec.Prompt), Provider: provider, TaskID: task.ID, Bucket: bucket})
+		Input: externalPrompt(ctx, spec.Prompt), Provider: provider, TaskID: task.ID, Bucket: bucket, Effort: spec.Effort})
 	if err != nil {
 		return fmt.Errorf("workflow: %w", err)
 	}

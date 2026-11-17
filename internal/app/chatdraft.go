@@ -386,14 +386,14 @@ func (a *App) AdoptChatDraft(ctx context.Context, sid, expectCurrent string) (we
 
 // ChatTaskPreset is "save as task" from a session (or, fromRun, from the run
 // it continues): the request (the last message, or the run's), the folder,
-// the permission level, the provider, and every skill pinned: to the version
-// adopted in the session, else the one the turns use now.
+// the permission level, the run's effort, the provider, and every skill pinned:
+// to the version adopted in the session, else the one the turns use now.
 func (a *App) ChatTaskPreset(ctx context.Context, sid string, fromRun bool) (webui.ChatTaskPreset, error) {
 	c, err := a.chatSession(ctx, sid)
 	if err != nil {
 		return webui.ChatTaskPreset{}, err
 	}
-	p := webui.ChatTaskPreset{Workspace: c.WorkspaceDir, RunMode: chatMode(c.PermissionMode), Provider: c.Provider, SkillBindings: []tasksvc.SkillBinding{}}
+	p := webui.ChatTaskPreset{Workspace: c.WorkspaceDir, RunMode: chatMode(c.PermissionMode), Provider: c.Provider, Effort: a.runEffort(ctx, c.OriginRunID), SkillBindings: []tasksvc.SkillBinding{}}
 	if prob := a.chatWorkspaceProblem(c.WorkspaceDir); prob != "" {
 		p.WorkspaceProblem = prob
 		if prob != guard.DirNotFound {

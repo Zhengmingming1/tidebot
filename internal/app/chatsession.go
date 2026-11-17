@@ -21,6 +21,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/id"
 	"github.com/Zhengmingming1/tidebot/internal/pricing"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/textclip"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
@@ -287,6 +288,22 @@ func chatCreateMode(asked, runMode string) string {
 		return chatMode(asked)
 	}
 	return chatMode(runMode)
+}
+
+// runEffort is the --effort value a run recorded ("" = not passed, or the run
+// was saved before this was stored). Invalid values are treated as empty.
+func (a *App) runEffort(ctx context.Context, runID string) string {
+	if runID == "" {
+		return ""
+	}
+	var e string
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(effort,'') FROM runs WHERE id=?`, runID).Scan(&e); err != nil {
+		return ""
+	}
+	if !tasksvc.ValidEffort(e) {
+		return ""
+	}
+	return e
 }
 
 // SetChatMode changes a session's permission level (read | edit | exec); the
@@ -656,6 +673,7 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 		mcp["tidebot"] = srv
 		args = append(args, "--allowedTools", "mcp__tidebot")
 	}
+	effort := a.runEffort(ctx, c.OriginRunID)
 	runID, err := launch(startWait, func(onStart func(string)) error {
 		// The turn's stage, tool token and folder lock go before the session is
 		// idle again: a next message sent the moment it is would otherwise find
@@ -675,7 +693,7 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 		var rowSaved atomic.Bool
 		opts := runner.Options{
 			Prompt: prompt, DisplayPrompt: message, WorkspaceDir: ws, TriggerKind: "session",
-			CostBucket: cost.BucketProduction, RunMode: mode, KeepSession: true, NoPluginMCP: true, ContextArgs: args, MCPServers: mcp,
+			CostBucket: cost.BucketProduction, RunMode: mode, Effort: effort, KeepSession: true, NoPluginMCP: true, ContextArgs: args, MCPServers: mcp,
 			ContextRequest: st.contextRequest(a.modernClaude(), false),
 			OnStart: a.skillStart(st, func(rid string) {
 				started, createdAt = rid, nowUTC()

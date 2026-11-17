@@ -776,11 +776,10 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	}
 	// Permission level: "" (saved before the three levels) runs as "edit" always did.
 	mode := ""
+	effort := ""
 	if view.Spec != nil {
 		mode = view.Spec.RunMode
-		if view.Spec.Effort != "" {
-			skillArgs = append(skillArgs, "--effort", view.Spec.Effort)
-		}
+		effort = view.Spec.Effort
 	}
 	if mode == "read" {
 		skillArgs = append(skillArgs, "--disallowedTools", strings.Join(readOnlyDeny, ","))
@@ -799,7 +798,7 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 	}
 	res, err := a.RunPromptEx(ctx, runner.Options{
 		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
-		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket, RunMode: mode,
+		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket, RunMode: mode, Effort: effort,
 		OnStart: a.skillStart(staged, a.sourceStart(setSource, declared, onStart)), ContextArgs: skillArgs, ContextRequest: staged.contextRequest(a.modernClaude(), staged != nil && len(staged.Skills) > 1),
 	}, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {

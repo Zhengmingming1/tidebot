@@ -19,6 +19,8 @@ func TestRunDetailActions(t *testing.T) {
 		`"/task-preset?from=run"`,
 		`run_mode: pre.run_mode || "exec", effort: pre.effort || ""`,
 		`prompt: pre.prompt || ""`,
+		`runModeTag(r.run_mode) + effortTag(r.effort)`,
+		`function effortTag(e)`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lost %q", want)

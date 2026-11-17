@@ -103,7 +103,7 @@ func TestTaskRunModes(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", argsFile)
 	tid := mkTask(t, a, "modes")
-	run := func(mode, effort string) ([]string, string) {
+	run := func(mode, effort string) ([]string, string, string) {
 		t.Helper()
 		v, err := a.Tasks.Get(ctx, tid)
 		if err != nil {
@@ -120,21 +120,21 @@ func TestTaskRunModes(t *testing.T) {
 		if err := a.runTaskTrigger(ctx, v.Task, "manual", "production"); err != nil {
 			t.Fatal(err)
 		}
-		var rm string
-		_ = a.DB.QueryRow(`SELECT run_mode FROM runs WHERE task_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1`, tid).Scan(&rm)
-		return readArgs(t, argsFile), rm
+		var rm, ef string
+		_ = a.DB.QueryRow(`SELECT run_mode, effort FROM runs WHERE task_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1`, tid).Scan(&rm, &ef)
+		return readArgs(t, argsFile), rm, ef
 	}
-	args, rm := run("", "")
-	if !contains(args, "--restricted") || strings.HasPrefix(argAfter(args, "--disallowedTools"), "Edit,") || contains(args, "--effort") || rm != "" {
-		t.Fatalf("legacy %q %q", args, rm)
+	args, rm, ef := run("", "")
+	if !contains(args, "--restricted") || strings.HasPrefix(argAfter(args, "--disallowedTools"), "Edit,") || contains(args, "--effort") || rm != "" || ef != "" {
+		t.Fatalf("legacy %q %q %q", args, rm, ef)
 	}
-	args, rm = run("read", "high")
-	if !strings.Contains(strings.Join(args, "\n"), "Edit,Write") || argAfter(args, "--effort") != "high" || rm != "read" {
-		t.Fatalf("read %q %q", args, rm)
+	args, rm, ef = run("read", "high")
+	if !strings.Contains(strings.Join(args, "\n"), "Edit,Write") || argAfter(args, "--effort") != "high" || rm != "read" || ef != "high" {
+		t.Fatalf("read %q %q %q", args, rm, ef)
 	}
-	args, rm = run("exec", "")
-	if contains(args, "--restricted") || !contains(args, "--settings") || contains(args, "--effort") || rm != "exec" {
-		t.Fatalf("exec %q %q", args, rm)
+	args, rm, ef = run("exec", "")
+	if contains(args, "--restricted") || !contains(args, "--settings") || contains(args, "--effort") || rm != "exec" || ef != "" {
+		t.Fatalf("exec %q %q %q", args, rm, ef)
 	}
 	v, _ := a.Tasks.Get(ctx, tid)
 	sp := *v.Spec

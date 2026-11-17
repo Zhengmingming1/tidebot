@@ -158,8 +158,8 @@
     if(r.skill_set_source)out += '<dt>'+esc(T("ss.source"))+'</dt><dd><a href="#/skill-sets">'+esc(r.skill_set_source.set_id)+'</a><br><code>'+esc(r.skill_set_source.version_id)+'</code> · '+esc(T("ss.state_"+r.skill_set_source.state))+'</dd>';
     if((r.skill_evidence||[]).length)out += '<dt>'+esc(T("ss.evidence"))+'</dt><dd><p class="hint">'+esc(T("ss.evidence_hint"))+'</p><ul class="list-plain">'+r.skill_evidence.map(function(e){var b=(r.skill_bindings||[]).filter(function(x){return x.skill_id===e.skill_id;})[0]||{};return '<li>'+esc(b.skill_name||e.skill_id)+' · '+esc(T(e.role==="primary"?"ss.primary":"ss.auxiliary"))+' · '+esc(T("ss.loaded"))+'<br><code>'+esc(e.version_id)+'</code></li>';}).join('')+'</ul></dd>';
     if (r.skill_id) out += "<dt>" + esc(T("rn.skill")) + '</dt><dd><a href="#/skills/' + enc(r.skill_id) + '">' + esc(r.skill_name || r.skill_id) + "</a>" + (r.skill_version ? ' <span class="tag perm">v' + esc(r.skill_version) + "</span>" : "") + "</dd>";
-    if (r.workspace) out += "<dt>" + esc(T("rn.folder")) + '</dt><dd class="rn-kv-ws"><code class="mono" data-tip="' + esc(r.workspace) + '">' + esc(r.workspace) + "</code>" + runModeTag(r.run_mode) + "</dd>";
-    else if (r.run_mode === "exec") out += "<dt>" + esc(T("rn.mode")) + '</dt><dd class="rn-kv-ws">' + runModeTag("exec") + "</dd>";
+    if (r.workspace) out += "<dt>" + esc(T("rn.folder")) + '</dt><dd class="rn-kv-ws"><code class="mono" data-tip="' + esc(r.workspace) + '">' + esc(r.workspace) + "</code>" + runModeTag(r.run_mode) + effortTag(r.effort) + "</dd>";
+    else if (r.run_mode === "exec" || r.effort) out += "<dt>" + esc(T(r.run_mode === "exec" ? "rn.mode" : "tf.effort")) + '</dt><dd class="rn-kv-ws">' + (r.run_mode === "exec" ? runModeTag("exec") : "") + effortTag(r.effort) + "</dd>";
     return out;
   }
   // This section is explicitly current task configuration; run metadata above it is a snapshot.
@@ -433,6 +433,11 @@
   function runModeTag(m) {
     var k = m === "edit" || m === "exec" ? m : "read";
     return '<span class="tag ' + (k === "read" ? "perm" : "warn") + '" data-tip="' + esc(T("rn." + k + "_tip")) + '">' + ic({ read: "eye", edit: "edit", exec: "terminal" }[k], "sm") + esc(T("rn." + k)) + "</span>";
+  }
+  // effortTag: the --effort this run used, hidden when Claude Code decided ("").
+  function effortTag(e) {
+    if (e !== "low" && e !== "medium" && e !== "high") return "";
+    return ' <span class="tag perm" data-tip="' + esc(T("tf.effort_tip")) + '">' + esc(T("tf.effort")) + " · " + esc(T("tf.effort_" + e)) + "</span>";
   }
   function runChangesHtml(r) {
     var c = r.file_changes;

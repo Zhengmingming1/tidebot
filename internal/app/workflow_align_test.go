@@ -198,9 +198,12 @@ func TestTaskRunsWorkflow(t *testing.T) {
 	}
 	spec := *tv.Spec
 	spec.Prompt = "tonight's input"
+	spec.Effort = "medium"
 	if _, err := a.Tasks.UpdateSpec(ctx, tv.Task.ID, spec, "user", "input"); err != nil {
 		t.Fatal(err)
 	}
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", argsFile)
 	var started string
 	if err := a.runTaskTriggerOn(ctx, tv.Task, "manual", "", func(id string) { started = id }); err != nil {
 		t.Fatal(err)
@@ -210,11 +213,14 @@ func TestTaskRunsWorkflow(t *testing.T) {
 		t.Fatalf("run %q: %+v %v", started, r, err)
 	}
 	for _, n := range r.Nodes {
-		var task string
-		_ = a.DB.QueryRow(`SELECT COALESCE(task_id,'') FROM runs WHERE id=?`, n.ChildRunID).Scan(&task)
-		if task != tv.Task.ID {
-			t.Fatalf("node %s ran outside the task: %q", n.NodeID, task)
+		var task, effort string
+		_ = a.DB.QueryRow(`SELECT COALESCE(task_id,''), effort FROM runs WHERE id=?`, n.ChildRunID).Scan(&task, &effort)
+		if task != tv.Task.ID || effort != "medium" {
+			t.Fatalf("node %s ran outside the task or lost effort: task=%q effort=%q", n.NodeID, task, effort)
 		}
+	}
+	if argAfter(readArgs(t, argsFile), "--effort") != "medium" {
+		t.Fatal("workflow node lost --effort")
 	}
 	// A failed workflow fails the task run.
 	if err := a.Workflows.Delete(ctx, w.ID); err != nil {

@@ -44,8 +44,9 @@ type Options struct {
 	// when Prompt carries more, e.g. a leading /skill command.
 	DisplayPrompt string
 	// SkillID / SkillVersionID / RunMode ('read' | 'edit' | 'exec') label runs started from
-	// the Run dialog.
-	SkillID, SkillVersionID, RunMode string
+	// the Run dialog. Effort ('low' | 'medium' | 'high'; "" = not passed) is written
+	// with the row and added as --effort when set; Claude Code decides otherwise.
+	SkillID, SkillVersionID, RunMode, Effort string
 	// ContextArgs are added after ExtraArgs whether or not the caller set ExtraArgs
 	// (e.g. --plugin-dir for skills tidebot staged in its own directory).
 	ContextArgs     []string
@@ -310,6 +311,7 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 	row.HasNextRunItems = opts.HasNextRunItems
 	row.CostBucket = opts.CostBucket
 	row.SkillID, row.SkillVersionID, row.RunMode = opts.SkillID, opts.SkillVersionID, opts.RunMode
+	row.Effort = claudeEffort(opts.Effort)
 	if err := r.store.InsertRun(ctx, row); err != nil {
 		return Result{}, fmt.Errorf("insert run: %w", err)
 	}
@@ -644,7 +646,20 @@ func claudeArgs(opts Options) []string {
 	}
 	args = append(args, opts.ExtraArgs...)
 	args = append(args, opts.ContextArgs...)
+	if e := claudeEffort(opts.Effort); e != "" {
+		args = append(args, "--effort", e)
+	}
 	return args
+}
+
+// claudeEffort is a --effort value Claude Code accepts. Anything else
+// (including "") is ignored: Claude Code decides, and the run row stays empty.
+func claudeEffort(e string) string {
+	switch e {
+	case "low", "medium", "high":
+		return e
+	}
+	return ""
 }
 
 func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.Duration, onUsage func(pricing.Cost)) (Result, error) {

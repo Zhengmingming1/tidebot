@@ -375,3 +375,40 @@ func TestChatSessionBlank(t *testing.T) {
 		t.Fatal("blank session folder kept after delete")
 	}
 }
+
+// A session that continues a run with effort keeps that --effort on later
+// turns, records it on the turn's run, and prefills it when saving as a task.
+func TestChatSessionInheritsEffort(t *testing.T) {
+	chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", argsFile)
+	rid := originRun(t, a, runner.Options{Prompt: "first", RunMode: "edit", Effort: "high", WorkspaceDir: t.TempDir()})
+	var ef string
+	if err := a.DB.QueryRow(`SELECT effort FROM runs WHERE id=?`, rid).Scan(&ef); err != nil || ef != "high" {
+		t.Fatalf("origin effort %q %v", ef, err)
+	}
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SendChatTurn(ctx, ses.ID, "continue"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, a, ses.ID, 1)
+	if argAfter(readArgs(t, argsFile), "--effort") != "high" {
+		t.Fatal("turn lost --effort")
+	}
+	if err := a.DB.QueryRow(`SELECT r.effort FROM chat_session_turns t JOIN runs r ON r.id=t.run_id WHERE t.session_id=? AND t.turn_index=1`, ses.ID).Scan(&ef); err != nil || ef != "high" {
+		t.Fatalf("turn row %q %v", ef, err)
+	}
+	p, err := a.ChatTaskPreset(ctx, ses.ID, true)
+	if err != nil || p.Effort != "high" || p.RunMode != "edit" {
+		t.Fatalf("from run %v %+v", err, p)
+	}
+	p, err = a.ChatTaskPreset(ctx, ses.ID, false)
+	if err != nil || p.Effort != "high" {
+		t.Fatalf("from session %v %+v", err, p)
+	}
+}

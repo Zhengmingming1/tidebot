@@ -117,6 +117,7 @@ type RunInfo struct {
 	RunID  string
 	TaskID string // the task that started the run ("" = started by hand)
 	Bucket string // the task's cost bucket ("" = production)
+	Effort string // the task's --effort ("" = not passed)
 	Def    Definition
 }
 
@@ -136,6 +137,7 @@ type StartOptions struct {
 	Provider   string
 	TaskID     string
 	Bucket     string
+	Effort     string
 }
 
 // ErrBudget stops a run whose total cost reached the workflow's budget.
