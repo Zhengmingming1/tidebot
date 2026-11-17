@@ -100,29 +100,35 @@ func (a *App) reserveProviderQuota(ctx context.Context, o *runner.Options, p pro
 	return nil
 }
 
-func (a *App) saveCostSnapshot(ctx context.Context, o *runner.Options, bucket string, at time.Time) error {
-	mode, revision, err := a.taskCostMode(ctx, o.TaskID)
-	if err != nil {
+// saveCostSnapshot freezes the launch-time cost policy on the run row.
+// The write is retried on a busy database and does not use the run context:
+// AtStart is given runCtx, and a canceled or briefly busy write used to skip
+// a run that could have started.
+func (a *App) saveCostSnapshot(o *runner.Options, bucket string, at time.Time) error {
+	return a.retryWrite("cost snapshot", o.RunID, func(wctx context.Context) error {
+		mode, revision, err := a.taskCostMode(wctx, o.TaskID)
+		if err != nil {
+			return err
+		}
+		snapshot := struct {
+			Mode          cost.Mode  `json:"mode"`
+			Revision      int64      `json:"revision"`
+			Currency      string     `json:"currency"`
+			FX            pricing.FX `json:"fx"`
+			MaxAmount     float64    `json:"max_amount"`
+			MaxTokens     int64      `json:"max_tokens"`
+			MaxRequests   int64      `json:"max_requests"`
+			Bucket        string     `json:"bucket"`
+			AccountingAt  string     `json:"accounting_at"`
+			AccountingDay string     `json:"accounting_day"`
+			Timezone      string     `json:"timezone"`
+			LimitSources  []string   `json:"limit_sources"`
+		}{mode, revision, o.Cost.Currency, o.Cost.FX, o.Cost.MaxAmount, o.Cost.MaxTokens, o.Cost.MaxRequests, bucket, at.UTC().Format(time.RFC3339), at.In(a.Loc()).Format("2006-01-02"), a.Loc().String(), o.Cost.BudgetSources}
+		raw, err := json.Marshal(snapshot)
+		if err != nil {
+			return err
+		}
+		_, err = a.Store.DB.ExecContext(wctx, "UPDATE runs SET effective_cost_policy_json=? WHERE id=?", string(raw), o.RunID)
 		return err
-	}
-	snapshot := struct {
-		Mode          cost.Mode  `json:"mode"`
-		Revision      int64      `json:"revision"`
-		Currency      string     `json:"currency"`
-		FX            pricing.FX `json:"fx"`
-		MaxAmount     float64    `json:"max_amount"`
-		MaxTokens     int64      `json:"max_tokens"`
-		MaxRequests   int64      `json:"max_requests"`
-		Bucket        string     `json:"bucket"`
-		AccountingAt  string     `json:"accounting_at"`
-		AccountingDay string     `json:"accounting_day"`
-		Timezone      string     `json:"timezone"`
-		LimitSources  []string   `json:"limit_sources"`
-	}{mode, revision, o.Cost.Currency, o.Cost.FX, o.Cost.MaxAmount, o.Cost.MaxTokens, o.Cost.MaxRequests, bucket, at.UTC().Format(time.RFC3339), at.In(a.Loc()).Format("2006-01-02"), a.Loc().String(), o.Cost.BudgetSources}
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return err
-	}
-	_, err = a.Store.DB.ExecContext(ctx, "UPDATE runs SET effective_cost_policy_json=? WHERE id=?", string(raw), o.RunID)
-	return err
+	})
 }

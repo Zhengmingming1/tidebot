@@ -406,32 +406,35 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 					return err
 				}
 			}
+			// Admit and reserve under the policy lock; persist the snapshot
+			// after releasing it. retryWrite may wait, and must not hold the
+			// lock or use the (possibly canceled) run context.
 			policyMu.Lock()
-			defer policyMu.Unlock()
-			rm, ncc, err := a.admitRun(sctx, o.TaskID, bucket, prof, callerCap)
+			err := func() error {
+				defer policyMu.Unlock()
+				rm, ncc, err := a.admitRun(sctx, o.TaskID, bucket, prof, callerCap)
+				if err != nil {
+					return err
+				}
+				o.Cost = ncc
+				o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, rm)
+				h, err := a.holdRunBudget(sctx, o, bucket, prof)
+				if err != nil {
+					return err
+				}
+				hold.Store(h)
+				accountingAt = time.Now()
+				if h != nil {
+					accountingAt = h.AccountingAt()
+				}
+				accountingDay = accountingAt.In(a.Loc()).Format("2006-01-02")
+				launchedID = o.RunID
+				return a.reserveProviderQuota(sctx, o, prof)
+			}()
 			if err != nil {
 				return err
 			}
-			o.Cost = ncc
-			o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, rm)
-			h, err := a.holdRunBudget(sctx, o, bucket, prof)
-			if err != nil {
-				return err
-			}
-			hold.Store(h)
-			accountingAt = time.Now()
-			if h != nil {
-				accountingAt = h.AccountingAt()
-			}
-			accountingDay = accountingAt.In(a.Loc()).Format("2006-01-02")
-			launchedID = o.RunID
-			if err = a.reserveProviderQuota(sctx, o, prof); err != nil {
-				return err
-			}
-			if err = a.saveCostSnapshot(sctx, o, bucket, accountingAt); err != nil {
-				return err
-			}
-			return nil
+			return a.saveCostSnapshot(o, bucket, accountingAt)
 		}
 	}
 	// A run that waited for a slot is checked again before it starts: runs ahead

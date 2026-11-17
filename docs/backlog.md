@@ -6728,3 +6728,25 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
 - 一个会话仍只能有一份草稿。
 - 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
+
+### 2026-11-18：开始运行时写入费用策略快照会重试，不再因数据库忙或 context 取消而跳过（BUG）
+
+- **问题**（上一轮核对后仍在）：`saveCostSnapshot` 把 `effective_cost_policy_json` 写入运行行只试一次，而且用的是 runner 传给 `AtStart` 的 `runCtx`。数据库忙，或用户停止 / 退出把 context 取消时，这次写入失败，`AtStart` 返回错误，运行被标为 skipped（或 unstarted），一次本可开始的运行就没了。不是跑完后静默丢掉快照。
+- **改法**：
+  - `saveCostSnapshot` 改走已有的 `retryWrite`（自己的超时，不用 runCtx）。数据库忙会重试，最多约 2 分钟；放弃后仍返回错误，运行才会被跳过。
+  - 录取预算和预留配额仍在费用策略锁里完成；快照写入放到锁外，避免重试时长时间占住锁，挡住别的运行记账。
+- 测试：`TestSaveCostSnapshotRetriesWhenDatabaseBusy`（先挡住写入，解开后快照落地且内容完整）；`TestSaveCostSnapshotWrites`；`TestSaveCostSnapshotGivesUpWhenStillBusy`。`go test ./internal/app/ ./internal/runner/ ./internal/cost/ ./internal/tasksvc/`、`go vet`（含 GOOS=windows/darwin）通过。
+- 截图：未拍——改动在开始运行时的记账写入，界面上看不出差别。
+
+**心得**：`AtStart` 失败会直接让运行无法开始，这里的写入必须能扛住数据库忙，也不能绑在可能已取消的 runCtx 上。和运行结束时的 `retryWrite`（改动文件、agent 配置、Claude 版本）同一套路，但开始时还要先把策略锁放下，免得重试拖住其他运行。
+
+**后续想法**：
+- 会话本身还没有推理强度选择器，只能沿用源运行的值；从空白会话存为任务、以及运行对话框新开一次运行，仍是「默认」。若要在会话或运行对话框里改强度，需要像权限档那样加一档设置（对话框现在只是悄悄带着源运行的值）。
+- 技能组合评估（`x.error`）和依赖检查（`r.error`）可能仍直接显示英文；运行页 `error_message` 可能仍缺 `error_info`。
+- 工作流运行不记来自哪个任务（业务逻辑矛盾）。
+- `workflow_runs` / `workflow_run_nodes` 从未清理（2026-11-03 起 P2）：工作流是软删除，节点输出最大 128 KB × 32 节点，数据目录会一直涨；可评估是否纳入设置 › 数据清理统计和保留策略。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
+- `AtStart` 里 `admitRun` / `holdRunBudget` / `reserveProviderQuota` 仍使用 `runCtx`，数据库忙或 context 取消时仍可能在快照写入之前就把运行跳过；若再出现误跳，可以把录取阶段也改成短超时的独立 context（用户主动停止仍应尊重）。
