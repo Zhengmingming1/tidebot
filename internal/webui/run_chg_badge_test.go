@@ -104,7 +104,7 @@ func TestRunChangeSumList(t *testing.T) {
 // TestRunChangeBadgeUI: list rows show the badge (files, +add, −del with zero sides left
 // out), it opens the run at its Changed files card, escaped, both languages.
 func TestRunChangeBadgeUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`function runChgBadge(r) {`,

@@ -147,7 +147,7 @@ func TestClip(t *testing.T) {
 // TestRunsExportUI: the runs page has an Export menu that sends the list's own query and
 // offers CSV and JSONL; no native dialogs, both languages.
 func TestRunsExportUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`id="r-export" aria-haspopup="menu"`,

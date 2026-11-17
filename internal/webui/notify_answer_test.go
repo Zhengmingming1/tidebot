@@ -56,7 +56,7 @@ func TestTaskFormNotifyAnswer(t *testing.T) {
 }
 
 func TestNotifyAnswerUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`'<label class="check tf-pol-ans"><input type="checkbox" name="notify_answer"' + (p.notify_answer !== false ? " checked" : "")`,

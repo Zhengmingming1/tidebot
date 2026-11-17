@@ -13,10 +13,7 @@ import (
 // three colour modes; moving previews (repaint only), Enter saves, Esc / Backspace / closing
 // put the old look back, and typing a name on the first page lists that look directly.
 func TestPaletteLook(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`{ kind: "cmd", icon: "palette", label: T("pal.look"), kw: T("pal.look_kw"), stay: true, run: function () { palPage("look"); } },`,

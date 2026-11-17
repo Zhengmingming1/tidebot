@@ -13,10 +13,7 @@ import (
 // paused the task list / task page mark the next run the pause holds back (escaped, and
 // repainted when the pause changes).
 func TestTaskPauseUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`function pzMenu(anchor, dir, o) {`,

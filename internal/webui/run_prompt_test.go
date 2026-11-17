@@ -49,7 +49,7 @@ func TestRunPromptFull(t *testing.T) {
 // only when it overflows, copy of the full text, edit/save-as-task fed from the detail, both
 // languages, no native dialogs, escaped output.
 func TestRunPromptUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`"</dd>" + runPromptHtml(r) + (r.error`,

@@ -189,10 +189,10 @@ func TestAppJSUsesAssetVersion(t *testing.T) {
 	}
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
-		`document.currentScript && document.currentScript.src`,
-		`"/static/i18n/" + lang + ".json" + assetV`,
-		`"/static/i18n/en.json" + assetV`,
-		`"/static/favicon.svg" + assetV`,
+		`document.currentScript&&document.currentScript.src`,
+		`"/static/i18n/"+lang+".json"+assetV`,
+		`"/static/i18n/en.json"+assetV`,
+		`"/static/favicon.svg"+assetV`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js missing %q", want)

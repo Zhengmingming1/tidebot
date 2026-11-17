@@ -12,10 +12,7 @@ import (
 // TestLiveRunUsage: a running run's cost/token cards refresh in place from the usage the
 // core saves mid-run (no remount), stop once it ends, and their text is escaped.
 func TestLiveRunUsage(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`'<div class="card stat" id="rd-cost">' + runCostStat(r, live) + "</div>"`,

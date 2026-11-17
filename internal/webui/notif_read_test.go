@@ -75,7 +75,7 @@ func TestNotifRead(t *testing.T) {
 // adopted, a mark this browser is ahead with is sent once, a failed send retries, and
 // "mark all read" never moves the mark back; both languages carry the tooltip.
 func TestNotifReadUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, s := range []string{
 		`"/api/notifications/read", { method: "POST", body: { seen_at: v }, read: true }`,

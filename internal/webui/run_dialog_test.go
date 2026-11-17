@@ -134,10 +134,7 @@ func urlQ(s string) string { return url.QueryEscape(s) }
 // The Run dialog's wiring lives in app.js; these are the pieces that make it a
 // skill + folder runner rather than the old prompt-only quick run.
 func TestRunDialogUI(t *testing.T) {
-	js, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	css, err := os.ReadFile("static/styles.css")
 	if err != nil {
 		t.Fatal(err)

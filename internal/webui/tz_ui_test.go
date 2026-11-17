@@ -10,10 +10,7 @@ import (
 // timezone.get / timezone.set (no native dialogs), timezone.get is a cache-safe read,
 // and /api/settings carries the offset the row shows.
 func TestTimezoneUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`tzButtonHtml(st.tz_offset)`,

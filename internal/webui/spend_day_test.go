@@ -107,10 +107,7 @@ func TestSpendBreakdownDay(t *testing.T) {
 }
 
 func TestSpendDayUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`function spendChart(days, range, sel) {`,

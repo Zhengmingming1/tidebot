@@ -79,7 +79,7 @@ func TestRunAnswerSameAPI(t *testing.T) {
 }
 
 func TestNotifyChangedUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`<input type="checkbox" name="notify_changed"' + (p.notify_changed ? " checked" : "") + (p.notify_success ? "" : " disabled")`,

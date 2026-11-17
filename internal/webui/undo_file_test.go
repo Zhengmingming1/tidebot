@@ -61,7 +61,7 @@ func TestUndoFileAPI(t *testing.T) {
 // while running, for a cut patch or when not every file is listed; a partly undone run
 // says "n/m undone" and offers "Undo the rest"; texts in both languages.
 func TestUndoFileUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`api("/api/runs/" + enc(r.id) + "/undo-changes", { method: "POST", body: { redo: redo, path: path } })`,

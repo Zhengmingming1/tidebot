@@ -24,10 +24,7 @@ func TestTaskTimeoutFormExplicitZeroAndLegacyOmission(t *testing.T) {
 }
 
 func TestTaskTimeoutToggleMarkup(t *testing.T) {
-	b, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	for _, want := range []string{`timeout_minutes: 0, run_mode: pre.run_mode || "exec"`, `name="timeout_enabled"`, `f.timeout_minutes.disabled = !enabled;`, `f.timeout_minutes.required = enabled;`, `timeout_minutes: f.timeout_enabled.checked ? Number(f.timeout_minutes.value) : 0`} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("missing timeout control: %s", want)

@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -10,10 +9,7 @@ import (
 // workflow without a level stays read-only; the schedule button opens the task form
 // with the workflow pinned to the saved version.
 func TestWorkflowAlignmentUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := string(b)
 	for _, want := range []string{
 		`run_mode:'exec',workspace_dir:''`,

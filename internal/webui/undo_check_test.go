@@ -48,7 +48,7 @@ func TestUndoCheckAPI(t *testing.T) {
 // removed) with the reason, the main button too; a later clean answer turns them back
 // on with the original tooltips; dir / busy turn everything off; no native dialogs.
 func TestUndoCheckUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`api("/api/runs/" + enc(r.id) + "/undo-check", { fresh: true })`,

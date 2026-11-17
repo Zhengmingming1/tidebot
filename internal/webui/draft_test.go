@@ -13,10 +13,7 @@ import (
 // it with a "Draft restored · Clear" tag, and drops it on submit, sign-out and UI reset. Edit
 // & rerun, edit task and "save as task" never touch drafts.
 func TestPromptDrafts(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`else wireDraft(root, ta, "qr", function () { filterChips(); sync(); });`,

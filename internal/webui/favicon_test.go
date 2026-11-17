@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -11,10 +10,7 @@ import (
 // TestFaviconBadge: the tab icon badge picks failed > alert > running, caps the count
 // at "9+", and the background poll only runs in a hidden tab while something runs.
 func TestFaviconBadge(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		"paintFavicon();\n  }\n  // ---------- favicon badge", // setDocTitle repaints it

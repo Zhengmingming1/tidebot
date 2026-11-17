@@ -94,7 +94,7 @@ func TestUndoChangesAPI(t *testing.T) {
 // patch), marks an undone run, uses the in-app confirm, names conflicting files from
 // git's message; the list badge reads as undone; both languages carry every text.
 func TestUndoChangesUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`api("/api/runs/" + enc(r.id) + "/undo-changes", { method: "POST", body: { redo: redo } })`,

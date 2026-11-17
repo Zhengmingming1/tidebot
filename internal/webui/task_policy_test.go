@@ -102,10 +102,7 @@ func TestTaskFormPolicy(t *testing.T) {
 }
 
 func TestTaskFormPolicyUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	d := policy.Default("x")
 	for _, want := range []string{

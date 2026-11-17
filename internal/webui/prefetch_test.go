@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -27,10 +26,7 @@ func cut(t *testing.T, src, from, to string) string {
 // longer drop it, and nothing is prefetched for the current page, signed out, on Save-Data,
 // in a hidden tab, for filtered addresses or past the in-flight cap.
 func TestIntentPrefetch(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`if (res.status === 401 && path !== "/api/login" && !opts.quiet) { showLogin();`,

@@ -10,7 +10,7 @@ import (
 // The button is wired by assignment so re-rendering the list doesn't stack handlers, and a
 // click that lands before the list has loaded (palette "n p") still opens the picker.
 func TestProviderHeadUI(t *testing.T) {
-	jsb, _ := Static.ReadFile("static/app.js")
+	jsb := []byte(appJSSource(t))
 	cssb, _ := Static.ReadFile("static/styles.css")
 	js, css := string(jsb), string(cssb)
 	i := strings.Index(js, `section === "providers"`)
@@ -48,7 +48,7 @@ func TestProviderHeadUI(t *testing.T) {
 // The preset picker's arrow-key handler must not touch the grid after Esc closed it
 // (getComputedStyle(null) threw a TypeError on every Esc).
 func TestPresetPickerEscNoError(t *testing.T) {
-	jsb, _ := Static.ReadFile("static/app.js")
+	jsb := []byte(appJSSource(t))
 	js := string(jsb)
 	if !strings.Contains(js, `var grid = $(".ap-grid", root); if (!grid) return;`) || strings.Contains(js, `getComputedStyle($(".ap-grid", root))`) {
 		t.Fatal("preset picker: grid not guarded after close")

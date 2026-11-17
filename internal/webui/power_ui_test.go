@@ -15,10 +15,7 @@ import (
 // and a run held back for power is explained in both languages. The page's pattern
 // must match the message the core stores ("skipped: power saving: <why> <percent>").
 func TestPowerUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`powerCardHtml() +`,

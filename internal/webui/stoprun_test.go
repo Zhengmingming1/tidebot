@@ -97,10 +97,7 @@ func TestStopRunAndQueuePos(t *testing.T) {
 
 // The WebUI wiring: stop buttons (list + detail), the queued pill, the stop reason.
 func TestStopRunUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`function stopRun(id, st) {`,

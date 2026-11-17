@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -12,10 +11,7 @@ import (
 // opens the quick-run dialog with the run's prompt and provider; "Revert" shows only once
 // something changed, and CRLF / trailing whitespace alone isn't a change.
 func TestEditAndRerun(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`(r.task_id || turn ? "" : '<button type="button" class="icon-btn sm" id="rd-edit"`,

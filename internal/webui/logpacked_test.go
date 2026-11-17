@@ -52,7 +52,7 @@ func TestRunEventsPackedLog(t *testing.T) {
 
 // Settings › Storage says how many logs are compressed (in the tooltip, both languages).
 func TestStoragePackedTipUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	if !strings.Contains(string(js), `T("st.packed", { n: x.packed, raw: fmtBytes(x.packed_raw), on: fmtBytes(x.packed_bytes) })`) {
 		t.Error("storage tooltip lacks the packed line")
 	}

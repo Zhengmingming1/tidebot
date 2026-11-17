@@ -11,7 +11,7 @@ import (
 // both languages, no native dialogs, and the renderer block stays free of lookbehind regexes
 // (older WebKit in the desktop app rejects the whole script on one).
 func TestMarkdownPreviewUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`function fileViewHtml(f, mode) {`,
@@ -64,7 +64,7 @@ func mdBlock(t *testing.T, src string) string {
 // schemes, relative paths resolved against the file's folder), and nothing from the file
 // reaching the page as markup.
 func TestMarkdownRender(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	block := mdBlock(t, src)
 	esc := regexpFunc(t, src, "  function esc(v) {")

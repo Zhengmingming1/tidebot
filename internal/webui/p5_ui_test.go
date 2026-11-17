@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -10,10 +9,7 @@ import (
 // in use); Git repositories have one home under 扩展 › 来源; the home composer can hand
 // its text to a new session.
 func TestConvergedEntriesUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := string(b)
 	for _, want := range []string{
 		`function startSkillChat(skillId, btn) {`,

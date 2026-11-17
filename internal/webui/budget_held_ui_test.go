@@ -19,10 +19,7 @@ func TestBudgetHeldUI(t *testing.T) {
 	if h, n := parseHeldDetail("task/x daily CNY cap held by 1 running (1.0000+0.5000/2.0000)"); h != "¥0.5000" || n != "1" {
 		t.Fatal(h, n)
 	}
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, s := range []string{
 		`"rd.err_skip_held" : "rd.err_skip_budget"`,

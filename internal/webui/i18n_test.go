@@ -2,7 +2,6 @@ package webui
 
 import (
 	"encoding/json"
-	"os"
 	"regexp"
 	"sort"
 	"testing"
@@ -57,10 +56,7 @@ func TestI18nKeysComplete(t *testing.T) {
 
 // TestI18nKeysUsed: every literal T("key") used by app.js exists in the dictionaries.
 func TestI18nKeysUsed(t *testing.T) {
-	src, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	src := []byte(appJSSource(t))
 	en := loadDict(t, "en")
 	re := regexp.MustCompile(`\bT\("([a-z0-9_.]+)"`)
 	for _, m := range re.FindAllStringSubmatch(string(src), -1) {

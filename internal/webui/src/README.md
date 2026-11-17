@@ -8,8 +8,10 @@ node --check internal/webui/static/app.js
 python3 scripts/check-i18n.py
 ```
 
-`bundle.json` defines evaluation order. The assembler preserves the existing private
-closure, function bindings, event registration order, CSP and `/static/app.js` URL.
+`bundle.json` defines evaluation order. The assembler minifies the bundle (comments
+and unnecessary whitespace only; identifiers and literals stay) and preserves the
+existing private closure, function bindings, event registration order, CSP and
+`/static/app.js` URL. There is no source map; debug against these feature sources.
 The checked-in bundle supports Go builds without a JavaScript toolchain. CI rejects
 missing/duplicate source entries or a stale bundle. Do not edit `static/app.js` directly.
 

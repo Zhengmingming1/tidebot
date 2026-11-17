@@ -113,10 +113,7 @@ func TestRunsDateRangeFilter(t *testing.T) {
 }
 
 func TestRunsDateRangeUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`var RUN_RANGES = ["", "today", "yesterday", "7d", "30d"];`,

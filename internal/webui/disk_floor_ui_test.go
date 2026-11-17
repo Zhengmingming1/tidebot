@@ -11,10 +11,7 @@ import (
 // full disk is explained in both languages. The page's pattern must match the message the
 // core stores ("skipped: disk full: <free>/<minimum>").
 func TestDiskFloorUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, s := range []string{
 		`r("min_free", T("st.min_free_sub"), sel("st-minfree", "min_free"))`,

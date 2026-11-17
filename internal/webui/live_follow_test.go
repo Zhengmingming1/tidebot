@@ -2,7 +2,6 @@ package webui
 
 import (
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -59,10 +58,7 @@ func TestLiveFollowStableReads(t *testing.T) {
 
 func liveSrc(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 

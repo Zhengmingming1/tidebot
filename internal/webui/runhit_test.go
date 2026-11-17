@@ -109,10 +109,7 @@ func TestRunsSearchHit(t *testing.T) {
 // TestRunsHitUI: the runs table shows the excerpt escaped with marks, the title is marked,
 // search boxes wait for the input method, and IME keys never reach our shortcuts.
 func TestRunsHitUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, s := range []string{
 		`window.addEventListener("keydown", function (e) { if (imeKey(e)) e.stopImmediatePropagation(); }, true);`,

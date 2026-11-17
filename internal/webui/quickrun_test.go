@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -9,10 +8,7 @@ import (
 // TestQuickRunMemory: the quick-run dialog offers recent prompts (escaped), keeps only the
 // provider name in localStorage, and Ctrl/⌘+Enter submits.
 func TestQuickRunMemory(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`api("/api/runs/recent-prompts")`,

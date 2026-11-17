@@ -41,10 +41,7 @@ func TestChannelDownCenter(t *testing.T) {
 // Settings › Notifications while a channel is failing (count in the tooltip only), and
 // every string has both languages.
 func TestChannelDownUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, s := range []string{
 		`n.key === "channel_down" || n.key === "channel_up" ? "#/settings/notifications"`,

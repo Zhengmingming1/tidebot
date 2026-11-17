@@ -31,7 +31,7 @@ func TestNoNativeDialogs(t *testing.T) {
 	if err != nil || n == 0 {
 		t.Fatal("no static files scanned", err)
 	}
-	src, _ := Static.ReadFile("static/app.js")
+	src := []byte(appJSSource(t))
 	for _, want := range []string{
 		`rpc("update.check", { async: true }, 15000)`,
 		`rpc("update.apply", { async: true }, 15000)`,

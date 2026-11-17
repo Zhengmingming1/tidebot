@@ -13,7 +13,7 @@ import (
 // only when the column itself is wide (1024×655 keeps one stacked column).
 func TestSettingsFillWideWindows(t *testing.T) {
 	cssB, _ := Static.ReadFile("static/styles.css")
-	jsB, _ := Static.ReadFile("static/app.js")
+	jsB := []byte(appJSSource(t))
 	css, js := strings.ReplaceAll(string(cssB), "\r\n", "\n"), strings.ReplaceAll(string(jsB), "\r\n", "\n")
 
 	// The last max-width given to .set-main decides; it must not be the old 720px.

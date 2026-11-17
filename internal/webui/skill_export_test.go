@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -136,10 +135,7 @@ func TestExportSlug(t *testing.T) {
 // TestSkillExportUI: download buttons on the list, the detail head and each version;
 // filename* (UTF-8) wins over the ASCII fallback in the browser too.
 func TestSkillExportUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`data-sk-export="' + esc(s.id) + '"`,

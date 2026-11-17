@@ -10,10 +10,7 @@ import (
 // Settings › Data: the size tooltip says which database rows are trimmed automatically,
 // and the last cleanup (tooltip and toast) says how many went.
 func TestStorageRowPruneUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`(v.last.deleted_rows > 0 ? "\n" + T("st.rows", { n: v.last.deleted_rows }) : "")`,
@@ -53,10 +50,7 @@ func TestStorageTotalTipOpensDown(t *testing.T) {
 
 // Settings › Data usage bar includes session folders and Claude Code transcripts.
 func TestStorageSessionsUsageUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`var ST_PARTS = ["logs", "artifacts", "sessions", "database", "backups"];`,

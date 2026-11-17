@@ -35,10 +35,7 @@ func TestTwoFADisableRateLimited(t *testing.T) {
 }
 
 func TestTwoFADisableUI(t *testing.T) {
-	js, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, want := range []string{`id="tf-off-form"`, `autocomplete="current-password"`, `x.status === 429`, `"bad_password"`, `twoFADisable(st.password_set !== false)`} {
 		if !strings.Contains(src, want) {

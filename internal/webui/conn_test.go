@@ -13,10 +13,7 @@ import (
 // nothing, a lasting outage shows one bar that retries with backoff and a countdown, a click
 // while down toasts once, and the page repaints when the server answers again.
 func TestConnectionBar(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`return netFetch(path, { method: method, headers: headers, body: body, credentials: "same-origin", signal: ac ? ac.signal : undefined })`,

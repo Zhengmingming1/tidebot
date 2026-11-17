@@ -14,10 +14,7 @@ import (
 // on a Mac, Ctrl+Alt is AltGr on Windows), and letter shortcuts work with Caps Lock and
 // non-Latin layouts.
 func TestPlatformKeys(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`"</span>" + kbdHtml("Mod+K") + "</button>"`,

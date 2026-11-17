@@ -115,10 +115,7 @@ func TestPauseReasonAPI(t *testing.T) {
 }
 
 func TestPauseReasonUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`var PAUSE_KINDS = ["user", "snooze", "breaker", "budget", "pack", "plugin"];`,

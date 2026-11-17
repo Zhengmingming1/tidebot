@@ -108,10 +108,7 @@ func TestTaskListRecentRuns(t *testing.T) {
 }
 
 func TestTaskListRecentRunsUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`function taskBeatsCell(t) {`,
@@ -180,10 +177,7 @@ func TestFailStreak(t *testing.T) {
 // The task list has a "failing" chip, counts on every chip, the filter in the address,
 // and the success rate links to the task's runs.
 func TestTaskListFailingFilterUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`["failing", "tl.f_failing", "tl.f_failing_tip"]`,

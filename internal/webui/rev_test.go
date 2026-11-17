@@ -2,7 +2,6 @@ package webui
 
 import (
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -66,10 +65,7 @@ func TestRevAPI(t *testing.T) {
 // TestRevGate: live pages only refetch when the token moved, retry after a failed reload,
 // and poll less often when nothing runs and nobody is using the page.
 func TestRevGate(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`if (ticks % liveEvery(!!$("#running .spin")) === 0) {`,

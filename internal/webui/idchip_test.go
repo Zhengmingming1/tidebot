@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -11,10 +10,7 @@ import (
 // TestIDChip: ids moved out of page rows into an escaped copy chip; the schedule row
 // shows only "next run" and keeps cron/time zone/later runs in its tooltip.
 func TestIDChip(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`taskPill(t.status, t) + idChip(T("td.task_id"), t.id)`,

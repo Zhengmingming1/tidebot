@@ -9,10 +9,7 @@ import (
 // the details live in the tooltip, the list test refreshes the row, and every string has
 // both languages.
 func TestNotifyLastDeliveryUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, s := range []string{
 		`function ntLastHtml(c)`,

@@ -13,10 +13,7 @@ import (
 // every error code, kind and event group the server knows has text in both languages, and
 // the page never asks the browser for a native dialog.
 func TestNotifyChannelsUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, s := range []string{`rpc("notify.channel_save"`, `rpc("notify.channel_test"`, `"notify.channel_enable"`, `"notify.channel_remove"`, `confirmDialog({ title: T("nt.del_title"`} {
 		if !strings.Contains(src, s) {

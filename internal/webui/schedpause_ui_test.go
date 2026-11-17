@@ -16,10 +16,7 @@ import (
 // in both languages; the dashboard carries the state; and (under node) a status answer that
 // left before a change can't undo it, while Home dims the runs the pause holds back.
 func TestSchedPauseUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`box.innerHTML = spPillHtml() + '<button class="cc-card cc-'`,

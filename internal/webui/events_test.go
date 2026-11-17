@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -337,10 +336,7 @@ var bad = [];
 
 func appJS(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	return strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 }
 

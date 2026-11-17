@@ -113,10 +113,7 @@ func TestViewSkillFileEOL(t *testing.T) {
 // TestSkillFileBrowserUI: the detail page has the compare / files tabs, reads files through
 // the new endpoint, escapes the text, keeps the view in the address and has both locales.
 func TestSkillFileBrowserUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := string(js)
 	for _, s := range []string{`data-sktab="`, `"/file?v=" + enc(fv) + "&path=" + enc(p)`, `"&tab=files&v="`, `params.get("tab") === "files"`,
 		`data-v-files="`, `function browseTree(`, `function treeKeys(`, `<pre class="fb-tx" tabindex="0">' + esc(text)`, `if (g !== fgen) return;`} {

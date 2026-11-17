@@ -126,7 +126,7 @@ func TestNotifClear(t *testing.T) {
 // native dialogs; update notices show a plain summary and open the update card; both
 // languages carry every string.
 func TestNotifClearUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	css, _ := Static.ReadFile("static/styles.css")
 	src := string(js)
 	for _, s := range []string{
@@ -161,7 +161,7 @@ func TestNotifClearUI(t *testing.T) {
 // TestNotesSummary runs the release-notes helpers: Markdown syntax never reaches the bell,
 // bold lead-ins win, three items at most, CRLF notes read the same as LF.
 func TestNotesSummary(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := string(js)
 	a, b := strings.Index(src, "  function notesPlain("), strings.Index(src, "  function notifTitle(")
 	if a < 0 || b < a {

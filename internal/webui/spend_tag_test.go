@@ -100,10 +100,7 @@ func TestSpendBreakdownByTag(t *testing.T) {
 }
 
 func TestSpendByTagUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`SPEND_BYS = ["task", "provider_model", "model", "provider", "tag"];`,

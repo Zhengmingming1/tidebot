@@ -44,7 +44,7 @@ func TestRunAnswerAPI(t *testing.T) {
 // TestRunAnswerUI: the card is wired into the run page with preview / source, copy and
 // download, strings in both languages, its own scroll box, and no native dialogs.
 func TestRunAnswerUI(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`runAnswerHtml(r, ansMode(r)) +
@@ -95,7 +95,7 @@ func TestRunAnswerUI(t *testing.T) {
 // TestRunAnswerRender: in an answer (base null) relative links and front matter are not
 // interpreted, web links and in-page anchors still work, and markup stays escaped.
 func TestRunAnswerRender(t *testing.T) {
-	js, _ := Static.ReadFile("static/app.js")
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	block := mdBlock(t, src)
 	esc := regexpFunc(t, src, "  function esc(v) {")

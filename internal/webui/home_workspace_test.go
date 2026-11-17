@@ -14,7 +14,7 @@ func TestHomeWorkspaceClient(t *testing.T) {
 	}
 	script := `
 const assert = require("node:assert/strict");
-const src = require("node:fs").readFileSync("static/app.js", "utf8");
+const src = (function(){const fs=require("node:fs");const names=JSON.parse(fs.readFileSync("src/bundle.json","utf8"));return names.map(n=>fs.readFileSync("src/"+n,"utf8").replace(/\r\n/g,"\n")).join("");})();
 function grab(name) {
   const m=src.match(new RegExp("  function " + name + "\\([^]*?\\n  \\}"));
   assert.ok(m, "missing helper " + name); return m[0];

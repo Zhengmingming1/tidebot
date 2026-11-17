@@ -92,10 +92,7 @@ func TestBudgetPartialUpdate(t *testing.T) {
 // Spend page budget rows: column heads, cap button, in-place editor that asks before
 // removing a cap (in-app dialog), only the changed field posted; Settings posts one cap.
 func TestBudgetRowsUI(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(js), "\r\n", "\n")
 	for _, s := range []string{
 		`'<div class="bud-grid" role="table"`,
@@ -165,10 +162,7 @@ if (bad.length) { console.log(JSON.stringify(bad)); process.exit(1); }
 }
 
 func TestGlobalBudgetRowHasOneEditingHome(t *testing.T) {
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	js := []byte(appJSSource(t))
 	fn := regexp.MustCompile(`(?s)  function budgetRow\(b, k\) \{.*?\n  \}\n`).FindString(strings.ReplaceAll(string(js), "\r\n", "\n"))
 	if fn == "" {
 		t.Fatal("budgetRow not found")

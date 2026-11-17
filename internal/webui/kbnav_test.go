@@ -13,10 +13,7 @@ import (
 // it, Esc drops it, / focuses the search box; the row is remembered per page and survives a
 // repaint; a row remembered from a click is only highlighted (o keeps its page meaning).
 func TestListKeyboardCursor(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		"    if (kbKey(e)) return;\n    // page-level single keys",

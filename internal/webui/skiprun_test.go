@@ -10,10 +10,7 @@ import (
 // A queued run skipped at its slot is explained in the viewer's language; the
 // patterns match what the runner stores ("skipped: <why>").
 func TestSkippedRunUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`if (/^skipped: task paused/.test(msg)) return T("rd.err_skip_paused");`,

@@ -158,7 +158,7 @@ func TestAnswerDiffAPI(t *testing.T) {
 }
 
 func TestAnswerDiffUI(t *testing.T) {
-	b, _ := os.ReadFile("static/app.js")
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, s := range []string{
 		`function ansModes(r) { return r.answer_prev ? ["preview", "source", "diff"] : ["preview", "source"]; }`,

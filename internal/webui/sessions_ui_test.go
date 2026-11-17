@@ -95,10 +95,7 @@ func TestDesktopPrunesOldLocalSessions(t *testing.T) {
 }
 
 func TestSignedInDevicesUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		`'<div id="ses-box">' + sesListHtml(st.sessions) + "</div></section>"`,

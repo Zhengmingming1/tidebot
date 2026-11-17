@@ -160,10 +160,7 @@ func TestNumberedName(t *testing.T) {
 }
 
 func TestTaskTransferUI(t *testing.T) {
-	src, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	src := []byte(appJSSource(t))
 	js := string(src)
 	for _, want := range []string{`id="t-import"`, `id="t-export"`, `id="tb-export"`, `"/api/tasks/export"`, `"/api/tasks/import"`, "function taskImportModal", `kind !== "tidebot.tasks"`, "data-noguard data-tx"} {
 		if !strings.Contains(js, want) {

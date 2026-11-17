@@ -78,10 +78,7 @@ func TestRunsPerDayDST(t *testing.T) {
 }
 
 func TestSchedulerDSTUI(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, s := range []string{
 		`dstEl.innerHTML = dstNoteHtml(d.dst, d.scheduler_timezone || tz);`,

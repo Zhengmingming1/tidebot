@@ -13,10 +13,7 @@ import (
 // closes; the close() given to onMount (after a save) doesn't. Only fields the user touched and
 // changed count; prefills, search boxes, [data-noguard] and CRLF-only differences don't.
 func TestModalDiscardGuard(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	for _, want := range []string{
 		`if (e.key === "Escape") { e.preventDefault(); tryClose(); return; }`,

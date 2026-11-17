@@ -14,10 +14,7 @@ import (
 // there is no primary — and never while the discard bar asks, an input method composes, a
 // field already took the key, the button is off or hidden; auto-repeat does not press twice.
 func TestDialogSubmitKey(t *testing.T) {
-	b, err := os.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
 		"    dialogKeys(box);\n    if (onMount) onMount(root, close);",
