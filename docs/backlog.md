@@ -6750,3 +6750,26 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 一个会话仍只能有一份草稿。
 - 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
 - `AtStart` 里 `admitRun` / `holdRunBudget` / `reserveProviderQuota` 仍使用 `runCtx`，数据库忙或 context 取消时仍可能在快照写入之前就把运行跳过；若再出现误跳，可以把录取阶段也改成短超时的独立 context（用户主动停止仍应尊重）。
+
+### 2026-11-18：工作流运行记下并显示来自哪个任务（业务逻辑矛盾）
+
+- **问题**（2026-11-09 P4 起一直搁着）：任务可以定时或手动跑一个工作流，节点运行已经带 `task_id`（花费归到任务），但 `workflow_runs` 本身不记来源任务。工作流的运行历史和运行页上看不出是哪个任务启动的，只能靠时间和输入去猜。从工作流页手动点「运行」的则本来就没有任务。
+- **改法**：
+  - 迁移 `048_workflow_run_task.sql`：`workflow_runs.task_id`（空 = 手工启动），并按子节点运行已有的 `task_id` 回填旧记录；不加外键，任务删了仍留着 id。
+  - `StartWith` 写入并在 `GetRun` / `ListRuns` 读出；手工启动仍为空。接口附带还在的任务名（`task_name`）。
+  - 工作流历史和运行页用小标签显示任务名并链到任务；任务已不在则显示「任务已删除」（中英文）。
+- 测试：`TestWorkflowRunPersistsTask`（含空白修剪、列表）；`TestWorkflowRunTaskBackfill`（有子运行 / 手工 / 尚无子运行）；`TestTaskRunsWorkflow` 核对运行行上的 task_id；`TestWorkflowRunTaskAPI`（名字、已删除、手工、列表）；`TestWorkflowRunTaskUI`。`go test ./...`、`go vet`（含 GOOS=windows/darwin）通过。
+- 截图：未拍——改动是已有页面上多一个任务标签，需要先造一条由任务启动的工作流运行才能拍；这一轮没有起完整界面。
+
+**心得**：节点运行早就有 task_id，缺的是工作流运行这一层的归属。回填可以接上旧记录，但任务在任何节点开始前就失败的旧运行补不回来（当时没写下）。不要给 task_id 加外键，否则删任务会卡住或把归属清掉。
+
+**后续想法**：
+- 任务详情目前只列出节点运行（`runs.task_id`），没有工作流运行本身；若要在任务页看到整次工作流执行，可以按 `workflow_runs.task_id` 再列一栏。
+- 会话本身还没有推理强度选择器，只能沿用源运行的值；从空白会话存为任务、以及运行对话框新开一次运行，仍是「默认」。
+- 技能组合评估（`x.error`）和依赖检查（`r.error`）可能仍直接显示英文；运行页 `error_message` 可能仍缺 `error_info`。
+- `workflow_runs` 的按保留期清理其实在 2026-11-07 已经做了（已结束 90 天，软删工作流 7 天）；上一轮后续想法里「从未清理」是过时抄写。还没做的是把保留天数放到「设置 › 数据」里可配。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
+- `AtStart` 里 `admitRun` / `holdRunBudget` / `reserveProviderQuota` 仍使用 `runCtx`，数据库忙或 context 取消时仍可能在快照写入之前就把运行跳过；若再出现误跳，可以把录取阶段也改成短超时的独立 context（用户主动停止仍应尊重）。

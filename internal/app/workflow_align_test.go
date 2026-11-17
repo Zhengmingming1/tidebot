@@ -209,7 +209,7 @@ func TestTaskRunsWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := a.Workflows.GetRun(ctx, started)
-	if err != nil || r.Status != "succeeded" || r.Input != "tonight's input" || r.WorkflowVersion != 1 {
+	if err != nil || r.Status != "succeeded" || r.Input != "tonight's input" || r.WorkflowVersion != 1 || r.TaskID != tv.Task.ID {
 		t.Fatalf("run %q: %+v %v", started, r, err)
 	}
 	for _, n := range r.Nodes {

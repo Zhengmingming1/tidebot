@@ -2,14 +2,15 @@ package webui
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
-
-	"github.com/Zhengmingming1/tidebot/internal/guard"
-	"github.com/Zhengmingming1/tidebot/internal/workflow"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/Zhengmingming1/tidebot/internal/guard"
+	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
 
 func workflowBody(w http.ResponseWriter, r *http.Request, v any) error {
@@ -203,11 +204,7 @@ func (s *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		workflowError(w, err)
 		return
 	}
-	out := make([]workflowRunDTO, len(list))
-	for i, run := range list {
-		out[i] = workflowRunView(run)
-	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 200, s.workflowRunViews(r.Context(), list))
 }
 func (s *Server) handleWorkflowRunSub(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Workflows == nil {
@@ -244,13 +241,15 @@ func (s *Server) handleWorkflowRunSub(w http.ResponseWriter, r *http.Request) {
 		workflowError(w, err)
 		return
 	}
-	writeJSON(w, 200, workflowRunView(run))
+	writeJSON(w, 200, s.workflowRunViews(r.Context(), []workflow.Run{run})[0])
 }
 
 // workflowRunDTO adds error codes to an execution, so the page can show stored
 // English errors (also on executions recorded before codes existed) in its language.
+// TaskName is the task that started the run, when task_id is set and the task still exists.
 type workflowRunDTO struct {
 	workflow.Run
+	TaskName  string            `json:"task_name,omitempty"`
 	ErrorInfo *errInfo          `json:"error_info,omitempty"`
 	Nodes     []workflowNodeDTO `json:"nodes"`
 }
@@ -263,6 +262,61 @@ func workflowRunView(r workflow.Run) workflowRunDTO {
 	out := workflowRunDTO{Run: r, ErrorInfo: explainError(r.Error), Nodes: make([]workflowNodeDTO, len(r.Nodes))}
 	for i, n := range r.Nodes {
 		out.Nodes[i] = workflowNodeDTO{NodeRun: n, ErrorInfo: explainError(n.Error)}
+	}
+	return out
+}
+
+func (s *Server) workflowRunViews(ctx context.Context, runs []workflow.Run) []workflowRunDTO {
+	ids := make([]string, 0, len(runs))
+	for _, r := range runs {
+		ids = append(ids, r.TaskID)
+	}
+	names := taskNamesByID(ctx, s.deps.DB, ids)
+	out := make([]workflowRunDTO, len(runs))
+	for i, r := range runs {
+		out[i] = workflowRunView(r)
+		out[i].TaskName = names[r.TaskID]
+	}
+	return out
+}
+
+func taskNamesByID(ctx context.Context, db *sql.DB, ids []string) map[string]string {
+	out := map[string]string{}
+	if db == nil {
+		return out
+	}
+	seen := map[string]struct{}{}
+	uniq := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	if len(uniq) == 0 {
+		return out
+	}
+	q := `SELECT id, name FROM tasks WHERE id IN (?` + strings.Repeat(",?", len(uniq)-1) + `)`
+	args := make([]any, len(uniq))
+	for i, id := range uniq {
+		args[i] = id
+	}
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return out
+		}
+		out[id] = name
 	}
 	return out
 }

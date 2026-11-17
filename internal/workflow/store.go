@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Zhengmingming1/tidebot/internal/id"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/id"
 )
 
 type Service struct {
@@ -217,7 +219,8 @@ func (s *Service) StartWith(ctx context.Context, o StartOptions) (string, error)
 		return "", err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,provider,snapshot_json,created_at) VALUES(?,?,?,'queued',?,?,?,?)`, rid, wid, w.Version, input, provider, string(snapshot), at); err != nil {
+	taskID := strings.TrimSpace(o.TaskID)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,provider,snapshot_json,created_at,task_id) VALUES(?,?,?,'queued',?,?,?,?,?)`, rid, wid, w.Version, input, provider, string(snapshot), at, taskID); err != nil {
 		return "", err
 	}
 	for _, n := range d.Nodes {
@@ -239,7 +242,7 @@ func (s *Service) StartWith(ctx context.Context, o StartOptions) (string, error)
 		release()
 		return "", err
 	}
-	runCtx, cancel := context.WithCancelCause(context.WithValue(context.Background(), runInfoKey{}, RunInfo{RunID: rid, TaskID: o.TaskID, Bucket: o.Bucket, Effort: o.Effort, Def: d}))
+	runCtx, cancel := context.WithCancelCause(context.WithValue(context.Background(), runInfoKey{}, RunInfo{RunID: rid, TaskID: taskID, Bucket: o.Bucket, Effort: o.Effort, Def: d}))
 	s.active[rid] = cancel
 	finished := make(chan struct{})
 	s.done[rid] = finished
@@ -262,7 +265,7 @@ func (s *Service) StartWith(ctx context.Context, o StartOptions) (string, error)
 func (s *Service) GetRun(ctx context.Context, rid string) (Run, error) {
 	var r Run
 	var raw string
-	err := s.DB.QueryRowContext(ctx, `SELECT id,workflow_id,workflow_version,status,input,provider,snapshot_json,error,created_at,started_at,finished_at FROM workflow_runs WHERE id=?`, rid).Scan(&r.ID, &r.WorkflowID, &r.WorkflowVersion, &r.Status, &r.Input, &r.Provider, &raw, &r.Error, &r.CreatedAt, &r.StartedAt, &r.FinishedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,workflow_id,workflow_version,status,input,provider,snapshot_json,error,created_at,started_at,finished_at,task_id FROM workflow_runs WHERE id=?`, rid).Scan(&r.ID, &r.WorkflowID, &r.WorkflowVersion, &r.Status, &r.Input, &r.Provider, &raw, &r.Error, &r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.TaskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -290,7 +293,7 @@ func (s *Service) GetRun(ctx context.Context, rid string) (Run, error) {
 func (s *Service) ListRuns(ctx context.Context, wid string) ([]Run, error) {
 	// History is a summary; large node outputs and complete snapshots belong to
 	// GetRun, otherwise polling 100 graphs could repeatedly transfer hundreds of MB.
-	q := `SELECT id,workflow_id,workflow_version,status,substr(input,1,240),provider,error,created_at,started_at,finished_at,json_extract(snapshot_json,'$.name') FROM workflow_runs`
+	q := `SELECT id,workflow_id,workflow_version,status,substr(input,1,240),provider,error,created_at,started_at,finished_at,task_id,json_extract(snapshot_json,'$.name') FROM workflow_runs`
 	args := []any{}
 	if wid != "" {
 		q += ` WHERE workflow_id=?`
@@ -306,7 +309,7 @@ func (s *Service) ListRuns(ctx context.Context, wid string) ([]Run, error) {
 	for rows.Next() {
 		var r Run
 		var name sql.NullString
-		if err = rows.Scan(&r.ID, &r.WorkflowID, &r.WorkflowVersion, &r.Status, &r.Input, &r.Provider, &r.Error, &r.CreatedAt, &r.StartedAt, &r.FinishedAt, &name); err != nil {
+		if err = rows.Scan(&r.ID, &r.WorkflowID, &r.WorkflowVersion, &r.Status, &r.Input, &r.Provider, &r.Error, &r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.TaskID, &name); err != nil {
 			return nil, err
 		}
 		r.Snapshot.Name = name.String

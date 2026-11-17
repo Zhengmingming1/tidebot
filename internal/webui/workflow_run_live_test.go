@@ -35,7 +35,7 @@ function livePoll(fn) { polls++; pollFn = fn; }
 function stopPoll() { stops++; pollFn = null; }
 function liveQuiet() { return quiet; }
 function enc(s) { return s; } function esc(s) { return String(s); } function T(k) { return k; }
-function ic() { return ""; } function fmtTime(s) { return s; } function wfStatus(s) { return s; }
+function ic() { return ""; } function fmtTime(s) { return s; } function wfStatus(s) { return s; } function wfRunTask() { return ""; }
 function errInfoText(i, e) { return e; } function wfDiagram() { return ""; } function fail() {}
 eval(SECTION);
 function node(id, status, out) { return { node_id: id, status: status, output: out || "" }; }

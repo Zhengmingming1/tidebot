@@ -99,6 +99,7 @@ type Run struct {
 	CreatedAt       string     `json:"created_at"`
 	StartedAt       string     `json:"started_at"`
 	FinishedAt      string     `json:"finished_at"`
+	TaskID          string     `json:"task_id"` // the task that started the run ("" = started by hand)
 	Nodes           []NodeRun  `json:"nodes"`
 }
 type NodeRun struct {
