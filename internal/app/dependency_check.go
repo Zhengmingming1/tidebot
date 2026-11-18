@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -104,23 +103,20 @@ func dependencySkillTitle(b tasksvc.SkillBinding, origin string) string {
 	title := strings.TrimSpace(b.SkillName)
 	if title == "" {
 		if dependencyGeneratedSkillID.MatchString(b.SkillID) {
-			title = "技能 …" + b.SkillID[len(b.SkillID)-8:]
+			title = webui.DepSkillFallbackTitle(b.SkillID)
 		} else if len(b.SkillID) <= 24 {
 			title = b.SkillID
 		} else {
-			title = "技能引用"
+			title = webui.DepTitleSkillRef
 		}
 	}
-	if origin != "" {
-		title += "（" + origin + "）"
-	}
-	return title // c.finding still applies credential redaction to the display text
+	return webui.DepTitleWithOrigin(title, origin) // c.finding still applies credential redaction to the display text
 }
 
 func (c *dependencyCollector) bindings(bindings []tasksvc.SkillBinding, origin string) {
 	c.measureContext(bindings, origin)
 	if _, err := tasksvc.NormalizeBindings(bindings); err != nil {
-		c.finding(origin, "skill", "missing", "技能绑定无效", err.Error(), "修正主技能、辅助技能及版本设置")
+		c.finding(origin, "skill", "missing", webui.DepReasonBadBindings, err.Error(), webui.DepSuggestFixBindings)
 	} else if len(bindings) > 0 {
 		c.checkSkillDependencies(bindings, origin)
 	}
@@ -138,7 +134,7 @@ func (c *dependencyCollector) bindings(bindings []tasksvc.SkillBinding, origin s
 		one.Role = "primary" // resolve each reference even if the overall composition is invalid
 		resolved, err := c.a.Skills.ResolveBindings(c.ctx, []tasksvc.SkillBinding{one})
 		if err != nil {
-			c.finding(dependencySkillTitle(b, origin), "skill", "missing", "引用的技能或版本不可用", err.Error(), "重新选择已导入的技能和有效版本")
+			c.finding(dependencySkillTitle(b, origin), "skill", "missing", webui.DepReasonSkillUnavailable, err.Error(), webui.DepSuggestReselectSkill)
 			continue
 		}
 		frozen := resolved[0]
@@ -151,13 +147,13 @@ func (c *dependencyCollector) bindings(bindings []tasksvc.SkillBinding, origin s
 		// blob, including credential files that must stay outside this analysis.
 		files, err := c.sourceFiles(frozen.VersionID)
 		if err != nil {
-			c.finding(title, "skill", "missing", "无法读取技能版本内容", err.Error(), "检查或重新导入技能")
+			c.finding(title, "skill", "missing", webui.DepReasonVersionUnreadable, err.Error(), webui.DepSuggestReimport)
 			continue
 		}
 		if _, ok := files["SKILL.md"]; !ok {
-			c.finding(title, "skill", "missing", "技能版本缺少 SKILL.md", frozen.VersionID, "重新导入完整技能目录")
+			c.finding(title, "skill", "missing", webui.DepReasonNoSkillMD, frozen.VersionID, webui.DepSuggestReimportDir)
 		} else {
-			c.finding(title, "skill", "available", "已找到技能及固定版本；不代表运行依赖已满足", frozen.SkillName+" · "+frozen.VersionID, "检查下列静态依赖分析")
+			c.finding(title, "skill", "available", webui.DepReasonSkillFound, frozen.SkillName+" · "+frozen.VersionID, webui.DepSuggestCheckStatic)
 		}
 		keys := make([]string, 0, len(files))
 		for name := range files {
@@ -178,7 +174,7 @@ func (c *dependencyCollector) bindings(bindings []tasksvc.SkillBinding, origin s
 			}
 			var data []byte
 			if err := c.a.DB.QueryRowContext(c.ctx, `SELECT substr(data,1,32769) FROM blobs WHERE sha256=?`, files[name]).Scan(&data); err != nil {
-				c.finding(title+"/"+name, "file", "missing", "无法读取技能源文件", frozen.VersionID, "重新导入此技能版本")
+				c.finding(title+"/"+name, "file", "missing", webui.DepReasonSourceUnreadable, frozen.VersionID, webui.DepSuggestReimportVersion)
 				continue
 			}
 			c.material("skill:"+title+"/"+name, string(data))
@@ -221,12 +217,12 @@ func dependencySourceFile(name string) bool {
 func (c *dependencyCollector) task(id string) {
 	t, err := c.a.Tasks.Get(c.ctx, id)
 	if err != nil {
-		c.finding(id, "task", "missing", "任务不存在或无法读取", err.Error(), "重新选择任务")
+		c.finding(id, "task", "missing", webui.DepReasonTaskMissing, err.Error(), webui.DepSuggestReselectTask)
 		return
 	}
 	c.material("task:"+id, t.Task.Prompt)
 	if t.Spec == nil {
-		c.finding(id, "task", "uncertain", "任务没有可解析的版本快照", "未获取到任务 Spec", "保存任务配置后重新检测")
+		c.finding(id, "task", "uncertain", webui.DepReasonNoTaskSpec, webui.DepEvidenceNoTaskSpec, webui.DepSuggestSaveTask)
 		return
 	}
 	p := &c.snapshot.RuntimeProfile
@@ -269,7 +265,7 @@ func (c *dependencyCollector) graph(def workflow.Definition) {
 	var copy workflow.Definition
 	_ = json.Unmarshal(raw, &copy)
 	if err := workflow.Validate(&copy); err != nil {
-		c.finding("workflow graph", "workflow", "missing", "工作流定义无效", err.Error(), "修复节点、上游引用、分支和环路后再运行")
+		c.finding("workflow graph", "workflow", "missing", webui.DepReasonBadWorkflow, err.Error(), webui.DepSuggestFixWorkflow)
 	}
 	// Redact authored strings before JSON escaping, which would otherwise hide
 	// quoted credential assignments inside a node's prompt from text matchers.
@@ -304,16 +300,16 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 	case "skill_set":
 		set, err := a.Skills.GetSet(ctx, req.ID)
 		if err != nil {
-			c.finding(req.ID, "skill_set", "missing", "技能组合不存在或无法读取", err.Error(), "重新选择或保存技能组合")
+			c.finding(req.ID, "skill_set", "missing", webui.DepReasonSetMissing, err.Error(), webui.DepSuggestReselectSet)
 		} else {
 			c.material("skill-set", set.Name)
 			c.bindings(set.SkillBindings, "skill_set:"+req.ID)
 		}
 	case "workflow":
 		if a.Workflows == nil {
-			c.finding(req.ID, "workflow", "missing", "工作流服务不可用", "workflow service is unavailable", "重启软件后重新检测")
+			c.finding(req.ID, "workflow", "missing", webui.DepReasonWFUnavailable, "workflow service is unavailable", webui.DepSuggestRestart)
 		} else if w, err := a.Workflows.Get(ctx, req.ID); err != nil {
-			c.finding(req.ID, "workflow", "missing", "工作流不存在或无法读取", err.Error(), "重新选择或保存工作流")
+			c.finding(req.ID, "workflow", "missing", webui.DepReasonWFMissing, err.Error(), webui.DepSuggestReselectWF)
 		} else {
 			c.graph(w.Definition)
 		}
@@ -356,7 +352,7 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 			break
 		}
 		if !found {
-			c.finding(req.ID, "button", "missing", "按钮不存在", "按钮设置中未找到此 ID", "重新选择按钮")
+			c.finding(req.ID, "button", "missing", webui.DepReasonButtonMissing, webui.DepEvidenceButtonMissing, webui.DepSuggestReselectButton)
 		}
 	}
 	if req.Prompt != "" {
@@ -382,7 +378,7 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 		if len(c.snapshot.Findings) >= 256 {
 			c.snapshot.Findings = c.snapshot.Findings[:255]
 		}
-		c.finding("snapshot coverage", "analysis", "uncertain", "检测材料或结果超过大小、数量限制，分析范围不完整", "最多 128 KiB、96 份源材料；128 项运行依赖；256 项检查结果", "缩小技能组合或逐个技能检测；未读取部分不能视作没有依赖")
+		c.finding("snapshot coverage", "analysis", "uncertain", webui.DepReasonTruncated, webui.DepEvidenceLimits, webui.DepSuggestNarrow)
 	}
 	return c.snapshot, nil
 }
@@ -451,10 +447,10 @@ func parseDependencyReport(text string) (*webui.DependencyReport, error) {
 		case "uncertain":
 		case "missing":
 			f.Level = "uncertain"
-			f.Reason = "AI 推断此依赖可能缺失，尚未实际验证。" + f.Reason
+			f.Reason = webui.DepAIUnverifiedMissingPrefix + f.Reason
 		case "available":
 			f.Level = "uncertain"
-			f.Reason = "AI 仅分析静态材料，未验证环境可用性。" + f.Reason
+			f.Reason = webui.DepAIUnverifiedAvailablePrefix + f.Reason
 		default:
 			return nil, errors.New("dependency report is invalid")
 		}
@@ -502,7 +498,7 @@ func (a *App) dependencyCheckStatus(ctx context.Context, runID string) (webui.De
 	}
 	report.Findings = merged
 	if len(snapshot.Findings) > 0 {
-		report.Summary = fmt.Sprintf("已结合 %d 项确定性检查；%s", len(snapshot.Findings), report.Summary)
+		report.Summary = webui.DepSummaryCombined(len(snapshot.Findings), report.Summary)
 	}
 	out.Report = report
 	return out, nil

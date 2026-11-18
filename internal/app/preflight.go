@@ -3,7 +3,6 @@ package app
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -23,7 +22,7 @@ import (
 // This is an instruction-body limit, not a model context-window claim. Wrappers,
 // the task prompt, tool results and model-specific tokenization are additional.
 const skillContextMaxBytes = 256 << 10
-const contextEstimateMethod = "仅 SKILL.md 正文粗估：ASCII 约 4 字符/token，非 ASCII 约 1 字符/token；不是模型实际 token 用量，不含任务提示词、包装和工具结果"
+const contextEstimateMethod = webui.DepEstimateMethod
 
 func estimateSkillTokens(data []byte) int { return contextplan.Estimate(data) }
 
@@ -41,9 +40,9 @@ func (s dependencySnapshot) preflight() webui.DependencyPreflightReport {
 
 func initialDependencyProfile(req webui.DependencyCheckRequest) webui.DependencyRuntimeProfile {
 	p := webui.DependencyRuntimeProfile{Provider: req.Provider, Mode: "unselected", WorkspaceKind: "unselected", Restricted: true, PythonEnvironment: req.PythonEnvironment,
-		Notes: "允许工具列表表示预授权；没有匹配规则不等于禁用。未执行命令、脚本、导入包或联网，未验证服务连通性和凭据有效性。"}
+		Notes: webui.DepNoteScope}
 	if req.PythonEnvironment != "" {
-		p.Notes += "Python 环境仅用于元数据核对，不会自动激活；实际任务需要显式使用该环境。"
+		p.Notes += " " + webui.DepNotePython
 	}
 	if req.Kind == "workflow" || req.Kind == "workflow_draft" {
 		p.Mode, p.WorkspaceKind = "read", "workflow_scratch"
@@ -55,7 +54,7 @@ func initialDependencyProfile(req webui.DependencyCheckRequest) webui.Dependency
 			p.WorkspaceKind = "task_selected"
 		}
 		p.AllowedTools = append([]string{}, req.AllowedTools...)
-		p.Notes += "任务草稿核对目标预授权规则；此检测不会保存或更改执行策略。"
+		p.Notes += " " + webui.DepNoteDraftPolicy
 	} else if req.Kind == "draft" && len(req.SkillBindings) == 0 && req.Workspace == "" || req.Kind == "button" {
 		p.Mode, p.WorkspaceKind = "quick", "scratch"
 	} else if req.Kind == "draft" || req.Kind == "button" || req.Workspace != "" || req.Mode != "" {
@@ -95,11 +94,11 @@ func (c *dependencyCollector) checkSandbox() {
 	st := c.a.SandboxStatus()
 	switch st.Status {
 	case guard.SandboxMissing:
-		c.finding("命令沙箱", "runtime", "blocked", "缺少 "+strings.Join(st.Missing, "、")+"，可执行命令的运行会被拒绝", "tidebot 在这台电脑上找不到："+strings.Join(st.Missing, "、"), "在终端运行 "+st.Install+"，或改用只读 / 可修改")
+		c.finding(webui.DepTitleSandbox, "runtime", "blocked", webui.DepSandboxMissingReason(st.Missing), webui.DepSandboxMissingEvidence(st.Missing), webui.DepSandboxInstallSuggestion(st.Install))
 	case guard.SandboxNone:
-		c.finding("命令沙箱", "runtime", "uncertain", "这个平台没有系统沙箱，命令只受权限规则和运行后的配置检查保护", "原生 Windows 不支持 Claude Code 的系统沙箱", "只在信任的目录和技能上使用可执行命令")
+		c.finding(webui.DepTitleSandbox, "runtime", "uncertain", webui.DepReasonSandboxNone, webui.DepEvidenceSandboxWindows, webui.DepSuggestSandboxTrust)
 	default:
-		c.finding("命令沙箱", "runtime", "available", "命令会在系统沙箱里运行", "沙箱组件齐全", "无需处理")
+		c.finding(webui.DepTitleSandbox, "runtime", "available", webui.DepReasonSandboxOK, webui.DepEvidenceSandboxOK, webui.DepSuggestNone)
 	}
 }
 
@@ -110,7 +109,7 @@ func (c *dependencyCollector) draftTaskPolicy(id string) {
 	p.AllowedTools = nil
 	t, err := c.a.Tasks.Get(c.ctx, id)
 	if err != nil || t.Spec == nil {
-		c.finding("任务策略", "configuration", "uncertain", "无法核对该任务已保存的工具策略", "未找到任务或有效版本", "保存任务后重新检测")
+		c.finding(webui.DepTitleTaskPolicy, "configuration", "uncertain", webui.DepReasonTaskPolicyUnread, webui.DepEvidenceNoTaskVersion, webui.DepSuggestResaveTask)
 		return
 	}
 	if c.a.Policy != nil {
@@ -126,7 +125,7 @@ func (c *dependencyCollector) draftTaskPolicy(id string) {
 	if p.Provider == "" {
 		p.Provider = t.Spec.Provider
 	}
-	p.Notes += "工具预授权来自此任务已保存的策略（优先）或版本配置。"
+	p.Notes += " " + webui.DepNoteTaskPolicy
 }
 
 func (c *dependencyCollector) checkWorkspace() {
@@ -135,18 +134,18 @@ func (c *dependencyCollector) checkWorkspace() {
 		home, _ := os.UserHomeDir()
 		_, problem := guard.CheckRunDir(p.Workspace, home, c.a.Cfg.HomeDir)
 		if problem != "" {
-			c.finding("工作目录", "workspace", "blocked", "所选工作目录无法用于此运行", problem, "选择一个存在且允许访问的工作目录")
+			c.finding(webui.DepTitleWorkspace, "workspace", "blocked", webui.DepReasonWorkspaceUnusable, problem, webui.DepSuggestPickWorkspace)
 		} else {
-			c.finding("工作目录", "workspace", "available", "所选工作目录存在且通过目录边界检查", "仅校验目录，不读取其中的文件；未验证写权限", "按任务需要确认只读或修改模式")
+			c.finding(webui.DepTitleWorkspace, "workspace", "available", webui.DepReasonWorkspaceOK, webui.DepEvidenceWorkspaceOK, webui.DepSuggestConfirmMode)
 		}
 	} else if p.WorkspaceKind == "task_selected" {
 		// Scheduled tasks have a different workspace contract from the run dialog.
 		// Do not claim the dialog guard is enforced on this execution path.
 		fi, err := os.Stat(p.Workspace)
 		if err != nil || !fi.IsDir() || !filepath.IsAbs(p.Workspace) {
-			c.finding("任务工作目录", "workspace", "uncertain", "任务工作目录目前无法确认为可用绝对目录", "运行时可能创建目录；检查不会创建或修改目录", "检查任务保存的目录与访问权限")
+			c.finding(webui.DepTitleTaskWorkspace, "workspace", "uncertain", webui.DepReasonTaskWsUncertain, webui.DepEvidenceTaskWsUncertain, webui.DepSuggestCheckTaskWs)
 		} else {
-			c.finding("任务工作目录", "workspace", "available", "任务工作目录存在", "未读取目录内容或尝试写入", "运行时仍应用任务保护策略")
+			c.finding(webui.DepTitleTaskWorkspace, "workspace", "available", webui.DepReasonTaskWsOK, webui.DepEvidenceTaskWsOK, webui.DepSuggestTaskWsPolicy)
 		}
 	}
 }
@@ -192,16 +191,16 @@ func (c *dependencyCollector) measureContext(bindings []tasksvc.SkillBinding, or
 	usage.Exceeded = usage.TotalBytes > skillContextMaxBytes
 	c.snapshot.ContextUsage = append(c.snapshot.ContextUsage, usage)
 	if usage.Exceeded {
-		c.finding(origin, "context", "blocked", "技能正文超过单次运行的 256 KiB 上限，运行前将拒绝而不会截断", fmt.Sprintf("%d bytes；约 %d tokens（估算）", usage.TotalBytes, usage.EstimatedTokens), "精简正文，将详细资料放到按需读取的 references 文件，或拆为独立工作流步骤")
+		c.finding(origin, "context", "blocked", webui.DepReasonContextOver, webui.DepContextOverEvidence(usage.TotalBytes, usage.EstimatedTokens), webui.DepSuggestContextOver)
 	} else if usage.TotalBytes > skillContextMaxBytes*3/4 {
-		c.finding(origin, "context", "uncertain", "技能正文接近单次运行的大小上限", fmt.Sprintf("%d / %d bytes；约 %d tokens（估算）", usage.TotalBytes, skillContextMaxBytes, usage.EstimatedTokens), "精简或按需读取辅助资料，为提示词和工具结果保留空间")
+		c.finding(origin, "context", "uncertain", webui.DepReasonContextNear, webui.DepContextNearEvidence(usage.TotalBytes, skillContextMaxBytes, usage.EstimatedTokens), webui.DepSuggestContextNear)
 	}
 }
 
 func (c *dependencyCollector) checkManifest(b tasksvc.SkillBinding) {
 	manifest, err := c.a.Skills.ReadSkillManifest(c.ctx, b.VersionID)
 	if err != nil {
-		c.finding(dependencySkillTitle(b, ""), "configuration", "missing", "技能依赖清单无效", err.Error(), "修复 tidebot.json 后导入新版本")
+		c.finding(dependencySkillTitle(b, ""), "configuration", "missing", webui.DepReasonBadManifest, err.Error(), webui.DepSuggestFixManifest)
 		return
 	}
 	for _, req := range manifest.Environment {
@@ -211,19 +210,19 @@ func (c *dependencyCollector) checkManifest(b tasksvc.SkillBinding) {
 		}
 		status, evidence := c.checkRequirement(req, b.VersionID)
 		if req.Version != "" && req.Kind != "python_package" && status == "present" {
-			status, evidence = "unchecked", evidence+"；未验证版本要求 "+req.Version
+			status, evidence = "unchecked", webui.DepVersionUnverifiedEvidence(evidence, req.Version)
 		}
 		evidence = dependencyClip(dependencyRedact(evidence), 2048)
 		c.snapshot.Requirements = append(c.snapshot.Requirements, webui.DependencyRequirementResult{SkillID: b.SkillID, VersionID: b.VersionID, Requirement: req, Status: status, Evidence: evidence})
 		level := map[string]string{"present": "available", "missing": "missing", "blocked": "blocked", "unchecked": "uncertain"}[status]
-		reason := map[string]string{"present": "只读检查已找到此依赖的证据，不代表端到端运行成功", "missing": "只读检查未找到必需依赖", "blocked": "当前目标运行权限不允许使用此依赖", "unchecked": "尚不能验证此依赖是否可用"}[status]
+		reason := map[string]string{"present": webui.DepReasonReqPresent, "missing": webui.DepReasonReqMissing, "blocked": webui.DepReasonReqBlocked, "unchecked": webui.DepReasonReqUnchecked}[status]
 		if req.Optional {
-			reason = "可选依赖：" + reason
+			reason = webui.DepOptionalReason(reason)
 			if level == "missing" || level == "blocked" {
 				level = "uncertain"
 			}
 		}
-		c.finding(dependencySkillTitle(b, "")+" · "+req.Name, req.Kind, level, reason, evidence, "根据目标运行环境配置依赖；检测不会安装、执行或扩大权限")
+		c.finding(dependencySkillTitle(b, "")+" · "+req.Name, req.Kind, level, reason, evidence, webui.DepSuggestConfigureReq)
 		// Executable presence does not imply the model can invoke it. Keep these
 		// findings separate so an installed Python is never mistaken for executable
 		// Python in a workflow whose shell tools are denied.
@@ -234,7 +233,7 @@ func (c *dependencyCollector) checkManifest(b tasksvc.SkillBinding) {
 				if req.Optional {
 					level = "uncertain"
 				}
-				c.finding(dependencySkillTitle(b, "")+" · "+req.Name+" 执行权限", "tool", level, "本地脚本或命令执行需要 shell，但当前目标模式禁止 shell", toolEvidence, "改用已授权且能完成任务的 MCP 工具，或在支持此能力的执行方式中运行；不要在检测时放开权限")
+				c.finding(webui.DepExecPermTitle(dependencySkillTitle(b, ""), req.Name), "tool", level, webui.DepReasonShellDenied, toolEvidence, webui.DepSuggestShellDenied)
 			}
 		}
 	}
@@ -250,10 +249,10 @@ func (c *dependencyCollector) checkSkillDependencies(bindings []tasksvc.SkillBin
 		if issue.Optional {
 			level = "uncertain"
 		}
-		c.finding(issue.SkillName+"（"+origin+"）", "skill", level, "技能依赖需要处理", issue.Message, "按依赖清单选择已导入且兼容的技能；可选依赖可以跳过")
+		c.finding(webui.DepTitleWithOrigin(issue.SkillName, origin), "skill", level, webui.DepReasonSkillDepAttention, issue.Message, webui.DepSuggestSkillDepAttention)
 	}
 	for _, addition := range preview.Additions {
-		c.finding(dependencySkillTitle(addition, origin), "skill", "missing", "依赖技能已导入，但尚未加入本次技能组合", "此依赖由 tidebot.json 声明；检测只提出候选，不会自动加入", "预览并采用依赖补全后重新检测")
+		c.finding(dependencySkillTitle(addition, origin), "skill", "missing", webui.DepReasonSkillDepNotInSet, webui.DepEvidenceSkillDepDeclared, webui.DepSuggestSkillDepPreview)
 	}
 }
 
@@ -264,38 +263,38 @@ func (c *dependencyCollector) checkRequirement(req skillstore.RuntimeRequirement
 	switch req.Kind {
 	case "command":
 		if !preflightCommandName.MatchString(req.Name) {
-			return "unchecked", "命令必须为不含路径和参数的可执行文件名称"
+			return "unchecked", "A command must be an executable name with no path or arguments"
 		}
 		_, err := exec.LookPath(req.Name)
 		if err != nil {
-			return "unchecked", "应用进程 PATH 中未找到可执行文件；实际运行可能使用扩展 PATH，未执行 shell 或版本探测，不能认定缺失"
+			return "unchecked", "The executable was not found on the application process PATH; a real run may use an extended PATH. No shell or version probe was executed, so this is not treated as missing"
 		}
 		if req.Version != "" {
-			return "unchecked", "PATH 中找到可执行文件，但未执行版本探测，无法验证要求的版本 " + req.Version
+			return "unchecked", webui.DepCommandVersionUnchecked(req.Version)
 		}
-		return "present", "应用进程 PATH 中存在可执行文件；未运行、未验证版本和运行权限"
+		return "present", "The executable exists on the application process PATH; it was not run, and its version and run permission were not verified"
 	case "python_package":
 		return inspectPythonDistribution(c.snapshot.RuntimeProfile.PythonEnvironment, req.Name, req.Version)
 	case "env":
 		if !preflightEnvName.MatchString(req.Name) {
-			return "unchecked", "环境变量名无效"
+			return "unchecked", "The environment variable name is invalid"
 		}
 		if strings.HasPrefix(req.Name, "ANTHROPIC_") || strings.HasPrefix(req.Name, "CLAUDE_") || req.Name == "TIDEBOT_IPC" || req.Name == "TIDEBOT_TASK_ID" || req.Name == "TIDEBOT_GUARD_WORKSPACE" {
-			return "unchecked", "此变量可能由运行隔离或提供商配置重写；未读取凭据值，不能用宿主环境判断实际子进程配置"
+			return "unchecked", "This variable may be overwritten by run isolation or provider configuration; credential values were not read, so the host environment cannot be used to judge the actual child process configuration"
 		}
 		if prof, err := c.a.ResolveProfile(c.snapshot.RuntimeProfile.Provider); err == nil {
 			if req.Name == prof.AuthEnv || req.Name == provider.NormalizeSecretEnv(prof.SecretEnv) {
-				return "unchecked", "此变量参与提供商凭据映射，实际子进程可能注入或移除；检测不读取密钥"
+				return "unchecked", "This variable is part of the provider credential mapping, so the actual child process may inject or remove it; the inspection does not read secrets"
 			}
 			if _, configured := prof.ExtraEnv[req.Name]; configured {
-				return "present", "提供商额外环境配置已声明此变量（configured）；未保存、返回或验证值"
+				return "present", "The provider's extra environment configuration declares this variable (configured); the value was not saved, returned, or verified"
 			}
 		}
 		// Only existence is observed. No value is retained, interpolated or emitted.
 		if _, ok := os.LookupEnv(req.Name); ok {
-			return "present", "应用进程环境中已声明此变量（configured）；未保存、返回或验证值"
+			return "present", "The application process environment declares this variable (configured); the value was not saved, returned, or verified"
 		}
-		return "missing", "应用进程环境中未声明此变量；未读取 .env、密钥库或凭据文件"
+		return "missing", "The application process environment does not declare this variable; .env, the secret store, and credential files were not read"
 	case "tool":
 		return c.checkTool(req.Name)
 	case "mcp":
@@ -303,19 +302,19 @@ func (c *dependencyCollector) checkRequirement(req skillstore.RuntimeRequirement
 	case "file":
 		name := filepath.ToSlash(req.Name)
 		if filepath.IsAbs(req.Name) || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") || strings.Contains(name, "\\") {
-			return "unchecked", "只检查技能包内部的相对文件路径"
+			return "unchecked", "Only relative file paths inside the skill package are checked"
 		}
 		var count int
 		err := c.a.DB.QueryRowContext(c.ctx, `SELECT COUNT(*) FROM version_files WHERE version_id=? AND path=?`, versionID, name).Scan(&count)
 		if err != nil {
-			return "unchecked", "无法读取技能版本文件索引"
+			return "unchecked", "The skill version file index could not be read"
 		}
 		if count == 0 {
-			return "missing", "技能版本的文件索引中不存在此路径；未读取任何文件内容"
+			return "missing", "This path is not in the skill version file index; no file contents were read"
 		}
-		return "present", "技能版本文件索引中存在此路径；未读取或执行文件"
+		return "present", "This path is in the skill version file index; the file was not read or executed"
 	default:
-		return "unchecked", "此类依赖尚无只读检查器"
+		return "unchecked", "This kind of dependency has no read-only checker yet"
 	}
 }
 
@@ -324,30 +323,30 @@ func (c *dependencyCollector) checkTool(name string) (string, string) {
 	base := strings.SplitN(name, "(", 2)[0]
 	for _, deny := range p.DeniedTools {
 		if strings.EqualFold(base, deny) {
-			return "blocked", "目标运行模式 " + p.Mode + " 通过 --disallowedTools 禁止 " + deny
+			return "blocked", webui.DepToolModeDenied(p.Mode, deny)
 		}
 	}
 	if p.Mode == "unselected" {
-		return "unchecked", "尚未选择目标运行模式，不能确定工具权限"
+		return "unchecked", "The target run mode has not been selected, so tool permissions cannot be determined"
 	}
 	for _, allowed := range p.AllowedTools {
 		if allowed == base || allowed == name {
-			return "present", "任务策略已预授权此工具规则；仍受工作目录、保护规则和实际调用参数约束"
+			return "present", "The task policy pre-authorizes this tool rule; it is still constrained by the workspace, protection rules, and the actual invocation arguments"
 		}
 	}
 	if p.Mode == "read" && (base == "Read" || base == "Glob" || base == "Grep") {
-		return "present", "目标只读模式未禁用此内置读取工具；文件范围仍受运行环境约束"
+		return "present", "The target read-only mode does not disable this built-in read tool; file scope is still constrained by the run environment"
 	}
-	return "unchecked", "目标运行未显式禁用此工具，但没有可证明此调用已获授权的规则"
+	return "unchecked", "The target run does not explicitly deny this tool, but there is no rule that proves this invocation is authorized"
 }
 
 func (c *dependencyCollector) checkMCP(name string) (string, string) {
 	if c.a.Plugins == nil {
-		return "unchecked", "插件配置服务不可用"
+		return "unchecked", "The plugin configuration service is unavailable"
 	}
 	list, err := c.a.Plugins.List(c.ctx)
 	if err != nil {
-		return "unchecked", "无法读取插件授权元数据"
+		return "unchecked", "Plugin authorization metadata could not be read"
 	}
 	type match struct {
 		p         plugin.Info
@@ -365,27 +364,27 @@ func (c *dependencyCollector) checkMCP(name string) (string, string) {
 		}
 	}
 	if len(matches) == 0 {
-		return "missing", "已安装插件的当前版本中未找到对应 MCP；未读取凭据或连接服务"
+		return "missing", "The corresponding MCP was not found in the current version of the installed plugin; credentials were not read and the service was not contacted"
 	}
 	if len(matches) > 1 {
-		return "unchecked", "多个插件提供同名 MCP，请用 plugin-id__connector-id 指定"
+		return "unchecked", "Multiple plugins provide an MCP with this name; specify it as plugin-id__connector-id"
 	}
 	p := matches[0].p
 	if !p.Enabled {
-		return "blocked", "MCP 所属插件当前未启用"
+		return "blocked", "The plugin that provides this MCP is not currently enabled"
 	}
 	if p.Current.Approved == nil || len(plugin.NewPermissions(p.Current.Approved, p.Current.Requested)) > 0 {
-		return "blocked", "MCP 所属插件仍有未获授权或已撤销的权限"
+		return "blocked", "The plugin that provides this MCP still has unauthorized or revoked permissions"
 	}
 	connector := matches[0].connector
 	if connector.MCP.Builtin != "" {
 		if plugin.BuiltinExe == "" {
-			return "missing", "MCP 已授权，但此进程没有可用的内置插件入口"
+			return "missing", "The MCP is authorized, but this process has no usable built-in plugin entry"
 		}
 	} else if info, err := os.Stat(filepath.Join(p.Current.Dir, connector.MCP.Command)); err != nil || !info.Mode().IsRegular() {
-		return "missing", "MCP 已授权，但其插件入口文件不存在或不是普通文件；未执行入口"
+		return "missing", "The MCP is authorized, but its plugin entry file is missing or is not a regular file; the entry was not executed"
 	}
-	return "present", "插件已启用且当前版本所声明权限均已授权；未验证密钥配置、进程启动或服务连通性"
+	return "present", "The plugin is enabled and every permission declared by the current version is authorized; secret configuration, process startup, and service reachability were not verified"
 }
 
 func canonicalPythonName(name string) string {
@@ -397,25 +396,25 @@ func canonicalPythonName(name string) string {
 // venv are read. An unselected or ambiguous environment remains unchecked.
 func inspectPythonDistribution(venv, name, want string) (string, string) {
 	if venv == "" {
-		return "unchecked", "未选择 Python 虚拟环境；不会用默认 Python 导入包猜测是否安装"
+		return "unchecked", "No Python virtual environment was selected; the default Python will not be used to import the package and guess whether it is installed"
 	}
 	root, err := filepath.EvalSymlinks(venv)
 	if err != nil || !filepath.IsAbs(root) {
-		return "unchecked", "所选 Python 环境目录不可读取"
+		return "unchecked", "The selected Python environment directory is not readable"
 	}
 	info, err := os.Stat(root)
 	if err != nil || !info.IsDir() {
-		return "unchecked", "所选 Python 环境不是目录"
+		return "unchecked", "The selected Python environment is not a directory"
 	}
 	// An explicit venv must have its metadata marker; never scan a whole arbitrary directory.
 	marker, err := os.Lstat(filepath.Join(root, "pyvenv.cfg"))
 	if err != nil || !marker.Mode().IsRegular() || marker.Size() > 64<<10 {
-		return "unchecked", "目录缺少常规 pyvenv.cfg，尚不能确认为虚拟环境"
+		return "unchecked", "The directory has no regular pyvenv.cfg, so it cannot yet be confirmed as a virtual environment"
 	}
 	paths := []string{filepath.Join(root, "Lib", "site-packages")}
 	libs, err := filepath.Glob(filepath.Join(root, "lib", "python*", "site-packages"))
 	if err != nil {
-		return "unchecked", "无法列出虚拟环境包元数据"
+		return "unchecked", "Virtual environment package metadata could not be listed"
 	}
 	paths = append(paths, libs...)
 	found := []string{}
@@ -426,7 +425,7 @@ func inspectPythonDistribution(venv, name, want string) (string, string) {
 	// proof of a missing runtime dependency.
 	config, err := os.ReadFile(filepath.Join(root, "pyvenv.cfg"))
 	if err != nil {
-		return "unchecked", "无法读取虚拟环境标记元数据"
+		return "unchecked", "Virtual environment marker metadata could not be read"
 	}
 	for _, line := range strings.Split(string(config), "\n") {
 		key, value, ok := strings.Cut(line, "=")
@@ -450,7 +449,7 @@ func inspectPythonDistribution(venv, name, want string) (string, string) {
 		}
 		readable = true
 		if len(entries) > 4096 {
-			return "unchecked", "包目录超过 4096 项，未完整检查"
+			return "unchecked", "The package directory has more than 4096 entries and was not fully inspected"
 		}
 		for _, entry := range entries {
 			if strings.HasSuffix(entry.Name(), ".pth") || strings.HasSuffix(entry.Name(), ".egg-info") || entry.Name() == "sitecustomize.py" || entry.Name() == "usercustomize.py" {
@@ -500,23 +499,23 @@ func inspectPythonDistribution(venv, name, want string) (string, string) {
 		}
 	}
 	if len(found) > 1 {
-		return "unchecked", "发现多个同名发行包的元数据，无法确定实际导入版本"
+		return "unchecked", "Metadata for multiple distributions with this name was found, so the actual import version cannot be determined"
 	}
 	if len(found) == 1 {
 		actual := found[0]
 		if want != "" {
 			exact := strings.TrimPrefix(want, "==")
 			if !regexp.MustCompile(`^[0-9][0-9A-Za-z.+_-]*$`).MatchString(exact) {
-				return "unchecked", "存在发行包元数据（版本 " + actual + "），但尚未验证版本范围 " + want
+				return "unchecked", webui.DepPythonVersionUnchecked(actual, want)
 			}
 			if actual != exact {
-				return "missing", "发行包元数据版本为 " + actual + "，不符合指定版本 " + want
+				return "missing", webui.DepPythonVersionMissing(actual, want)
 			}
 		}
-		return "present", "所选虚拟环境中存在发行包元数据（版本 " + actual + "）；未导入包或验证脚本可运行"
+		return "present", webui.DepPythonPresent(actual)
 	}
 	if !readable || incomplete {
-		return "unchecked", "虚拟环境包元数据未能完整读取；不能据此认定依赖未安装"
+		return "unchecked", "Virtual environment package metadata could not be fully read; this is not treated as proof that the dependency is not installed"
 	}
-	return "missing", "所选虚拟环境的 dist-info 元数据中未找到发行包；未执行 Python 或导入包"
+	return "missing", "The distribution was not found in the selected virtual environment's dist-info metadata; Python was not executed and the package was not imported"
 }

@@ -135,7 +135,7 @@ func (a *App) evaluationPreflight(ctx context.Context, set skillstore.SkillSet, 
 	}
 	// This evaluation has fewer tools than a normal read-only task and no connectors.
 	report.RuntimeProfile.AllowedTools = []string{"Read", "Glob", "Grep"}
-	report.RuntimeProfile.Notes += " 评测仅允许 Read/Glob/Grep，所有 MCP 关闭。"
+	report.RuntimeProfile.Notes = strings.TrimSpace(report.RuntimeProfile.Notes + " " + webui.DepNoteEvalTools)
 	for i := range report.Requirements {
 		r := &report.Requirements[i]
 		req := r.Requirement
@@ -146,7 +146,7 @@ func (a *App) evaluationPreflight(ctx context.Context, set skillstore.SkillSet, 
 			if req.Optional {
 				level = "uncertain"
 			}
-			report.Findings = append(report.Findings, webui.DependencyFinding{Dependency: req.Name, Kind: "tool", Level: level, Reason: "此依赖在评测环境中被禁用", Evidence: r.Evidence, Suggestion: "评测只验证当前只读环境下的文本输出；需要该依赖时请使用常规任务运行"})
+			report.Findings = append(report.Findings, webui.DependencyFinding{Dependency: req.Name, Kind: "tool", Level: level, Reason: webui.DepReasonEvalDisabled, Evidence: r.Evidence, Suggestion: webui.DepSuggestEvalRegularRun})
 		}
 		if !req.Optional && (r.Status == "missing" || r.Status == "blocked") {
 			return report, fmt.Errorf("evaluation dependency %s is %s: %s", req.Name, r.Status, r.Evidence)

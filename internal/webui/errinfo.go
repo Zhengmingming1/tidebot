@@ -196,6 +196,9 @@ func explainDepth(msg string, depth int) *errInfo {
 		}
 		return info
 	}
+	if info := explainDepText(msg); info != nil {
+		return info
+	}
 	return nil
 }
 

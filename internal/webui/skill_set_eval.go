@@ -125,6 +125,10 @@ func (s *Server) handleSkillSetEvalSub(w http.ResponseWriter, r *http.Request) {
 // outcome) so the page can show past English errors in its language.
 func skillSetEvalView(ev SkillSetEvaluation) SkillSetEvaluation {
 	ev.ErrorInfo = explainError(ev.Error)
+	if ev.Preflight != nil {
+		pf := annotatePreflight(*ev.Preflight)
+		ev.Preflight = &pf
+	}
 	if len(ev.Cases) == 0 {
 		return ev
 	}

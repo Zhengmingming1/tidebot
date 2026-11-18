@@ -19,6 +19,7 @@
   function errInfoText(info, raw, depth) {
     if (!info || !info.code || (depth || 0) > 3) return raw || "";
     var key = "wfe." + info.code;
+    if (state.dict[key] == null) key = "dep.txt." + info.code;
     if (state.dict[key] == null) return raw || info.code;
     var p = {}, src = info.params || {};
     for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) p[k] = src[k];
@@ -26,6 +27,15 @@
     else if (p.status && state.dict["dep.req_" + p.status] != null) p.status = T("dep.req_" + p.status);
     if (info.cause) p.detail = errInfoText(info.cause, p.detail, (depth || 0) + 1);
     return T(key, p);
+  }
+  function depText(info, raw) { return errInfoText(info, raw); }
+  function depNotesText(infos, raw) {
+    if (infos && infos.length) {
+      var parts = [];
+      for (var i = 0; i < infos.length; i++) parts.push(errInfoText(infos[i], ""));
+      if (parts.every(Boolean)) return parts.join(" ");
+    }
+    return raw || "";
   }
   function loadLang(pref) {
     state.langPref = pref || "auto";

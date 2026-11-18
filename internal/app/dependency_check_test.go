@@ -143,7 +143,7 @@ func TestDependencySkillTitlesRemainReadableAndRedacted(t *testing.T) {
 		t.Fatalf("source lost its skill name: %+v", snap.Materials)
 	}
 	generated := "skill_0123456789abcdef0123456789abcdef"
-	if title := dependencySkillTitle(tasksvc.SkillBinding{SkillID: generated}, "node:A"); title != "技能 …89abcdef（node:A）" {
+	if title := dependencySkillTitle(tasksvc.SkillBinding{SkillID: generated}, "node:A"); title != "Skill …89abcdef (node:A)" {
 		t.Fatalf("fallback %q", title)
 	}
 	c := dependencyCollector{}
@@ -174,6 +174,9 @@ func TestDependencyCheckAsyncRunAndReport(t *testing.T) {
 	}
 	if len(status.Report.Findings) != 2 || status.Report.Findings[0].Level != "missing" || status.Report.Findings[1].Level != "uncertain" {
 		t.Fatalf("AI overrode confirmed facts or fabricated availability: %+v", status.Report)
+	}
+	if !strings.HasPrefix(status.Report.Summary, "Combined ") || !strings.HasPrefix(status.Report.Findings[1].Reason, webui.DepAIUnverifiedAvailablePrefix) {
+		t.Fatalf("report still uses a language-specific prefix: %q %q", status.Report.Summary, status.Report.Findings[1].Reason)
 	}
 	var prompt, ws, trigger string
 	if err = a.DB.QueryRow(`SELECT prompt,workspace_dir,trigger_kind FROM runs WHERE id=?`, rid).Scan(&prompt, &ws, &trigger); err != nil {
@@ -229,7 +232,7 @@ func TestDependencyReportValidation(t *testing.T) {
 		t.Fatalf("empty findings: %+v %v", r, err)
 	}
 	missing := strings.ReplaceAll(dependencyReportFixture, `"available"`, `"missing"`)
-	if r, err := parseDependencyReport(missing); err != nil || r.Findings[0].Level != "uncertain" {
+	if r, err := parseDependencyReport(missing); err != nil || r.Findings[0].Level != "uncertain" || !strings.HasPrefix(r.Findings[0].Reason, webui.DepAIUnverifiedMissingPrefix) {
 		t.Fatalf("unverified missing environment dependency reported as fact: %+v %v", r, err)
 	}
 }

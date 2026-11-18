@@ -208,14 +208,14 @@ func TestPreflightExecSandbox(t *testing.T) {
 	}
 	found := false
 	for _, f := range rep.Findings {
-		found = found || f.Dependency == "命令沙箱" && f.Level == "blocked"
+		found = found || f.Dependency == "Command sandbox" && f.Level == "blocked"
 	}
 	if !found {
 		t.Fatalf("findings %+v", rep.Findings)
 	}
 	rep, _ = a.dependencyPreflight(context.Background(), webui.DependencyCheckRequest{Kind: "draft", Prompt: "hi", Mode: "edit"})
 	for _, f := range rep.Findings {
-		if f.Dependency == "命令沙箱" {
+		if f.Dependency == "Command sandbox" {
 			t.Fatal("sandbox finding outside 可执行命令")
 		}
 	}

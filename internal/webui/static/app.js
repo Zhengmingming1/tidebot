@@ -74,6 +74,7 @@ return s;
 function errInfoText(info,raw,depth){
 if(!info||!info.code||(depth||0)>3)return raw||"";
 var key="wfe."+info.code;
+if(state.dict[key]==null)key="dep.txt."+info.code;
 if(state.dict[key]==null)return raw||info.code;
 var p={},src=info.params||{};
 for(var k in src)if(Object.prototype.hasOwnProperty.call(src,k))p[k]=src[k];
@@ -81,6 +82,15 @@ if(p.status&&state.dict["wf.status_"+p.status]!=null)p.status=T("wf.status_"+p.s
 else if(p.status&&state.dict["dep.req_"+p.status]!=null)p.status=T("dep.req_"+p.status);
 if(info.cause)p.detail=errInfoText(info.cause,p.detail,(depth||0)+1);
 return T(key,p);
+}
+function depText(info,raw){return errInfoText(info,raw);}
+function depNotesText(infos,raw){
+if(infos&&infos.length){
+var parts=[];
+for(var i=0;i<infos.length;i++)parts.push(errInfoText(infos[i],""));
+if(parts.every(Boolean))return parts.join(" ");
+}
+return raw||"";
 }
 function loadLang(pref){
 state.langPref=pref||"auto";
@@ -3275,7 +3285,7 @@ function poll(gen){if(!selected||gen!==generation||!document.contains(panel))ret
 api('/api/skill-set-evals/'+enc(selected)).then(function(r){
 if(gen!==generation||!document.contains(panel))return;var box=$('#ev-result',panel),active=r.status==='running';
 box.innerHTML='<div class="row-actions"><span class="pill">'+esc(T('ev.status_'+r.status))+'</span><span>'+esc(money(r.cost_usd||0,'USD',4))+' / '+esc(money(r.budget_usd,'USD',2))+'</span>'+(active?'<button class="btn sm" data-cancel>'+esc(T('btn.stop'))+'</button>':'')+'</div><p class="hint"><code>'+esc(r.version_id)+'</code> · '+esc(r.provider)+(r.model?' / '+esc(r.model):'')+'</p>'+
-(r.error?'<p class="notice bad">'+esc(runErrText(r.error_info,r.error))+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
+(r.error?'<p class="notice bad">'+esc(runErrText(r.error_info,r.error))+'</p>':'')+(r.preflight?preflightHTML(r.preflight):'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
 var cancel=$('[data-cancel]',box);if(cancel)cancel.onclick=function(){cancel.disabled=true;api('/api/skill-set-evals/'+enc(r.id)+'/cancel',{method:'POST',body:{}}).then(function(){poll(++generation);}).catch(function(e){cancel.disabled=false;fail(e);});};
 $$('[data-run-log]',box).forEach(function(a){a.onclick=closeDrawer;});
 if(active)setTimeout(function(){poll(gen);},1500);else history();
@@ -3477,16 +3487,16 @@ return fetchNext().then(function(next){if(location.hash!==here)return;var s=JSON
 }
 function dependencyFindingHTML(items){
 return(items||[]).map(function(f){var level=['missing','uncertain','available','blocked'].indexOf(f.level)>=0?f.level:'uncertain';
-return '<article class="dep-finding"><div class="row-actions"><strong>'+esc(f.dependency)+'</strong><span class="grow"></span><span class="pill '+(level==='missing'||level==='blocked'?'bad':level==='available'?'ok':'warn')+'">'+esc(T('dep.'+level))+'</span></div><p>'+esc(f.reason)+'</p>'+(f.evidence?'<details><summary>'+esc(T('dep.evidence'))+'</summary><pre class="wf-output">'+esc(f.evidence)+'</pre></details>':'')+(f.suggestion?'<p class="notice">'+esc(f.suggestion)+'</p>':'')+'</article>';
+return '<article class="dep-finding"><div class="row-actions"><strong>'+esc(depText(f.dependency_info,f.dependency))+'</strong><span class="grow"></span><span class="pill '+(level==='missing'||level==='blocked'?'bad':level==='available'?'ok':'warn')+'">'+esc(T('dep.'+level))+'</span></div><p>'+esc(depText(f.reason_info,f.reason))+'</p>'+(f.evidence?'<details><summary>'+esc(T('dep.evidence'))+'</summary><pre class="wf-output">'+esc(depText(f.evidence_info,f.evidence))+'</pre></details>':'')+(f.suggestion?'<p class="notice">'+esc(depText(f.suggestion_info,f.suggestion))+'</p>':'')+'</article>';
 }).join('');
 }
 function preflightHTML(r){
 var p=r.runtime_profile||{};
 return '<h3>'+esc(T('dep.runtime'))+'</h3><dl class="kv"><dt>'+esc(T('rn.mode'))+'</dt><dd>'+esc(T('dep.mode_'+p.mode))+'</dd><dt>'+esc(T('rn.folder'))+'</dt><dd>'+esc(p.workspace||T('dep.workspace_'+p.workspace_kind))+'</dd></dl>'+
 (p.denied_tools&&p.denied_tools.length?'<p>'+esc(T('dep.denied'))+' <code>'+esc(p.denied_tools.join(', '))+'</code></p>':'')+
-'<p class="hint">'+esc(p.notes||'')+'</p>'+
-(r.context_usage||[]).map(function(u){return '<details class="ss-details" open><summary>'+esc(T('dep.context'))+' · '+esc(u.origin)+'</summary><p class="notice '+(u.exceeded?'bad':'')+'">'+esc(T('dep.context_size',{kb:(u.total_bytes/ 1024).toFixed(1),limit:Math.round(u.limit_bytes/ 1024),tokens:u.estimated_tokens}))+'</p><ul class="list-plain">'+(u.members||[]).map(function(m){return '<li>'+esc(m.name)+' · '+esc(T(m.role==='primary'?'ss.primary':'ss.auxiliary'))+' · '+esc((m.bytes/ 1024).toFixed(1))+' KiB · ≈ '+esc(m.estimated_tokens)+' tokens</li>';}).join('')+'</ul><p class="hint">'+esc(u.estimate_method)+'</p></details>';}).join('')+
-(r.requirements&&r.requirements.length?'<h3>'+esc(T('sm.environment'))+'</h3>'+r.requirements.map(function(x){return '<p><span class="pill '+(x.status==='missing'||x.status==='blocked'?'bad':x.status==='present'?'ok':'warn')+'">'+esc(T('dep.req_'+x.status))+'</span> '+esc(x.requirement.kind)+' · '+esc(x.requirement.name)+'<br><small>'+esc(x.evidence)+'</small></p>';}).join(''):'')+
+'<p class="hint">'+esc(depNotesText(p.notes_info,p.notes||''))+'</p>'+
+(r.context_usage||[]).map(function(u){return '<details class="ss-details" open><summary>'+esc(T('dep.context'))+' · '+esc(u.origin)+'</summary><p class="notice '+(u.exceeded?'bad':'')+'">'+esc(T('dep.context_size',{kb:(u.total_bytes/ 1024).toFixed(1),limit:Math.round(u.limit_bytes/ 1024),tokens:u.estimated_tokens}))+'</p><ul class="list-plain">'+(u.members||[]).map(function(m){return '<li>'+esc(m.name)+' · '+esc(T(m.role==='primary'?'ss.primary':'ss.auxiliary'))+' · '+esc((m.bytes/ 1024).toFixed(1))+' KiB · ≈ '+esc(m.estimated_tokens)+' tokens</li>';}).join('')+'</ul><p class="hint">'+esc(depText(u.estimate_method_info,u.estimate_method))+'</p></details>';}).join('')+
+(r.requirements&&r.requirements.length?'<h3>'+esc(T('sm.environment'))+'</h3>'+r.requirements.map(function(x){return '<p><span class="pill '+(x.status==='missing'||x.status==='blocked'?'bad':x.status==='present'?'ok':'warn')+'">'+esc(T('dep.req_'+x.status))+'</span> '+esc(x.requirement.kind)+' · '+esc(x.requirement.name)+'<br><small>'+esc(depText(x.evidence_info,x.evidence))+'</small></p>';}).join(''):'')+
 (r.truncated?'<p class="notice warn">'+esc(T('dep.truncated'))+'</p>':'')+dependencyFindingHTML(r.findings);
 }
 function dependencyCheck(request,localOnly){
@@ -3507,7 +3517,7 @@ var active=r.status==='queued'||r.status==='running',box=$('#dep-result',panel);
 $('#dep-stop',panel).classList.toggle('hidden',!active);
 var log=$('#dep-log',panel);log.classList.remove('hidden');log.href='#/runs/'+enc(r.child_run_id||current);log.onclick=closeDrawer;
 if(r.preflight)$('#dep-preflight',panel).innerHTML=preflightHTML(r.preflight);
-box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>':r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+dependencyFindingHTML(r.report.findings):'<p class="notice bad">'+esc(runErrText(r.error_info,r.error)||T('wf.status_'+r.status))+'</p>';
+box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>':r.report?'<p class="dep-summary">'+esc(depText(r.report.summary_info,r.report.summary))+'</p>'+dependencyFindingHTML(r.report.findings):'<p class="notice bad">'+esc(runErrText(r.error_info,r.error)||T('wf.status_'+r.status))+'</p>';
 if(!active)busy(false);return active;
 }
 function poll(gen){if(gen!==generation||!document.contains(panel))return;api('/api/dependencies/check/'+enc(current)).then(function(r){if(gen!==generation||!document.contains(panel))return;if(present(r))setTimeout(function(){poll(gen);},1500);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;busy(false);}});}

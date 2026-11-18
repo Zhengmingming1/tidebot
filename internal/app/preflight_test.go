@@ -62,7 +62,7 @@ func TestPreflightWorkflowEnvironmentAndPermissionAreSeparate(t *testing.T) {
 	}
 	foundShell := false
 	for _, f := range report.Findings {
-		if f.Level == "blocked" && strings.Contains(f.Dependency, "执行权限") {
+		if f.Level == "blocked" && strings.Contains(f.Dependency, "execution permission") {
 			foundShell = true
 		}
 	}

@@ -31,15 +31,16 @@ type DependencyCheckRequest struct {
 // RuntimeProfile describes the target run, never the tool-free AI checker.
 // AllowedTools are pre-approved rules, not an exhaustive list of available tools.
 type DependencyRuntimeProfile struct {
-	Provider          string   `json:"provider,omitempty"`
-	Mode              string   `json:"mode"`
-	Workspace         string   `json:"workspace,omitempty"`
-	WorkspaceKind     string   `json:"workspace_kind"`
-	PythonEnvironment string   `json:"python_environment,omitempty"`
-	AllowedTools      []string `json:"allowed_tools,omitempty"`
-	DeniedTools       []string `json:"denied_tools,omitempty"`
-	Restricted        bool     `json:"restricted"`
-	Notes             string   `json:"notes"`
+	Provider          string     `json:"provider,omitempty"`
+	Mode              string     `json:"mode"`
+	Workspace         string     `json:"workspace,omitempty"`
+	WorkspaceKind     string     `json:"workspace_kind"`
+	PythonEnvironment string     `json:"python_environment,omitempty"`
+	AllowedTools      []string   `json:"allowed_tools,omitempty"`
+	DeniedTools       []string   `json:"denied_tools,omitempty"`
+	Restricted        bool       `json:"restricted"`
+	Notes             string     `json:"notes"`
+	NotesInfo         []*errInfo `json:"notes_info,omitempty"`
 }
 
 type DependencyContextMember struct {
@@ -52,22 +53,24 @@ type DependencyContextMember struct {
 }
 
 type DependencyContextUsage struct {
-	Origin          string                    `json:"origin"`
-	Members         []DependencyContextMember `json:"members"`
-	TotalBytes      int                       `json:"total_bytes"`
-	EstimatedTokens int                       `json:"estimated_tokens"`
-	LimitBytes      int                       `json:"limit_bytes"`
-	Exceeded        bool                      `json:"exceeded"`
-	EstimateOnly    bool                      `json:"estimate_only"`
-	EstimateMethod  string                    `json:"estimate_method"`
+	Origin             string                    `json:"origin"`
+	Members            []DependencyContextMember `json:"members"`
+	TotalBytes         int                       `json:"total_bytes"`
+	EstimatedTokens    int                       `json:"estimated_tokens"`
+	LimitBytes         int                       `json:"limit_bytes"`
+	Exceeded           bool                      `json:"exceeded"`
+	EstimateOnly       bool                      `json:"estimate_only"`
+	EstimateMethod     string                    `json:"estimate_method"`
+	EstimateMethodInfo *errInfo                  `json:"estimate_method_info,omitempty"`
 }
 
 type DependencyRequirementResult struct {
-	SkillID     string                        `json:"skill_id"`
-	VersionID   string                        `json:"version_id"`
-	Requirement skillstore.RuntimeRequirement `json:"requirement"`
-	Status      string                        `json:"status"` // present | missing | blocked | unchecked
-	Evidence    string                        `json:"evidence"`
+	SkillID      string                        `json:"skill_id"`
+	VersionID    string                        `json:"version_id"`
+	Requirement  skillstore.RuntimeRequirement `json:"requirement"`
+	Status       string                        `json:"status"` // present | missing | blocked | unchecked
+	Evidence     string                        `json:"evidence"`
+	EvidenceInfo *errInfo                      `json:"evidence_info,omitempty"`
 }
 
 type DependencyPreflightReport struct {
@@ -79,17 +82,22 @@ type DependencyPreflightReport struct {
 }
 
 type DependencyFinding struct {
-	Dependency string `json:"dependency"`
-	Kind       string `json:"kind"`
-	Level      string `json:"level"`
-	Reason     string `json:"reason"`
-	Evidence   string `json:"evidence"`
-	Suggestion string `json:"suggestion"`
+	Dependency     string   `json:"dependency"`
+	DependencyInfo *errInfo `json:"dependency_info,omitempty"`
+	Kind           string   `json:"kind"`
+	Level          string   `json:"level"`
+	Reason         string   `json:"reason"`
+	ReasonInfo     *errInfo `json:"reason_info,omitempty"`
+	Evidence       string   `json:"evidence"`
+	EvidenceInfo   *errInfo `json:"evidence_info,omitempty"`
+	Suggestion     string   `json:"suggestion"`
+	SuggestionInfo *errInfo `json:"suggestion_info,omitempty"`
 }
 
 type DependencyReport struct {
-	Summary  string              `json:"summary"`
-	Findings []DependencyFinding `json:"findings"`
+	Summary     string              `json:"summary"`
+	SummaryInfo *errInfo            `json:"summary_info,omitempty"`
+	Findings    []DependencyFinding `json:"findings"`
 }
 
 type DependencyCheckStatus struct {
@@ -195,7 +203,7 @@ func (s *Server) handleDependencyPreflight(w http.ResponseWriter, r *http.Reques
 		writeErrInfo(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, annotatePreflight(out))
 }
 
 func (s *Server) handleDependencyCheck(w http.ResponseWriter, r *http.Request) {
@@ -260,5 +268,5 @@ func (s *Server) handleDependencyCheckStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	out.ErrorInfo = explainError(out.Error)
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, annotateDependencyStatus(out))
 }

@@ -6846,3 +6846,28 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
 - 一个会话仍只能有一份草稿。
 - 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
+
+### 2026-11-18：依赖检查和评测预检的报告摘要、理由会按界面语言显示（BUG）
+
+- **问题**（上一轮报错 i18n 留下的尾巴）：依赖检查报告摘要会加上写死的中文前缀（「已结合 N 项确定性检查」），AI 推断的理由也会加上「AI 推断此依赖可能缺失…」「AI 仅分析静态材料…」。评测预检的 Notes/Reason/Suggestion 同样是中文原文。确定性检查里的 finding 标题、理由、证据、建议和运行环境说明也全是中文。英文界面会直接看到这些中文，历史快照也无法按语言翻译。
+- **改法**：
+  - 上述稳定文案改存英文原文（或在读接口时由英文/历史中文匹配出码），不把某一种界面语言写进快照或评测状态。
+  - 依赖检查预检/状态、技能组合评估详情在展示层附上 `summary_info`、`reason_info`、`notes_info` 等，前端按界面语言翻译；历史中文快照和评测记录同样能翻译。
+  - 评测结果抽屉会显示已保存的预检说明，这样评测环境限制不再只出现在报错的 `{detail}` 里。
+  - 评测预检失败时，嵌在 `ev_preflight` 里的理由也会作为 `cause` 一起翻译。
+- 测试：`TestDepTextCatalogTranslated`、`TestExplainDepTextEnglishAndHistoricalChinese`、`TestAnnotateDependencyReportAndPreflight` 覆盖码表、中英文原文和历史前缀；`TestDependencyCheckAPILocalizesReport`、`TestSkillSetEvalAPILocalizesPreflight` 确认接口带 info；`TestDepTextInPage` 确认报告摘要、理由、Notes 和评测预检使用 `depText`/`depNotesText`。`TestDependencyCheckAsyncRunAndReport` / `TestDependencyReportValidation` 确认新报告使用英文前缀。`go test ./internal/webui/`、`./internal/app/`、`go vet`（含 GOOS=windows/darwin）通过；上述相关测试 `go test -race -count=3` 通过。
+- 截图：未另拍。核对路径：技能组合或任务的「检查依赖」抽屉（免费预检的 Notes/理由，以及 AI 分析完成后的摘要前缀）；技能组合「评测」历史里的预检说明。用顶部语言按钮切换中/EN。
+- 耗时：不是性能改动。
+
+**心得**：和上一轮报错目录一样，展示层集中匹配更适合这类已经落库的文案：不必迁移历史快照，只要同时认英文原文和旧中文。写死某一种语言的前缀会在另一种界面里露馅；带参数的句子（结合 N 项检查、AI 前缀后面的模型原文）应把稳定部分做成码，把其余部分留在 `{detail}`。
+
+**后续想法**：
+- 子运行失败时里层的 `detail` 仍是 Claude 或提供商的原文，比如限流、额度用完。可以复用 `policy.Classify` 的分类，给出「限流，稍后重试」这类本地化提示。
+- 会话本身还没有推理强度选择器，只能沿用源运行的值；从空白会话存为任务、以及运行对话框新开一次运行，仍是「默认」。若要在会话或运行对话框里改强度，需要像权限档那样加一档设置。
+- 任务详情目前只列出节点运行（`runs.task_id`），没有工作流运行本身；若要在任务页看到整次工作流执行，可以按 `workflow_runs.task_id` 再列一栏。
+- `workflow_runs` 的按保留期清理其实在 2026-11-07 已经做了（已结束 90 天，软删工作流 7 天）；还没做的是把保留天数放到「设置 › 数据」里可配。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
+- 依赖检查的 AI 报告正文（摘要其余部分、模型写的理由）仍按提示词用中文生成，英文界面里除稳定前缀外仍会看到这部分中文；若要整份报告跟界面语言走，需要改生成提示词或另做翻译，不能只靠展示层目录。
