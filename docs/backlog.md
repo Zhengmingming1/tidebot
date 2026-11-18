@@ -6773,3 +6773,28 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 一个会话仍只能有一份草稿。
 - 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
 - `AtStart` 里 `admitRun` / `holdRunBudget` / `reserveProviderQuota` 仍使用 `runCtx`，数据库忙或 context 取消时仍可能在快照写入之前就把运行跳过；若再出现误跳，可以把录取阶段也改成短超时的独立 context（用户主动停止仍应尊重）。
+
+### 2026-11-18：开始运行时录取预算和预留配额会重试，不再因数据库忙或 context 取消而跳过（BUG）
+
+- **问题**（上一轮费用策略快照修复后仍在）：`saveCostSnapshot` 已改走独立超时的 `retryWrite`，但 `AtStart` 里的 `admitRun` / `holdRunBudget` / `reserveProviderQuota` 仍使用 runner 传来的 `runCtx`。数据库忙，或用户停止 / 退出把 context 取消时，录取阶段失败，运行在快照写入之前就被标为 skipped（或 unstarted）。排队后再检查的 `BeforeStart` 也有同样问题。
+- **改法**：
+  - 录取和预留改走短超时的独立 context，数据库忙或本轮超时会按与 `retryWrite` 相同的窗口重试（最多约 2 分钟）；预算已满、配额用尽等永久性拒绝不重试，立刻返回。
+  - 重试时先放下费用策略锁，并释放上一轮未完成的预算占用和配额预留，避免长时间挡住别的运行，也不会重复占用。
+  - 用户主动停止或退出仍立即中止启动，不把已占用的预算留下来。快照写入仍在锁外，保持上一轮的写法。
+  - 排队后的 `BeforeStart` 预算检查同样改走这套重试。
+- 测试：`TestRetryStartOpUsesIndependentContext`；`TestRetryStartOpRetriesBusyThenSucceeds`；`TestRetryStartOpGivesUpWhenStillBusy`；`TestRetryStartOpDoesNotRetryPermanentError`；`TestRetryStartOpHonorsUserStopWhileWaiting`；`TestAdmitAtStartHoldsAndWritesSnapshot`；`TestAdmitAtStartHonorsUserStop` / `HonorsShutdown`；`TestAdmitAtStartReleasesHoldIfStopAfterAdmit`；`TestReleaseStartReservationClearsHold`；`TestAdmitAtStartBudgetBlockedIsNotRetried`；`TestAdmitAtStartOnceRetryDoesNotDoubleHold`。`go test ./internal/app/ ./internal/runner/ ./internal/cost/ ./internal/tasksvc/`、`go vet`（含 GOOS=windows/darwin）通过；`go test -race` 对上述包通过（`internal/app` 整包约 9.7 分钟）。
+- 截图：未拍——改动在开始运行时的录取与记账，界面上看不出差别。
+- 耗时：录取成功路径约 0.15ms，与原先单次 `admitRun`+`holdRunBudget`+`reserveProviderQuota`（约 0.13–0.20ms）同量级；预算已满的拒绝约 0.15ms，不会按重试窗口拖到 2 分钟。
+
+**心得**：快照写入是启动决定之后的记账，可以完全脱离 runCtx；录取是启动决定本身，数据库调用必须能扛住忙碌，但用户停止和退出仍要立刻放弃，并且不能把重试时的预算占用叠在一起。重试期间不要一直握着费用策略锁。
+
+**后续想法**：
+- `RunPromptEx` 入口第一次 `admitRun`（还没有运行行）仍使用调用方 context，数据库忙时会在排队前直接失败；若再出现误拒，可以套同一套短超时重试。
+- 会话本身还没有推理强度选择器，只能沿用源运行的值；从空白会话存为任务、以及运行对话框新开一次运行，仍是「默认」。若要在会话或运行对话框里改强度，需要像权限档那样加一档设置。
+- 技能组合评估（`x.error`）和依赖检查（`r.error`）可能仍直接显示英文；运行页 `error_message` 可能仍缺 `error_info`。
+- 任务详情目前只列出节点运行（`runs.task_id`），没有工作流运行本身；若要在任务页看到整次工作流执行，可以按 `workflow_runs.task_id` 再列一栏。
+- `workflow_runs` 的按保留期清理其实在 2026-11-07 已经做了（已结束 90 天，软删工作流 7 天）；还没做的是把保留天数放到「设置 › 数据」里可配。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。

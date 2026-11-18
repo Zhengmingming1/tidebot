@@ -406,34 +406,19 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 					return err
 				}
 			}
-			// Admit and reserve under the policy lock; persist the snapshot
-			// after releasing it. retryWrite may wait, and must not hold the
-			// lock or use the (possibly canceled) run context.
-			policyMu.Lock()
-			err := func() error {
-				defer policyMu.Unlock()
-				rm, ncc, err := a.admitRun(sctx, o.TaskID, bucket, prof, callerCap)
-				if err != nil {
-					return err
-				}
-				o.Cost = ncc
-				o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, rm)
-				h, err := a.holdRunBudget(sctx, o, bucket, prof)
-				if err != nil {
-					return err
-				}
-				hold.Store(h)
-				accountingAt = time.Now()
-				if h != nil {
-					accountingAt = h.AccountingAt()
-				}
-				accountingDay = accountingAt.In(a.Loc()).Format("2006-01-02")
-				launchedID = o.RunID
-				return a.reserveProviderQuota(sctx, o, prof)
-			}()
+			// Admit and reserve with a short independent timeout, retried
+			// while the database is busy. Do not use the (possibly canceled)
+			// run context for those calls: that used to skip a run before the
+			// snapshot was written. A user stop is still honored. The snapshot
+			// is written after the policy lock is released.
+			res, err := a.admitAtStart(sctx, o, bucket, prof, callerCap)
 			if err != nil {
 				return err
 			}
+			hold.Store(res.hold)
+			accountingAt = res.accountingAt
+			accountingDay = res.accountingDay
+			launchedID = res.launchedID
 			return a.saveCostSnapshot(o, bucket, accountingAt)
 		}
 	}
@@ -457,7 +442,13 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		if !a.taskStillRunnable(sctx, o.TaskID, o.TriggerKind) {
 			return errTaskInactive
 		}
-		rm, ncc, err := a.admitRun(sctx, o.TaskID, bucket, prof, callerCap)
+		var rm float64
+		var ncc *runner.CostControl
+		err := a.retryStartOp(sctx, "admit before start", o.RunID, func(wctx context.Context) error {
+			var err error
+			rm, ncc, err = a.admitRun(wctx, o.TaskID, bucket, prof, callerCap)
+			return err
+		})
 		if err != nil {
 			return err
 		}
