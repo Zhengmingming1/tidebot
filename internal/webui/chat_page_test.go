@@ -51,6 +51,7 @@ function dur(ms) { return Math.round(ms / 1000) + "s"; }
 function skeleton() { return "<sk>"; }
 function statusPill(s) { return "<pill:" + s + ">"; }
 function runErr(m) { return "E:" + m; }
+function runErrText(info, raw) { return runErr(raw); }
 function mdHtml(s) { return "<md>" + esc(s) + "</md>"; }
 function classifyLog(text) { return { ts: "", kind: "sys", text: text }; }
 `+string(rc)+src+`

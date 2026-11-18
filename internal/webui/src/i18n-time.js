@@ -23,6 +23,7 @@
     var p = {}, src = info.params || {};
     for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) p[k] = src[k];
     if (p.status && state.dict["wf.status_" + p.status] != null) p.status = T("wf.status_" + p.status);
+    else if (p.status && state.dict["dep.req_" + p.status] != null) p.status = T("dep.req_" + p.status);
     if (info.cause) p.detail = errInfoText(info.cause, p.detail, (depth || 0) + 1);
     return T(key, p);
   }

@@ -53,15 +53,16 @@ type ChatBindingsInput struct {
 
 // ChatTurn is one turn: what was asked and the run that answered.
 type ChatTurn struct {
-	Index     int     `json:"index"`
-	RunID     string  `json:"run_id"`
-	Message   string  `json:"message"`
-	Status    string  `json:"status"`
-	Answer    string  `json:"answer"`
-	Truncated bool    `json:"answer_truncated,omitempty"`
-	Error     string  `json:"error,omitempty"`
-	CostUSD   float64 `json:"cost_usd"` // display currency
-	CreatedAt string  `json:"created_at"`
+	Index     int      `json:"index"`
+	RunID     string   `json:"run_id"`
+	Message   string   `json:"message"`
+	Status    string   `json:"status"`
+	Answer    string   `json:"answer"`
+	Truncated bool     `json:"answer_truncated,omitempty"`
+	Error     string   `json:"error,omitempty"`
+	ErrorInfo *errInfo `json:"error_info,omitempty"`
+	CostUSD   float64  `json:"cost_usd"` // display currency
+	CreatedAt string   `json:"created_at"`
 }
 
 // ChatSessionDetail is a session with its turns, oldest first.
@@ -256,6 +257,7 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 		if d.TurnList == nil {
 			d.TurnList = []ChatTurn{}
 		}
+		attachTurnErrInfo(d.TurnList)
 		d.Sig = sig
 		writeJSON(w, 200, d)
 	case sub == "" && r.Method == http.MethodDelete:
@@ -326,5 +328,11 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 405, "method")
 	default:
 		writeErr(w, 404, "not found")
+	}
+}
+
+func attachTurnErrInfo(turns []ChatTurn) {
+	for i := range turns {
+		turns[i].ErrorInfo = explainError(turns[i].Error)
 	}
 }

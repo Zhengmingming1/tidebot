@@ -98,6 +98,7 @@ type DependencyCheckStatus struct {
 	Status         string                     `json:"status"`
 	Report         *DependencyReport          `json:"report,omitempty"`
 	Error          string                     `json:"error,omitempty"`
+	ErrorInfo      *errInfo                   `json:"error_info,omitempty"`
 	StaticFindings []DependencyFinding        `json:"static_findings,omitempty"`
 	Preflight      *DependencyPreflightReport `json:"preflight,omitempty"`
 }
@@ -160,11 +161,11 @@ func (r DependencyCheckRequest) Validate() error {
 // launches the model, imports a package, executes a command or installs anything.
 func (s *Server) handleDependencyPreflight(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "GET or POST only")
+		writeErrInfo(w, http.StatusMethodNotAllowed, "GET or POST only")
 		return
 	}
 	if s.deps.DependencyPreflight == nil {
-		writeErr(w, http.StatusServiceUnavailable, "dependency preflight is unavailable")
+		writeErrInfo(w, http.StatusServiceUnavailable, "dependency preflight is unavailable")
 		return
 	}
 	var req DependencyCheckRequest
@@ -177,21 +178,21 @@ func (s *Server) handleDependencyPreflight(w http.ResponseWriter, r *http.Reques
 		d := json.NewDecoder(r.Body)
 		d.DisallowUnknownFields()
 		if err := d.Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid dependency check input")
+			writeErrInfo(w, http.StatusBadRequest, "invalid dependency check input")
 			return
 		}
 		if err := d.Decode(new(any)); err != io.EOF {
-			writeErr(w, http.StatusBadRequest, "one JSON object is required")
+			writeErrInfo(w, http.StatusBadRequest, "one JSON object is required")
 			return
 		}
 	}
 	if err := req.Validate(); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeErrInfo(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	out, err := s.deps.DependencyPreflight(r.Context(), req)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeErrInfo(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -199,11 +200,11 @@ func (s *Server) handleDependencyPreflight(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleDependencyCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "POST only")
+		writeErrInfo(w, http.StatusMethodNotAllowed, "POST only")
 		return
 	}
 	if s.deps.StartDependencyCheck == nil {
-		writeErr(w, http.StatusServiceUnavailable, "dependency checking is unavailable")
+		writeErrInfo(w, http.StatusServiceUnavailable, "dependency checking is unavailable")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
@@ -212,24 +213,24 @@ func (s *Server) handleDependencyCheck(w http.ResponseWriter, r *http.Request) {
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid dependency check input")
+		writeErrInfo(w, http.StatusBadRequest, "invalid dependency check input")
 		return
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
-		writeErr(w, http.StatusBadRequest, "one JSON object is required")
+		writeErrInfo(w, http.StatusBadRequest, "one JSON object is required")
 		return
 	}
 	if err := req.Validate(); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeErrInfo(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	runID, err := s.deps.StartDependencyCheck(req)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeErrInfo(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if runID == "" {
-		writeErr(w, http.StatusServiceUnavailable, "dependency check did not start")
+		writeErrInfo(w, http.StatusServiceUnavailable, "dependency check did not start")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID})
@@ -237,26 +238,27 @@ func (s *Server) handleDependencyCheck(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDependencyCheckStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		writeErrInfo(w, http.StatusMethodNotAllowed, "GET only")
 		return
 	}
 	if s.deps.DependencyCheckStatus == nil {
-		writeErr(w, http.StatusServiceUnavailable, "dependency checking is unavailable")
+		writeErrInfo(w, http.StatusServiceUnavailable, "dependency checking is unavailable")
 		return
 	}
 	runID := strings.TrimPrefix(r.URL.Path, "/api/dependencies/check/")
 	if !idRe.MatchString(runID) {
-		writeErr(w, http.StatusBadRequest, "invalid dependency check id")
+		writeErrInfo(w, http.StatusBadRequest, "invalid dependency check id")
 		return
 	}
 	out, err := s.deps.DependencyCheckStatus(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeErr(w, http.StatusNotFound, "dependency check not found")
+			writeErrInfo(w, http.StatusNotFound, "dependency check not found")
 		} else {
-			writeErr(w, http.StatusInternalServerError, "cannot read dependency check")
+			writeErrInfo(w, http.StatusInternalServerError, "cannot read dependency check")
 		}
 		return
 	}
+	out.ErrorInfo = explainError(out.Error)
 	writeJSON(w, http.StatusOK, out)
 }

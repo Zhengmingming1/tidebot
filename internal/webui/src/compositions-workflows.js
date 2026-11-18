@@ -181,7 +181,7 @@
         if(!x)return '<section class="ss-eval-outcome"><h4>'+esc(T(key))+'</h4><p>'+esc(T('ev.pending'))+'</p></section>';
         return '<section class="ss-eval-outcome"><h4>'+esc(T(key))+'</h4><p><span class="pill '+(x.status==='succeeded'?(x.passed?'ok':'warn'):'')+'">'+esc(x.status==='succeeded'?T(x.passed?'ev.passed':'ev.not_passed'):T('wf.status_'+x.status))+'</span></p>'+
           '<p class="hint">'+esc(dur(x.duration_ms||0))+' · '+esc(money(x.cost_usd||0,'USD',4))+' · '+esc((x.input_tokens||0)+' / '+(x.output_tokens||0))+' tokens</p>'+
-          (x.error?'<p class="notice bad">'+esc(x.error)+'</p>':'')+
+          (x.error?'<p class="notice bad">'+esc(runErrText(x.error_info,x.error))+'</p>':'')+
           (x.assertions||[]).map(function(a){return '<p>'+ic(a.passed?'check':'x','sm')+' '+esc(T(a.kind==='must_not_contain'?'ss.must_not_contain_short':'ss.must_contain_short'))+' <code>'+esc(a.text)+'</code></p>';}).join('')+
           (x.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(x.output)+'</pre></details>':'')+
           (x.output_truncated?'<p class="hint">'+esc(T('ev.truncated'))+'</p>':'')+
@@ -191,7 +191,7 @@
         api('/api/skill-set-evals/'+enc(selected)).then(function(r){
           if(gen!==generation||!document.contains(panel))return;var box=$('#ev-result',panel),active=r.status==='running';
           box.innerHTML='<div class="row-actions"><span class="pill">'+esc(T('ev.status_'+r.status))+'</span><span>'+esc(money(r.cost_usd||0,'USD',4))+' / '+esc(money(r.budget_usd,'USD',2))+'</span>'+(active?'<button class="btn sm" data-cancel>'+esc(T('btn.stop'))+'</button>':'')+'</div><p class="hint"><code>'+esc(r.version_id)+'</code> · '+esc(r.provider)+(r.model?' / '+esc(r.model):'')+'</p>'+
-            (r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
+            (r.error?'<p class="notice bad">'+esc(runErrText(r.error_info,r.error))+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
           var cancel=$('[data-cancel]',box);if(cancel)cancel.onclick=function(){cancel.disabled=true;api('/api/skill-set-evals/'+enc(r.id)+'/cancel',{method:'POST',body:{}}).then(function(){poll(++generation);}).catch(function(e){cancel.disabled=false;fail(e);});};
           $$('[data-run-log]',box).forEach(function(a){a.onclick=closeDrawer;});
           if(active)setTimeout(function(){poll(gen);},1500);else history();
@@ -440,7 +440,7 @@
       $('#dep-stop',panel).classList.toggle('hidden',!active);
       var log=$('#dep-log',panel);log.classList.remove('hidden');log.href='#/runs/'+enc(r.child_run_id||current);log.onclick=closeDrawer;
       if(r.preflight)$('#dep-preflight',panel).innerHTML=preflightHTML(r.preflight);
-      box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>':r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+dependencyFindingHTML(r.report.findings):'<p class="notice bad">'+esc(r.error||T('wf.status_'+r.status))+'</p>';
+      box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>':r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+dependencyFindingHTML(r.report.findings):'<p class="notice bad">'+esc(runErrText(r.error_info,r.error)||T('wf.status_'+r.status))+'</p>';
       if(!active)busy(false);return active;
     }
     function poll(gen){if(gen!==generation||!document.contains(panel))return;api('/api/dependencies/check/'+enc(current)).then(function(r){if(gen!==generation||!document.contains(panel))return;if(present(r))setTimeout(function(){poll(gen);},1500);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;busy(false);}});}

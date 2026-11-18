@@ -28,6 +28,7 @@ type EvalRunResult struct {
 	InputTokens     int             `json:"input_tokens"`
 	OutputTokens    int             `json:"output_tokens"`
 	Error           string          `json:"error,omitempty"`
+	ErrorInfo       *errInfo        `json:"error_info,omitempty"`
 }
 type EvalCaseResult struct {
 	Name        string         `json:"name"`
@@ -46,6 +47,7 @@ type SkillSetEvaluation struct {
 	CostUSD    float64                    `json:"cost_usd"`
 	Status     string                     `json:"status"`
 	Error      string                     `json:"error,omitempty"`
+	ErrorInfo  *errInfo                   `json:"error_info,omitempty"`
 	CreatedAt  string                     `json:"created_at"`
 	FinishedAt string                     `json:"finished_at,omitempty"`
 	Cases      []EvalCaseResult           `json:"cases"`
@@ -56,7 +58,7 @@ func (s *Server) handleSkillSetEvals(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		if s.deps.ListSkillSetEvals == nil {
-			writeErr(w, 503, "evaluations unavailable")
+			writeErrInfo(w, 503, "evaluations unavailable")
 			return
 		}
 		out, err := s.deps.ListSkillSetEvals(r.Context(), r.URL.Query().Get("set_id"))
@@ -64,15 +66,15 @@ func (s *Server) handleSkillSetEvals(w http.ResponseWriter, r *http.Request) {
 			s.setError(w, err)
 			return
 		}
-		writeJSON(w, 200, out)
+		writeJSON(w, 200, skillSetEvalViews(out))
 	case http.MethodPost:
 		if s.deps.StartSkillSetEval == nil {
-			writeErr(w, 503, "evaluations unavailable")
+			writeErrInfo(w, 503, "evaluations unavailable")
 			return
 		}
 		var req SkillSetEvalRequest
 		if decodeManifestRequest(w, r, &req) != nil || !idRe.MatchString(req.SetID) || !idRe.MatchString(req.VersionID) {
-			writeErr(w, 400, "valid set_id, version_id and evaluation options are required")
+			writeErrInfo(w, 400, "valid set_id, version_id and evaluation options are required")
 			return
 		}
 		out, err := s.deps.StartSkillSetEval(req)
@@ -80,20 +82,20 @@ func (s *Server) handleSkillSetEvals(w http.ResponseWriter, r *http.Request) {
 			s.setError(w, err)
 			return
 		}
-		writeJSON(w, 202, out)
+		writeJSON(w, 202, skillSetEvalView(out))
 	default:
-		writeErr(w, 405, "GET or POST only")
+		writeErrInfo(w, 405, "GET or POST only")
 	}
 }
 func (s *Server) handleSkillSetEvalSub(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/skill-set-evals/"), "/")
 	if len(parts) == 0 || !idRe.MatchString(parts[0]) {
-		writeErr(w, 404, "evaluation not found")
+		writeErrInfo(w, 404, "evaluation not found")
 		return
 	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		if s.deps.GetSkillSetEval == nil {
-			writeErr(w, 503, "evaluations unavailable")
+			writeErrInfo(w, 503, "evaluations unavailable")
 			return
 		}
 		out, err := s.deps.GetSkillSetEval(r.Context(), parts[0])
@@ -101,12 +103,12 @@ func (s *Server) handleSkillSetEvalSub(w http.ResponseWriter, r *http.Request) {
 			s.setError(w, err)
 			return
 		}
-		writeJSON(w, 200, out)
+		writeJSON(w, 200, skillSetEvalView(out))
 		return
 	}
 	if len(parts) == 2 && parts[1] == "cancel" && r.Method == http.MethodPost {
 		if s.deps.CancelSkillSetEval == nil {
-			writeErr(w, 503, "evaluations unavailable")
+			writeErrInfo(w, 503, "evaluations unavailable")
 			return
 		}
 		if err := s.deps.CancelSkillSetEval(parts[0]); err != nil {
@@ -116,5 +118,38 @@ func (s *Server) handleSkillSetEvalSub(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
-	writeErr(w, 405, "GET evaluation or POST cancel only")
+	writeErrInfo(w, 405, "GET evaluation or POST cancel only")
+}
+
+// skillSetEvalView adds error codes to a stored evaluation (and each case
+// outcome) so the page can show past English errors in its language.
+func skillSetEvalView(ev SkillSetEvaluation) SkillSetEvaluation {
+	ev.ErrorInfo = explainError(ev.Error)
+	if len(ev.Cases) == 0 {
+		return ev
+	}
+	cases := make([]EvalCaseResult, len(ev.Cases))
+	for i, c := range ev.Cases {
+		cases[i] = c
+		if c.Baseline != nil {
+			b := *c.Baseline
+			b.ErrorInfo = explainError(b.Error)
+			cases[i].Baseline = &b
+		}
+		if c.Composition != nil {
+			comp := *c.Composition
+			comp.ErrorInfo = explainError(comp.Error)
+			cases[i].Composition = &comp
+		}
+	}
+	ev.Cases = cases
+	return ev
+}
+
+func skillSetEvalViews(items []SkillSetEvaluation) []SkillSetEvaluation {
+	out := make([]SkillSetEvaluation, len(items))
+	for i, ev := range items {
+		out[i] = skillSetEvalView(ev)
+	}
+	return out
 }

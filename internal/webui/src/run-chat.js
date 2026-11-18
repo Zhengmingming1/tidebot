@@ -87,7 +87,7 @@
     head += "</div>";
     var body = busy ? '<div class="log rc-live" data-rc-live="' + esc(t.run_id || "") + '" tabindex="0" aria-label="' + esc(T("rd.log")) + '"></div>' :
       (t.answer ? '<div class="rc-a-body md" tabindex="0">' + mdHtml(t.answer, null) + "</div>" : "") +
-      (t.error && t.status !== "succeeded" ? '<p class="rc-a-err">' + esc(runErr(t.error)) + "</p>" : "") +
+      (t.error && t.status !== "succeeded" ? '<p class="rc-a-err">' + esc(runErrText(t.error_info, t.error)) + "</p>" : "") +
       (!t.answer && !t.error && t.status ? '<p class="rc-a-err muted">' + esc(T("rw.answer_missing")) + "</p>" : "");
     return '<article class="rc-turn" data-turn="' + t.index + '"><div class="rc-q"><div class="rc-bubble" data-tip="' + esc(when(t.created_at)) + '">' + esc(t.message) + "</div></div>" +
       '<div class="rc-a' + (busy ? " busy" : "") + '">' + head + body + "</div></article>";

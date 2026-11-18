@@ -25,6 +25,12 @@
     if (b) return T(/ cap held by \d+ running /.test(b[1]) ? "rd.err_skip_held" : "rd.err_skip_budget", { why: budgetWhy(b[1]) });
     return /^interrupted:/.test(msg) ? T("rd.err_interrupted") : msg;
   }
+  // Prefer the existing run-message translations (budget figures, bytes), then error_info.
+  function runErrText(info, raw) {
+    var via = runErr(raw);
+    if (via !== (raw || "")) return via;
+    return errInfoText(info, raw);
+  }
   // A core budget reason ("global/ daily USD cap reached (5.1/5.0)") in the viewer's language.
   function budgetWhy(d) {
     var sc = /^(global|task|bucket)\//.exec(d), name = sc ? T("sp.scope_" + sc[1]) : "";

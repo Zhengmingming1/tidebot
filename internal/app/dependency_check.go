@@ -440,12 +440,12 @@ func parseDependencyReport(text string) (*webui.DependencyReport, error) {
 	}
 	var report webui.DependencyReport
 	if json.Unmarshal([]byte(text), &report) != nil || strings.TrimSpace(report.Summary) == "" || len(report.Summary) > 4096 || report.Findings == nil || len(report.Findings) > 64 {
-		return nil, errors.New("报告格式不符合要求")
+		return nil, errors.New("dependency report is invalid")
 	}
 	for i := range report.Findings {
 		f := &report.Findings[i]
 		if f.Dependency == "" || f.Kind == "" || f.Reason == "" || f.Evidence == "" || f.Suggestion == "" || len(f.Dependency)+len(f.Kind)+len(f.Reason)+len(f.Evidence)+len(f.Suggestion) > 8192 {
-			return nil, errors.New("报告格式不符合要求")
+			return nil, errors.New("dependency report is invalid")
 		}
 		switch f.Level {
 		case "uncertain":
@@ -456,7 +456,7 @@ func parseDependencyReport(text string) (*webui.DependencyReport, error) {
 			f.Level = "uncertain"
 			f.Reason = "AI 仅分析静态材料，未验证环境可用性。" + f.Reason
 		default:
-			return nil, errors.New("报告格式不符合要求")
+			return nil, errors.New("dependency report is invalid")
 		}
 	}
 	return &report, nil
@@ -475,7 +475,7 @@ func (a *App) dependencyCheckStatus(ctx context.Context, runID string) (webui.De
 	}
 	var snapshot dependencySnapshot
 	if err := json.NewDecoder(strings.NewReader(strings.TrimPrefix(prompt, dependencySnapshotMarker))).Decode(&snapshot); err != nil {
-		out.Status, out.Error = "failed", "依赖检测快照无法读取"
+		out.Status, out.Error = "failed", "dependency check snapshot is unreadable"
 		return out, nil
 	}
 	out.StaticFindings = snapshot.Findings
@@ -486,7 +486,7 @@ func (a *App) dependencyCheckStatus(ctx context.Context, runID string) (webui.De
 	}
 	report, err := parseDependencyReport(result)
 	if truncated != 0 || err != nil {
-		out.Status, out.Error = "failed", "报告格式不符合要求"
+		out.Status, out.Error = "failed", "dependency report is invalid"
 		return out, nil
 	}
 	merged := append([]webui.DependencyFinding{}, snapshot.Findings...)

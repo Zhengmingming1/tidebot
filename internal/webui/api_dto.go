@@ -114,24 +114,25 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 }
 
 type runDTO struct {
-	ID           string  `json:"id"`
-	TaskID       string  `json:"task_id"`
-	TaskName     string  `json:"task_name"`
-	Status       string  `json:"status"`
-	Trigger      string  `json:"trigger"`
-	Provider     string  `json:"provider"`
-	Model        string  `json:"model"`
-	CostUSD      float64 `json:"cost_usd"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	DurationMS   int64   `json:"duration_ms"`
-	StartedAt    string  `json:"started_at"`
-	FinishedAt   string  `json:"finished_at"`
-	CreatedAt    string  `json:"created_at"`
-	Error        string  `json:"error"`
-	Prompt       string  `json:"prompt"`
-	VersionNo    int     `json:"version_no"`
-	Bucket       string  `json:"bucket"`
+	ID           string   `json:"id"`
+	TaskID       string   `json:"task_id"`
+	TaskName     string   `json:"task_name"`
+	Status       string   `json:"status"`
+	Trigger      string   `json:"trigger"`
+	Provider     string   `json:"provider"`
+	Model        string   `json:"model"`
+	CostUSD      float64  `json:"cost_usd"`
+	InputTokens  int64    `json:"input_tokens"`
+	OutputTokens int64    `json:"output_tokens"`
+	DurationMS   int64    `json:"duration_ms"`
+	StartedAt    string   `json:"started_at"`
+	FinishedAt   string   `json:"finished_at"`
+	CreatedAt    string   `json:"created_at"`
+	Error        string   `json:"error"`
+	ErrorInfo    *errInfo `json:"error_info,omitempty"`
+	Prompt       string   `json:"prompt"`
+	VersionNo    int      `json:"version_no"`
+	Bucket       string   `json:"bucket"`
 	// tidebot's own pricing (native currency); CostUSD above is in the display currency.
 	CostAmount   float64 `json:"cost_amount"`
 	CostCurrency string  `json:"cost_currency"`
@@ -225,6 +226,7 @@ func (s *Server) queryRunsOpt(ctx context.Context, promptMax int, where string, 
 		if s.internalDir(d.Workspace) {
 			d.Workspace = "" // a scratch folder of tidebot's (command runs without a folder)
 		}
+		d.ErrorInfo = explainError(d.Error)
 		out = append(out, d)
 	}
 	return out, rows.Err()

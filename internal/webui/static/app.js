@@ -78,6 +78,7 @@ if(state.dict[key]==null)return raw||info.code;
 var p={},src=info.params||{};
 for(var k in src)if(Object.prototype.hasOwnProperty.call(src,k))p[k]=src[k];
 if(p.status&&state.dict["wf.status_"+p.status]!=null)p.status=T("wf.status_"+p.status);
+else if(p.status&&state.dict["dep.req_"+p.status]!=null)p.status=T("dep.req_"+p.status);
 if(info.cause)p.detail=errInfoText(info.cause,p.detail,(depth||0)+1);
 return T(key,p);
 }
@@ -553,6 +554,11 @@ if(dk)return T("rd.err_skip_disk",{f:fmtBytes(Number(dk[1])),m:mbLabel(Math.roun
 var b=/^skipped: budget blocked: (.*)$/.exec(msg);
 if(b)return T(/ cap held by \d+ running /.test(b[1])?"rd.err_skip_held":"rd.err_skip_budget",{why:budgetWhy(b[1])});
 return /^interrupted:/.test(msg)?T("rd.err_interrupted"):msg;
+}
+function runErrText(info,raw){
+var via=runErr(raw);
+if(via!==(raw||""))return via;
+return errInfoText(info,raw);
 }
 function budgetWhy(d){
 var sc=/^(global|task|bucket)\//.exec(d),name=sc?T("sp.scope_"+sc[1]):"";
@@ -3259,7 +3265,7 @@ function outcome(x,key){
 if(!x)return '<section class="ss-eval-outcome"><h4>'+esc(T(key))+'</h4><p>'+esc(T('ev.pending'))+'</p></section>';
 return '<section class="ss-eval-outcome"><h4>'+esc(T(key))+'</h4><p><span class="pill '+(x.status==='succeeded'?(x.passed?'ok':'warn'):'')+'">'+esc(x.status==='succeeded'?T(x.passed?'ev.passed':'ev.not_passed'):T('wf.status_'+x.status))+'</span></p>'+
 '<p class="hint">'+esc(dur(x.duration_ms||0))+' · '+esc(money(x.cost_usd||0,'USD',4))+' · '+esc((x.input_tokens||0)+' / '+(x.output_tokens||0))+' tokens</p>'+
-(x.error?'<p class="notice bad">'+esc(x.error)+'</p>':'')+
+(x.error?'<p class="notice bad">'+esc(runErrText(x.error_info,x.error))+'</p>':'')+
 (x.assertions||[]).map(function(a){return '<p>'+ic(a.passed?'check':'x','sm')+' '+esc(T(a.kind==='must_not_contain'?'ss.must_not_contain_short':'ss.must_contain_short'))+' <code>'+esc(a.text)+'</code></p>';}).join('')+
 (x.output?'<details open><summary>'+esc(T('wf.output'))+'</summary><pre class="wf-output">'+esc(x.output)+'</pre></details>':'')+
 (x.output_truncated?'<p class="hint">'+esc(T('ev.truncated'))+'</p>':'')+
@@ -3269,7 +3275,7 @@ function poll(gen){if(!selected||gen!==generation||!document.contains(panel))ret
 api('/api/skill-set-evals/'+enc(selected)).then(function(r){
 if(gen!==generation||!document.contains(panel))return;var box=$('#ev-result',panel),active=r.status==='running';
 box.innerHTML='<div class="row-actions"><span class="pill">'+esc(T('ev.status_'+r.status))+'</span><span>'+esc(money(r.cost_usd||0,'USD',4))+' / '+esc(money(r.budget_usd,'USD',2))+'</span>'+(active?'<button class="btn sm" data-cancel>'+esc(T('btn.stop'))+'</button>':'')+'</div><p class="hint"><code>'+esc(r.version_id)+'</code> · '+esc(r.provider)+(r.model?' / '+esc(r.model):'')+'</p>'+
-(r.error?'<p class="notice bad">'+esc(errInfoText(r.error_info,r.error))+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
+(r.error?'<p class="notice bad">'+esc(runErrText(r.error_info,r.error))+'</p>':'')+(r.cases||[]).map(function(c){return '<article class="ss-details"><h3>'+esc(c.name)+'</h3><details><summary>'+esc(T('wf.input'))+'</summary><pre class="wf-output">'+esc(c.input)+'</pre></details><div class="ss-eval-pair">'+outcome(c.baseline,'ev.baseline')+outcome(c.composition,'ev.composition')+'</div></article>';}).join('');
 var cancel=$('[data-cancel]',box);if(cancel)cancel.onclick=function(){cancel.disabled=true;api('/api/skill-set-evals/'+enc(r.id)+'/cancel',{method:'POST',body:{}}).then(function(){poll(++generation);}).catch(function(e){cancel.disabled=false;fail(e);});};
 $$('[data-run-log]',box).forEach(function(a){a.onclick=closeDrawer;});
 if(active)setTimeout(function(){poll(gen);},1500);else history();
@@ -3501,7 +3507,7 @@ var active=r.status==='queued'||r.status==='running',box=$('#dep-result',panel);
 $('#dep-stop',panel).classList.toggle('hidden',!active);
 var log=$('#dep-log',panel);log.classList.remove('hidden');log.href='#/runs/'+enc(r.child_run_id||current);log.onclick=closeDrawer;
 if(r.preflight)$('#dep-preflight',panel).innerHTML=preflightHTML(r.preflight);
-box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>':r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+dependencyFindingHTML(r.report.findings):'<p class="notice bad">'+esc(r.error||T('wf.status_'+r.status))+'</p>';
+box.innerHTML=active?'<p>'+ic('spinner','sm')+esc(T('dep.analyzing'))+'</p>':r.report?'<p class="dep-summary">'+esc(r.report.summary)+'</p>'+dependencyFindingHTML(r.report.findings):'<p class="notice bad">'+esc(runErrText(r.error_info,r.error)||T('wf.status_'+r.status))+'</p>';
 if(!active)busy(false);return active;
 }
 function poll(gen){if(gen!==generation||!document.contains(panel))return;api('/api/dependencies/check/'+enc(current)).then(function(r){if(gen!==generation||!document.contains(panel))return;if(present(r))setTimeout(function(){poll(gen);},1500);}).catch(function(e){if(document.contains(panel)){$('#dep-result',panel).textContent=e.message;busy(false);}});}
@@ -6651,7 +6657,7 @@ costCalcHtml(r)+contextPlanHtml(r)+costPolicySnapshotHtml(r)+
 '<section class="rw-panel card" id="rw-log" role="tabpanel" aria-labelledby="rw-tab-log"><div class="card-head"><span class="ico">'+ic("terminal")+'</span><h2>'+esc(T("rd.log"))+'</h2><span class="link" id="live-ind">'+(live?'<span class="live">'+esc(T("rd.live"))+"</span>":'<span class="muted">'+esc(T("rd.finished"))+"</span>")+'</span></div><div id="lv"></div></section>'+runChatHtml(r)+'</div>'+
 '<aside class="rw-inspector" id="rd-inspector" aria-label="'+esc(T("rw.inspector"))+'" hidden><section><div class="card-head rd-head"><h3>'+esc(T("rw.run_snapshot"))+"</h3>"+idChip(T("rd.run_id"),r.id)+'</div><dl class="kv"><dt>'+esc(T("col.task"))+"</dt><dd>"+(r.task_id?'<a href="#/tasks/'+enc(r.task_id)+'">'+esc(r.task_name)+"</a>":esc(T("run.adhoc")))+"</dd>"+
 (r.version_no?'<dt>'+esc(T("rw.run_version"))+'</dt><dd>v'+esc(r.version_no)+'</dd>':'')+
-runSkillKv(r)+"<dt>"+esc(T("f.provider"))+"</dt><dd>"+esc(r.provider||"—")+"</dd><dt>"+esc(T("f.model"))+"</dt><dd>"+esc(r.model||"—")+"</dd>"+runPromptHtml(r)+(r.error?"<dt>"+esc(T("rd.error"))+'</dt><dd class="err">'+esc(runErr(r.error))+"</dd>":"")+"</dl></section>"+
+runSkillKv(r)+"<dt>"+esc(T("f.provider"))+"</dt><dd>"+esc(r.provider||"—")+"</dd><dt>"+esc(T("f.model"))+"</dt><dd>"+esc(r.model||"—")+"</dd>"+runPromptHtml(r)+(r.error?"<dt>"+esc(T("rd.error"))+'</dt><dd class="err">'+esc(runErrText(r.error_info,r.error))+"</dd>":"")+"</dl></section>"+
 (r.task_id?'<section id="rw-current-task"><h3>'+esc(T("rw.current_task"))+'</h3>'+skeleton("list")+'</section>':'')+'</aside></div></div>',
 "runs",[[T("nav.runs"),"#/runs"],[runTitle(r)]]);
 bumpIdle();
@@ -7150,7 +7156,7 @@ if(ok)head+='<a class="icon-btn sm" href="#/runs/'+enc(t.run_id)+'" aria-label="
 head+="</div>";
 var body=busy?'<div class="log rc-live" data-rc-live="'+esc(t.run_id||"")+'" tabindex="0" aria-label="'+esc(T("rd.log"))+'"></div>':
 (t.answer?'<div class="rc-a-body md" tabindex="0">'+mdHtml(t.answer,null)+"</div>":"")+
-(t.error&&t.status!=="succeeded"?'<p class="rc-a-err">'+esc(runErr(t.error))+"</p>":"")+
+(t.error&&t.status!=="succeeded"?'<p class="rc-a-err">'+esc(runErrText(t.error_info,t.error))+"</p>":"")+
 (!t.answer&&!t.error&&t.status?'<p class="rc-a-err muted">'+esc(T("rw.answer_missing"))+"</p>":"");
 return '<article class="rc-turn" data-turn="'+t.index+'"><div class="rc-q"><div class="rc-bubble" data-tip="'+esc(when(t.created_at))+'">'+esc(t.message)+"</div></div>"+
 '<div class="rc-a'+(busy?" busy":"")+'">'+head+body+"</div></article>";

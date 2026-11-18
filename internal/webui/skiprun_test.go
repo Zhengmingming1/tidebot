@@ -16,7 +16,7 @@ func TestSkippedRunUI(t *testing.T) {
 		`if (/^skipped: task paused/.test(msg)) return T("rd.err_skip_paused");`,
 		`var b = /^skipped: budget blocked: (.*)$/.exec(msg);`,
 		`if (b) return T(/ cap held by \d+ running /.test(b[1]) ? "rd.err_skip_held" : "rd.err_skip_budget", { why: budgetWhy(b[1]) });`,
-		`esc(runErr(r.error))`,
+		`esc(runErrText(r.error_info, r.error))`,
 		`function budgetWhy(d) {`,
 		`statusPill(r.status, r.queue_pos, r.error)`,
 		`(st === "skipped" || st === "canceled") && err ? ' data-tip="' + esc(runErr(err))`,

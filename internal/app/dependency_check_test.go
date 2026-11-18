@@ -201,7 +201,7 @@ func TestDependencyCheckAsyncRunAndReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err = a.dependencyCheckStatus(ctx, rid)
-	if err != nil || status.Status != "failed" || status.Error != "报告格式不符合要求" || status.Report != nil {
+	if err != nil || status.Status != "failed" || status.Error != "dependency report is invalid" || status.Report != nil {
 		t.Fatalf("malformed report %+v %v", status, err)
 	}
 	if err = a.Store.InsertRun(ctx, db.Run{ID: "run_other", Status: "succeeded", TriggerKind: "quick", Prompt: prompt}); err != nil {
