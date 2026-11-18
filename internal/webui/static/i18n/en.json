@@ -984,6 +984,8 @@
   "id.copy": "Copy {l}",
   "list.sep": ", ",
   "td.view_all": "View all",
+  "td.node_runs": "Node runs",
+  "td.wf_runs": "Workflow runs",
   "td.workspace": "Workspace",
   "tf.bad_code": "That code didn't match or expired. Wait for the next one and try again.",
   "tf.bad_pw": "Wrong password",

@@ -247,6 +247,9 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg-sunk);padding:2p
 .mini-runs .d.run{background:var(--info);animation:pulse 1.2s infinite;}
 .mini-runs strong{display:block;font-weight:600;}
 .mini-runs small{color:var(--text-3);font-size:12px;}
+.td-wf-runs{margin-bottom:8px;}
+.td-wf-runs h3,.td-node-runs h3{margin:0 0 8px;font-size:13px;font-weight:600;}
+.td-node-runs{margin-top:16px;}
 .kv{display:grid;grid-template-columns:140px minmax(0,1fr);gap:12px var(--s2);font-size:13px;margin:0;}
 .kv dt{color:var(--text-3);}
 .kv dd{margin:0;min-width:0;overflow-wrap:anywhere;}

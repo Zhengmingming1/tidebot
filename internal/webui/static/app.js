@@ -2801,7 +2801,38 @@ return '<div class="req-item'+(expired||i.status==="rejected"?" expired":"")+'">
 "</div></div></div>";
 }).join("");
 }
-function taskTab(tab,tk,items,vers,extra){
+function wfRunDuration(r){
+if(r.status==="running"&&r.started_at)return dur(Date.now()-new Date(r.started_at).getTime());
+if(r.started_at&&r.finished_at){
+var ms=new Date(r.finished_at).getTime()-new Date(r.started_at).getTime();
+if(isFinite(ms)&&ms>=0)return dur(ms);
+}
+return "—";
+}
+function wfRunDot(st){
+return st==="succeeded"?"":(st==="running"||st==="queued")?"run":"bad";
+}
+function taskShowsWfRuns(tk,wfRuns){
+return!!(tk&&tk.workflow)||!!(wfRuns&&wfRuns.length);
+}
+function wfRunName(r){
+return(r.snapshot&&r.snapshot.name)||T("wf.execution");
+}
+function taskWfMini(wfRuns){
+if(!wfRuns||!wfRuns.length)return emptyState("runs",T("wf.no_runs"),"");
+return '<ul class="mini-runs">'+wfRuns.map(function(x){
+return '<li data-href="#/workflow-runs/'+enc(x.id)+'"><span class="d '+wfRunDot(x.status)+'"></span><div><strong>'+esc(wfRunName(x))+(x.workflow_version?" v"+esc(x.workflow_version):"")+"</strong><small>"+esc(when(x.created_at))+"</small></div>"+wfStatus(x.status)+'<span class="muted">'+esc(wfRunDuration(x))+"</span></li>";
+}).join("")+"</ul>";
+}
+function taskWfTable(wfRuns){
+if(!wfRuns||!wfRuns.length)return '<p class="muted">'+esc(T("wf.no_runs"))+"</p>";
+return '<table class="table"><thead><tr><th>'+esc(T("td.wf_runs"))+"</th><th>"+esc(T("col.status"))+"</th><th>"+esc(T("col.started"))+'</th><th class="c-opt">'+esc(T("col.duration"))+"</th></tr></thead><tbody>"+
+wfRuns.map(function(r){
+return '<tr class="click" data-href="#/workflow-runs/'+enc(r.id)+'"><td><div class="cell-main"><span class="ico" data-hue="'+iconHue("workflows")+'">'+ic("workflows","sm")+'</span><div><a class="row-link" href="#/workflow-runs/'+enc(r.id)+'"><strong class="ell">'+esc(wfRunName(r))+'</strong></a><small class="ell">v'+esc(r.workflow_version)+(r.provider?" · "+esc(r.provider):"")+"</small></div></div></td>"+
+"<td>"+wfStatus(r.status)+'</td><td class="nowrap">'+esc(when(r.started_at||r.created_at))+'</td><td class="nowrap c-opt">'+esc(wfRunDuration(r))+"</td></tr>";
+}).join("")+"</tbody></table>";
+}
+function taskTab(tab,tk,items,vers,extra,wfRuns){
 if(tab==="thread"){
 return '<div class="thread scroll" id="thread">'+threadHtml(items,tk)+"</div>"+
 (items.some(function(i){return i.status==="pending";})?'<div class="req-bar" id="req-bar" role="region" aria-label="'+esc(T("req.bar"))+'"><span id="rb-n"></span><span class="grow"></span><button class="btn sm ghost" id="rb-prev">'+esc(T("req.preview_all"))+'</button><button class="btn sm danger" id="rb-rej">'+esc(T("req.reject_sel"))+'</button><button class="btn sm ok" id="rb-ok"></button></div>':"")+
@@ -2821,7 +2852,11 @@ return '<div class="thread"><dl class="kv ov">'+
 '<button type="button" class="icon-btn sm" id="ws-copy" data-tip="'+esc(T("ws.copy"))+'" aria-label="'+esc(T("ws.copy"))+'">'+ic("copy","sm")+"</button>"+
 '<button type="button" class="icon-btn sm hidden" id="ws-open" aria-label="">'+ic("folder","sm")+"</button>":'<span class="muted">—</span>')+"</dd></dl></div>";
 }
-if(tab==="runs")return '<div class="thread flush-t">'+(extra&&extra.length?runsTable(extra):emptyState("runs",T("runs.none"),""))+"</div>";
+if(tab==="runs"){
+var nodes=extra&&extra.length?runsTable(extra):emptyState("runs",T("runs.none"),"");
+if(!taskShowsWfRuns(tk,wfRuns))return '<div class="thread flush-t">'+nodes+"</div>";
+return '<div class="thread flush-t"><div class="td-wf-runs"><h3>'+esc(T("td.wf_runs"))+"</h3>"+taskWfTable(wfRuns)+'</div><div class="td-node-runs"><h3>'+esc(T("td.node_runs"))+"</h3>"+nodes+"</div></div>";
+}
 return '<div class="thread"><table class="table"><thead><tr><th>'+esc(T("col.version"))+"</th><th>"+esc(T("col.source"))+"</th><th>"+esc(T("col.note"))+"</th><th>"+esc(T("col.created"))+'</th><th></th></tr></thead><tbody>'+
 vers.versions.slice().reverse().map(function(v){
 var cur=v.id===vers.current;
@@ -2856,7 +2891,8 @@ el.addEventListener("keydown",function(e){if(e.key==="Enter"&&!el.classList.cont
 }
 function taskDetailPaths(id,tab){
 var base="/api/tasks/"+enc(id);
-return[base,base+"/amendments",base+"/versions",base+"/runs?limit="+(tab==="runs"?50:6)];
+var lim=tab==="runs"?50:6;
+return[base,base+"/amendments",base+"/versions",base+"/runs?limit="+lim,base+"/workflow-runs?limit="+lim];
 }
 var ovKeep=null;
 var taskRailView={q:"",status:"",open:null,off:null};
@@ -2933,11 +2969,12 @@ tab=tab||"overview";
 var base="/api/tasks/"+enc(id);
 return Promise.all(taskDetailPaths(id,tab).map(function(u){return api(u);})).then(function(r){
 var shown=JSON.parse(JSON.stringify(r));
-var t=r[0],items=r[1]||[],vers=r[2],runs=r[3]||[];
+var t=r[0],items=r[1]||[],vers=r[2],runs=r[3]||[],wfRuns=r[4]||[];
 var mini=runs.length?'<ul class="mini-runs">'+runs.map(function(x){
 var d=x.status==="succeeded"?"":(x.status==="running"||x.status==="queued")?"run":"bad";
 return '<li data-href="#/runs/'+enc(x.id)+'"><span class="d '+d+'"></span><div><strong>'+(x.version_no?"v"+esc(x.version_no):"#"+esc(shortId(x.id)))+"</strong><small>"+esc(when(x.created_at))+'</small></div><span class="muted">'+esc(dur(x.duration_ms))+"</span><strong>"+esc(usd(x.cost_usd,3))+"</strong></li>";
 }).join("")+"</ul>":emptyState("runs",T("runs.none"),"");
+var wfCard=taskShowsWfRuns(t,wfRuns)?'<section class="card"><div class="card-head"><span class="ico">'+ic("workflows")+'</span><h3>'+esc(T("td.wf_runs"))+'</h3><a class="link" href="#/tasks/'+enc(t.id)+'/runs">'+esc(T("td.view_all"))+"</a></div>"+taskWfMini(wfRuns)+"</section>":"";
 var tabs=[["overview",T("td.tab_overview")],["thread",T("td.tab_req")],["runs",T("nav.runs")],["history",T("td.tab_versions")]];
 mount('<div class="task-workspace">'+taskWorkspaceHtml()+'<div class="task-workspace-detail"><div class="grid g-detail">'+
 '<section class="card task-main-card'+(tab==="thread"?" task-thread-card":"")+'"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="'+esc(T("ie.hint"))+'">'+esc(t.name)+"</h1>"+taskPill(t.status,t)+idChip(T("td.task_id"),t.id)+costModeBadge(t.cost_control_mode)+"</div><p>"+esc(t.goal||t.prompt)+"</p>"+
@@ -2946,8 +2983,9 @@ mount('<div class="task-workspace">'+taskWorkspaceHtml()+'<div class="task-works
 '<div class="row-actions">'+(t.status==="active"?'<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">'+ic("pause","sm")+esc(T("td.pause"))+ic("chevDown","sm")+"</button>":'<button class="btn" id="t-toggle" data-act="resume">'+ic("play","sm")+esc(T("td.resume"))+"</button>")+
 '<button class="btn" id="t-edit">'+ic("doc","sm")+esc(T("btn.edit"))+'</button><button class="icon-btn" id="t-dup" data-tip="'+esc(T("td.dup_tip"))+'" aria-label="'+esc(T("td.dup"))+'">'+ic("copy","sm")+'</button><button class="icon-btn danger-text" id="t-del" data-tip="'+esc(T("td.delete"))+'" aria-label="'+esc(T("td.delete"))+'">'+ic("trash","sm")+'</button><button class="btn primary" id="t-run">'+ic("play","sm")+esc(T("td.run_now"))+"</button></div></div>"+pauseNotice(t)+
 '<nav class="tabs" aria-label="'+esc(T("nav.tasks"))+'">'+tabs.map(function(x){return '<a data-tab="'+x[0]+'" href="#/tasks/'+enc(id)+'/'+x[0]+'" class="'+(x[0]===tab?"active":"")+'"'+(x[0]===tab?' aria-current="page"':'')+'>'+esc(x[1])+(x[0]==="thread"&&items.some(function(i){return i.status==="pending";})?' <span class="pill info plain">'+items.filter(function(i){return i.status==="pending";}).length+"</span>":"")+"</a>";}).join("")+"</nav>"+
-taskTab(tab,t,items,vers,runs)+"</section>"+
+taskTab(tab,t,items,vers,runs,wfRuns)+"</section>"+
 '<div class="stack task-secondary">'+'<section class="card"><h3>'+esc(T("costmode.title"))+'</h3>'+costModeBadge(t.cost_control_mode)+'<p>'+esc(T("costmode."+(t.cost_control_mode==="bypass"?"warning":"global_hint")))+'</p><p class="hint">'+esc(T("costmode.next_start"))+'</p></section>'+'<section class="card"><div class="card-head"><span class="ico">'+ic("branch")+'</span><h3>'+esc(T("ver.tree"))+'</h3><span class="link muted">'+esc(T("ver.n_current",{n:t.version_no}))+"</span></div>"+versionTree(vers.versions,vers.current)+'<p class="hint mt">'+esc(T("ver.hint"))+"</p></section>"+
+wfCard+
 '<section class="card"><div class="card-head"><span class="ico">'+ic("runs")+'</span><h3>'+esc(T("home.recent"))+'</h3><a class="link" href="#/runs?task='+enc(t.id)+'">'+esc(T("td.view_all"))+"</a></div>"+mini+"</section></div></div></div></div>",
 "tasks",[[T("nav.tasks"),"#/tasks"],[t.name]]);
 var refreshTaskRail=wireTaskWorkspace(id,tab);
@@ -3069,7 +3107,7 @@ if(!v)return;
 comp.querySelector("button").disabled=true;
 api(base+"/amendments",{method:"POST",body:{utterance:v}}).then(function(){draftClear("amendment_"+id);reload();}).catch(function(err){fail(err);comp.querySelector("button").disabled=false;});
 });
-var paths=taskDetailPaths(id,tab),going=runs.some(function(x){return x.status==="running"||x.status==="queued";});
+var paths=taskDetailPaths(id,tab),going=runs.some(function(x){return x.status==="running"||x.status==="queued";})||wfRuns.some(function(x){return x.status==="running"||x.status==="queued";});
 var check=liveFollow(function(){
 var detail=Promise.all(paths.map(function(u){return apiRaw(u);})).catch(function(e){if(e&&e.status===404)return{gone:true};throw e;});
 return Promise.all([detail,refreshTaskRail()]).then(function(data){return data[0];});

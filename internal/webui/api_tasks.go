@@ -208,6 +208,20 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, runs)
 		return
+	case "workflow-runs":
+		// Node runs are listed above; this is the workflow execution itself
+		// (a run can finish or fail before any node run exists).
+		if s.deps.Workflows == nil {
+			writeJSON(w, 200, []workflowRunDTO{})
+			return
+		}
+		list, err := s.deps.Workflows.ListRunsByTask(ctx, id, limitParam(r, 10, 100))
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, s.workflowRunViews(ctx, list))
+		return
 	case "run":
 		auth.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || s.deps.RunTask == nil {

@@ -293,13 +293,37 @@ func (s *Service) GetRun(ctx context.Context, rid string) (Run, error) {
 func (s *Service) ListRuns(ctx context.Context, wid string) ([]Run, error) {
 	// History is a summary; large node outputs and complete snapshots belong to
 	// GetRun, otherwise polling 100 graphs could repeatedly transfer hundreds of MB.
+	return s.listRuns(ctx, strings.TrimSpace(wid), "", 100)
+}
+
+// ListRunsByTask returns recent executions started by this task. An empty
+// taskID yields an empty list (it is not a request for every manual run).
+func (s *Service) ListRunsByTask(ctx context.Context, taskID string, limit int) ([]Run, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return []Run{}, nil
+	}
+	return s.listRuns(ctx, "", taskID, limit)
+}
+
+func (s *Service) listRuns(ctx context.Context, wid, taskID string, limit int) ([]Run, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
 	q := `SELECT id,workflow_id,workflow_version,status,substr(input,1,240),provider,error,created_at,started_at,finished_at,task_id,json_extract(snapshot_json,'$.name') FROM workflow_runs`
 	args := []any{}
-	if wid != "" {
+	if taskID != "" {
+		q += ` WHERE task_id=?`
+		args = append(args, taskID)
+	} else if wid != "" {
 		q += ` WHERE workflow_id=?`
 		args = append(args, wid)
 	}
-	q += ` ORDER BY created_at DESC,id DESC LIMIT 100`
+	q += ` ORDER BY created_at DESC,id DESC LIMIT ?`
+	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err

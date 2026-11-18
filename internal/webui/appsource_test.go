@@ -88,3 +88,27 @@ func TestWebUICSSMinify(t *testing.T) {
 		t.Fatalf("shipped styles.css is not smaller than the source: %d vs %d", len(got), len(src))
 	}
 }
+
+// TestWebUIBundleParses: the shipped bundle (and the source assembly) must be
+// valid JavaScript. String-inspect tests do not catch quote mistakes that only
+// show up after minify, which would leave the WebUI stuck on the splash.
+func TestWebUIBundleParses(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	check := func(path string) {
+		t.Helper()
+		cmd := exec.Command(node, "--check", path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("%s is not valid JavaScript:\n%s", path, out)
+		}
+	}
+	check(filepath.Join("static", "app.js"))
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "app.js")
+	if err := os.WriteFile(srcPath, []byte(appJSSource(t)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(srcPath)
+}

@@ -18,7 +18,7 @@ func TestLiveFollowStableReads(t *testing.T) {
 	if id == "" {
 		t.Fatalf("create %v", tk)
 	}
-	paths := []string{"/api/tasks", "/api/tasks/" + id, "/api/tasks/" + id + "/amendments", "/api/tasks/" + id + "/versions", "/api/tasks/" + id + "/runs?limit=6"}
+	paths := []string{"/api/tasks", "/api/tasks/" + id, "/api/tasks/" + id + "/amendments", "/api/tasks/" + id + "/versions", "/api/tasks/" + id + "/runs?limit=6", "/api/tasks/" + id + "/workflow-runs?limit=6"}
 	read := func() []string {
 		var out []string
 		for _, p := range paths {

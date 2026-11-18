@@ -74,7 +74,7 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   var T = "#/tasks/t%201", tid = "/api/tasks/t%201";
   if (keys("#/") !== "/api/overview | /api/dashboard") bad.push("home: " + keys("#/"));
   if (keys("#/tasks") !== "/api/tasks") bad.push("tasks: " + keys("#/tasks"));
-  if (keys(T) !== [tid, tid + "/amendments", tid + "/versions", tid + "/runs?limit=6"].join(" | ")) bad.push("task: " + keys(T));
+  if (keys(T) !== [tid, tid + "/amendments", tid + "/versions", tid + "/runs?limit=6", tid + "/workflow-runs?limit=6"].join(" | ")) bad.push("task: " + keys(T));
   if (keys(T + "/runs").indexOf("runs?limit=50") < 0) bad.push("task runs tab: " + keys(T + "/runs"));
   if (keys("#/runs/r1") !== "/api/runs/r1") bad.push("run: " + keys("#/runs/r1"));
   if (keys("#/skills/s1") !== '/api/skills | /api/skills/s1/versions | rpc:skills.optimize_settings:{"skill_id":"s1"} | rpc:skills.proposals:{"skill_id":"s1"} | rpc:skills.compare:{"skill_id":"s1"}') bad.push("skill: " + keys("#/skills/s1"));
@@ -88,10 +88,10 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   if (calls.length) bad.push("guards still fetched: " + calls);
 
   // Prefetch, then the page render uses it: no second request.
-  if (prefetchRoute(T) !== 4) bad.push("task prefetch count");
+  if (prefetchRoute(T) !== 5) bad.push("task prefetch count");
   if (prefetchRoute(T) !== 0) bad.push("in-flight prefetch repeated");
   await tick();
-  if (calls.length !== 4 || calls.some(function (c) { return c.indexOf(" quiet") < 0; })) bad.push("prefetch calls: " + calls);
+  if (calls.length !== 5 || calls.some(function (c) { return c.indexOf(" quiet") < 0; })) bad.push("prefetch calls: " + calls);
   calls = []; swr.on = true; swr.soft = false;
   var got = await Promise.all(taskDetailPaths("t 1", "overview").map(function (u) { return api(u); }));
   swr.on = false;

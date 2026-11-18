@@ -984,6 +984,8 @@
   "id.copy": "复制{l}",
   "list.sep": "、",
   "td.view_all": "查看全部",
+  "td.node_runs": "节点运行",
+  "td.wf_runs": "工作流运行",
   "td.workspace": "工作目录",
   "tf.bad_code": "验证码不对，或已过期。等下一个码再试。",
   "tf.bad_pw": "密码不对",
