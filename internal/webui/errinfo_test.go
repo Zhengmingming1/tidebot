@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/policy"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/workflow"
@@ -36,6 +37,12 @@ func TestErrInfoCatalogTranslated(t *testing.T) {
 	for _, code := range repositoryErrorCodes {
 		if codes[code] != nil {
 			t.Errorf("duplicate typed error %s", code)
+		}
+		codes[code] = map[string]bool{}
+	}
+	for _, code := range classifiedRunCodes {
+		if codes[code] != nil {
+			t.Errorf("duplicate classified error %s", code)
 		}
 		codes[code] = map[string]bool{}
 	}
@@ -210,6 +217,95 @@ func TestErrInfoRealErrors(t *testing.T) {
 			t.Errorf("unknown %q → %+v", m[:min(len(m), 20)], info)
 		}
 	}
+
+	// Leftover provider text, including the inner detail of a stored sub-run, uses
+	// policy.Classify. Stable catalog messages still win over the fallback.
+	info = explainError("node a: node run failed: claude exited with status 1 after rate limit")
+	if info == nil || info.Code != "wf_node" || info.Cause == nil || info.Cause.Code != "wf_child_run" ||
+		info.Cause.Cause == nil || info.Cause.Cause.Code != "run_rate_limit" || info.Cause.Params["detail"] != "claude exited with status 1 after rate limit" {
+		t.Errorf("classified nested %+v", info)
+	}
+	for _, c := range []struct{ msg, code string }{
+		{"API Error: 429 rate_limit_error", "run_rate_limit"},
+		{"rate limited: quota exhausted", "run_rate_limit"},
+		{"API overloaded", "run_overloaded"},
+		{"authentication_failed: 401 Unauthorized", "run_authentication_failed"},
+		{"invalid api key", "run_authentication_failed"},
+		{"billing: credit balance too low", "run_billing_error"},
+		{"daily budget exceeded", "run_budget"},
+		{"invalid_request: max tokens", "run_invalid_request"},
+		{"blocked by guard", "run_danger_blocked"},
+		{"acceptance checks failed", "run_acceptance_failed"},
+		{"API server_error 500", "run_server_error"},
+		{"dial tcp: connection refused", "run_network"},
+		{"claude: exit status 1", "run_process_exit"},
+		{"stopped: by user", "run_stopped"},
+	} {
+		got := explainError(c.msg)
+		if got == nil || got.Code != c.code {
+			t.Errorf("%q → %+v, want %s", c.msg, got, c.code)
+		}
+	}
+}
+
+// TestClassifiedRunCodesCoverPolicy: every class policy.Classify can return
+// (except ok/unknown) has a display-layer code, and the list has no extras.
+func TestClassifiedRunCodesCoverPolicy(t *testing.T) {
+	fixtures := map[string]string{
+		"budget exceeded":       "budget",
+		"authentication_failed": "authentication_failed",
+		"401 unauthorized":      "authentication_failed",
+		"invalid api key":       "authentication_failed",
+		"billing error":         "billing_error",
+		"invalid_request":       "invalid_request",
+		"invalid request":       "invalid_request",
+		"blocked by guard":      "danger_blocked",
+		"dangerous command":     "danger_blocked",
+		"acceptance failed":     "acceptance_failed",
+		"rate_limit_error":      "rate_limit",
+		"rate limit":            "rate_limit",
+		"429":                   "rate_limit",
+		"API overloaded":        "overloaded",
+		"529":                   "overloaded",
+		"server_error":          "server_error",
+		"500":                   "server_error",
+		"502":                   "server_error",
+		"503":                   "server_error",
+		"connection refused":    "network",
+		"network unreachable":   "network",
+		"unexpected EOF":        "network",
+		"i/o timeout":           "network",
+		"exit status 1":         "process_exit",
+		"signal: killed":        "process_exit",
+		"":                      "ok",
+		"claude exited 1":       "unknown",
+	}
+	want := map[string]bool{}
+	for msg, class := range fixtures {
+		got, _ := policy.Classify(msg)
+		if got != class {
+			t.Errorf("Classify(%q)=%q, want %q", msg, got, class)
+			continue
+		}
+		if class != "ok" && class != "unknown" {
+			want["run_"+class] = true
+		}
+	}
+	got := map[string]bool{}
+	for _, code := range classifiedRunCodes {
+		if got[code] {
+			t.Errorf("duplicate classified code %s", code)
+		}
+		got[code] = true
+		if !want[code] {
+			t.Errorf("classifiedRunCodes has %s, but no Classify fixture produces it", code)
+		}
+	}
+	for code := range want {
+		if !got[code] {
+			t.Errorf("Classify class %s has no classifiedRunCodes entry", code)
+		}
+	}
 }
 
 // TestWorkflowAPIErrorInfo: refusals and stored node errors carry error_info, and the
@@ -343,6 +439,8 @@ eq(errInfoText({ code: "wf_template_ref", params: { node: "a", ref: "{node}" } }
 eq(errInfoText({ code: "ev_budget_exhausted" }, "Evaluation budget exhausted."), "评测预算已用完。");
 eq(errInfoText({ code: "dep_report_invalid" }, "dependency report is invalid"), "依赖检查报告格式不符合要求。");
 eq(errInfoText({ code: "ev_dependency", params: { name: "curl", status: "missing", detail: "not on PATH" } }, "raw"), "评测依赖 curl 当前为「缺失」：not on PATH");
+eq(errInfoText({ code: "wf_node", params: { node: "a", detail: "node run failed: claude exited with status 1 after rate limit" }, cause: { code: "wf_child_run", params: { status: "failed", detail: "claude exited with status 1 after rate limit" }, cause: { code: "run_rate_limit" } } }, "raw"), "步骤 a：步骤运行失败：限流，稍后重试。");
+eq(errInfoText({ code: "run_rate_limit" }, "API Error: 429 rate_limit_error"), "限流，稍后重试。");
 if (bad.length) { console.error(bad.join("\n")); process.exitCode = 1; }
 `, map[string]string{"SECTION": js[start:end], "DICT": string(zh)})
 }
@@ -448,9 +546,17 @@ func TestRunAPIErrorInfo(t *testing.T) {
 	if _, err := c.s.deps.DB.Exec(`INSERT INTO runs(id,status,trigger_kind,prompt,error_message,created_at,started_at,finished_at) VALUES('run_ei','canceled','quick','p','stopped: by user',?,?,?)`, now, now, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := c.s.deps.DB.Exec(`INSERT INTO runs(id,status,trigger_kind,prompt,error_message,created_at,started_at,finished_at) VALUES('run_ei_rl','failed','quick','p','API Error: 429 rate_limit_error',?,?,?)`, now, now, now); err != nil {
+		t.Fatal(err)
+	}
 	code, out := c.json(http.MethodGet, "/api/runs/run_ei", nil)
 	info, _ := out["error_info"].(map[string]any)
 	if code != 200 || out["error"] != "stopped: by user" || info["code"] != "run_stopped" {
 		t.Fatalf("run error_info %d %v", code, out)
+	}
+	code, out = c.json(http.MethodGet, "/api/runs/run_ei_rl", nil)
+	info, _ = out["error_info"].(map[string]any)
+	if code != 200 || out["error"] != "API Error: 429 rate_limit_error" || info["code"] != "run_rate_limit" {
+		t.Fatalf("classified run error_info %d %v", code, out)
 	}
 }

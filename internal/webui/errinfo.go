@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/Zhengmingming1/tidebot/internal/policy"
 )
 
 // errInfo is a stable code (+ values) for a server error, so the page can show it in
@@ -198,6 +200,38 @@ func explainDepth(msg string, depth int) *errInfo {
 	}
 	if info := explainDepText(msg); info != nil {
 		return info
+	}
+	return explainClassified(msg)
+}
+
+// classifiedRunCodes are display-layer codes for leftover provider text after
+// catalog patterns don't match. policy.Classify decides the class; "ok" and
+// "unknown" stay uncoded so the raw text is shown. Historical run and
+// workflow-node errors are classified the same way, without a DB migration.
+var classifiedRunCodes = []string{
+	"run_acceptance_failed",
+	"run_authentication_failed",
+	"run_billing_error",
+	"run_budget",
+	"run_danger_blocked",
+	"run_invalid_request",
+	"run_network",
+	"run_overloaded",
+	"run_process_exit",
+	"run_rate_limit",
+	"run_server_error",
+}
+
+func explainClassified(msg string) *errInfo {
+	class, _ := policy.Classify(msg)
+	if class == "" || class == "ok" || class == "unknown" {
+		return nil
+	}
+	code := "run_" + class
+	for _, known := range classifiedRunCodes {
+		if known == code {
+			return &errInfo{Code: code}
+		}
 	}
 	return nil
 }
