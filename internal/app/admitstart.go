@@ -34,10 +34,21 @@ func retryableStartErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Permanent refusals must not be retried, even if the message mentions a
+	// locked database (a pending ledger write often failed with SQLITE_BUSY).
+	if errors.Is(err, errAccountingPending) || errors.Is(err, errBudgetHeld) || errors.Is(err, errTaskInactive) {
+		return false
+	}
+	if errors.Is(err, runner.ErrStoppedByUser) || errors.Is(err, runner.ErrShuttingDown) || errors.Is(err, runner.ErrSkipped) {
+		return false
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return true
 	}
 	s := err.Error()
+	if strings.Contains(s, "budget blocked") {
+		return false
+	}
 	return strings.Contains(s, "database is locked") || strings.Contains(s, "SQLITE_BUSY") || strings.Contains(s, "SQLITE_LOCKED")
 }
 
@@ -83,6 +94,22 @@ func (a *App) retryStartOp(runCtx context.Context, what, id string, fn func(cont
 			pause *= 2
 		}
 	}
+}
+
+// admitRunRetry is admitRun with the same short-timeout retry used at launch.
+// RunPromptEx's first check happens before a run row exists, so a busy database
+// or a canceled caller context used to fail the request before it was even
+// queued. Permanent budget or quota refusals are not retried. A user stop or
+// shutdown on ctx still aborts immediately.
+func (a *App) admitRunRetry(ctx context.Context, what, id, taskID, bucket string, prof provider.Profile, callerCap float64) (float64, *runner.CostControl, error) {
+	var runMax float64
+	var cc *runner.CostControl
+	err := a.retryStartOp(ctx, what, id, func(wctx context.Context) error {
+		var err error
+		runMax, cc, err = a.admitRun(wctx, taskID, bucket, prof, callerCap)
+		return err
+	})
+	return runMax, cc, err
 }
 
 // admitAtStart checks budgets and reserves them at actual launch. It must not

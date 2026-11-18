@@ -314,7 +314,10 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		bucket = cost.BucketProduction
 	}
 	callerCap := runCallerCap(opts)
-	runMax, cc, err := a.admitRun(ctx, opts.TaskID, bucket, prof, callerCap)
+	// Admit with a short independent timeout, retried while the database is
+	// busy. The caller context used to make this first check fail before a
+	// run row was even created. Permanent budget/quota refusals are not retried.
+	runMax, cc, err := a.admitRunRetry(ctx, "admit before queue", opts.TaskID, opts.TaskID, bucket, prof, callerCap)
 	if err != nil {
 		return runner.Result{}, err
 	}
@@ -442,13 +445,7 @@ func (a *App) RunPromptEx(ctx context.Context, opts runner.Options, providerName
 		if !a.taskStillRunnable(sctx, o.TaskID, o.TriggerKind) {
 			return errTaskInactive
 		}
-		var rm float64
-		var ncc *runner.CostControl
-		err := a.retryStartOp(sctx, "admit before start", o.RunID, func(wctx context.Context) error {
-			var err error
-			rm, ncc, err = a.admitRun(wctx, o.TaskID, bucket, prof, callerCap)
-			return err
-		})
+		rm, ncc, err := a.admitRunRetry(sctx, "admit before start", o.RunID, o.TaskID, bucket, prof, callerCap)
 		if err != nil {
 			return err
 		}
@@ -528,11 +525,20 @@ func (a *App) taskStillRunnable(ctx context.Context, taskID, trigger string) boo
 	return err != nil || t.Status == "active" // a read error must not drop the run
 }
 
+// admitRunHook is used by tests to inject a busy or permanent error into
+// admitRun. Production leaves it nil.
+var admitRunHook func() error
+
 // admitRun checks the budgets (global and task) and the provider quota, and
 // returns the per-run cap (display currency) with the cost control for the run.
 // A breach is logged, notified and (per the budget's action) pauses the task.
 // It runs when a run is asked for and again when a queued run gets its slot.
 func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider.Profile, callerCap float64) (float64, *runner.CostControl, error) {
+	if hook := admitRunHook; hook != nil {
+		if err := hook(); err != nil {
+			return 0, nil, err
+		}
+	}
 	if failure := a.accountingFailure.Load(); failure != nil {
 		return 0, nil, fmt.Errorf("%w: %s", errAccountingPending, *failure)
 	}

@@ -6798,3 +6798,26 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
 - 一个会话仍只能有一份草稿。
 - 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
+
+### 2026-11-18：开始运行前录取预算会重试，不再因数据库忙而在排队前直接失败（BUG）
+
+- **问题**（上一轮录取重试之后仍在）：`AtStart` / `BeforeStart` 的录取已改走短超时的独立 context 并在数据库忙时重试，但 `RunPromptEx` 入口第一次 `admitRun`（还没有运行行）仍使用调用方 context。数据库忙时这次检查失败，运行在排队前就被拒掉，不会留下运行记录。另：上一轮的 `retryableStartErr` 只看错误字符串是否包含 `database is locked`，而「记账未完成」（`errAccountingPending`）的说明里经常就带这句（正是账本写入遇到 SQLITE_BUSY 才挂起的），会被误当成可重试，最多拖约 2 分钟；定时运行等记账时本应立刻放弃并吸收后续触发，也可能会在解开后连跑多次。
+- **改法**：
+  - 第一次录取和排队后的 `BeforeStart` 复用同一套 `admitRunRetry`（短超时独立 context，最多约 2 分钟，与已有 `retryStartOp` 相同）。预算已满、配额用尽、记账未完成等永久性拒绝不重试，立刻返回，也不建运行行。用户主动停止或退出仍立即中止。
+  - 收紧 `retryableStartErr`：先按错误类型排除记账未完成、预算占用、任务已停、用户停止和退出，再看是否为数据库忙或超时。`AtStart` 的录取同样受益。
+  - 这一次录取只做检查，不占用预算。
+- 测试：`TestAdmitRunRetrySucceedsAndDoesNotHold`；`TestAdmitRunRetryRetriesBusyThenSucceeds`；`TestAdmitRunRetryBudgetBlockedIsNotRetried` / `TestAdmitRunRetryAccountingPendingIsNotRetried` / `TestAdmitRunRetryHonorsUserStop`；`TestRunPromptExFirstAdmitRetriesWhenDatabaseBusy`；`TestRunPromptExBudgetBlockedDoesNotQueue` / `TestRunPromptExFirstAdmitDoesNotRetryPermanentError` / `TestRunPromptExAccountingPendingDoesNotQueue` / `TestRunPromptExHonorsCanceledContextBeforeQueue`；更新 `TestRetryableStartErr`（说明里带 `database is locked` 的记账未完成不得重试）。`go test ./internal/app/`（整包）、`./internal/runner/` `./internal/cost/` `./internal/tasksvc/`、`go vet`（含 GOOS=windows/darwin）通过；上述测试 `go test -race -count=3` 通过。
+- 截图：未拍——改动在开始运行前的录取，界面上看不出差别。
+- 耗时：不是性能改动。成功路径仍是一次录取（约 0.2–0.5ms 量级），预算已满或记账未完成约 0.2ms 内返回，不会按重试窗口拖到 2 分钟。
+
+**心得**：启动前的第一次录取和真正启动时的录取是同一类数据库调用，不能绑在可能已经取消或即将到期的调用方 context 上。判断能不能重试要先看错误类型，不能只搜字符串：待记账的原因里写着「database is locked」，并不代表这次录取本身可以再试。
+
+**后续想法**：
+- 技能组合评估（`x.error`）和依赖检查（`r.error`）可能仍直接显示英文；运行页 `error_message` 可能仍缺 `error_info`。
+- 会话本身还没有推理强度选择器，只能沿用源运行的值；从空白会话存为任务、以及运行对话框新开一次运行，仍是「默认」。若要在会话或运行对话框里改强度，需要像权限档那样加一档设置。
+- 任务详情目前只列出节点运行（`runs.task_id`），没有工作流运行本身；若要在任务页看到整次工作流执行，可以按 `workflow_runs.task_id` 再列一栏。
+- `workflow_runs` 的按保留期清理其实在 2026-11-07 已经做了（已结束 90 天，软删工作流 7 天）；还没做的是把保留天数放到「设置 › 数据」里可配。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。

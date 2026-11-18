@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -296,10 +297,224 @@ func TestAdmitAtStartOnceRetryDoesNotDoubleHold(t *testing.T) {
 }
 
 func TestRetryableStartErr(t *testing.T) {
-	if retryableStartErr(nil) || retryableStartErr(errors.New("budget blocked: cap")) || retryableStartErr(errBudgetHeld) {
+	if retryableStartErr(nil) || retryableStartErr(errors.New("budget blocked: cap")) || retryableStartErr(errBudgetHeld) || retryableStartErr(errAccountingPending) || retryableStartErr(errTaskInactive) {
 		t.Fatal("permanent errors must not retry")
+	}
+	pendingBusy := fmt.Errorf("%w: cost ledger persistence failed for run_y: database is locked", errAccountingPending)
+	if retryableStartErr(pendingBusy) {
+		t.Fatal("pending ledger must not be retried as a busy database")
+	}
+	if retryableStartErr(fmt.Errorf("%w: %w", errBudgetHeld, errors.New("database is locked"))) {
+		t.Fatal("held budget must not be retried as a busy database")
 	}
 	if !retryableStartErr(context.DeadlineExceeded) || !retryableStartErr(context.Canceled) || !retryableStartErr(errors.New("database is locked")) {
 		t.Fatal("busy/timeout must retry")
+	}
+}
+
+func countAllRuns(t *testing.T, a *App) int {
+	t.Helper()
+	var n int
+	if err := a.DB.QueryRow(`SELECT count(*) FROM runs`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestAdmitRunRetrySucceedsAndDoesNotHold(t *testing.T) {
+	a := newTestApp(t)
+	withDayBudget(t, a, 10)
+	start := time.Now()
+	runMax, cc, err := a.admitRunRetry(context.Background(), "admit before queue", "", "", cost.BucketProduction, modeMeteredProfile(), 0)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc == nil || runMax <= 0 {
+		t.Fatalf("cap %v cost=%v", runMax, cc)
+	}
+	if heldCount(a) != 0 {
+		t.Fatalf("pre-queue admit must not hold budget: %d", heldCount(a))
+	}
+	t.Logf("admitRunRetry happy path %s", elapsed)
+}
+
+func TestAdmitRunRetryBudgetBlockedIsNotRetried(t *testing.T) {
+	a := newTestApp(t)
+	withDayBudget(t, a, 1)
+	if err := a.Cost.RecordEntry(context.Background(), cost.Entry{RunID: "spent-prequeue", Amount: 2, Currency: pricing.USD, Source: pricing.SourceClaude}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, _, err := a.admitRunRetry(context.Background(), "admit before queue", "", "", cost.BucketProduction, modeMeteredProfile(), 0)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "budget blocked") {
+		t.Fatalf("got %v", err)
+	}
+	if heldCount(a) != 0 {
+		t.Fatalf("hold leaked: %d", heldCount(a))
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("permanent refusal retried: %s", elapsed)
+	}
+	t.Logf("admitRunRetry budget blocked %s", elapsed)
+}
+
+func TestAdmitRunRetryHonorsUserStop(t *testing.T) {
+	a := newTestApp(t)
+	withDayBudget(t, a, 10)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(runner.ErrStoppedByUser)
+	if _, _, err := a.admitRunRetry(ctx, "admit before queue", "", "", cost.BucketProduction, modeMeteredProfile(), 0); !errors.Is(err, runner.ErrStoppedByUser) {
+		t.Fatalf("got %v", err)
+	}
+	if heldCount(a) != 0 {
+		t.Fatalf("hold leaked: %d", heldCount(a))
+	}
+}
+
+func TestRunPromptExBudgetBlockedDoesNotQueue(t *testing.T) {
+	a := newTestApp(t)
+	withDayBudget(t, a, 1)
+	if err := a.Cost.RecordEntry(context.Background(), cost.Entry{RunID: "spent-runprompt", Amount: 2, Currency: pricing.USD, Source: pricing.SourceClaude}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	res, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "must not start", TriggerKind: "manual"}, "anthropic", 0)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "budget blocked") {
+		t.Fatalf("got %+v %v", res, err)
+	}
+	if res.RunID != "" || countAllRuns(t, a) != 0 {
+		t.Fatalf("queued a run before admission: %+v count=%d", res, countAllRuns(t, a))
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("permanent refusal retried: %s", elapsed)
+	}
+}
+
+func TestRunPromptExHonorsCanceledContextBeforeQueue(t *testing.T) {
+	a := newTestApp(t)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(runner.ErrStoppedByUser)
+	res, err := a.RunPromptEx(ctx, runner.Options{Prompt: "must not start", TriggerKind: "manual"}, "anthropic", 0)
+	if !errors.Is(err, runner.ErrStoppedByUser) {
+		t.Fatalf("got %+v %v", res, err)
+	}
+	if res.RunID != "" || countAllRuns(t, a) != 0 {
+		t.Fatalf("queued a run after stop: %+v count=%d", res, countAllRuns(t, a))
+	}
+}
+
+func TestAdmitRunRetryRetriesBusyThenSucceeds(t *testing.T) {
+	shortWriteRetries(t)
+	a := newTestApp(t)
+	withDayBudget(t, a, 10)
+	var n atomic.Int32
+	admitRunHook = func() error {
+		if n.Add(1) == 1 {
+			return errors.New("database is locked")
+		}
+		return nil
+	}
+	t.Cleanup(func() { admitRunHook = nil })
+	start := time.Now()
+	runMax, cc, err := a.admitRunRetry(context.Background(), "admit before queue", "", "", cost.BucketProduction, modeMeteredProfile(), 0)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Load() != 2 || cc == nil || runMax <= 0 {
+		t.Fatalf("attempts %d cap %v cost=%v", n.Load(), runMax, cc)
+	}
+	if heldCount(a) != 0 {
+		t.Fatalf("pre-queue admit must not hold budget: %d", heldCount(a))
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("retry took too long: %s", elapsed)
+	}
+}
+
+func TestRunPromptExFirstAdmitRetriesWhenDatabaseBusy(t *testing.T) {
+	shortWriteRetries(t)
+	a := newTestApp(t)
+	withDayBudget(t, a, 10)
+	var n atomic.Int32
+	admitRunHook = func() error {
+		if n.Add(1) == 1 {
+			return errors.New("database is locked")
+		}
+		return nil
+	}
+	t.Cleanup(func() { admitRunHook = nil })
+	res, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "hello", TriggerKind: "manual"}, "anthropic", 0)
+	if err != nil || res.Status != "succeeded" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if n.Load() < 2 {
+		t.Fatalf("first admit was not retried: %d", n.Load())
+	}
+	if res.RunID == "" || countAllRuns(t, a) == 0 {
+		t.Fatalf("run not queued after retry: %+v count=%d", res, countAllRuns(t, a))
+	}
+}
+
+func TestRunPromptExFirstAdmitDoesNotRetryPermanentError(t *testing.T) {
+	a := newTestApp(t)
+	var n atomic.Int32
+	admitRunHook = func() error {
+		n.Add(1)
+		return errors.New("budget blocked: global daily cap reached")
+	}
+	t.Cleanup(func() { admitRunHook = nil })
+	start := time.Now()
+	res, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "must not start", TriggerKind: "manual"}, "anthropic", 0)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "budget blocked") {
+		t.Fatalf("got %+v %v", res, err)
+	}
+	if n.Load() != 1 {
+		t.Fatalf("retried a permanent refusal: %d", n.Load())
+	}
+	if res.RunID != "" || countAllRuns(t, a) != 0 {
+		t.Fatalf("queued a run after a permanent refusal: %+v count=%d", res, countAllRuns(t, a))
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("permanent refusal retried: %s", elapsed)
+	}
+}
+
+func TestAdmitRunRetryAccountingPendingIsNotRetried(t *testing.T) {
+	a := newTestApp(t)
+	msg := "cost ledger persistence failed for run_y: database is locked"
+	a.accountingFailure.Store(&msg)
+	t.Cleanup(func() { a.accountingFailure.Store(nil) })
+	start := time.Now()
+	_, _, err := a.admitRunRetry(context.Background(), "admit before queue", "", "", cost.BucketProduction, modeMeteredProfile(), 0)
+	elapsed := time.Since(start)
+	if !errors.Is(err, errAccountingPending) {
+		t.Fatalf("got %v", err)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("pending ledger retried: %s", elapsed)
+	}
+}
+
+func TestRunPromptExAccountingPendingDoesNotQueue(t *testing.T) {
+	a := newTestApp(t)
+	msg := "cost ledger persistence failed for run_y: database is locked"
+	a.accountingFailure.Store(&msg)
+	t.Cleanup(func() { a.accountingFailure.Store(nil) })
+	start := time.Now()
+	res, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "must not start", TriggerKind: "manual"}, "anthropic", 0)
+	elapsed := time.Since(start)
+	if !errors.Is(err, errAccountingPending) {
+		t.Fatalf("got %+v %v", res, err)
+	}
+	if res.RunID != "" || countAllRuns(t, a) != 0 {
+		t.Fatalf("queued a run while accounting was pending: %+v count=%d", res, countAllRuns(t, a))
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("pending ledger retried: %s", elapsed)
 	}
 }
