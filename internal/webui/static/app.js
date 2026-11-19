@@ -600,6 +600,14 @@ var k=pauseKind(t),why=k?pauseWhy(t):"";
 if(k&&k!=="user")m=[k==="pack"?"info":"warn",T("pz.pill_"+k)];
 return '<span class="pill '+m[0]+(small?" sm":"")+(why?' pz-pill"'+(small?"":' tabindex="0"')+' data-tip="'+esc(why)+'" aria-label="'+esc(m[1]+" · "+why):"")+'">'+esc(m[1])+"</span>";
 }
+var POLICY_WAITS=["dir_busy","accounting_pending"];
+function policyWaitOf(t){return t&&POLICY_WAITS.indexOf(t.policy_wait)>=0?t.policy_wait:"";}
+function policyWaitPill(t,small){
+var w=policyWaitOf(t);
+if(!w)return "";
+var label=T("td.wait_"+w),tip=T("td.wait_"+w+"_tip");
+return '<span class="pill info'+(small?" sm":"")+' pw-pill" tabindex="0" data-tip="'+esc(tip)+'" aria-label="'+esc(label)+'">'+esc(label)+"</span>";
+}
 function pauseNotice(t){
 var k=pauseKind(t);
 if(!k||k==="user"||k==="snooze")return "";
@@ -2557,7 +2565,7 @@ var list=base.filter(function(t){return taskMatchesStatus(t,v.status);}).sort(fu
 $("#tcount").textContent=T("tl.showing",{n:list.length,total:tasks.length});
 body.innerHTML=list.length?list.map(function(t){
 return '<tr class="click" data-href="#/tasks/'+enc(t.id)+'"><td class="ck"><input type="checkbox" data-pick="'+esc(t.id)+'"'+(v.sel[t.id]?" checked":"")+' aria-label="'+esc(t.name)+'"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="'+iconHue(runIcon({task_name:t.name}))+'">'+ic(runIcon({task_name:t.name}),"sm")+'</span><div><div class="tl-line"><a class="row-link" href="#/tasks/'+enc(t.id)+'"><strong>'+esc(t.name)+"</strong></a>"+costModeBadge(t.cost_control_mode)+tagChipsRow(t.tags)+"</div><small class=\"clamp1\">"+esc(t.goal||t.prompt)+"</small></div></div></td>"+
-'<td class="nowrap">'+esc(cronHuman(t.cron))+(t.next_run_at&&t.status==="active"?"<small>"+heldNext(t.next_run_at)+((t.skip_runs||[]).length?'<span class="nx-skip" data-tip="'+esc(T("skip.chip_tip",{l:t.skip_runs.map(when).join(T("list.sep"))}))+'">'+ic("skipFwd","sm")+"</span>":"")+"</small>":pauseKind(t)==="snooze"?"<small>"+esc(T("tpz.wakes",{t:when(t.pause_detail)}))+"</small>":"")+"</td><td>"+taskPill(t.status,t)+'</td><td class="c-opt"><span class="tag">v'+esc(t.version_no)+"</span></td><td class=\"tl-last\">"+taskBeatsCell(t)+'</td><td class="num c-opt">'+esc(t.runs_today)+'</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="'+esc(t.id)+'" title="'+esc(T("td.run_now"))+'" aria-label="'+esc(T("td.run_now")+" · "+t.name)+'">'+ic("play","sm")+"</button></td></tr>";
+'<td class="nowrap">'+esc(cronHuman(t.cron))+(t.next_run_at&&t.status==="active"?"<small>"+heldNext(t.next_run_at)+((t.skip_runs||[]).length?'<span class="nx-skip" data-tip="'+esc(T("skip.chip_tip",{l:t.skip_runs.map(when).join(T("list.sep"))}))+'">'+ic("skipFwd","sm")+"</span>":"")+"</small>":pauseKind(t)==="snooze"?"<small>"+esc(T("tpz.wakes",{t:when(t.pause_detail)}))+"</small>":"")+"</td><td>"+taskPill(t.status,t)+policyWaitPill(t,true)+'</td><td class="c-opt"><span class="tag">v'+esc(t.version_no)+"</span></td><td class=\"tl-last\">"+taskBeatsCell(t)+'</td><td class="num c-opt">'+esc(t.runs_today)+'</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="'+esc(t.id)+'" title="'+esc(T("td.run_now"))+'" aria-label="'+esc(T("td.run_now")+" · "+t.name)+'">'+ic("play","sm")+"</button></td></tr>";
 }).join(""):'<tr><td colspan="8">'+(tasks.length?(v.status==="failing"&&!q?emptyState("checkc",T("tl.no_failing"),T("tl.no_failing_sub")):emptyState("search",T("tl.no_match"),T("tl.no_match_sub"))):emptyState("tasks",T("tasks.none"),T("tasks.none_sub")))+"</td></tr>";
 wireRows(body);
 $$("[data-runnow]",body).forEach(function(b){b.addEventListener("click",function(e){e.stopPropagation();runTaskNow(b.getAttribute("data-runnow"),b);});});
@@ -2619,7 +2627,7 @@ var sk={},tg={};
 ts.forEach(function(t){(t.skills||[]).forEach(function(k){sk[k]=1;});(t.tags||[]).forEach(function(g){tg[g]=(tg[g]||0)+1;});});
 return JSON.stringify([Object.keys(sk).sort(),tg]);
 };
-var going=function(ts){return ts.some(function(t){var b=t.beats||[],l=b[b.length-1];return!!l&&(l.status==="running"||l.status==="queued");});};
+var going=function(ts){return ts.some(function(t){var b=t.beats||[],l=b[b.length-1];return!!policyWaitOf(t)||(!!l&&(l.status==="running"||l.status==="queued"));});};
 var check=liveFollow(function(){return apiRaw("/api/tasks");},tasks,function(d){
 if(!$("#tbody"))return;
 var pg=page();
@@ -2918,7 +2926,7 @@ $("#task-rail-count",box).textContent=shown.length+" / "+tasks.length;
 keepFocus(list,function(){
 list.innerHTML=shown.length?shown.map(function(t){
 var href="#/tasks/"+enc(t.id)+"/"+enc(tab);
-return '<a class="task-rail-item'+(t.id===id?" selected":"")+'" href="'+href+'" data-href="'+href+'"'+(t.id===id?' aria-current="page"':"")+'><span class="task-rail-icon" aria-hidden="true">'+ic(runIcon({task_name:t.name}),"sm")+'</span><span class="task-rail-copy"><strong>'+esc(t.name)+'</strong><small>'+esc(cronHuman(t.cron))+'</small><span class="task-rail-status">'+taskPill(t.status,t,true)+'</span></span></a>';
+return '<a class="task-rail-item'+(t.id===id?" selected":"")+'" href="'+href+'" data-href="'+href+'"'+(t.id===id?' aria-current="page"':"")+'><span class="task-rail-icon" aria-hidden="true">'+ic(runIcon({task_name:t.name}),"sm")+'</span><span class="task-rail-copy"><strong>'+esc(t.name)+'</strong><small>'+esc(cronHuman(t.cron))+'</small><span class="task-rail-status">'+taskPill(t.status,t,true)+policyWaitPill(t,true)+'</span></span></a>';
 }).join(""):'<p class="task-rail-empty">'+esc(T("tl.no_match"))+'</p>';
 });
 };
@@ -2977,7 +2985,7 @@ return '<li data-href="#/runs/'+enc(x.id)+'"><span class="d '+d+'"></span><div><
 var wfCard=taskShowsWfRuns(t,wfRuns)?'<section class="card"><div class="card-head"><span class="ico">'+ic("workflows")+'</span><h3>'+esc(T("td.wf_runs"))+'</h3><a class="link" href="#/tasks/'+enc(t.id)+'/runs">'+esc(T("td.view_all"))+"</a></div>"+taskWfMini(wfRuns)+"</section>":"";
 var tabs=[["overview",T("td.tab_overview")],["thread",T("td.tab_req")],["runs",T("nav.runs")],["history",T("td.tab_versions")]];
 mount('<div class="task-workspace">'+taskWorkspaceHtml()+'<div class="task-workspace-detail"><div class="grid g-detail">'+
-'<section class="card task-main-card'+(tab==="thread"?" task-thread-card":"")+'"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="'+esc(T("ie.hint"))+'">'+esc(t.name)+"</h1>"+taskPill(t.status,t)+idChip(T("td.task_id"),t.id)+costModeBadge(t.cost_control_mode)+"</div><p>"+esc(t.goal||t.prompt)+"</p>"+
+'<section class="card task-main-card'+(tab==="thread"?" task-thread-card":"")+'"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="'+esc(T("ie.hint"))+'">'+esc(t.name)+"</h1>"+taskPill(t.status,t)+policyWaitPill(t)+idChip(T("td.task_id"),t.id)+costModeBadge(t.cost_control_mode)+"</div><p>"+esc(t.goal||t.prompt)+"</p>"+
 '<div class="td-meta">'+ic("clock","sm")+"<span>"+esc(cronHuman(t.cron))+"</span><span>·</span><span>"+tAgo("td.created_updated",{c:fmtTime(t.created_at,{month:"short",day:"numeric",year:"numeric"})},"u",t.updated_at)+"</span>"+
 ((t.tags||[]).length?'<span class="td-tags">'+ic("tag","sm")+t.tags.map(function(g){return '<a class="ttag h'+tagHue(g)+'" href="#/tasks?tag='+enc(g)+'" data-tip="'+esc(T("tg.filter_tip",{t:g}))+'">'+esc(g)+"</a>";}).join("")+"</span>":"")+"</div></div>"+
 '<div class="row-actions">'+(t.status==="active"?'<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">'+ic("pause","sm")+esc(T("td.pause"))+ic("chevDown","sm")+"</button>":'<button class="btn" id="t-toggle" data-act="resume">'+ic("play","sm")+esc(T("td.resume"))+"</button>")+
@@ -3107,7 +3115,7 @@ if(!v)return;
 comp.querySelector("button").disabled=true;
 api(base+"/amendments",{method:"POST",body:{utterance:v}}).then(function(){draftClear("amendment_"+id);reload();}).catch(function(err){fail(err);comp.querySelector("button").disabled=false;});
 });
-var paths=taskDetailPaths(id,tab),going=runs.some(function(x){return x.status==="running"||x.status==="queued";})||wfRuns.some(function(x){return x.status==="running"||x.status==="queued";});
+var paths=taskDetailPaths(id,tab),going=!!policyWaitOf(t)||runs.some(function(x){return x.status==="running"||x.status==="queued";})||wfRuns.some(function(x){return x.status==="running"||x.status==="queued";});
 var check=liveFollow(function(){
 var detail=Promise.all(paths.map(function(u){return apiRaw(u);})).catch(function(e){if(e&&e.status===404)return{gone:true};throw e;});
 return Promise.all([detail,refreshTaskRail()]).then(function(data){return data[0];});

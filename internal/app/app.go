@@ -207,6 +207,7 @@ func Open(cfg config.Config) (*App, error) {
 		},
 		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
 		QuietAt:       a.QuietAt,
+		PolicyWaits:   a.PolicyWaits,
 		QuickRunSkill: a.startQuickRunSkill, StartRun: a.startRun, UndoRunChanges: a.undoRunChanges, CheckRunUndo: a.checkRunUndo,
 		Providers: providerAdmin{a}, ChatSessions: a, Capabilities: a,
 		Public: map[string]http.Handler{"/hooks/": a.WebhookHandler(), "/metrics": a.MetricsHandler()},

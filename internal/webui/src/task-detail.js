@@ -225,7 +225,7 @@
       keepFocus(list, function () {
         list.innerHTML = shown.length ? shown.map(function (t) {
           var href = "#/tasks/" + enc(t.id) + "/" + enc(tab);
-          return '<a class="task-rail-item' + (t.id === id ? " selected" : "") + '" href="' + href + '" data-href="' + href + '"' + (t.id === id ? ' aria-current="page"' : "") + '><span class="task-rail-icon" aria-hidden="true">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><span class="task-rail-copy"><strong>' + esc(t.name) + '</strong><small>' + esc(cronHuman(t.cron)) + '</small><span class="task-rail-status">' + taskPill(t.status, t, true) + '</span></span></a>';
+          return '<a class="task-rail-item' + (t.id === id ? " selected" : "") + '" href="' + href + '" data-href="' + href + '"' + (t.id === id ? ' aria-current="page"' : "") + '><span class="task-rail-icon" aria-hidden="true">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><span class="task-rail-copy"><strong>' + esc(t.name) + '</strong><small>' + esc(cronHuman(t.cron)) + '</small><span class="task-rail-status">' + taskPill(t.status, t, true) + policyWaitPill(t, true) + '</span></span></a>';
         }).join("") : '<p class="task-rail-empty">' + esc(T("tl.no_match")) + '</p>';
       });
     };
@@ -285,7 +285,7 @@
       var wfCard = taskShowsWfRuns(t, wfRuns) ? '<section class="card"><div class="card-head"><span class="ico">' + ic("workflows") + '</span><h3>' + esc(T("td.wf_runs")) + '</h3><a class="link" href="#/tasks/' + enc(t.id) + '/runs">' + esc(T("td.view_all")) + "</a></div>" + taskWfMini(wfRuns) + "</section>" : "";
       var tabs = [["overview", T("td.tab_overview")], ["thread", T("td.tab_req")], ["runs", T("nav.runs")], ["history", T("td.tab_versions")]];
       mount('<div class="task-workspace">' + taskWorkspaceHtml() + '<div class="task-workspace-detail"><div class="grid g-detail">' +
-        '<section class="card task-main-card' + (tab === "thread" ? " task-thread-card" : "") + '"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + idChip(T("td.task_id"), t.id) + costModeBadge(t.cost_control_mode) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
+        '<section class="card task-main-card' + (tab === "thread" ? " task-thread-card" : "") + '"><div class="task-head"><div class="grow-col"><div class="td-title"><h1 class="inline-edit" id="ie-name" tabindex="0" role="button" data-tip="' + esc(T("ie.hint")) + '">' + esc(t.name) + "</h1>" + taskPill(t.status, t) + policyWaitPill(t) + idChip(T("td.task_id"), t.id) + costModeBadge(t.cost_control_mode) + "</div><p>" + esc(t.goal || t.prompt) + "</p>" +
         '<div class="td-meta">' + ic("clock", "sm") + "<span>" + esc(cronHuman(t.cron)) + "</span><span>·</span><span>" + tAgo("td.created_updated", { c: fmtTime(t.created_at, { month: "short", day: "numeric", year: "numeric" }) }, "u", t.updated_at) + "</span>" +
         ((t.tags || []).length ? '<span class="td-tags">' + ic("tag", "sm") + t.tags.map(function (g) { return '<a class="ttag h' + tagHue(g) + '" href="#/tasks?tag=' + enc(g) + '" data-tip="' + esc(T("tg.filter_tip", { t: g })) + '">' + esc(g) + "</a>"; }).join("") + "</span>" : "") + "</div></div>" +
         '<div class="row-actions">' + (t.status === "active" ? '<button class="btn" id="t-toggle" data-act="pause" aria-haspopup="menu" aria-expanded="false">' + ic("pause", "sm") + esc(T("td.pause")) + ic("chevDown", "sm") + "</button>" : '<button class="btn" id="t-toggle" data-act="resume">' + ic("play", "sm") + esc(T("td.resume")) + "</button>") +
@@ -425,7 +425,7 @@
       // data just fetched (no second request, scroll kept) — but not while you type, edit inline,
       // have amendments ticked or something typed in the composer, read further up the thread,
       // or have a dialog or menu open. A task deleted elsewhere turns into the "not found" page.
-      var paths = taskDetailPaths(id, tab), going = runs.some(function (x) { return x.status === "running" || x.status === "queued"; }) || wfRuns.some(function (x) { return x.status === "running" || x.status === "queued"; });
+      var paths = taskDetailPaths(id, tab), going = !!policyWaitOf(t) || runs.some(function (x) { return x.status === "running" || x.status === "queued"; }) || wfRuns.some(function (x) { return x.status === "running" || x.status === "queued"; });
       var check = liveFollow(function () {
         var detail = Promise.all(paths.map(function (u) { return apiRaw(u); })).catch(function (e) { if (e && e.status === 404) return { gone: true }; throw e; });
         return Promise.all([detail, refreshTaskRail()]).then(function (data) { return data[0]; });

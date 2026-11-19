@@ -28,6 +28,7 @@ function ic(k) { return "<i>" + k + "</i>"; }
 function opt(v, label, selected) { return '<option value="' + esc(v) + '"' + (selected ? ' selected' : '') + '>' + esc(label) + '</option>'; }
 function taskMatchesStatus(t, status) { return !status || (status === "failing" ? !!t.failing : t.status === status); }
 function taskPill(status) { return "<small>" + esc(status) + "</small>"; }
+function policyWaitPill() { return ""; }
 function runIcon() { return "tasks"; }
 function cronHuman(c) { return c || "manual"; }
 function skeleton() { return "loading"; }

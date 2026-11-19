@@ -64,6 +64,9 @@ type taskDTO struct {
 	PauseDetail string `json:"pause_detail,omitempty"`
 	PausedAt    string `json:"paused_at,omitempty"`
 	BreakerAt   int    `json:"breaker_at,omitempty"` // breaker pauses: failures in a row that tripped it
+	// PolicyWait: a scheduled run is waiting to start before it has a run row
+	// ("dir_busy" or "accounting_pending"); omitted when it is not waiting.
+	PolicyWait string `json:"policy_wait,omitempty"`
 	// SkipRuns: upcoming fire times skipped by hand (RFC 3339 UTC, oldest first); the
 	// schedule stays on and next_run_at is already the run after them.
 	SkipRuns []string `json:"skip_runs,omitempty"`

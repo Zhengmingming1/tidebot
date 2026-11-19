@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -17,7 +18,8 @@ import (
 // sidebar status follow within a second instead of on the next 30–60 s poll.
 //
 // Each message is the whole state as three short tokens: rev (the /api/rev token: data
-// written + current minute), notif (what the bell shows: notifications, pending
+// written + current minute, and a suffix when a scheduled run is waiting to start
+// before it has a run row), notif (what the bell shows: notifications, pending
 // confirmations, failing channels, read mark) and busy (queued / running runs). The page
 // compares them with what it has and reloads only what moved. Nothing else is sent, so the
 // stream never carries data a GET couldn't — it is a doorbell, not a feed.
@@ -53,6 +55,7 @@ type evHub struct {
 	cur     evState
 	changes int64
 	minute  int64
+	wait    string // policy-wait fingerprint mixed into rev (no run row yet)
 }
 
 func (h *evHub) quitCh() chan struct{} {
@@ -87,8 +90,9 @@ func (s *Server) readState(ctx context.Context) (evState, int64, error) {
 	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM notify_channels WHERE enabled=1 AND last_at IS NOT NULL AND last_ok=0`).Scan(&failing)
 	_ = s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM runs WHERE status IN ('queued','running')`).Scan(&busy)
 	notif := fmt.Sprintf("%d|%s|%d|%s|%d|%s", nCount, nLast, pCount, pLast, failing, s.notifSeenAt(ctx))
+	wait := s.policyWaitSig()
 	return evState{
-		Rev:   revToken(n, time.Now()),
+		Rev:   revWithWait(n, time.Now(), wait),
 		Notif: shortHash(notif),
 		Busy:  strconv.FormatInt(busy, 10),
 	}, n, nil
@@ -96,6 +100,37 @@ func (s *Server) readState(ctx context.Context) (evState, int64, error) {
 
 func revToken(changes int64, now time.Time) string {
 	return strconv.FormatInt(changes, 10) + "." + strconv.FormatInt(now.Unix()/60, 10)
+}
+
+// revWithWait is the /api/rev token, with a short suffix when a scheduled run
+// is waiting to start (no run row, so total_changes() would miss it).
+func revWithWait(changes int64, now time.Time, wait string) string {
+	tok := revToken(changes, now)
+	if wait != "" {
+		return tok + "." + wait
+	}
+	return tok
+}
+
+// policyWaitSig is a short, stable fingerprint of the in-memory wait map.
+func (s *Server) policyWaitSig() string {
+	if s.deps.PolicyWaits == nil {
+		return ""
+	}
+	waits := s.deps.PolicyWaits()
+	if len(waits) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(waits))
+	for id := range waits {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var b string
+	for _, id := range ids {
+		b += id + "=" + waits[id] + ";"
+	}
+	return shortHash(b)
 }
 
 // shortHash keeps the bell token short and opaque (FNV-1a, 64 bit).
@@ -123,7 +158,7 @@ func (s *Server) subscribe() (chan struct{}, bool) {
 	h.subs[ch] = struct{}{}
 	if h.stop == nil {
 		h.stop = make(chan struct{})
-		h.changes, h.minute = -1, -1
+		h.changes, h.minute, h.wait = -1, -1, ""
 		go s.watch(h.stop, eventsTick)
 	}
 	return ch, true
@@ -137,7 +172,7 @@ func (s *Server) unsubscribe(ch chan struct{}) {
 	if len(h.subs) == 0 && h.stop != nil {
 		close(h.stop)
 		h.stop = nil
-		h.changes, h.minute = -1, -1
+		h.changes, h.minute, h.wait = -1, -1, ""
 	}
 }
 
@@ -163,9 +198,10 @@ func (s *Server) watch(stop chan struct{}, tick time.Duration) {
 		var n int64
 		err := s.deps.DB.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&n)
 		min := time.Now().Unix() / 60
+		wait := s.policyWaitSig()
 		h.mu.Lock()
-		same := err == nil && n == h.changes && min == h.minute
-		onlyMinute := err == nil && n == h.changes && h.cur.Rev != ""
+		same := err == nil && n == h.changes && min == h.minute && wait == h.wait
+		onlyMinute := err == nil && n == h.changes && h.cur.Rev != "" && wait == h.wait
 		prev := h.cur
 		h.mu.Unlock()
 		if err != nil || same {
@@ -175,14 +211,14 @@ func (s *Server) watch(stop chan struct{}, tick time.Duration) {
 		st := prev
 		if onlyMinute {
 			// only the minute turned: the counts can't have moved
-			st.Rev = revToken(n, time.Now())
+			st.Rev = revWithWait(n, time.Now(), wait)
 		} else if st, n, err = s.readState(ctx); err != nil {
 			cancel()
 			continue
 		}
 		cancel()
 		h.mu.Lock()
-		h.changes, h.minute = n, min
+		h.changes, h.minute, h.wait = n, min, wait
 		if st != h.cur {
 			h.cur = st
 			for ch := range h.subs {

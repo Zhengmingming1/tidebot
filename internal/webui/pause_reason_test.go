@@ -121,10 +121,10 @@ func TestPauseReasonUI(t *testing.T) {
 		`var PAUSE_KINDS = ["user", "snooze", "breaker", "budget", "pack", "plugin"];`,
 		`function taskPill(st, t, small) {`,
 		`function pauseNotice(t) {`,
-		`taskPill(t.status, t) + idChip(T("td.task_id"), t.id)`,
+		`taskPill(t.status, t) + policyWaitPill(t) + idChip(T("td.task_id"), t.id)`,
 		`"</button></div></div>" + pauseNotice(t) +`,
 		`taskPill("paused", t, true)`,
-		`"</td><td>" + taskPill(t.status, t) + `,
+		`"</td><td>" + taskPill(t.status, t) + policyWaitPill(t, true) + `,
 		`if (act === "resume" && k === "breaker") toast(T("pz.resumed_reset"));`,
 		`'&status=failed">'`,
 	} {

@@ -46,6 +46,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.applyPolicyWaits(out)
 	writeJSON(w, 200, out)
 }
 
@@ -131,6 +132,7 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		if m, err := s.taskTags(ctx, id); err == nil && m[id] != nil {
 			d.Tags = m[id]
 		}
+		s.applyPolicyWait(&d)
 		writeJSON(w, 200, d)
 		return
 	}
@@ -357,6 +359,31 @@ func (s *Server) nameTaskWorkflows(ctx context.Context, out []taskDTO) {
 		}
 		if w, ok := byID[ref.ID]; ok {
 			ref.Name, ref.Current = w.Name, w.Version
+		}
+	}
+}
+
+// applyPolicyWait sets d.PolicyWait from the in-memory wait map (no run row yet).
+func (s *Server) applyPolicyWait(d *taskDTO) {
+	if d == nil || s.deps.PolicyWaits == nil {
+		return
+	}
+	if r := s.deps.PolicyWaits()[d.ID]; r != "" {
+		d.PolicyWait = r
+	}
+}
+
+func (s *Server) applyPolicyWaits(out []taskDTO) {
+	if s.deps.PolicyWaits == nil || len(out) == 0 {
+		return
+	}
+	waits := s.deps.PolicyWaits()
+	if len(waits) == 0 {
+		return
+	}
+	for i := range out {
+		if r := waits[out[i].ID]; r != "" {
+			out[i].PolicyWait = r
 		}
 	}
 }

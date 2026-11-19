@@ -2386,6 +2386,8 @@ a.card.stat.stat-link:focus-visible { outline: none; box-shadow: var(--focus-rin
 
 /* paused task: why, in a word (pill + tooltip) and, for automatic pauses, one line on the task page */
 .pill.pz-pill { cursor: help; }
+.pill.pw-pill { cursor: help; }
+td > .pill + .pw-pill { margin-inline-start: 8px; }
 .pz-note { align-items: center; margin-top: var(--s2); }
 .pz-note + .tabs { margin-top: var(--s2); }
 .pz-note > svg { flex: none; }
@@ -3247,7 +3249,7 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 .task-rail-copy { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
 .task-rail-copy strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-rail-copy small { color: var(--text-2); font-size: 11px; }
-.task-rail-status { line-height: 18px; }
+.task-rail-status { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; line-height: 18px; }
 .task-rail-status .pill { font-size: 10px; min-height: 16px; padding: 0 5px; }
 .task-rail-empty { margin: 16px 8px; color: var(--text-2); font-size: 12px; }
 .task-workspace-detail { min-width: 0; }

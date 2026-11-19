@@ -10,8 +10,10 @@ import (
 // changes is SQLite's total_changes() on the store's only connection: it grows with every
 // row any part of tidebot inserts, updates or deletes (runs, usage saves, tasks, settings,
 // notifications). minute is the server's Unix minute, so time-based views (next 24 h,
-// "today") still refresh once a minute with no writes. Live pages poll this instead of
-// re-running their heavy queries, and only refetch when the token moves.
+// "today") still refresh once a minute with no writes. When a scheduled run is waiting
+// to start (no run row yet), a short third part is appended so live pages still refetch.
+// Live pages poll this instead of re-running their heavy queries, and only refetch when
+// the token moves.
 func (s *Server) handleRev(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "method")
@@ -23,5 +25,5 @@ func (s *Server) handleRev(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]string{"rev": revToken(n, time.Now())})
+	writeJSON(w, 200, map[string]string{"rev": revWithWait(n, time.Now(), s.policyWaitSig())})
 }

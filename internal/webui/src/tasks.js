@@ -147,7 +147,7 @@
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
           return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + costModeBadge(t.cost_control_mode) + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
-            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + ((t.skip_runs || []).length ? '<span class="nx-skip" data-tip="' + esc(T("skip.chip_tip", { l: t.skip_runs.map(when).join(T("list.sep")) })) + '">' + ic("skipFwd", "sm") + "</span>" : "") + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
+            '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + ((t.skip_runs || []).length ? '<span class="nx-skip" data-tip="' + esc(T("skip.chip_tip", { l: t.skip_runs.map(when).join(T("list.sep")) })) + '">' + ic("skipFwd", "sm") + "</span>" : "") + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + policyWaitPill(t, true) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);
         $$("[data-runnow]", body).forEach(function (b) { b.addEventListener("click", function (e) { e.stopPropagation(); runTaskNow(b.getAttribute("data-runnow"), b); }); });
@@ -208,13 +208,14 @@
       // Follow changes: only the rows repaint (search text, filters, sort, ticks and scroll stay);
       // a new skill or tag for the menus redraws the page, unless you're using the toolbar or
       // have rows ticked. Checks every 2 s with the change stream up (free); without it only
-      // while a task's newest run is going, like the runs list.
+      // while a task's newest run is going or a scheduled run is waiting to start,
+      // like the runs list.
       var menus = function (ts) {
         var sk = {}, tg = {};
         ts.forEach(function (t) { (t.skills || []).forEach(function (k) { sk[k] = 1; }); (t.tags || []).forEach(function (g) { tg[g] = (tg[g] || 0) + 1; }); });
         return JSON.stringify([Object.keys(sk).sort(), tg]);
       };
-      var going = function (ts) { return ts.some(function (t) { var b = t.beats || [], l = b[b.length - 1]; return !!l && (l.status === "running" || l.status === "queued"); }); };
+      var going = function (ts) { return ts.some(function (t) { var b = t.beats || [], l = b[b.length - 1]; return !!policyWaitOf(t) || (!!l && (l.status === "running" || l.status === "queued")); }); };
       var check = liveFollow(function () { return apiRaw("/api/tasks"); }, tasks, function (d) {
         if (!$("#tbody")) return;
         var pg = page();

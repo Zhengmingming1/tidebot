@@ -100,6 +100,10 @@ type Deps struct {
 	// QuietAt (optional): is t inside quiet hours for scheduled runs, and when that window
 	// ends (Home's "next 24 hours" marks those runs as held until then).
 	QuietAt func(t time.Time) (bool, time.Time)
+	// PolicyWaits (optional): task IDs whose scheduled run is waiting to start
+	// (busy folder or a pending ledger write). There is no run row yet, so the
+	// task APIs and the change stream read this in-memory map.
+	PolicyWaits func() map[string]string
 }
 
 // Server is a togglable HTTP listener.

@@ -59,3 +59,57 @@ func TestParallelPolicyDoesNotSerializeAndReleasesLocks(t *testing.T) {
 		t.Fatal("task locks leaked")
 	}
 }
+
+func TestPolicyWaitVisibleIncludingParallel(t *testing.T) {
+	a := &App{}
+	skip := db.Task{ID: "skip", OverlapPolicy: "skip"}
+	if release, ok := a.enterPolicyRun(skip); !ok {
+		t.Fatal("refused skip task")
+	} else {
+		defer release()
+	}
+	if a.PolicyWait("skip") != "" || a.PolicyWaits() != nil {
+		t.Fatal("idle task looked as if it was waiting")
+	}
+	clear := a.markPolicyWaiting(skip, PolicyWaitDirBusy)
+	if a.PolicyWait("skip") != PolicyWaitDirBusy {
+		t.Fatalf("skip wait %q", a.PolicyWait("skip"))
+	}
+	a.setPolicyWaitReason("skip", PolicyWaitAccountingPending)
+	if a.PolicyWait("skip") != PolicyWaitAccountingPending {
+		t.Fatalf("updated wait %q", a.PolicyWait("skip"))
+	}
+	if got := a.PolicyWaits(); got["skip"] != PolicyWaitAccountingPending || len(got) != 1 {
+		t.Fatalf("waits %v", got)
+	}
+	clear()
+	if a.PolicyWait("skip") != "" || a.PolicyWaits() != nil {
+		t.Fatal("cleared wait left behind")
+	}
+
+	par := db.Task{ID: "par", OverlapPolicy: "parallel"}
+	// Parallel tasks have no overlap lock; waiting must still be queryable.
+	c1 := a.markPolicyWaiting(par, PolicyWaitDirBusy)
+	c2 := a.markPolicyWaiting(par, PolicyWaitAccountingPending)
+	if a.PolicyWait("par") != PolicyWaitAccountingPending {
+		t.Fatalf("parallel wait %q", a.PolicyWait("par"))
+	}
+	c1()
+	if a.PolicyWait("par") != PolicyWaitAccountingPending {
+		t.Fatal("first of two parallel waits hid the other")
+	}
+	c2()
+	if a.PolicyWait("par") != "" {
+		t.Fatal("parallel wait left behind")
+	}
+}
+
+func TestMarkPolicyWaitingEmptyReasonIsNoop(t *testing.T) {
+	a := &App{}
+	clear := a.markPolicyWaiting(db.Task{ID: "t"}, "")
+	clear()
+	a.setPolicyWaitReason("t", PolicyWaitDirBusy)
+	if a.PolicyWait("t") != "" {
+		t.Fatal("empty mark still recorded a wait")
+	}
+}

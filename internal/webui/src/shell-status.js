@@ -63,6 +63,17 @@
     if (k && k !== "user") m = [k === "pack" ? "info" : "warn", T("pz.pill_" + k)];
     return '<span class="pill ' + m[0] + (small ? " sm" : "") + (why ? ' pz-pill"' + (small ? "" : ' tabindex="0"') + ' data-tip="' + esc(why) + '" aria-label="' + esc(m[1] + " · " + why) : "") + '">' + esc(m[1]) + "</span>";
   }
+  // A scheduled run waiting to start (folder busy, or a cost ledger write still
+  // pending) has no run row yet; this pill is how the list and the task page
+  // say why it has not started.
+  var POLICY_WAITS = ["dir_busy", "accounting_pending"];
+  function policyWaitOf(t) { return t && POLICY_WAITS.indexOf(t.policy_wait) >= 0 ? t.policy_wait : ""; }
+  function policyWaitPill(t, small) {
+    var w = policyWaitOf(t);
+    if (!w) return "";
+    var label = T("td.wait_" + w), tip = T("td.wait_" + w + "_tip");
+    return '<span class="pill info' + (small ? " sm" : "") + ' pw-pill" tabindex="0" data-tip="' + esc(tip) + '" aria-label="' + esc(label) + '">' + esc(label) + "</span>";
+  }
   // Task page: an automatic pause (failures, budget, plugin) gets one line saying what
   // happened and what resuming does; a pause by hand needs no explanation.
   function pauseNotice(t) {

@@ -41,7 +41,7 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 		// and go then; no retry used, no breaker strike. Later firings of the task
 		// meanwhile are dropped (enterPolicyRun), so one wait ends in one run.
 		a.Log.Info("task waits before running", "task_id", task.ID, "why", err.Error())
-		defer a.markPolicyWaiting(task)()
+		defer a.markPolicyWaiting(task, policyWaitReason(err))()
 		for waitsOut(err) {
 			for {
 				if !a.sleepPolicy(ctx, dirBusyPoll) || !a.taskStillRunnable(ctx, task.ID, trigger) {
@@ -52,6 +52,9 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 				}
 			}
 			err = a.runTaskTrigger(ctx, task, trigger, bucket)
+			if waitsOut(err) {
+				a.setPolicyWaitReason(task.ID, policyWaitReason(err))
+			}
 		}
 	}
 	if a.policyRunsClosing() || ctx.Err() != nil {
@@ -86,9 +89,28 @@ func (a *App) runWithPolicy(ctx context.Context, task db.Task, trigger, bucket s
 	}
 }
 
+// PolicyWaitDirBusy and PolicyWaitAccountingPending are why a scheduled run
+// can wait before it has a run row. They are the values of the task API's
+// policy_wait field.
+const (
+	PolicyWaitDirBusy           = "dir_busy"
+	PolicyWaitAccountingPending = "accounting_pending"
+)
+
 // waitsOut: the run could not start for a reason that clears by itself.
 func waitsOut(err error) bool {
 	return errors.Is(err, guard.ErrDirBusy) || errors.Is(err, errAccountingPending)
+}
+
+func policyWaitReason(err error) string {
+	switch {
+	case errors.Is(err, guard.ErrDirBusy):
+		return PolicyWaitDirBusy
+	case errors.Is(err, errAccountingPending):
+		return PolicyWaitAccountingPending
+	default:
+		return ""
+	}
 }
 
 // dirBusyPoll: how often a scheduled run whose folder is busy looks again (a var for tests).

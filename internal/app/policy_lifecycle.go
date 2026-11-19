@@ -2,9 +2,10 @@ package app
 
 import (
 	"context"
-	"github.com/Zhengmingming1/tidebot/internal/db"
 	"sync"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/db"
 )
 
 type taskPolicyLock struct {
@@ -12,10 +13,19 @@ type taskPolicyLock struct {
 	refs    int
 	waiting bool // its holder waits for a busy folder / pending ledger write
 }
+
+// policyWait is a scheduled run waiting to start, including parallel tasks
+// (they have no overlap lock, but the UI still needs to see why they wait).
+type policyWait struct {
+	reason string
+	n      int // how many of this task's runs are waiting (parallel can be > 1)
+}
+
 type policyRunState struct {
 	mu      sync.Mutex
 	closing bool
 	locks   map[string]*taskPolicyLock
+	waits   map[string]*policyWait
 	timers  map[*time.Timer]bool
 	wg      sync.WaitGroup
 }
@@ -69,23 +79,89 @@ func (a *App) enterPolicyRun(task db.Task) (func(), bool) {
 	}, true
 }
 
-// markPolicyWaiting flags the task's run (holding its policy lock) as waiting to
-// start; the returned func clears it. Parallel tasks have no lock: every firing
-// is its own run there.
-func (a *App) markPolicyWaiting(task db.Task) func() {
+// markPolicyWaiting records that a scheduled run of the task is waiting to
+// start, and why, so the task page can show it. The returned func clears this
+// one wait. Parallel tasks have no overlap lock (every firing is its own run)
+// but they are still recorded here; non-parallel tasks also set the lock's
+// waiting flag so later firings keep collapsing to one run.
+func (a *App) markPolicyWaiting(task db.Task, reason string) func() {
+	if reason == "" {
+		return func() {}
+	}
 	s := &a.policyRuns
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock := s.locks[task.ID]
-	if task.OverlapPolicy == "parallel" || lock == nil {
-		return func() {}
+	if s.waits == nil {
+		s.waits = map[string]*policyWait{}
 	}
-	lock.waiting = true
+	w := s.waits[task.ID]
+	if w == nil {
+		w = &policyWait{}
+		s.waits[task.ID] = w
+	}
+	w.n++
+	w.reason = reason
+	if task.OverlapPolicy != "parallel" {
+		if lock := s.locks[task.ID]; lock != nil {
+			lock.waiting = true
+		}
+	}
 	return func() {
 		s.mu.Lock()
-		lock.waiting = false
-		s.mu.Unlock()
+		defer s.mu.Unlock()
+		if w.n > 0 {
+			w.n--
+		}
+		if w.n == 0 {
+			delete(s.waits, task.ID)
+			if lock := s.locks[task.ID]; lock != nil {
+				lock.waiting = false
+			}
+		}
 	}
+}
+
+// setPolicyWaitReason updates why a task already waiting is waiting (a busy
+// folder can become a pending ledger write, or the other way around).
+func (a *App) setPolicyWaitReason(taskID, reason string) {
+	if reason == "" {
+		return
+	}
+	s := &a.policyRuns
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if w := s.waits[taskID]; w != nil {
+		w.reason = reason
+	}
+}
+
+// PolicyWait is why a scheduled run of the task is waiting to start (dir_busy
+// or accounting_pending). Empty when it is not waiting.
+func (a *App) PolicyWait(taskID string) string {
+	s := &a.policyRuns
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if w := s.waits[taskID]; w != nil {
+		return w.reason
+	}
+	return ""
+}
+
+// PolicyWaits is the in-memory map of task IDs currently waiting to start a
+// scheduled run. The WebUI reads this for task APIs and the change stream;
+// there is no run row yet, so SQLite's total_changes() would miss it.
+func (a *App) PolicyWaits() map[string]string {
+	s := &a.policyRuns
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.waits) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(s.waits))
+	for id, w := range s.waits {
+		out[id] = w.reason
+	}
+	return out
 }
 
 func (a *App) policyRunsClosing() bool {
