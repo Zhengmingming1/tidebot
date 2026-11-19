@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,7 +305,7 @@ func TestUninstallHistoryScanPerf(t *testing.T) {
 	if len(found) != 0 {
 		t.Fatalf("unexpected hits %+v", found)
 	}
-	t.Logf("%d skills × %d×32KB unrelated defs: old %s (%d row reads, %d KB into Go); new one-pass Contains+parse-gate %s",
+	t.Logf("%d skills × %d×32KB unrelated defs: old %s (%d row reads, %d KB into Go); new one-pass escape-aware gate %s",
 		skills, n, oldElapsed, oldRows, oldBytes/1024, newElapsed)
 	if newElapsed*3 > oldElapsed {
 		t.Fatalf("expected ≥3× speedup, got old=%s new=%s", oldElapsed, newElapsed)
@@ -331,6 +332,83 @@ func TestSkillsReferencedInHistorySubstringFalsePositive(t *testing.T) {
 	}
 	if len(out.RemovedSkills) != 1 || out.RemovedSkills[0] != c.SkillID {
 		t.Fatalf("false-positive substring retained skill: %+v", out)
+	}
+}
+
+func jsonUnicodeEscape(id string) string {
+	var b strings.Builder
+	for i := 0; i < len(id); i++ {
+		fmt.Fprintf(&b, `\u%04x`, id[i])
+	}
+	return b.String()
+}
+
+func assertHistoryRetention(t *testing.T, out UninstallResult, skillID, why string) {
+	t.Helper()
+	if len(out.RemovedSkills) != 0 {
+		t.Fatalf("%s: skill was removed: %+v", why, out)
+	}
+	for _, retained := range out.Retained {
+		if retained.Kind == "skill" && retained.ID == skillID && retained.Reason == "retained by task, workflow, session or proposal history" {
+			return
+		}
+	}
+	t.Fatalf("%s: missing history retention: %+v", why, out)
+}
+
+func TestUninstallHistoryScanRetainsEscapedSkillID(t *testing.T) {
+	// A historical definition can name the skill with JSON \u escapes (the
+	// active-path gate already handled this; history used to look only for the
+	// literal id and would have deleted the registration).
+	s := testStore(t)
+	ctx := context.Background()
+	r, _ := installOwnedSkill(t, s)
+	c := r.Lock.Components[0]
+	raw := `{"skills":["` + jsonUnicodeEscape(c.SkillID) + `"]}`
+	if strings.Contains(raw, c.SkillID) {
+		t.Fatal("fixture still contains the literal id")
+	}
+	// Only an older version names the skill, so the active-path check (current
+	// definitions only) lets uninstall proceed; history must still retain it.
+	if _, err := s.DB.Exec(`INSERT INTO workflows(id,name,description,version,deleted,created_at,updated_at) VALUES('wf-esc','esc','',2,0,'t','t')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf-esc',1,?,?)`, raw, "t"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf-esc',2,?,?)`, `{"skills":["sk_other"]}`, "t"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.UninstallWithReport(ctx, r.ID, "ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHistoryRetention(t, out, c.SkillID, "escaped skill id")
+}
+
+func TestUninstallHistoryScanIgnoresHTMLEscapesWithoutSkill(t *testing.T) {
+	// Go's json.Marshal writes < and & as \u003c / \u0026. Those must not
+	// make history retain a skill the definition does not name.
+	s := testStore(t)
+	ctx := context.Background()
+	r, _ := installOwnedSkill(t, s)
+	c := r.Lock.Components[0]
+	raw, _ := json.Marshal(map[string]any{"prompt": "检查 <b>&</b>", "skills": []string{"sk_other"}})
+	if !strings.Contains(string(raw), `\u00`) {
+		t.Fatalf("expected HTML escapes in fixture: %s", raw)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO workflows(id,name,description,version,deleted,created_at,updated_at) VALUES('wf-html','html','',1,0,'t','t')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('wf-html',1,?,?)`, string(raw), "t"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.UninstallWithReport(ctx, r.ID, "ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.RemovedSkills) != 1 || out.RemovedSkills[0] != c.SkillID {
+		t.Fatalf("HTML escapes in an unrelated prompt retained the skill: %+v", out)
 	}
 }
 

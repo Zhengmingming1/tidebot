@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"strings"
 )
 
 // UninstallResult distinguishes removed registrations from retained immutable
@@ -289,8 +288,8 @@ var historyRefQueries = []string{
 var historyScanHook func()
 
 // skillsReferencedInHistory scans each history table once for all candidate skill
-// ids. A cheap strings.Contains gate skips JSON parsing for blobs that cannot
-// mention any remaining candidate, so a large historical backlog is no longer
+// ids. The same escape-aware gate as active references skips JSON parsing for
+// blobs that cannot mention a remaining candidate, so a historical backlog is no longer
 // O(skills × rows) full parses on every uninstall.
 func skillsReferencedInHistory(ctx context.Context, tx *sql.Tx, candidates map[string]bool) (map[string]bool, error) {
 	found := map[string]bool{}
@@ -329,14 +328,7 @@ func skillsReferencedInHistory(ctx context.Context, tx *sql.Tx, candidates map[s
 				rows.Close()
 				return found, nil
 			}
-			gate := false
-			for id := range remaining {
-				if strings.Contains(raw.String, id) {
-					gate = true
-					break
-				}
-			}
-			if !gate {
+			if !mentionsAny([]byte(raw.String), "", remaining) {
 				continue
 			}
 			markReferencedSkills(raw.String, remaining, found)
@@ -355,7 +347,7 @@ func skillsReferencedInHistory(ctx context.Context, tx *sql.Tx, candidates map[s
 
 // markReferencedSkills records every candidate skill id that appears as a JSON
 // string leaf. Malformed non-empty JSON fails closed for candidates whose id
-// substring is present (the Contains gate already selected this row).
+// may be present, including escaped ids (the gate already selected this row).
 func markReferencedSkills(raw string, candidates, found map[string]bool) {
 	var value any
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
@@ -363,7 +355,7 @@ func markReferencedSkills(raw string, candidates, found map[string]bool) {
 			return
 		}
 		for id := range candidates {
-			if strings.Contains(raw, id) {
+			if mentionsAny([]byte(raw), id, nil) {
 				found[id] = true
 			}
 		}
