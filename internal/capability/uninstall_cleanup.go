@@ -34,50 +34,92 @@ func (s *Store) UninstallWithReport(ctx context.Context, capID, actor string) (U
 	return out, nil
 }
 
+// lockSkillRefs is the only lock_json we need for this capability's versions.
+// Other packages are not decoded in Go at all; SQLite returns their skill ids.
+type lockSkillRefs struct {
+	Components []struct {
+		SkillID   string `json:"skill_id"`
+		VersionID string `json:"version_id"`
+	} `json:"components"`
+}
+
+// addOwnLockSkills records skill versions from one of this capability's locks.
+// A digest mismatch refuses the uninstall.
+func addOwnLockSkills(raw, digest string, own map[string]map[string]bool) error {
+	sum := sha256.Sum256([]byte(raw))
+	if hex.EncodeToString(sum[:]) != digest {
+		return errors.New("capability lock integrity mismatch; uninstall cleanup refused")
+	}
+	var l lockSkillRefs
+	if err := json.Unmarshal([]byte(raw), &l); err != nil {
+		return err
+	}
+	for _, c := range l.Components {
+		if c.SkillID == "" {
+			continue
+		}
+		if own[c.SkillID] == nil {
+			own[c.SkillID] = map[string]bool{}
+		}
+		own[c.SkillID][c.VersionID] = true
+	}
+	return nil
+}
+
+// loadSkillRefs reads this capability's locks (and checks their digests) and
+// only the component skill ids of every other package. Other locks are not
+// hashed or decoded in Go, so a damaged digest on a different package does
+// not block this uninstall. Malformed JSON in another lock still fails closed.
+func loadSkillRefs(ctx context.Context, tx *sql.Tx, capID string) (map[string]map[string]bool, map[string]bool, error) {
+	own := map[string]map[string]bool{}
+	shared := map[string]bool{}
+	rows, err := tx.QueryContext(ctx, `SELECT lock_json,lock_sha256 FROM capability_versions WHERE capability_id=?`, capID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for rows.Next() {
+		var raw, digest string
+		if err = rows.Scan(&raw, &digest); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		if err = addOwnLockSkills(raw, digest, own); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT DISTINCT json_extract(c.value,'$.skill_id') FROM capability_versions v, json_each(v.lock_json,'$.components') c WHERE v.capability_id<>? AND coalesce(json_extract(c.value,'$.skill_id'),'')<>''`, capID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for rows.Next() {
+		var sid string
+		if err = rows.Scan(&sid); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		shared[sid] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	return own, shared, nil
+}
+
 // planSkillCleanup runs under the uninstall transaction's writer lock and only
 // reads. Immutable skill versions/blobs remain available to retained snapshots.
 // Only skills whose complete provenance belongs to this capability are listed
 // for removal. The confirmed path compares this plan with the reviewed one and
 // then applies the same plan, so history is scanned once per uninstall.
 func planSkillCleanup(ctx context.Context, tx *sql.Tx, capID string, out *UninstallResult) error {
-	own := map[string]map[string]bool{}
-	shared := map[string]bool{}
-	rows, err := tx.QueryContext(ctx, `SELECT capability_id,lock_json,lock_sha256 FROM capability_versions`)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var cid, raw, digest string
-		if err = rows.Scan(&cid, &raw, &digest); err != nil {
-			rows.Close()
-			return err
-		}
-		sum := sha256.Sum256([]byte(raw))
-		if hex.EncodeToString(sum[:]) != digest {
-			rows.Close()
-			return errors.New("capability lock integrity mismatch; uninstall cleanup refused")
-		}
-		var l Lock
-		if err = json.Unmarshal([]byte(raw), &l); err != nil {
-			rows.Close()
-			return err
-		}
-		for _, c := range l.Components {
-			if c.SkillID == "" {
-				continue
-			}
-			if cid != capID {
-				shared[c.SkillID] = true
-				continue
-			}
-			if own[c.SkillID] == nil {
-				own[c.SkillID] = map[string]bool{}
-			}
-			own[c.SkillID][c.VersionID] = true
-		}
-	}
-	err = rows.Err()
-	rows.Close()
+	own, shared, err := loadSkillRefs(ctx, tx, capID)
 	if err != nil {
 		return err
 	}

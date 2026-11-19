@@ -333,3 +333,107 @@ func TestSkillsReferencedInHistorySubstringFalsePositive(t *testing.T) {
 		t.Fatalf("false-positive substring retained skill: %+v", out)
 	}
 }
+
+func insertCapabilityVersion(t *testing.T, s *Store, capID, verID, lockJSON, hash string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var n int
+	if err := s.DB.QueryRow(`SELECT count(*) FROM capabilities WHERE id=?`, capID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		if _, err := s.DB.Exec(`INSERT INTO capabilities(id,title,status,current_version_id,created_at,updated_at) VALUES(?,?,?,?,?,?)`, capID, capID, "installed", verID, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if hash == "" {
+		hash = digest([]byte(lockJSON))
+	}
+	if _, err := s.DB.Exec(`INSERT INTO capability_versions(id,capability_id,lock_json,lock_sha256,files_json,created_at) VALUES(?,?,?,?,?,?)`, verID, capID, lockJSON, hash, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAddOwnLockSkillsIntegrity(t *testing.T) {
+	raw := `{"components":[{"skill_id":"sk_a","version_id":"ver_a"},{"skill_id":"","version_id":"ver_empty"}]}`
+	good := digest([]byte(raw))
+	own := map[string]map[string]bool{}
+	if err := addOwnLockSkills(raw, good, own); err != nil {
+		t.Fatal(err)
+	}
+	if !own["sk_a"]["ver_a"] || len(own) != 1 || own["sk_a"][""] {
+		t.Fatalf("own=%v", own)
+	}
+	if err := addOwnLockSkills(raw, strings.Repeat("0", 64), map[string]map[string]bool{}); err == nil || !strings.Contains(err.Error(), "integrity mismatch") {
+		t.Fatalf("own lock with bad digest accepted: %v", err)
+	}
+	if err := addOwnLockSkills("{", good, map[string]map[string]bool{}); err == nil {
+		t.Fatal("malformed JSON of this package was accepted")
+	}
+}
+
+func TestUninstallIgnoresOtherLockIntegrity(t *testing.T) {
+	for _, kind := range []string{"shared", "unrelated"} {
+		t.Run(kind, func(t *testing.T) {
+			s := testStore(t)
+			ctx := context.Background()
+			r, _ := installOwnedSkill(t, s)
+			c := r.Lock.Components[0]
+			skill := c.SkillID
+			if kind == "unrelated" {
+				skill = "sk_other_unrelated"
+			}
+			lock := `{"format":"tidebot-capability/1","id":"other","title":"Other","components":[{"type":"skill","name":"x","skill_id":"` + skill + `","version_id":"ver_x"}]}`
+			insertCapabilityVersion(t, s, "other", "other-ver", lock, strings.Repeat("0", 64))
+			out, err := s.UninstallWithReport(ctx, r.ID, "ui")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var n int
+			if err = s.DB.QueryRow(`SELECT count(*) FROM skills WHERE id=?`, c.SkillID).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "shared" {
+				if n != 1 || len(out.RemovedSkills) != 0 {
+					t.Fatalf("shared skill not retained: n=%d out=%+v", n, out)
+				}
+				found := false
+				for _, retained := range out.Retained {
+					if retained.Kind == "skill" && retained.ID == c.SkillID && retained.Reason == "referenced by another capability snapshot" {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("missing shared retention: %+v", out)
+				}
+				return
+			}
+			if n != 0 || len(out.RemovedSkills) != 1 || out.RemovedSkills[0] != c.SkillID {
+				t.Fatalf("exclusive skill not removed: n=%d out=%+v", n, out)
+			}
+		})
+	}
+}
+
+func TestUninstallRefusesOwnLockIntegrityMismatch(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	r, _ := installOwnedSkill(t, s)
+	sid := r.Lock.Components[0].SkillID
+	raw, err := json.Marshal(r.Lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertCapabilityVersion(t, s, r.ID, "ver-bad", string(raw), strings.Repeat("0", 64))
+	if _, err = s.UninstallWithReport(ctx, r.ID, "ui"); err == nil || !strings.Contains(err.Error(), "integrity mismatch") {
+		t.Fatalf("want integrity refusal, got %v", err)
+	}
+	var n int
+	if err = s.DB.QueryRow(`SELECT count(*) FROM skills WHERE id=?`, sid).Scan(&n); err != nil || n != 1 {
+		t.Fatal("skill removed despite refusal", n, err)
+	}
+	var status string
+	if err = s.DB.QueryRow(`SELECT status FROM capabilities WHERE id=?`, r.ID).Scan(&status); err != nil || status != "installed" {
+		t.Fatal("capability changed despite refusal", status, err)
+	}
+}
