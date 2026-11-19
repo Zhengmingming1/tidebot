@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io/fs"
 	"net/url"
 	"os"
@@ -270,11 +271,11 @@ func (c *Client) Scan(ctx context.Context, id, raw, ref, root string) (Snapshot,
 			return Snapshot{}, fail("path_not_found", "repository directory not found")
 		}
 	}
-	candidates := []Candidate{}
 	// SKILL.md files are read together after the tree walk: one Git process per
-	// batch instead of one per candidate.
+	// batch instead of one per candidate. Summaries are built in one pass over
+	// the tree (not once per candidate).
 	var manifests []entry
-	var owners []int
+	var roots []string
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
 			return Snapshot{}, err
@@ -282,16 +283,25 @@ func (c *Client) Scan(ctx context.Context, id, raw, ref, root string) (Snapshot,
 		if path.Base(e.Path) != "SKILL.md" || !within(e.Path, root) {
 			continue
 		}
-		if len(candidates) >= MaxCandidates {
+		if len(roots) >= MaxCandidates {
 			return Snapshot{}, fail("scan_limit", "too many skill candidates")
 		}
-		candidate := summarize(entries, path.Dir(e.Path))
-		if candidate.Error == "" {
-			manifests = append(manifests, e)
-			owners = append(owners, len(candidates))
-		}
-		candidates = append(candidates, candidate)
+		manifests = append(manifests, e)
+		roots = append(roots, path.Dir(e.Path))
 	}
+	candidates, err := summarizeByRoot(ctx, entries, root, roots)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	var owners []int
+	var readable []entry
+	for i, candidate := range candidates {
+		if candidate.Error == "" {
+			readable = append(readable, manifests[i])
+			owners = append(owners, i)
+		}
+	}
+	manifests = readable
 	err = c.readBlobs(ctx, dir, manifests, func(i int, b []byte) error {
 		candidate := &candidates[owners[i]]
 		if isLFS(b) {
@@ -379,66 +389,127 @@ func relative(p, root string) string {
 	}
 	return strings.TrimPrefix(p, root+"/")
 }
-func summarize(entries []entry, root string) Candidate {
-	c := Candidate{Path: root}
-	h := sha256.New()
-	type pathEntry struct {
-		name      string
-		directory bool
-		children  map[string]*pathEntry
+
+type pathEntry struct {
+	name      string
+	directory bool
+	children  map[string]*pathEntry
+}
+
+type summary struct {
+	Candidate
+	hash   hash.Hash
+	folded map[string]*pathEntry
+}
+
+func newSummary(root string) *summary {
+	return &summary{Candidate: Candidate{Path: root}, hash: sha256.New(), folded: map[string]*pathEntry{}}
+}
+
+func (s *summary) add(e entry) {
+	if e.Kind == "tree" {
+		return
 	}
-	folded := map[string]*pathEntry{}
+	p := relative(e.Path, s.Path)
+	s.Files++
+	s.Size += e.Size
+	// Skill versions currently preserve bytes, not executable mode.
+	fmt.Fprintf(s.hash, "%s\x00%s\x00", p, e.OID)
+	if e.Kind != "blob" || (e.Mode != "100644" && e.Mode != "100755") {
+		s.Error = "unsupported_file"
+	}
+	clean, err := skillpkg.CleanRel(p)
+	if err != nil || clean != p || strings.ContainsAny(p, "\\\r\n") {
+		s.Error = "unsafe_path"
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if strings.EqualFold(seg, ".git") {
+			s.Error = "unsafe_path"
+		}
+	}
+	// Check every component, not only complete filenames: Refs/a and
+	// refs/b merge directories on case-insensitive filesystems, and a
+	// file named Refs prevents creating refs/b altogether.
+	components := strings.Split(p, "/")
+	level := s.folded
+	for i, name := range components {
+		directory := i < len(components)-1
+		key := foldPath(name)
+		previous, exists := level[key]
+		if exists {
+			if previous.name != name || !previous.directory || !directory {
+				s.Error = "path_collision"
+			}
+		} else {
+			previous = &pathEntry{name: name, directory: directory}
+			level[key] = previous
+		}
+		if directory {
+			if previous.children == nil {
+				previous.children = map[string]*pathEntry{}
+			}
+			level = previous.children
+		}
+	}
+	if e.Size > skillpkg.MaxFileBytes || s.Size > skillpkg.MaxTotalBytes || s.Files > skillpkg.MaxEntries {
+		s.Error = "skill_size_limit"
+	}
+}
+
+func (s *summary) result() Candidate {
+	s.TreeHash = hex.EncodeToString(s.hash.Sum(nil))
+	return s.Candidate
+}
+
+func summarize(entries []entry, root string) Candidate {
+	s := newSummary(root)
 	for _, e := range entries {
-		if !within(e.Path, root) || e.Kind == "tree" {
+		if within(e.Path, root) {
+			s.add(e)
+		}
+	}
+	return s.result()
+}
+
+// summarizeByRoot builds one summary per skill directory in a single walk.
+// A file under nested skills is counted in every ancestor, same as calling
+// summarize() on each root. Cost is entries × path depth, not candidates × entries.
+func summarizeByRoot(ctx context.Context, entries []entry, scanRoot string, roots []string) ([]Candidate, error) {
+	accs := make([]*summary, len(roots))
+	index := make(map[string]int, len(roots))
+	for i, root := range roots {
+		accs[i] = newSummary(root)
+		index[root] = i
+	}
+	for i, e := range entries {
+		if i&1023 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		if e.Kind == "tree" || !within(e.Path, scanRoot) {
 			continue
 		}
-		p := relative(e.Path, root)
-		c.Files++
-		c.Size += e.Size
-		// Skill versions currently preserve bytes, not executable mode.
-		fmt.Fprintf(h, "%s\x00%s\x00", p, e.OID)
-		if e.Kind != "blob" || (e.Mode != "100644" && e.Mode != "100755") {
-			c.Error = "unsupported_file"
-		}
-		clean, err := skillpkg.CleanRel(p)
-		if err != nil || clean != p || strings.ContainsAny(p, "\\\r\n") {
-			c.Error = "unsafe_path"
-		}
-		for _, seg := range strings.Split(p, "/") {
-			if strings.EqualFold(seg, ".git") {
-				c.Error = "unsafe_path"
+		d := path.Dir(e.Path)
+		for {
+			if j, ok := index[d]; ok {
+				accs[j].add(e)
 			}
-		}
-		// Check every component, not only complete filenames: Refs/a and
-		// refs/b merge directories on case-insensitive filesystems, and a
-		// file named Refs prevents creating refs/b altogether.
-		components := strings.Split(p, "/")
-		level := folded
-		for i, name := range components {
-			directory := i < len(components)-1
-			key := foldPath(name)
-			previous, exists := level[key]
-			if exists {
-				if previous.name != name || !previous.directory || !directory {
-					c.Error = "path_collision"
-				}
-			} else {
-				previous = &pathEntry{name: name, directory: directory}
-				level[key] = previous
+			if d == "." || d == scanRoot {
+				break
 			}
-			if directory {
-				if previous.children == nil {
-					previous.children = map[string]*pathEntry{}
-				}
-				level = previous.children
+			parent := path.Dir(d)
+			if parent == d {
+				break
 			}
-		}
-		if e.Size > skillpkg.MaxFileBytes || c.Size > skillpkg.MaxTotalBytes || c.Files > skillpkg.MaxEntries {
-			c.Error = "skill_size_limit"
+			d = parent
 		}
 	}
-	c.TreeHash = hex.EncodeToString(h.Sum(nil))
-	return c
+	out := make([]Candidate, len(roots))
+	for i, acc := range accs {
+		out[i] = acc.result()
+	}
+	return out, nil
 }
 
 // foldPath gives Unicode simple-fold equivalents the same key, including

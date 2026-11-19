@@ -177,3 +177,48 @@ func TestRepositoryScanTiming(t *testing.T) {
 		t.Logf("%d skills x %d files: scan %v %s; read %d files %v %v", shape[0], shape[1], scan.Round(time.Millisecond), scanCalls, len(files), time.Since(start).Round(time.Millisecond), calls)
 	}
 }
+
+func synthEntries(skills, filesPer int) []entry {
+	oid := strings.Repeat("a", 40)
+	entries := make([]entry, 0, skills*(filesPer+3)+2)
+	entries = append(entries, entry{Path: "skills", Mode: "040000", Kind: "tree", OID: oid})
+	var roots []string
+	for i := 0; i < skills; i++ {
+		d := fmt.Sprintf("skills/s%04d", i)
+		roots = append(roots, d)
+		entries = append(entries, entry{Path: d, Mode: "040000", Kind: "tree", OID: oid})
+		entries = append(entries, entry{Path: d + "/SKILL.md", Mode: "100644", Kind: "blob", OID: oid, Size: 20})
+		entries = append(entries, entry{Path: d + "/ref", Mode: "040000", Kind: "tree", OID: oid})
+		for j := 1; j < filesPer; j++ {
+			entries = append(entries, entry{Path: fmt.Sprintf("%s/ref/f%04d.md", d, j), Mode: "100644", Kind: "blob", OID: oid, Size: 10})
+		}
+	}
+	return entries
+}
+
+func synthRoots(entries []entry) []string {
+	var roots []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Path, "/SKILL.md") {
+			roots = append(roots, strings.TrimSuffix(e.Path, "/SKILL.md"))
+		}
+	}
+	return roots
+}
+
+// Isolated walk cost, without Git fetch. Shapes include ones where the old
+// per-candidate walk was hundreds of milliseconds.
+func BenchmarkSummarizeByRoot(b *testing.B) {
+	for _, shape := range [][2]int{{50, 10}, {200, 10}, {20, 300}, {400, 50}, {1000, 40}} {
+		entries := synthEntries(shape[0], shape[1])
+		roots := synthRoots(entries)
+		b.Run(fmt.Sprintf("%dskx%df", shape[0], shape[1]), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := summarizeByRoot(context.Background(), entries, ".", roots); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
