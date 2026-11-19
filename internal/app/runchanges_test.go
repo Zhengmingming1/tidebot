@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -141,5 +142,77 @@ func TestEditRunRecordsChangedFilesWhenSaveBusy(t *testing.T) {
 	var c gitsnap.Changes
 	if err := json.Unmarshal([]byte(fc), &c); err != nil || c.Count != 1 || c.Files[0].Path != "made-by-run.txt" {
 		t.Fatalf("file_changes %q: %v %+v", fc, err, c)
+	}
+}
+
+// A task that may change the owner's folder records the same file list and
+// patch as the Run dialog, so the run page can show and undo them. Legacy
+// ("") and exec tasks do this too; read-only tasks and the task's own folder
+// in tidebot's home do not.
+func TestTaskRunRecordsChangedFiles(t *testing.T) {
+	a := newTestApp(t)
+	sandboxDeps(t, true)
+	fakeHome(t)
+	ctx := context.Background()
+	ws := gitRepo(t)
+	made := filepath.Join(ws, "made-by-run.txt")
+	t.Setenv("TIDEBOT_MOCK_WRITE_FILE", made)
+	for _, mode := range []string{"", "edit", "exec"} {
+		_ = os.Remove(made)
+		tid := taskInFolder(t, a, "chg-"+mode, ws, mode)
+		v, err := a.Tasks.Get(ctx, tid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.runTaskTrigger(ctx, v.Task, "manual", "production"); err != nil {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
+		var fc, patch string
+		if err := a.DB.QueryRow(`SELECT file_changes, file_patch FROM runs WHERE task_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1`, tid).Scan(&fc, &patch); err != nil {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
+		var c gitsnap.Changes
+		if err := json.Unmarshal([]byte(fc), &c); err != nil {
+			t.Fatalf("mode %q file_changes %q: %v", mode, fc, err)
+		}
+		if c.Count != 1 || c.Files[0].Path != "made-by-run.txt" || c.Files[0].Status != "A" || c.Add != 1 {
+			t.Fatalf("mode %q changes: %+v", mode, c)
+		}
+		if !strings.Contains(patch, "+mock edit") {
+			t.Fatalf("mode %q patch: %q", mode, patch)
+		}
+	}
+	if ents, _ := os.ReadDir(a.runSnapRoot()); len(ents) != 0 {
+		t.Fatalf("snapshot left: %v", ents)
+	}
+
+	plain := t.TempDir()
+	t.Setenv("TIDEBOT_MOCK_WRITE_FILE", filepath.Join(plain, "x.txt"))
+	for _, tc := range []struct{ name, dir, mode string }{
+		{"read", gitRepo(t), "read"},
+		{"plain", plain, "edit"},
+		{"own", "", "edit"},
+	} {
+		var tid string
+		if tc.dir == "" {
+			tid = mkTask(t, a, "own")
+			v, _ := a.Tasks.Get(ctx, tid)
+			sp := *v.Spec
+			sp.RunMode = tc.mode
+			if _, err := a.Tasks.UpdateSpec(ctx, tid, sp, "user", "mode"); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			tid = taskInFolder(t, a, tc.name, tc.dir, tc.mode)
+		}
+		v, _ := a.Tasks.Get(ctx, tid)
+		if err := a.runTaskTrigger(ctx, v.Task, "manual", "production"); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		var fc string
+		_ = a.DB.QueryRow(`SELECT file_changes FROM runs WHERE task_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1`, tid).Scan(&fc)
+		if fc != "" {
+			t.Fatalf("%s recorded %q", tc.name, fc)
+		}
 	}
 }

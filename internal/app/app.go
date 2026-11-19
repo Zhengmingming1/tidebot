@@ -796,11 +796,18 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		}
 		defer unlockEditDir(key)
 	}
-	res, err := a.RunPromptEx(ctx, runner.Options{
+	opts := runner.Options{
 		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
 		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket, RunMode: mode, Effort: effort,
 		OnStart: a.skillStart(staged, a.sourceStart(setSource, declared, onStart)), ContextArgs: skillArgs, ContextRequest: staged.contextRequest(a.modernClaude(), staged != nil && len(staged.Skills) > 1),
-	}, providerName, timeout)
+	}
+	if mode != "read" && ownerDir {
+		// what the task changed in the owner's folder (git work trees), for the run page
+		tr := &changeTracker{a: a, dir: ws}
+		defer tr.close()
+		opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(opts.OnStart), tr.atStart, tr.afterExit
+	}
+	res, err := a.RunPromptEx(ctx, opts, providerName, timeout)
 	if err == nil && len(nextIDs) > 0 {
 		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
 	}
