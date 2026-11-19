@@ -753,6 +753,11 @@ func (a *App) recoverCapabilityProposals(ctx context.Context) {
 	} else if len(r.Removed) > 0 {
 		a.Log.Info("removed interrupted managed installs", "count", len(r.Removed), "bytes", r.FreedBytes)
 	}
+	if n, err := managed.PurgeGCPending(ctx, a.Cfg.DataDir); err != nil {
+		a.Log.Warn("remove leftover storage cleanup trash", "error", err)
+	} else if n > 0 {
+		a.Log.Info("removed leftover storage cleanup trash", "bytes", n)
+	}
 	_, err := a.caps().RecoverInterruptedProposals(ctx)
 	if err != nil {
 		a.Log.Warn("recover capability proposals", "error", err)

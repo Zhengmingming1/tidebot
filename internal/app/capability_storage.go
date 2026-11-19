@@ -77,11 +77,15 @@ func (a *App) capabilityStorageRequest(ctx context.Context, action string, r web
 	if action == "storage_gc" {
 		// Every persisted version is retained, not just current/installed versions.
 		// Snapshot GC must remove obsolete locks before their dependencies can go.
-		report, err := installer.GC(ctx, managed.GCOptions{References: refs, KeepPrevious: 1})
+		// After the live trees have been moved aside, drop the writer lock so
+		// tree walks and deletions do not stall the single database connection.
+		report, err := installer.GC(ctx, managed.GCOptions{References: refs, KeepPrevious: 1, AfterPrepare: func() error {
+			return tx.Commit()
+		}})
 		if err != nil {
 			return map[string]any{"report": report}, err
 		}
-		return report, tx.Commit()
+		return report, nil
 	}
 	// The view only reads. Release the pool's single connection before walking
 	// managed directories, which can hold tens of thousands of files: holding it

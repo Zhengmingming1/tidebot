@@ -7027,3 +7027,30 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 任务页「查看全部」节点运行仍跳到 `#/runs?task=`（全局运行列表），工作流运行没有对应的全局列表，只能看任务运行页或工作流自己的历史。
 - 扫描的大头在中小仓库里仍是 `fetch`。可以考虑 `--filter=blob:none` 部分克隆，只按需拉要读的 blob，大仓库会省流量，但要先确认服务端支持，以及失败时怎么回退。
 - 设置 › 数据的存储清理在收集托管依赖引用时，仍会读出全部能力包的 lock、校验 SHA-256 并解码完整 `Lock`（它需要每份里的 `resolved`）。若以后清理变慢，可以只解码 `resolved`，不必做成整棵树。
+
+### 2026-11-20（续）：存储清理先隔离目录再量大小，不再占着数据库写锁走完整棵树（资源占用）
+
+- **问题**（11-07 起多次记下的「`GC` 在删除事务里量目录大小」；上一轮后续想法里的 lock 解码也先测过）：「扩展 › 工具」的立即清理在持有唯一数据库写锁时，会对每个待删的托管目录做符号链接核查、再 `treeSize`、再 `RemoveAll`，还会遍历 npm/uv 缓存和中断安装的暂存目录。Node 运行时动辄上万个文件，这段时间调度器、运行写入和其它请求都在等这一个连接。上一轮候选的「只解码 `resolved`」在同一夹具上只从 13.0 ms 降到 11.0 ms（哈希本身就要 4.8 ms），所以这轮改真正挡住连接的磁盘遍历。
+- **改法**：
+  - 收集引用、核对无正在安装的提议仍在写锁里。列出待删版本时只读 ownership 标记（创建时间），不再为「保留的上一份」走完整棵树。
+  - 待删的版本目录和中断安装残留先 `rename` 到 `<data>/.gc-pending/<id>/`（同一文件系统上是元数据操作），再调用 `AfterPrepare` 提交事务、放开写锁。
+  - 之后才做符号链接核查、量大小、删除隔离目录、清缓存。核查失败的目录会搬回原处并拒绝清理，外部链接目标不动。新安装若复用了刚腾出的版本路径，只会删隔离副本，不会碰到新目录。
+  - 启动时 `PurgeGCPending` 清掉上次崩溃留下的隔离目录。
+- 测试：`TestGCAfterPrepareRunsBeforeDiskWork`（先 AfterPrepare 再走磁盘）；`TestPurgeGCPendingRemovesLeftoverTrash` / `TestGCPurgesLeftoverPendingFromEarlierRun`；`TestGCDoesNotDeleteReuseAtLivePath`；`TestGCRestoresTamperedTreeAndLeavesLinkTarget`。`TestCapabilityStorageGCReleasesDBBeforeDiskWalk`：写锁放下后并发 `SELECT 1` 立刻成功。原有清理保留 / 拒绝安装中 / 损坏引用 / 残留配额测试照常。`go test ./internal/capability/managed/ ./internal/app/ -run 'TestCapabilityStorage|TestCapabilityManaged|TestGC|TestPurgeGC|TestLeftover|TestSweep'`、`go vet`（含 GOOS=windows/darwin）通过；`go test -race -count=3` 对 `managed` 整包和上述 app 测试通过。
+- 截图：未拍——没有界面改动。
+- 耗时：本机 Linux amd64、8 核。80 份大 lock（5188 KB）哈希 + 完整解码 13.0 ms，只解码 `resolved` 11.0 ms，故未改解码。清理路径（2 个各 5000 个文件的未引用版本）改前并发 `SELECT 1` 要等 73 ms（整段清理约 75 ms）；改后 2 个各 3000 个文件的同类夹具在 `AfterPrepare` 之后等待 16 µs，磁盘遍历仍发生，只是不再占着连接。
+
+**心得**：写锁要保护的是「不会有新的安装抢在引用快照之前落地」，不是「趁锁还在把整棵树量一遍再删」。先把待删目录从活路径上挪走，引用集合和安装互斥就已经成立；后面的 WalkDir 可以交给没有数据库锁的时间去做。
+
+**后续想法**：
+- 会话一轮在用户目录里改了文件，仍然不记 `file_changes`，运行页 / 会话页也就不能按轮次撤销。多轮会话的 diff 和撤销范围要另定，不能直接套单次任务运行。
+- 会话本身还没有推理强度选择器，只能沿用源运行的值；从空白会话存为任务、以及运行对话框新开一次运行，仍是「默认」。若要在会话或运行对话框里改强度，需要像权限档那样加一档设置。
+- `workflow_runs` 的按保留期清理其实在 2026-11-07 已经做了（已结束 90 天，软删工作流 7 天）；还没做的是把保留天数放到「设置 › 数据」里可配。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做。
+- 草稿起点落后时可以提供「把当前版本的改动合进草稿」（三方合并 SKILL.md），现在只能提醒后替换或重新「改技能」。
+- 一个会话仍只能有一份草稿。
+- 版本内容（任务 / 工作流定义的 `workspace_dir`）是不可变的、按哈希去重，没有改；换机恢复后可以在恢复后列出「目录不存在的任务」提示一次。
+- 依赖检查的 AI 报告正文（摘要其余部分、模型写的理由）仍按提示词用中文生成，英文界面里除稳定前缀外仍会看到这部分中文；若要整份报告跟界面语言走，需要改生成提示词或另做翻译，不能只靠展示层目录。
+- 任务页「查看全部」节点运行仍跳到 `#/runs?task=`（全局运行列表），工作流运行没有对应的全局列表，只能看任务运行页或工作流自己的历史。
+- 扫描的大头在中小仓库里仍是 `fetch`。可以考虑 `--filter=blob:none` 部分克隆，只按需拉要读的 blob，大仓库会省流量，但要先确认服务端支持，以及失败时怎么回退。
+- 存储清理收集托管依赖引用时仍会读出全部 lock、校验 SHA-256 并解码完整 `Lock`。本轮实测 80 份共 5188 KB：哈希 + 完整解码 13.0 ms，只解码 `resolved` 11.0 ms（哈希约 4.8 ms 省不掉），暂不改；若以后 lock 更大再看。

@@ -2,6 +2,8 @@ package managed
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ const DefaultEnvQuota int64 = 500 << 20
 const DefaultCacheQuota int64 = 1 << 30
 const ownerFile = ".tidebot-managed.json"
 const cacheOwnerFile = ".tidebot-cache.json"
+const gcPendingDir = ".gc-pending"
 
 var ErrQuotaExceeded = errors.New("managed storage quota exceeded")
 
@@ -303,7 +306,11 @@ func (i *Installer) markStage(stage string, r Reference) error {
 	}
 	return ce
 }
-func readOwner(path string, r Reference) (ownership, error) {
+
+// peekOwner reads the ownership marker without walking the tree. Listing
+// candidates only needs the created time; the symlink audit is deferred until
+// a tree is actually about to be removed.
+func peekOwner(path string, r Reference) (ownership, error) {
 	var meta ownership
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -320,6 +327,14 @@ func readOwner(path string, r Reference) (ownership, error) {
 	}
 	if json.Unmarshal(b, &meta) != nil || meta.Format != "tidebot-managed/1" || meta.Reference != r {
 		return meta, errors.New("invalid managed ownership marker")
+	}
+	return meta, nil
+}
+
+func readOwner(path string, r Reference) (ownership, error) {
+	meta, err := peekOwner(path, r)
+	if err != nil {
+		return meta, err
 	}
 	err = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -396,6 +411,12 @@ type GCOptions struct {
 	KeepPrevious int
 	Now          time.Time
 	DryRun       bool
+	// AfterPrepare runs after versions and leftover install stages have been
+	// identified and (unless this is a dry run) moved aside, and before any
+	// tree walk, size measurement, cache walk or deletion. Storage cleanup
+	// uses it to drop the database writer lock so other requests are not
+	// blocked for the rest of GC.
+	AfterPrepare func() error
 }
 type GCReport struct {
 	Removed    []Reference `json:"removed"`
@@ -405,9 +426,22 @@ type GCReport struct {
 	FreedBytes int64       `json:"freed_bytes"`
 }
 
+// gcMoved is one owned version isolated under .gc-pending for later audit and deletion.
+type gcMoved struct {
+	Ref  Reference
+	Live string
+	Dest string
+}
+
+// GCPurgeHook, when set (tests), runs at the start of post-prepare disk work.
+var GCPurgeHook = func() {}
+
 // GC retains every referenced version plus at least one most-recent unreferenced
 // version per tool/environment for rollback. Only ownership-marked trees can be
 // removed. Unknown directories and unknown/changed symlinks are left untouched.
+//
+// Tree walks and deletions happen after AfterPrepare, so a caller that holds a
+// database lock can release it once the live paths have been renamed aside.
 func (i *Installer) GC(ctx context.Context, opts GCOptions) (GCReport, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -433,6 +467,12 @@ func (i *Installer) GC(ctx context.Context, opts GCOptions) (GCReport, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
+	pending := ""
+	if !opts.DryRun {
+		pending = filepath.Join(i.DataDir, gcPendingDir, newPendingName())
+	}
+	var moved []gcMoved
+	var dryPaths []string
 	for _, kind := range []string{"tools", "runtimes", "envs"} {
 		root := filepath.Join(i.DataDir, kind)
 		if err := checkExistingParents(root); err != nil {
@@ -463,7 +503,8 @@ func (i *Installer) GC(ctx context.Context, opts GCOptions) (GCReport, error) {
 				if refs[r] {
 					continue
 				}
-				meta, e := readOwner(filepath.Join(parent, version.Name()), r)
+				path := filepath.Join(parent, version.Name())
+				meta, e := peekOwner(path, r)
 				if e != nil {
 					report.Skipped = append(report.Skipped, kind+"/"+name.Name()+"/"+version.Name())
 					continue
@@ -477,31 +518,232 @@ func (i *Installer) GC(ctx context.Context, opts GCOptions) (GCReport, error) {
 				}
 				r := candidates[n].Reference
 				path := filepath.Join(parent, r.Version)
-				if _, err = readOwner(path, r); err != nil {
+				if opts.DryRun {
+					dryPaths = append(dryPaths, path)
+					report.Removed = append(report.Removed, r)
+					continue
+				}
+				dest := filepath.Join(pending, r.Kind, r.Name, r.Version)
+				if err = quarantine(path, dest); err != nil {
 					return report, err
 				}
-				size, err := treeSize(ctx, path)
-				if err != nil {
-					return report, err
-				}
-				if !opts.DryRun {
-					if err = os.RemoveAll(path); err != nil {
-						return report, err
-					}
-				}
+				moved = append(moved, gcMoved{Ref: r, Live: path, Dest: dest})
 				report.Removed = append(report.Removed, r)
-				report.FreedBytes += size
 			}
 		}
 	}
-	if err := i.gcCaches(ctx, now, opts.DryRun, &report); err != nil {
+	stages, err := planStageSweep(ctx, i.DataDir, pending, opts.DryRun)
+	if err != nil {
 		return report, err
 	}
-	stages, err := sweepStages(ctx, i.DataDir, opts.DryRun)
 	report.Stages = stages.Removed
-	report.FreedBytes += stages.FreedBytes
 	report.Skipped = append(report.Skipped, stages.Skipped...)
-	return report, err
+	var prepErr error
+	if opts.AfterPrepare != nil {
+		prepErr = opts.AfterPrepare()
+	}
+	GCPurgeHook()
+	if opts.DryRun {
+		for _, path := range dryPaths {
+			size, e := treeSize(ctx, path)
+			if e != nil {
+				return report, e
+			}
+			report.FreedBytes += size
+		}
+		for _, path := range stages.live {
+			report.FreedBytes += stageMeasure(path)
+		}
+		if err = i.gcCaches(ctx, now, true, &report); err != nil {
+			return report, err
+		}
+		return report, prepErr
+	}
+	kept := moved[:0]
+	for _, m := range moved {
+		if _, e := readOwner(m.Dest, m.Ref); e != nil {
+			if err = os.Rename(m.Dest, m.Live); err != nil && !os.IsNotExist(err) {
+				return report, errors.Join(e, err)
+			}
+			return report, e
+		}
+		kept = append(kept, m)
+	}
+	moved = kept
+	for _, m := range moved {
+		size, e := treeSize(ctx, m.Dest)
+		if e != nil {
+			return report, e
+		}
+		report.FreedBytes += size
+	}
+	for _, path := range stages.live {
+		report.FreedBytes += stageMeasure(path)
+	}
+	if _, err = PurgeGCPending(ctx, i.DataDir); err != nil {
+		return report, err
+	}
+	if err = i.gcCaches(ctx, now, false, &report); err != nil {
+		return report, err
+	}
+	return report, prepErr
+}
+
+func newPendingName() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), hex.EncodeToString(b[:]))
+}
+
+func quarantine(src, dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return err
+	}
+	return os.Rename(src, dest)
+}
+
+func stageMeasure(path string) int64 {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return 0
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return 0
+	}
+	if info.IsDir() {
+		return stageSize(path)
+	}
+	if info.Mode().IsRegular() {
+		return info.Size()
+	}
+	return 0
+}
+
+// PurgeGCPending removes leftover trees from a previous GC that moved them
+// aside and then did not finish deleting (crash, force quit). RemoveAll does
+// not follow symlinks, so a planted link in the trash cannot reach outside.
+func PurgeGCPending(ctx context.Context, dataDir string) (int64, error) {
+	if !filepath.IsAbs(dataDir) {
+		return 0, errors.New("invalid managed data directory")
+	}
+	root := filepath.Join(dataDir, gcPendingDir)
+	info, err := os.Lstat(root)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return 0, errors.New("managed gc pending directory is not a directory")
+	}
+	if err = checkExistingParents(root); err != nil {
+		return 0, err
+	}
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		return 0, err
+	}
+	var freed int64
+	for _, e := range ents {
+		if err = ctx.Err(); err != nil {
+			return freed, err
+		}
+		path := filepath.Join(root, e.Name())
+		st, err := os.Lstat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return freed, err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		size, err := treeSize(ctx, path)
+		if err != nil {
+			return freed, err
+		}
+		if err = os.RemoveAll(path); err != nil {
+			return freed, err
+		}
+		freed += size
+	}
+	_ = os.Remove(root)
+	return freed, nil
+}
+
+type stagePlan struct {
+	StageReport
+	live []string // dest (or original, on a dry run) paths to measure after AfterPrepare
+}
+
+func planStageSweep(ctx context.Context, dataDir, pending string, dry bool) (stagePlan, error) {
+	plan := stagePlan{StageReport: StageReport{Removed: []string{}}}
+	if !filepath.IsAbs(dataDir) {
+		return plan, errors.New("invalid managed data directory")
+	}
+	for _, kind := range []string{"tools", "runtimes", "envs"} {
+		root := filepath.Join(dataDir, kind)
+		if err := checkExistingParents(root); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return plan, err
+		}
+		names, err := os.ReadDir(root)
+		if err != nil {
+			return plan, err
+		}
+		for _, name := range names {
+			if !name.IsDir() || !validID(name.Name()) {
+				continue
+			}
+			parent := filepath.Join(root, name.Name())
+			entries, err := os.ReadDir(parent)
+			if err != nil {
+				return plan, err
+			}
+			for _, e := range entries {
+				if err = ctx.Err(); err != nil {
+					return plan, err
+				}
+				stage := strings.HasPrefix(e.Name(), ".install-")
+				download := strings.HasPrefix(e.Name(), ".download-")
+				if !stage && !download {
+					continue
+				}
+				rel := kind + "/" + name.Name() + "/" + e.Name()
+				path := filepath.Join(parent, e.Name())
+				info, err := os.Lstat(path)
+				if err != nil {
+					if os.IsNotExist(err) {
+						continue
+					}
+					return plan, err
+				}
+				if (stage && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0)) || (download && !info.Mode().IsRegular()) {
+					plan.Skipped = append(plan.Skipped, rel)
+					continue
+				}
+				if dry {
+					plan.Removed = append(plan.Removed, rel)
+					plan.live = append(plan.live, path)
+					continue
+				}
+				dest := filepath.Join(pending, kind, name.Name(), e.Name())
+				if err = quarantine(path, dest); err != nil {
+					plan.Skipped = append(plan.Skipped, rel)
+					continue
+				}
+				plan.Removed = append(plan.Removed, rel)
+				plan.live = append(plan.live, dest)
+			}
+		}
+	}
+	return plan, nil
 }
 
 // StageReport is what SweepStages removed: install stages and downloads an

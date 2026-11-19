@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,4 +169,53 @@ func TestCapabilityManagedReferenceLegacyAndEscapes(t *testing.T) {
 			t.Fatalf("accepted %+v", r)
 		}
 	}
+}
+
+// Cleanup used to walk and delete managed trees while holding the single
+// SQLite writer lock. A concurrent request must be able to use the database
+// as soon as live paths have been moved aside.
+func TestCapabilityStorageGCReleasesDBBeforeDiskWalk(t *testing.T) {
+	a := newTestApp(t)
+	storageCapabilityFixture(t, a)
+	keep := storageOwnedFixture(t, a, "1")
+	storageLockFixture(t, a, "version-1", keep)
+	for _, v := range []string{"2", "3"} {
+		dir := storageOwnedFixture(t, a, v)
+		sub := filepath.Join(dir, "lib")
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 3000; i++ {
+			if err := os.WriteFile(filepath.Join(sub, fmt.Sprintf("f%d.js", i)), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(func() { managed.GCPurgeHook = func() {} })
+	var waited time.Duration
+	var selectErr error
+	managed.GCPurgeHook = func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		start := time.Now()
+		var one int
+		selectErr = a.DB.QueryRowContext(ctx, `SELECT 1`).Scan(&one)
+		waited = time.Since(start)
+	}
+	if _, err := a.capabilityStorageRequest(context.Background(), "storage_gc", webui.CapabilityRequest{Reviewed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if selectErr != nil {
+		t.Fatalf("database held during GC disk work: %v (waited %s)", selectErr, waited)
+	}
+	if _, err := os.Stat(filepath.Join(a.Cfg.DataDir, "tools", "test-cli", "2")); !os.IsNotExist(err) {
+		t.Fatal("older unreferenced version kept")
+	}
+	if _, err := os.Stat(filepath.Join(a.Cfg.DataDir, "tools", "test-cli", "3")); err != nil {
+		t.Fatal("most recent unreferenced version removed:", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatal("referenced version removed:", err)
+	}
+	t.Logf("concurrent SELECT 1 after prepare waited %s", waited)
 }
