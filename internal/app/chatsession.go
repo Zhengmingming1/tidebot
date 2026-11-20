@@ -471,6 +471,16 @@ func (a *App) ListChatSessions(ctx context.Context, limit int) ([]webui.ChatSess
 	return out, nil
 }
 
+// chatTurnChangeCols reads a turn's change summary from the joined runs row
+// (same rules as webui.runChangeCols), plus whether the patch was cut.
+// NULLs from a missing run become "no changes" so Scan never sees NULL.
+const chatTurnChangeCols = `COALESCE(CASE WHEN r.run_mode IN ('edit','exec') AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.count'),0) ELSE -1 END, -1),
+ COALESCE(CASE WHEN r.run_mode IN ('edit','exec') AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.add'),0) ELSE 0 END, 0),
+ COALESCE(CASE WHEN r.run_mode IN ('edit','exec') AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.del'),0) ELSE 0 END, 0),
+ COALESCE(r.changes_undone_at<>'', 0),
+ COALESCE(CASE WHEN r.changes_undone_files<>'' AND json_valid(r.changes_undone_files) THEN json_array_length(r.changes_undone_files) ELSE 0 END, 0),
+ COALESCE(CASE WHEN r.run_mode IN ('edit','exec') AND r.file_changes<>'' AND json_valid(r.file_changes) THEN COALESCE(json_extract(r.file_changes,'$.patch_cut'),0) ELSE 0 END, 0)`
+
 // GetChatSession returns a session and its turns (oldest first).
 func (a *App) GetChatSession(ctx context.Context, sid string) (webui.ChatSessionDetail, error) {
 	c, err := a.chatSession(ctx, sid)
@@ -481,7 +491,8 @@ func (a *App) GetChatSession(ctx context.Context, sid string) (webui.ChatSession
 	d.WorkspaceProblem = a.chatWorkspaceProblem(c.WorkspaceDir)
 	fx := a.cachedFX()
 	rows, err := a.DB.QueryContext(ctx, `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.prompt,''), COALESCE(r.status,''),
-  COALESCE(r.result_text,''), COALESCE(r.result_truncated,0), COALESCE(r.error_message,''), COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,'')
+  COALESCE(r.result_text,''), COALESCE(r.result_truncated,0), COALESCE(r.error_message,''), COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,''),
+  `+chatTurnChangeCols+`
 FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=? ORDER BY t.turn_index`, sid)
 	if err != nil {
 		return d, err
@@ -489,16 +500,19 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 	defer rows.Close()
 	for rows.Next() {
 		var t webui.ChatTurn
-		var trunc int
+		var trunc, files, add, del, undoneN, patchCut int
+		var undone bool
 		var amount float64
 		var cur string
-		if err := rows.Scan(&t.Index, &t.RunID, &t.CreatedAt, &t.Message, &t.Status, &t.Answer, &trunc, &t.Error, &amount, &cur); err != nil {
+		if err := rows.Scan(&t.Index, &t.RunID, &t.CreatedAt, &t.Message, &t.Status, &t.Answer, &trunc, &t.Error, &amount, &cur,
+			&files, &add, &del, &undone, &undoneN, &patchCut); err != nil {
 			return d, err
 		}
 		t.Truncated = trunc != 0
 		if amount != 0 && cur != "" {
 			t.CostUSD = fx.Convert(amount, cur, fx.Display)
 		}
+		t.Changes = webui.TurnChanges(files, add, del, undoneN, undone, patchCut != 0)
 		d.TurnList = append(d.TurnList, t)
 	}
 	return d, rows.Err()
@@ -512,7 +526,7 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 // changes once the run exists; a deleted run shows as an empty status.
 const chatTurnSigQuery = `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.status,''), COALESCE(r.finished_at,''),
   COALESCE(octet_length(r.result_text),-1), COALESCE(r.result_truncated,0), COALESCE(octet_length(r.error_message),-1),
-  COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,'')
+  COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,''), ` + chatTurnChangeCols + `
 FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=? ORDER BY t.turn_index`
 
 // ChatSessionSig is a fingerprint of what GetChatSession would return. The
@@ -520,7 +534,8 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 // over the run's event stream); with ?since=<sig> an unchanged session is a
 // short reply instead of every turn's answer again. The session row (with the
 // binding names and the display cost) and the display currency are hashed
-// whole; the turns by chatTurnSigQuery.
+// whole; the turns by chatTurnSigQuery (including each turn's change
+// summary, so undoing files from the session page is seen by the poll).
 func (a *App) ChatSessionSig(ctx context.Context, sid string) (string, error) {
 	c, err := a.chatSession(ctx, sid)
 	if err != nil {
@@ -544,15 +559,18 @@ func (a *App) ChatSessionSig(ctx context.Context, sid string) (string, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			idx, trunc                  int
-			runID, at, status, fin, cur string
-			ansLen, errLen              int64
-			amount                      float64
+			idx, trunc, files, add, del, undoneN, patchCut int
+			runID, at, status, fin, cur                    string
+			ansLen, errLen                                 int64
+			amount                                         float64
+			undone                                         bool
 		)
-		if err = rows.Scan(&idx, &runID, &at, &status, &fin, &ansLen, &trunc, &errLen, &amount, &cur); err != nil {
+		if err = rows.Scan(&idx, &runID, &at, &status, &fin, &ansLen, &trunc, &errLen, &amount, &cur,
+			&files, &add, &del, &undone, &undoneN, &patchCut); err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%d\x00%g\x00%s\n", idx, runID, at, status, fin, ansLen, trunc, errLen, amount, cur)
+		fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%d\x00%g\x00%s\x00%d\x00%d\x00%d\x00%t\x00%d\x00%d\n",
+			idx, runID, at, status, fin, ansLen, trunc, errLen, amount, cur, files, add, del, undone, undoneN, patchCut)
 	}
 	if err = rows.Err(); err != nil {
 		return "", err

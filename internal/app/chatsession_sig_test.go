@@ -61,6 +61,8 @@ func TestChatSessionSigTracksDetail(t *testing.T) {
 		{"cost", `UPDATE runs SET cost_amount=0.02 WHERE id=?`, []any{rid}},
 		{"error", `UPDATE runs SET error_message='boom' WHERE id=?`, []any{rid}},
 		{"truncated", `UPDATE runs SET result_truncated=1 WHERE id=?`, []any{rid}},
+		{"file changes", `UPDATE runs SET run_mode='edit', file_changes='{"files":[{"path":"a.txt"}],"count":1,"add":2,"del":0}' WHERE id=?`, []any{rid}},
+		{"changes undone", `UPDATE runs SET changes_undone_at=? WHERE id=?`, []any{nowUTC(), rid}},
 		{"session row", `UPDATE chat_sessions SET turns=1, status='idle', updated_at=? WHERE id=?`, []any{time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano), ses.ID}},
 		{"title", `UPDATE chat_sessions SET title='renamed' WHERE id=?`, []any{ses.ID}},
 		{"run deleted", `DELETE FROM runs WHERE id=?`, []any{rid}},

@@ -63,6 +63,19 @@ type ChatTurn struct {
 	ErrorInfo *errInfo `json:"error_info,omitempty"`
 	CostUSD   float64  `json:"cost_usd"` // display currency
 	CreatedAt string   `json:"created_at"`
+	// Changes is how much this turn changed in the owner's folder, same
+	// summary as a run list row. Nil when nothing was recorded. The file
+	// list itself stays on the run detail.
+	Changes *runChangeSum `json:"changes,omitempty"`
+}
+
+// TurnChanges builds the summary stored on a turn (files is -1 when nothing
+// was recorded). The session page uses this for the badge and undo button.
+func TurnChanges(files, add, del, undoneN int, undone, patchCut bool) *runChangeSum {
+	if files < 0 {
+		return nil
+	}
+	return &runChangeSum{Files: files, Add: add, Del: del, Undone: undone, UndoneN: undoneN, PatchCut: patchCut}
 }
 
 // ChatSessionDetail is a session with its turns, oldest first.

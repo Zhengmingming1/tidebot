@@ -172,6 +172,8 @@ type runChangeSum struct {
 	Undone bool `json:"undone,omitempty"`
 	// UndoneN: files taken back one by one so far (the run not wholly undone).
 	UndoneN int `json:"undone_n,omitempty"`
+	// PatchCut: the recorded patch was truncated; undo is not offered.
+	PatchCut bool `json:"patch_cut,omitempty"`
 }
 
 // runChangeCols reads runChangeSum from runs.file_changes in SQL, so lists never load the

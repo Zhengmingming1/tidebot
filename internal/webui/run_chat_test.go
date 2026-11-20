@@ -116,6 +116,7 @@ function enc(s) { return encodeURIComponent(s); }
 function T(k, v) { return k + (v ? JSON.stringify(v) : ""); }
 function ic(n) { return "<i:" + n + ">"; }
 function num(n) { return String(n); }
+function plural(n, one, many) { return T(n === 1 ? one : many, { n: n }); }
 function usd(v, d) { return "$" + Number(v || 0).toFixed(d); }
 function when(x) { return "@" + x; }
 function dur(ms) { return Math.round(ms / 1000) + "s"; }
@@ -151,6 +152,22 @@ ok(rcTurnHtml({ index: 2, run_id: "run_c", message: "m", status: "queued" }).ind
 var failed = rcTurnHtml({ index: 3, run_id: "run_d", message: "m", status: "failed", error: "<b>boom</b>", cost_usd: 0 });
 ok(failed.indexOf("<pill:failed>") > 0 && failed.indexOf("E:&lt;b&gt;boom") > 0, "failed turn: status and escaped error");
 ok(rcTurnHtml({ index: 4, run_id: "bad id\"", message: "m", status: "" }).indexOf("href=") < 0, "gone run, odd id: no link");
+
+var chg = rcTurnHtml({ index: 5, run_id: "run_e", message: "m", status: "succeeded", answer: "ok", changes: { files: 2, add: 3, del: 1 } });
+ok(chg.indexOf("chg-badge") > 0 && chg.indexOf("data-chg-jump") > 0 && chg.indexOf("+3") > 0 && chg.indexOf("−1") > 0 && chg.indexOf('href="#/runs/run_e"') > 0, "finished turn with changes: badge and run link");
+ok(chg.indexOf('data-rc-undo="undo"') > 0 && chg.indexOf("rd.chg_undo") > 0 && chg.indexOf(" disabled") < 0, "finished turn with changes: undo button");
+ok(chg.indexOf("<b>") < 0, "change badge has no raw tags");
+var undone = rcTurnHtml({ index: 6, run_id: "run_f", message: "m", status: "succeeded", answer: "ok", changes: { files: 1, add: 1, del: 0, undone: true } });
+ok(undone.indexOf("chg-badge undone") > 0 && undone.indexOf("runs.chg_undone_tip") > 0 && undone.indexOf('data-rc-undo="redo"') > 0, "undone turn: dashed badge and put-back");
+var part = rcTurnHtml({ index: 7, run_id: "run_g", message: "m", status: "succeeded", answer: "ok", changes: { files: 3, add: 2, del: 2, undone_n: 1 } });
+ok(part.indexOf("chg-badge partly") > 0 && part.indexOf("runs.chg_partly_tip") > 0 && part.indexOf("rd.chg_undo_rest") > 0, "partly undone turn: rest button");
+var cut = rcTurnHtml({ index: 8, run_id: "run_h", message: "m", status: "succeeded", answer: "ok", changes: { files: 1, add: 1, del: 0, patch_cut: true } });
+ok(cut.indexOf(" data-rc-undo") > 0 && cut.indexOf(" disabled") > 0 && cut.indexOf("rd.undo_off_cut") > 0, "cut patch: undo offered but disabled");
+ok(rcTurnHtml({ index: 9, run_id: "run_i", message: "m", status: "succeeded", answer: "ok", changes: { files: 0 } }).indexOf("chg-badge") < 0, "zero files: no badge");
+ok(rcTurnHtml({ index: 10, run_id: "run_j", message: "m", status: "running", changes: { files: 2, add: 1, del: 0 } }).indexOf("chg-badge") < 0, "running turn: no badge yet");
+var odd = rcTurnChgHtml({ run_id: "bad id\"", changes: { files: 1, add: 1, del: 0 } });
+ok(odd.indexOf("<a ") < 0 && odd.indexOf("chg-badge") > 0 && odd.indexOf("data-rc-undo") < 0, "odd run id: badge is not a link, no undo");
+ok(odd.indexOf("href=") < 0, "odd run id badge has no href");
 
 ok(rcErrText({ data: { code: "busy" }, message: "x" }) === "rc.err_busy", "busy code translated");
 ok(rcErrText({ data: { code: "weird" }, message: "raw" }) === "raw", "unknown code: message as sent");

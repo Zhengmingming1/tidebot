@@ -73,12 +73,49 @@
     var okId = /^[\w-]{1,64}$/.test(id || "");
     return '<a class="rc-open" id="rc-open" href="' + (okId ? "#/chat/" + enc(id) : "#/chat") + '"' + (okId ? "" : " hidden") + ">" + ic("chat", "sm") + esc(T("rc.open_session")) + "</a>";
   }
+
+  // Undo / put back this turn's hunks through the same API and confirm as the
+  // run page; on success the thread reloads (the poll also sees the new sig).
+  function rcUndoTurn(t, dir, redo, btn, onDone) {
+    var c = t.changes || {};
+    return runUndoChanges({
+      id: t.run_id,
+      workspace: dir || "",
+      file_changes: { count: c.files || 0, patch_cut: !!c.patch_cut },
+      changes_undone_at: c.undone ? "1" : "",
+      changes_undone_files: !c.undone && c.undone_n > 0 ? new Array(c.undone_n) : [],
+      onChanged: onDone
+    }, redo, btn);
+  }
+  // A finished turn's recorded file changes: the same compact badge as a run
+  // list row (opens that turn's run page at the file list) and an undo / put
+  // back button, so the session timeline does not need a detour just to take
+  // this turn's hunks back. The confirm is the run page's in-app dialog.
+  function rcTurnChgHtml(t) {
+    var c = t.changes;
+    if (!c || !(c.files > 0)) return "";
+    var tip = T("runs.chg_tip", { f: plural(c.files, "runs.chg_files_one", "runs.chg_files_many"), a: num(c.add || 0), d: num(c.del || 0) });
+    if (c.undone) tip = T("runs.chg_undone_tip") + " · " + tip;
+    else if (c.undone_n > 0) tip = T("runs.chg_partly_tip", { n: num(c.undone_n) }) + " · " + tip;
+    var ok = /^[\w-]{1,64}$/.test(t.run_id || "");
+    var cls = "chg-badge" + (c.undone ? " undone" : c.undone_n > 0 ? " partly" : "");
+    var inner = ic("git", "sm") + '<span class="n">' + esc(num(c.files)) + "</span>" + (c.add ? '<span class="add">+' + esc(num(c.add)) + "</span>" : "") + (c.del ? '<span class="del">−' + esc(num(c.del)) + "</span>" : "");
+    var badge = ok
+      ? '<a class="' + cls + '" href="#/runs/' + enc(t.run_id) + '" data-chg-jump data-tip="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + inner + "</a>"
+      : '<span class="' + cls + '" data-tip="' + esc(tip) + '">' + inner + "</span>";
+    if (!ok) return badge;
+    var off = c.patch_cut ? T("rd.undo_off_cut") : "";
+    var k = c.undone ? "rd.chg_redo" : c.undone_n > 0 ? "rd.chg_undo_rest" : "rd.chg_undo";
+    return badge + '<button type="button" class="icon-btn sm" data-rc-undo="' + (c.undone ? "redo" : "undo") + '"' + (off ? " disabled" : "") +
+      ' aria-label="' + esc(T(k)) + '" data-tip="' + esc(off || T(k + "_tip")) + '">' + ic(c.undone ? "redo" : "undo", "sm") + "</button>";
+  }
   function rcTurnHtml(t) {
     var busy = rcBusy(t.status), ok = /^[\w-]{1,64}$/.test(t.run_id || "");
     var head = '<div class="rc-a-head"><span class="rc-av">' + ic("sparkle", "sm") + "</span>";
     if (busy) head += '<span class="rc-act"><span class="rc-dot"></span>' + esc(T(t.status === "queued" ? "rc.queued" : "rc.answering")) + ' <span class="rc-el num" data-since="' + esc(t.created_at || "") + '"></span></span>';
     else if (t.status !== "succeeded") head += t.status ? statusPill(t.status, 0, t.error) : '<span class="muted">' + esc(T("rc.run_gone")) + "</span>";
     if (t.answer_truncated) head += '<span class="pill warn sm" data-tip="' + esc(T("rd.ans_cut_tip")) + '">' + esc(T("rd.ans_cut")) + "</span>";
+    if (!busy) head += rcTurnChgHtml(t);
     head += '<span class="rc-sp"></span>';
     if (!busy && t.status) head += '<span class="rc-cost num" data-tip="' + esc(T("rc.cost_tip", { t: when(t.created_at) })) + '">' + esc(usd(t.cost_usd, 4)) + "</span>";
     if (busy && ok) head += '<button type="button" class="icon-btn sm" data-rc-stop="' + esc(t.run_id) + '" data-st="' + esc(t.status) + '" aria-label="' + esc(T("run.stop")) + '" data-tip="' + esc(T("run.stop_tip")) + '">' + ic("stop", "sm") + "</button>";
@@ -274,9 +311,14 @@
     });
     paintMode();
     thread.addEventListener("click", function (e) {
-      var c = e.target.closest("[data-rc-copy]"), s = e.target.closest("[data-rc-stop]");
+      var c = e.target.closest("[data-rc-copy]"), s = e.target.closest("[data-rc-stop]"), u = e.target.closest("[data-rc-undo]");
       if (c && st.ses) { var t = (st.ses.turn_list || []).filter(function (x) { return String(x.index) === c.getAttribute("data-rc-copy"); })[0]; if (t) copyText(t.answer || "").catch(fail); }
       if (s) { s.disabled = true; stopRun(s.getAttribute("data-rc-stop"), s.getAttribute("data-st")).then(function () { load(); }).catch(function (x) { s.disabled = false; fail(x); }); }
+      if (u && !u.disabled && st.ses) {
+        var art = u.closest(".rc-turn");
+        var turn = (st.ses.turn_list || []).filter(function (x) { return art && String(x.index) === art.getAttribute("data-turn"); })[0];
+        if (turn) rcUndoTurn(turn, st.ses.workspace_dir || "", u.getAttribute("data-rc-undo") === "redo", u, load);
+      }
     });
     sync();
     if (o.pre) { st.sig = o.pre.sig || ""; st.sigId = st.id; turnsOf(o.pre).forEach(function (t) { st.painted[t.index] = rcTurnHtml(t); }); paint(o.pre); } else load();

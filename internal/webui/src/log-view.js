@@ -513,6 +513,7 @@
       if (btn) btn.disabled = true;
       return api("/api/runs/" + enc(r.id) + "/undo-changes", { method: "POST", body: { redo: redo } }).then(function () {
         if (location.hash === "#/runs/" + r.id) refresh();
+        if (typeof r.onChanged === "function") r.onChanged();
         if (redo) toast(T("rd.chg_redone", { n: num(n) }));
         else toast(T("rd.chg_undone_t", { n: num(n) }), false, function () { runUndoChanges(r, true); }, T("rd.chg_redo"));
       }).catch(function (e) {
