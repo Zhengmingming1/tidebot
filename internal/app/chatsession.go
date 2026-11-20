@@ -421,6 +421,23 @@ func (a *App) chatWorkspaceProblem(saved string) string {
 	return prob
 }
 
+// chatTracksChanges is whether a turn should snapshot the folder it runs in
+// (git work trees only, same as the Run dialog and tasks): the owner's folder,
+// not the session scratch folder or a task folder in tidebot's home. Each turn
+// is its own run, so the snapshot and file_changes cover only that turn.
+func (a *App) chatTracksChanges(ws string, own bool) bool {
+	if !own || ws == "" {
+		return false
+	}
+	if a.Cfg.HomeDir != "" && guard.Within(ws, a.Cfg.HomeDir) {
+		return false
+	}
+	if a.Cfg.DataDir != "" && guard.Within(ws, a.Cfg.DataDir) {
+		return false
+	}
+	return true
+}
+
 // ListChatSessions lists sessions, most recently active first.
 func (a *App) ListChatSessions(ctx context.Context, limit int) ([]webui.ChatSession, error) {
 	rows, err := a.DB.QueryContext(ctx, `SELECT `+chatCols+` FROM chat_sessions ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
@@ -709,6 +726,12 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 				}
 				onStart(rid)
 			}),
+		}
+		if mode != "read" && a.chatTracksChanges(ws, own) {
+			// what this turn changed in the owner's folder (git work trees), for its run page
+			tr := &changeTracker{a: a, dir: ws}
+			defer tr.close()
+			opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(opts.OnStart), tr.atStart, tr.afterExit
 		}
 		// Resolve all session capabilities inside RunPromptEx, after its base
 		// environment and guard are initialized. This also pins skill-only bindings.
