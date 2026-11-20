@@ -74,18 +74,89 @@
     return '<a class="rc-open" id="rc-open" href="' + (okId ? "#/chat/" + enc(id) : "#/chat") + '"' + (okId ? "" : " hidden") + ">" + ic("chat", "sm") + esc(T("rc.open_session")) + "</a>";
   }
 
+  // Session-turn undo check: same GET /api/runs/{id}/undo-check as the run
+  // page, but only when the user gets to a button (hover, focus, or click),
+  // never from the 1.5 s poll. A short cache keeps a cancelled confirm's
+  // "already edited" mark if the card is redrawn; a click always asks again.
+  // Idea: cline/cline UserMessage.tsx + checkpointExistsForMessage.ts — look
+  // up Restore when the user reaches it, not from when the turn ended.
+  var RC_UNDO_CK_TTL = 30000, rcUndoCk = {}, rcUndoCkWait = {}, rcUndoBusy = {};
+  function rcForgetUndoCheck(id) { delete rcUndoCk[id]; delete rcUndoCkWait[id]; }
+  function rcUndoCkFresh(row) { return row && Date.now() - row.at < RC_UNDO_CK_TTL && row.at > 0; }
+  function rcLoadUndoCheck(id, btn, fresh) {
+    rcWatchUndoCkFocus();
+    if (rcUndoCkWait[id]) return rcUndoCkWait[id];
+    if (!fresh && rcUndoCkFresh(rcUndoCk[id])) return Promise.resolve(rcUndoCk[id].x);
+    if (btn) btn.setAttribute("aria-busy", "true");
+    var p = api("/api/runs/" + enc(id) + "/undo-check", { fresh: true }).then(function (x) {
+      rcUndoCk[id] = { at: Date.now(), x: x || {} };
+      return rcUndoCk[id].x;
+    });
+    rcUndoCkWait[id] = p;
+    var clear = function () {
+      if (rcUndoCkWait[id] === p) delete rcUndoCkWait[id];
+      if (btn && document.contains(btn)) btn.removeAttribute("aria-busy");
+    };
+    return p.then(function (x) { clear(); return x; }, function (e) { clear(); throw e; });
+  }
+  // Grey the turn's undo button and, on a conflict, put the same "已改动"
+  // mark used on the run page next to it (no per-file list on the card).
+  function applyTurnUndoCheck(btn, x) {
+    if (!btn || btn.disabled) return;
+    var code = UNDO_CK_CODES[x && x.code] ? x.code : "";
+    var redo = btn.getAttribute("data-rc-undo") === "redo";
+    undoCkSet(btn, !!code || (x && x.whole === "conflict"), code || (x && x.whole === "conflict") ? undoCheckWarn(x, redo) : "");
+    var head = btn.parentNode, mark = head && $(".rd-chg-stale", head);
+    var stale = !code && x && x.whole === "conflict";
+    if (stale && head && !mark) {
+      mark = document.createElement("span");
+      mark.className = "pill warn sm rd-chg-stale";
+      mark.textContent = T("rd.chg_stale");
+      head.insertBefore(mark, btn);
+    }
+    if (mark && !stale) mark.remove();
+    if (mark && stale) {
+      var wf = (x.whole_files || []).slice(0, 3);
+      mark.setAttribute("data-tip", T("rd.chg_stale_tip") + (wf.length ? "\n" + wf.join(", ") : ""));
+    }
+  }
+  function rcRestoreUndoCheck(art, t) {
+    var btn = art && $("[data-rc-undo]", art), row = t && t.run_id && rcUndoCk[t.run_id];
+    if (btn && row && row.x) applyTurnUndoCheck(btn, row.x);
+  }
+  var rcUndoCkFocus = false;
+  function rcWatchUndoCkFocus() {
+    if (rcUndoCkFocus || typeof window === "undefined" || !window.addEventListener) return;
+    rcUndoCkFocus = true;
+    window.addEventListener("focus", function () {
+      Object.keys(rcUndoCk).forEach(function (id) { if (rcUndoCk[id]) rcUndoCk[id].at = 0; });
+    });
+  }
   // Undo / put back this turn's hunks through the same API and confirm as the
   // run page; on success the thread reloads (the poll also sees the new sig).
+  // Before the confirm, a fresh check names files edited since and, when the
+  // whole action would be refused, the in-app dialog shows why with OK off.
   function rcUndoTurn(t, dir, redo, btn, onDone) {
     var c = t.changes || {};
-    return runUndoChanges({
+    var r = {
       id: t.run_id,
       workspace: dir || "",
       file_changes: { count: c.files || 0, patch_cut: !!c.patch_cut },
       changes_undone_at: c.undone ? "1" : "",
       changes_undone_files: !c.undone && c.undone_n > 0 ? new Array(c.undone_n) : [],
-      onChanged: onDone
-    }, redo, btn);
+      onChanged: function () { rcForgetUndoCheck(t.run_id); if (typeof onDone === "function") onDone(); }
+    };
+    if (rcUndoBusy[t.run_id]) return rcUndoBusy[t.run_id];
+    var p = rcLoadUndoCheck(t.run_id, btn, true).then(function (x) {
+      if (btn && document.contains(btn)) applyTurnUndoCheck(btn, x || {});
+      if (redo && undoCheckBlocks(x || {})) { toast(undoCheckWarn(x || {}, true), true); return; }
+      return runUndoChanges(r, redo, btn, x || {});
+    }, function (e) {
+      if (e && e.auth) return;
+      return runUndoChanges(r, redo, btn);
+    });
+    rcUndoBusy[t.run_id] = p;
+    return p.then(function (v) { delete rcUndoBusy[t.run_id]; return v; }, function (e) { delete rcUndoBusy[t.run_id]; throw e; });
   }
   // A finished turn's recorded file changes: the same compact badge as a run
   // list row (opens that turn's run page at the file list) and an undo / put
@@ -233,6 +304,7 @@
         var next = tmp.firstChild;
         if (el) thread.replaceChild(next, el); else thread.appendChild(next);
         st.painted[t.index] = html;
+        rcRestoreUndoCheck(next, t);
       });
       $$(".rc-turn", thread).forEach(function (el) { if (!seen[el.getAttribute("data-turn")]) { delete st.painted[el.getAttribute("data-turn")]; el.remove(); } });
       var live = turns.filter(function (t) { return rcBusy(t.status) && t.run_id; })[0];
@@ -310,13 +382,28 @@
       });
     });
     paintMode();
+    var rcTurnOf = function (el) {
+      var art = el && el.closest && el.closest(".rc-turn");
+      return (st.ses && st.ses.turn_list || []).filter(function (x) { return art && String(x.index) === art.getAttribute("data-turn"); })[0];
+    };
+    // Hover / focus starts the check so the button can be marked before a
+    // click; load() / paint() never fetch, so the poll stays light.
+    var prefetch = function (e) {
+      var u = e.target.closest && e.target.closest("[data-rc-undo]");
+      if (!u || u.disabled || !st.ses) return;
+      var turn = rcTurnOf(u);
+      if (turn && turn.run_id) rcLoadUndoCheck(turn.run_id, u, false).then(function (x) {
+        if (document.contains(u)) applyTurnUndoCheck(u, x || {});
+      }).catch(function () {});
+    };
+    thread.addEventListener("pointerover", prefetch);
+    thread.addEventListener("focusin", prefetch);
     thread.addEventListener("click", function (e) {
       var c = e.target.closest("[data-rc-copy]"), s = e.target.closest("[data-rc-stop]"), u = e.target.closest("[data-rc-undo]");
       if (c && st.ses) { var t = (st.ses.turn_list || []).filter(function (x) { return String(x.index) === c.getAttribute("data-rc-copy"); })[0]; if (t) copyText(t.answer || "").catch(fail); }
       if (s) { s.disabled = true; stopRun(s.getAttribute("data-rc-stop"), s.getAttribute("data-st")).then(function () { load(); }).catch(function (x) { s.disabled = false; fail(x); }); }
       if (u && !u.disabled && st.ses) {
-        var art = u.closest(".rc-turn");
-        var turn = (st.ses.turn_list || []).filter(function (x) { return art && String(x.index) === art.getAttribute("data-turn"); })[0];
+        var turn = rcTurnOf(u);
         if (turn) rcUndoTurn(turn, st.ses.workspace_dir || "", u.getAttribute("data-rc-undo") === "redo", u, load);
       }
     });

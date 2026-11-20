@@ -86,6 +86,26 @@ func TestRunChatUI(t *testing.T) {
 	if strings.Contains(src, "fetch(") || strings.Contains(src, "innerHTML = t.") {
 		t.Error("run-chat.js bypasses api() or writes server text as HTML")
 	}
+	for _, want := range []string{
+		`api("/api/runs/" + enc(id) + "/undo-check", { fresh: true })`,
+		`thread.addEventListener("pointerover", prefetch);`,
+		`thread.addEventListener("focusin", prefetch);`,
+		`rcRestoreUndoCheck(next, t);`,
+		`return runUndoChanges(r, redo, btn, x || {});`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("run-chat.js lacks %q", want)
+		}
+	}
+	// The session poll must not start undo-check itself; only hover / focus / click do.
+	loadAt := strings.Index(src, "var load = function () {")
+	if loadAt < 0 {
+		t.Fatal("bindChat load not found")
+	}
+	load := src[loadAt : loadAt+1800]
+	if strings.Contains(load, "undo-check") {
+		t.Error("session poll load() calls undo-check")
+	}
 
 	// Every stable code the session API answers with has words in both languages.
 	goSrc, _ := os.ReadFile("chat_sessions.go")

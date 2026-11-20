@@ -505,7 +505,7 @@
     }
     return code && state.dict["rd.undo_err_" + code] ? T("rd.undo_err_" + code) : e.message;
   }
-  function runUndoChanges(r, redo, btn) {
+  function runUndoChanges(r, redo, btn, ck) {
     var c = r.file_changes || {}, n = c.count || 0;
     var gone = r.changes_undone_at ? [] : r.changes_undone_files || [];
     if (gone.length) n = redo ? gone.length : Math.max(0, n - gone.length);
@@ -523,7 +523,10 @@
       });
     };
     if (redo) return go();
-    return confirmDialog({ title: T("rd.undo_title", { n: num(n) }), body: T("rd.undo_body", { dir: r.workspace || "" }), ok: T("rd.chg_undo"), danger: true, icon: "undo" })
+    var body = T("rd.undo_body", { dir: r.workspace || "" });
+    var blocked = undoCheckBlocks(ck);
+    if (blocked) body += "\n\n" + undoCheckWarn(ck, false);
+    return confirmDialog({ title: T("rd.undo_title", { n: num(n) }), body: body, ok: T("rd.chg_undo"), danger: true, icon: "undo", okDisabled: !!blocked })
       .then(function (y) { if (y) return go(); });
   }
   // one file of the run: confirm names the file; put back goes straight away
@@ -568,6 +571,17 @@
     ask();
   }
   var UNDO_CK_CODES = { dir: 1, busy: 1, binary: 1 };
+  // Whether the main undo / put-back would be refused now, and the words for
+  // the tooltip or confirm. Shared with the session turn cards (same API).
+  function undoCheckBlocks(x) {
+    return !!(x && (UNDO_CK_CODES[x.code] || x.whole === "conflict"));
+  }
+  function undoCheckWarn(x, redo) {
+    if (!x) return "";
+    if (UNDO_CK_CODES[x.code]) return T("rd.undo_err_" + x.code);
+    var wf = (x.whole_files || []).slice(0, 3);
+    return T(redo ? (wf.length ? "rd.undo_ck_redo_f" : "rd.undo_ck_redo") : (wf.length ? "rd.undo_ck_whole_f" : "rd.undo_ck_whole"), { f: wf.join(", ") });
+  }
   function undoCkSet(b, off, tip) {
     if (!b.hasAttribute("data-tip0")) b.setAttribute("data-tip0", b.getAttribute("data-tip") || "");
     if (off) { b.setAttribute("aria-disabled", "true"); b.setAttribute("data-tip", tip); b.classList.add("ck-off"); }

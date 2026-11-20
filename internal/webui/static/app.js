@@ -1818,10 +1818,10 @@ var done=false;
 modal('<div class="card-head"><span class="ico'+(o.danger?" danger":"")+'">'+ic(o.icon||(o.danger?"trash":"info"))+"</span><h2>"+esc(o.title)+"</h2></div>"+
 (o.body?'<p class="confirm-body">'+esc(o.body)+"</p>":"")+
 (o.typeName?'<label class="field"><span>'+esc(T("cf.type_name",{n:o.typeName}))+'</span><input id="cf-name" autocomplete="off" spellcheck="false" data-noguard></label>':"")+
-'<div class="actions"><button type="button" class="btn ghost" data-close>'+esc(T("btn.cancel"))+'</button><button type="button" class="btn '+(o.danger?"danger-solid":"primary")+'" id="cf-ok"'+(o.typeName?" disabled":" autofocus")+">"+esc(o.ok||T("cf.ok"))+"</button></div>",function(root,close){
+'<div class="actions"><button type="button" class="btn ghost" data-close'+(o.okDisabled?" autofocus":"")+'>'+esc(T("btn.cancel"))+'</button><button type="button" class="btn '+(o.danger?"danger-solid":"primary")+'" id="cf-ok"'+(o.typeName||o.okDisabled?" disabled":" autofocus")+">"+esc(o.ok||T("cf.ok"))+"</button></div>",function(root,close){
 var ok=$("#cf-ok",root),nm=$("#cf-name",root);
 if(nm)nm.addEventListener("input",function(){ok.disabled=nm.value.trim()!==o.typeName;});
-ok.addEventListener("click",function(){done=true;close();resolve(true);});
+ok.addEventListener("click",function(){if(ok.disabled)return;done=true;close();resolve(true);});
 var obs=new MutationObserver(function(){if(!root.contains(ok)){obs.disconnect();if(!done)resolve(false);}});
 obs.observe(root,{childList:true});
 });
@@ -6924,7 +6924,7 @@ return f.length?T("rd.undo_err_conflict_f",{f:f.join(", ")}):T("rd.undo_err_conf
 }
 return code&&state.dict["rd.undo_err_"+code]?T("rd.undo_err_"+code):e.message;
 }
-function runUndoChanges(r,redo,btn){
+function runUndoChanges(r,redo,btn,ck){
 var c=r.file_changes||{},n=c.count||0;
 var gone=r.changes_undone_at?[]:r.changes_undone_files||[];
 if(gone.length)n=redo?gone.length:Math.max(0,n-gone.length);
@@ -6942,7 +6942,10 @@ toast(undoErrText(e),true);
 });
 };
 if(redo)return go();
-return confirmDialog({title:T("rd.undo_title",{n:num(n)}),body:T("rd.undo_body",{dir:r.workspace||""}),ok:T("rd.chg_undo"),danger:true,icon:"undo"})
+var body=T("rd.undo_body",{dir:r.workspace||""});
+var blocked=undoCheckBlocks(ck);
+if(blocked)body+="\n\n"+undoCheckWarn(ck,false);
+return confirmDialog({title:T("rd.undo_title",{n:num(n)}),body:body,ok:T("rd.chg_undo"),danger:true,icon:"undo",okDisabled:!!blocked})
 .then(function(y){if(y)return go();});
 }
 function runUndoFile(r,path,redo,btn){
@@ -6978,6 +6981,15 @@ document.addEventListener("visibilitychange",ask);
 ask();
 }
 var UNDO_CK_CODES={dir:1,busy:1,binary:1};
+function undoCheckBlocks(x){
+return!!(x&&(UNDO_CK_CODES[x.code]||x.whole==="conflict"));
+}
+function undoCheckWarn(x,redo){
+if(!x)return "";
+if(UNDO_CK_CODES[x.code])return T("rd.undo_err_"+x.code);
+var wf=(x.whole_files||[]).slice(0,3);
+return T(redo?(wf.length?"rd.undo_ck_redo_f":"rd.undo_ck_redo"):(wf.length?"rd.undo_ck_whole_f":"rd.undo_ck_whole"),{f:wf.join(", ")});
+}
 function undoCkSet(b,off,tip){
 if(!b.hasAttribute("data-tip0"))b.setAttribute("data-tip0",b.getAttribute("data-tip")||"");
 if(off){b.setAttribute("aria-disabled","true");b.setAttribute("data-tip",tip);b.classList.add("ck-off");}
@@ -7199,16 +7211,77 @@ function rcOpenHtml(id){
 var okId=/^[\w-]{1,64}$/.test(id||"");
 return '<a class="rc-open" id="rc-open" href="'+(okId?"#/chat/"+enc(id):"#/chat")+'"'+(okId?"":" hidden")+">"+ic("chat","sm")+esc(T("rc.open_session"))+"</a>";
 }
+var RC_UNDO_CK_TTL=30000,rcUndoCk={},rcUndoCkWait={},rcUndoBusy={};
+function rcForgetUndoCheck(id){delete rcUndoCk[id];delete rcUndoCkWait[id];}
+function rcUndoCkFresh(row){return row&&Date.now()-row.at<RC_UNDO_CK_TTL&&row.at>0;}
+function rcLoadUndoCheck(id,btn,fresh){
+rcWatchUndoCkFocus();
+if(rcUndoCkWait[id])return rcUndoCkWait[id];
+if(!fresh&&rcUndoCkFresh(rcUndoCk[id]))return Promise.resolve(rcUndoCk[id].x);
+if(btn)btn.setAttribute("aria-busy","true");
+var p=api("/api/runs/"+enc(id)+"/undo-check",{fresh:true}).then(function(x){
+rcUndoCk[id]={at:Date.now(),x:x||{}};
+return rcUndoCk[id].x;
+});
+rcUndoCkWait[id]=p;
+var clear=function(){
+if(rcUndoCkWait[id]===p)delete rcUndoCkWait[id];
+if(btn&&document.contains(btn))btn.removeAttribute("aria-busy");
+};
+return p.then(function(x){clear();return x;},function(e){clear();throw e;});
+}
+function applyTurnUndoCheck(btn,x){
+if(!btn||btn.disabled)return;
+var code=UNDO_CK_CODES[x&&x.code]?x.code:"";
+var redo=btn.getAttribute("data-rc-undo")==="redo";
+undoCkSet(btn,!!code||(x&&x.whole==="conflict"),code||(x&&x.whole==="conflict")?undoCheckWarn(x,redo):"");
+var head=btn.parentNode,mark=head&&$(".rd-chg-stale",head);
+var stale=!code&&x&&x.whole==="conflict";
+if(stale&&head&&!mark){
+mark=document.createElement("span");
+mark.className="pill warn sm rd-chg-stale";
+mark.textContent=T("rd.chg_stale");
+head.insertBefore(mark,btn);
+}
+if(mark&&!stale)mark.remove();
+if(mark&&stale){
+var wf=(x.whole_files||[]).slice(0,3);
+mark.setAttribute("data-tip",T("rd.chg_stale_tip")+(wf.length?"\n"+wf.join(", "):""));
+}
+}
+function rcRestoreUndoCheck(art,t){
+var btn=art&&$("[data-rc-undo]",art),row=t&&t.run_id&&rcUndoCk[t.run_id];
+if(btn&&row&&row.x)applyTurnUndoCheck(btn,row.x);
+}
+var rcUndoCkFocus=false;
+function rcWatchUndoCkFocus(){
+if(rcUndoCkFocus||typeof window==="undefined"||!window.addEventListener)return;
+rcUndoCkFocus=true;
+window.addEventListener("focus",function(){
+Object.keys(rcUndoCk).forEach(function(id){if(rcUndoCk[id])rcUndoCk[id].at=0;});
+});
+}
 function rcUndoTurn(t,dir,redo,btn,onDone){
 var c=t.changes||{};
-return runUndoChanges({
+var r={
 id:t.run_id,
 workspace:dir||"",
 file_changes:{count:c.files||0,patch_cut:!!c.patch_cut},
 changes_undone_at:c.undone?"1":"",
 changes_undone_files:!c.undone&&c.undone_n>0?new Array(c.undone_n):[],
-onChanged:onDone
-},redo,btn);
+onChanged:function(){rcForgetUndoCheck(t.run_id);if(typeof onDone==="function")onDone();}
+};
+if(rcUndoBusy[t.run_id])return rcUndoBusy[t.run_id];
+var p=rcLoadUndoCheck(t.run_id,btn,true).then(function(x){
+if(btn&&document.contains(btn))applyTurnUndoCheck(btn,x||{});
+if(redo&&undoCheckBlocks(x||{})){toast(undoCheckWarn(x||{},true),true);return;}
+return runUndoChanges(r,redo,btn,x||{});
+},function(e){
+if(e&&e.auth)return;
+return runUndoChanges(r,redo,btn);
+});
+rcUndoBusy[t.run_id]=p;
+return p.then(function(v){delete rcUndoBusy[t.run_id];return v;},function(e){delete rcUndoBusy[t.run_id];throw e;});
 }
 function rcTurnChgHtml(t){
 var c=t.changes;
@@ -7342,6 +7415,7 @@ var tmp=document.createElement("div");tmp.innerHTML=html;
 var next=tmp.firstChild;
 if(el)thread.replaceChild(next,el);else thread.appendChild(next);
 st.painted[t.index]=html;
+rcRestoreUndoCheck(next,t);
 });
 $$(".rc-turn",thread).forEach(function(el){if(!seen[el.getAttribute("data-turn")]){delete st.painted[el.getAttribute("data-turn")];el.remove();}});
 var live=turns.filter(function(t){return rcBusy(t.status)&&t.run_id;})[0];
@@ -7413,13 +7487,26 @@ return api("/api/chat-sessions/"+enc(st.id)+"/mode",{method:"PUT",body:{mode:v}}
 });
 });
 paintMode();
+var rcTurnOf=function(el){
+var art=el&&el.closest&&el.closest(".rc-turn");
+return(st.ses&&st.ses.turn_list||[]).filter(function(x){return art&&String(x.index)===art.getAttribute("data-turn");})[0];
+};
+var prefetch=function(e){
+var u=e.target.closest&&e.target.closest("[data-rc-undo]");
+if(!u||u.disabled||!st.ses)return;
+var turn=rcTurnOf(u);
+if(turn&&turn.run_id)rcLoadUndoCheck(turn.run_id,u,false).then(function(x){
+if(document.contains(u))applyTurnUndoCheck(u,x||{});
+}).catch(function(){});
+};
+thread.addEventListener("pointerover",prefetch);
+thread.addEventListener("focusin",prefetch);
 thread.addEventListener("click",function(e){
 var c=e.target.closest("[data-rc-copy]"),s=e.target.closest("[data-rc-stop]"),u=e.target.closest("[data-rc-undo]");
 if(c&&st.ses){var t=(st.ses.turn_list||[]).filter(function(x){return String(x.index)===c.getAttribute("data-rc-copy");})[0];if(t)copyText(t.answer||"").catch(fail);}
 if(s){s.disabled=true;stopRun(s.getAttribute("data-rc-stop"),s.getAttribute("data-st")).then(function(){load();}).catch(function(x){s.disabled=false;fail(x);});}
 if(u&&!u.disabled&&st.ses){
-var art=u.closest(".rc-turn");
-var turn=(st.ses.turn_list||[]).filter(function(x){return art&&String(x.index)===art.getAttribute("data-turn");})[0];
+var turn=rcTurnOf(u);
 if(turn)rcUndoTurn(turn,st.ses.workspace_dir||"",u.getAttribute("data-rc-undo")==="redo",u,load);
 }
 });

@@ -147,10 +147,10 @@
       modal('<div class="card-head"><span class="ico' + (o.danger ? " danger" : "") + '">' + ic(o.icon || (o.danger ? "trash" : "info")) + "</span><h2>" + esc(o.title) + "</h2></div>" +
         (o.body ? '<p class="confirm-body">' + esc(o.body) + "</p>" : "") +
         (o.typeName ? '<label class="field"><span>' + esc(T("cf.type_name", { n: o.typeName })) + '</span><input id="cf-name" autocomplete="off" spellcheck="false" data-noguard></label>' : "") +
-        '<div class="actions"><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn ' + (o.danger ? "danger-solid" : "primary") + '" id="cf-ok"' + (o.typeName ? " disabled" : " autofocus") + ">" + esc(o.ok || T("cf.ok")) + "</button></div>", function (root, close) {
+        '<div class="actions"><button type="button" class="btn ghost" data-close' + (o.okDisabled ? " autofocus" : "") + '>' + esc(T("btn.cancel")) + '</button><button type="button" class="btn ' + (o.danger ? "danger-solid" : "primary") + '" id="cf-ok"' + (o.typeName || o.okDisabled ? " disabled" : " autofocus") + ">" + esc(o.ok || T("cf.ok")) + "</button></div>", function (root, close) {
         var ok = $("#cf-ok", root), nm = $("#cf-name", root);
         if (nm) nm.addEventListener("input", function () { ok.disabled = nm.value.trim() !== o.typeName; });
-        ok.addEventListener("click", function () { done = true; close(); resolve(true); });
+        ok.addEventListener("click", function () { if (ok.disabled) return; done = true; close(); resolve(true); });
         var obs = new MutationObserver(function () { if (!root.contains(ok)) { obs.disconnect(); if (!done) resolve(false); } });
         obs.observe(root, { childList: true });
       });

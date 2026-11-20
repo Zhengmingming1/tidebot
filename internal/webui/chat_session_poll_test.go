@@ -98,7 +98,8 @@ function errorState(m) { return m; } function rcErrText(e) { return e.message; }
 function rcBusy(st) { return st === "running" || st === "queued"; }
 var renders = 0; function rcTurnHtml(t) { renders++; return '<article class="rc-turn" data-turn="' + t.index + '">' + t.status + t.answer + "</article>"; }
 function rcTurns(s) { return (s.turn_list || []).filter(function (t) { return t.index > 0; }); }
-function rcStream() {} function stopChatStream() {} function rcElapsed() {} var rcTick = 1, RC_POLL_MS = 1500;
+function rcStream() {} function stopChatStream() {} function rcElapsed() {} function rcRestoreUndoCheck() {}
+var rcTick = 1, RC_POLL_MS = 1500;
 var polls = 0; function livePoll() { polls++; } function stopPoll() {}
 var capCalls = 0; function capRefreshSession() { capCalls++; }
 var requests = [], server = null, status = 200;
