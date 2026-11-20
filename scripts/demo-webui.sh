@@ -9,7 +9,9 @@ BIN="${BIN:-/tmp/tidebot-demo-bin}"
 mkdir -p "$BIN"
 (cd "$ROOT" && go build -o "$BIN/agentd" ./cmd/agentd && go build -o "$BIN/agentctl" ./cmd/agentctl)
 [[ -f "$H/agentd.pid" ]] && kill "$(cat "$H/agentd.pid")" 2>/dev/null || true
-rm -rf "$H"; mkdir -p "$H/data" "$H/ws"
+# Workspace must sit outside the tidebot home: a folder inside it is rejected as internal.
+WS="${H}-ws"
+rm -rf "$H" "$WS"; mkdir -p "$H/data" "$WS"
 cat > "$H/config.yaml" <<YAML
 home_dir: $H
 data_dir: $H/data
@@ -30,7 +32,7 @@ echo $! > "$H/agentd.pid"
 for _ in $(seq 50); do [[ -S "$H/agentd.sock" ]] && break; sleep 0.1; done
 ctl() { "$BIN/agentctl" "$@"; }
 ctl auth set-password --password demo-pass-99 >/dev/null
-tid() { ctl tasks create --name "$1" --prompt "$2" --cron "$3" --workspace "$H/ws" | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["ID"])'; }
+tid() { ctl tasks create --name "$1" --prompt "$2" --cron "$3" --workspace "$WS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["ID"])'; }
 T1=$(tid "Daily Report" "Generate today's summary of repository activity" "0 9 * * *")
 T2=$(tid "Sync Issues" "Pull the latest issues from trackers and update the board" "30 11 * * *")
 T3=$(tid "Clean Logs" "Archive log files older than 7 days" "0 18 * * *")

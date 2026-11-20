@@ -608,7 +608,7 @@
         if (last && last.available) {
           h += '<div class="up-new"><h3>' + esc(T("up.avail", { v: last.latest, cur: last.current })) + "</h3>" +
             (last.date ? '<p class="muted">' + esc(last.date) + "</p>" : "") +
-            (last.notes ? '<pre class="changelog">' + esc(last.notes) + "</pre>" : "") +
+            (last.notes ? '<pre class="changelog">' + esc(notesPlain(last.notes)) + "</pre>" : "") +
             (last.notes_url ? '<p><a href="' + esc(last.notes_url) + '" target="_blank" rel="noopener">' + esc(T("up.notes")) + "</a></p>" : "") + "</div>";
           if (!last.can_apply && inst.kind === "self-built") h += '<p class="muted">' + esc(T("up.self_built")) + ' <a href="' + esc(st.releases_page || RELEASES_PAGE) + '" target="_blank" rel="noopener">' + esc(T("up.download_page")) + "</a></p>";
           else if (!last.can_apply) h += '<p class="muted">' + esc(T("up.notify_only", { kind: inst.kind || "?" })) + (inst.reason ? " — " + esc(inst.reason) : "") + "</p>";

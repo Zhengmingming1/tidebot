@@ -167,6 +167,9 @@ func TestNotesSummary(t *testing.T) {
 	if a < 0 || b < a {
 		t.Fatal("notesPlain / notesSummary not found")
 	}
+	if !strings.Contains(src, "esc(notesPlain(last.notes))") {
+		t.Fatal("Settings › About must show release notes as plain text, not raw Markdown")
+	}
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed; static checks only")
