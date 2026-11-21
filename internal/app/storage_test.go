@@ -245,7 +245,7 @@ func TestStorageUsageIncludesSessionsAndTranscripts(t *testing.T) {
 	for _, p := range v.Parts {
 		sum += p.Bytes
 	}
-	if v.TotalBytes != sum || v.TotalBytes != wantSessions+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes {
+	if v.TotalBytes != sum || v.TotalBytes != wantSessions+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes+v.Parts["capabilities"].Bytes {
 		t.Fatalf("total %d sum %d parts %+v", v.TotalBytes, sum, v.Parts)
 	}
 	// The previous bar total (logs+artifacts+database+backups) under-counted
@@ -260,4 +260,54 @@ func TestStorageUsageIncludesSessionsAndTranscripts(t *testing.T) {
 	if v.Preview.Bytes < 64<<10 {
 		t.Fatalf("preview should include the orphan session folder, got %+v", v.Preview)
 	}
+}
+
+func TestStorageUsageIncludesCapabilities(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	// Known sizes under the same trees Extensions › storage already measures.
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "tools", "demo-cli", "v1", "bin"), 30<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "runtimes", "node", "v20", "node"), 12<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "envs", "python", "3.12", "lib"), 80<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "cache", "capability-git", "blob"), 8<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "capabilities", "cap_demo", "files", "skill.md"), 5<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "runs", "r_cap_usage.log"), 100, time.Hour)
+
+	v, err := a.StorageUsage(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCap := int64((30 << 10) + (12 << 10) + (80 << 10) + (8 << 10) + (5 << 10))
+	cp := v.Parts["capabilities"]
+	if cp.Bytes != wantCap || cp.Tools != (30<<10)+(12<<10) || cp.Environments != 80<<10 || cp.Cache != 8<<10 || cp.Snapshots != 5<<10 {
+		t.Fatalf("capabilities part %+v, want bytes=%d tools=%d env=%d cache=%d snapshots=%d", cp, wantCap, (30<<10)+(12<<10), 80<<10, 8<<10, 5<<10)
+	}
+	if v.Parts["logs"].Bytes != 100 {
+		t.Fatalf("logs %+v", v.Parts["logs"])
+	}
+	var sum int64
+	for _, p := range v.Parts {
+		sum += p.Bytes
+	}
+	if v.TotalBytes != sum || v.TotalBytes != wantCap+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes+v.Parts["sessions"].Bytes {
+		t.Fatalf("total %d sum %d parts %+v", v.TotalBytes, sum, v.Parts)
+	}
+	oldTotal := v.TotalBytes - cp.Bytes
+	if oldTotal <= 0 || v.TotalBytes-oldTotal != wantCap {
+		t.Fatalf("old total %d new %d capabilities %d", oldTotal, v.TotalBytes, wantCap)
+	}
+	t.Logf("usage bar without capabilities: %d bytes; with capabilities: %d bytes (capabilities %d, undercount %d)", oldTotal, v.TotalBytes, wantCap, wantCap)
+
+	// A second call should reuse CheckQuota's cache (and still see the same sizes).
+	start := time.Now()
+	again, err := a.StorageUsage(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := time.Since(start)
+	if again.Parts["capabilities"].Bytes != wantCap {
+		t.Fatalf("cached capabilities %+v", again.Parts["capabilities"])
+	}
+	t.Logf("StorageUsage second call (quota cache warm): %s", cached)
 }

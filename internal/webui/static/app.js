@@ -8557,7 +8557,7 @@ if(!m){m=document.createElement("span");m.className="saved-mark";m.setAttribute(
 m.textContent=T("set.saved");
 m.classList.remove("fade");void m.offsetWidth;m.classList.add("fade");
 }
-var ST_PARTS=["logs","artifacts","sessions","database","backups"];
+var ST_PARTS=["logs","artifacts","sessions","capabilities","database","backups"];
 var ST_DAYS=[7,14,30,60,90,180,365,0];
 var ST_KEEP=[0,5,10,20,50,100];
 var ST_CAP_GB=[1,2,5,10,20,50,0];
@@ -8588,6 +8588,7 @@ var tipOf=function(k){
 var x=parts[k]||{},line=T("st.p_"+k)+" · "+fmtBytes(x.bytes);
 if(k==="database")return line;
 if(k==="sessions")return line+"\n"+T("st.sessions_tip",{f:x.folders||0,t:x.transcripts||0});
+if(k==="capabilities")return line+"\n"+T("st.capabilities_tip",{tools:fmtBytes(x.tools||0),env:fmtBytes(x.environments||0),cache:fmtBytes(x.cache||0),snap:fmtBytes(x.snapshots||0)});
 return line+" · "+T("st.files",{n:x.count||0})+(x.packed?"\n"+T("st.packed",{n:x.packed,raw:fmtBytes(x.packed_raw),on:fmtBytes(x.packed_bytes)}):"");
 };
 box.innerHTML='<div class="st-bar" role="img" aria-label="'+esc(ST_PARTS.map(tipOf).join("; "))+'">'+ST_PARTS.filter(function(k){return(parts[k]||{}).bytes>0;}).map(function(k){

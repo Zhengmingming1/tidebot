@@ -50,8 +50,9 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
-		`var ST_PARTS = ["logs", "artifacts", "sessions", "database", "backups"];`,
+		`var ST_PARTS = ["logs", "artifacts", "sessions", "capabilities", "database", "backups"];`,
 		`T("st.sessions_tip", { f: x.folders || 0, t: x.transcripts || 0 })`,
+		`T("st.capabilities_tip", { tools: fmtBytes(x.tools || 0), env: fmtBytes(x.environments || 0), cache: fmtBytes(x.cache || 0), snap: fmtBytes(x.snapshots || 0) })`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lacks %q", want)
@@ -60,6 +61,9 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 	css := []byte(cssSource(t))
 	if !strings.Contains(string(css), ".s-sessions { background: var(--hue-teal); }") {
 		t.Error("styles.css lacks .s-sessions")
+	}
+	if !strings.Contains(string(css), ".s-capabilities { background: var(--hue-violet); }") {
+		t.Error("styles.css lacks .s-capabilities")
 	}
 	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
 		raw, _ := os.ReadFile(f)
@@ -70,15 +74,18 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 		if m["st.p_sessions"] == "" || !strings.Contains(m["st.sessions_tip"], "{f}") || !strings.Contains(m["st.sessions_tip"], "{t}") {
 			t.Errorf("%s: st.p_sessions / st.sessions_tip missing", f)
 		}
+		if m["st.p_capabilities"] == "" || !strings.Contains(m["st.capabilities_tip"], "{tools}") || !strings.Contains(m["st.capabilities_tip"], "{env}") || !strings.Contains(m["st.capabilities_tip"], "{cache}") || !strings.Contains(m["st.capabilities_tip"], "{snap}") {
+			t.Errorf("%s: st.p_capabilities / st.capabilities_tip missing", f)
+		}
 		where, confirm := m["st.where"], m["st.clean_confirm"]
 		if f == "static/i18n/en.json" {
-			for _, w := range []string{"session", "transcript", "scratch", "draft"} {
+			for _, w := range []string{"session", "transcript", "scratch", "draft", "extension"} {
 				if !strings.Contains(where, w) && !strings.Contains(confirm, w) {
 					t.Errorf("%s: st.where/st.clean_confirm missing %q: where=%q confirm=%q", f, w, where, confirm)
 				}
 			}
 		} else {
-			for _, w := range []string{"会话", "转录", "临时", "草稿"} {
+			for _, w := range []string{"会话", "转录", "临时", "草稿", "扩展"} {
 				if !strings.Contains(where, w) && !strings.Contains(confirm, w) {
 					t.Errorf("%s: st.where/st.clean_confirm missing %q: where=%q confirm=%q", f, w, where, confirm)
 				}

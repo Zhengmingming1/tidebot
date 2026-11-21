@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/capability/managed"
 	"github.com/Zhengmingming1/tidebot/internal/runner"
 )
 
@@ -91,6 +93,11 @@ type UsagePart struct {
 	// Sessions only: folders under chat-sessions, plus Claude Code transcripts.
 	Folders     int `json:"folders,omitempty"`
 	Transcripts int `json:"transcripts,omitempty"`
+	// Capabilities only: breakdown of managed storage (same trees as Extensions › storage).
+	Tools        int64 `json:"tools,omitempty"`
+	Cache        int64 `json:"cache,omitempty"`
+	Environments int64 `json:"environments,omitempty"`
+	Snapshots    int64 `json:"snapshots,omitempty"`
 }
 
 // logQuiet: a finished run's log is gzipped once it has been left alone this long, so a
@@ -129,7 +136,7 @@ func (a *App) compactLogs(ctx context.Context, now time.Time) runner.CompactRepo
 type StorageView struct {
 	Policy      RetentionPolicy      `json:"policy"`
 	Defaults    RetentionPolicy      `json:"defaults"`
-	Parts       map[string]UsagePart `json:"parts"` // logs | artifacts | sessions | database | backups
+	Parts       map[string]UsagePart `json:"parts"` // logs | artifacts | sessions | capabilities | database | backups
 	TotalBytes  int64                `json:"total_bytes"`
 	Reclaimable int64                `json:"db_reclaimable"` // free pages VACUUM would return
 	Preview     struct {
@@ -176,6 +183,7 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 	}
 	v.Parts["database"] = db
 	v.Parts["sessions"] = a.sessionUsage()
+	v.Parts["capabilities"] = a.capabilityUsage(ctx)
 	if ents, err := os.ReadDir(a.backupDir()); err == nil {
 		var b UsagePart
 		for _, e := range ents {
@@ -245,6 +253,55 @@ func (a *App) sessionUsage() UsagePart {
 		p.Bytes += f.size
 		p.Count++
 		p.Transcripts++
+	}
+	return p
+}
+
+// capabilityUsage sums managed extension storage under the data folder: tools
+// and runtimes, environments, the shared cache, and capability snapshots.
+// These were left out of the Settings › Data bar, so the total looked small
+// after installing an extension whose tools or environments dwarfed run logs.
+// Sizes reuse CheckQuota's directory-mtime cache (and SnapshotUsage for
+// snapshots) and never hold the database: a cold walk can be large, but a
+// later open of Settings or the Extensions storage view does not re-walk an
+// unchanged tree. Errors are logged and that slice is omitted rather than
+// failing the whole usage view. Unused extension files are cleaned from the
+// Extensions page, not by "Clean up now".
+func (a *App) capabilityUsage(ctx context.Context) UsagePart {
+	var p UsagePart
+	if !filepath.IsAbs(a.Cfg.DataDir) {
+		return p
+	}
+	installer := &managed.Installer{
+		DataDir: a.Cfg.DataDir,
+		Quotas:  managed.Quotas{ToolsAndRuntimes: math.MaxInt64, Environment: math.MaxInt64, Cache: math.MaxInt64},
+	}
+	usage, err := installer.CheckQuota(ctx)
+	if err != nil {
+		if a.Log != nil {
+			a.Log.Warn("storage usage: capabilities", "error", err)
+		}
+	} else {
+		var env int64
+		for _, n := range usage.Environments {
+			env += n
+		}
+		p.Tools = usage.ToolsAndRuntimes
+		p.Cache = usage.Cache
+		p.Environments = env
+		p.Bytes += usage.ToolsAndRuntimes + usage.Cache + env
+	}
+	snaps, err := a.caps().SnapshotUsage(ctx)
+	if err != nil {
+		if a.Log != nil {
+			a.Log.Warn("storage usage: capability snapshots", "error", err)
+		}
+	} else {
+		p.Snapshots = snaps
+		p.Bytes += snaps
+	}
+	if p.Bytes > 0 {
+		p.Count = 1
 	}
 	return p
 }

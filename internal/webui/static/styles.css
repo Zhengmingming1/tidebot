@@ -1470,6 +1470,7 @@ button.spc-col:focus-visible .spc-bar{outline:2px solid var(--accent);outline-of
 .s-logs{background:var(--accent);}
 .s-artifacts{background:var(--hue-blue);}
 .s-sessions{background:var(--hue-teal);}
+.s-capabilities{background:var(--hue-violet);}
 .s-database{background:var(--hue-amber);}
 .s-backups{background:var(--hue-slate);}
 .st-total{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;}
