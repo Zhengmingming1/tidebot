@@ -269,7 +269,7 @@ func TestStorageUsageIncludesSessionsAndTranscripts(t *testing.T) {
 	for _, p := range v.Parts {
 		sum += p.Bytes
 	}
-	if v.TotalBytes != sum || v.TotalBytes != wantSessions+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes+v.Parts["capabilities"].Bytes {
+	if v.TotalBytes != sum || v.TotalBytes != wantSessions+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes+v.Parts["capabilities"].Bytes+v.Parts["other"].Bytes {
 		t.Fatalf("total %d sum %d parts %+v", v.TotalBytes, sum, v.Parts)
 	}
 	// The previous bar total (logs+artifacts+database+backups) under-counted
@@ -314,7 +314,7 @@ func TestStorageUsageIncludesCapabilities(t *testing.T) {
 	for _, p := range v.Parts {
 		sum += p.Bytes
 	}
-	if v.TotalBytes != sum || v.TotalBytes != wantCap+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes+v.Parts["sessions"].Bytes {
+	if v.TotalBytes != sum || v.TotalBytes != wantCap+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes+v.Parts["sessions"].Bytes+v.Parts["other"].Bytes {
 		t.Fatalf("total %d sum %d parts %+v", v.TotalBytes, sum, v.Parts)
 	}
 	oldTotal := v.TotalBytes - cp.Bytes
@@ -334,4 +334,68 @@ func TestStorageUsageIncludesCapabilities(t *testing.T) {
 		t.Fatalf("cached capabilities %+v", again.Parts["capabilities"])
 	}
 	t.Logf("StorageUsage second call (quota cache warm): %s", cached)
+}
+
+func TestStorageUsageIncludesOther(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	before, err := a.StorageUsage(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := before.Parts["other"]
+
+	// Known sizes under trees no other usage-bar segment already measures.
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "skill-repositories", "demo.git", "HEAD"), 48<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "skillstage", "run-stage", "plugin.json"), 16<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "runsnap", "r1", "snap"), 20<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "run-mcp", "r1", "mcp.json"), 4<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "run-work", "r1", "out.txt"), 8<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "run-sandbox", "r1", "settings.json"), 2<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "dependency-check", "analysis-9", "notes"), 6<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "runs", "r_other_usage.log"), 100, time.Hour)
+	// Already counted elsewhere: must not land in "other".
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "tools", "demo-cli", "v1", "bin"), 30<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "chat-sessions", "chat_other", "draft.md"), 12<<10, time.Hour)
+	writeOld(t, filepath.Join(a.Cfg.DataDir, "artifacts", "r_other", "out.md"), 3<<10, time.Hour)
+
+	v, err := a.StorageUsage(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRepos := int64(48 << 10)
+	wantStage := int64(16 << 10)
+	wantScratch := int64((20 << 10) + (4 << 10) + (8 << 10) + (2 << 10))
+	wantRestAdded := int64(6 << 10)
+	wantRest := base.Rest + wantRestAdded
+	wantOther := base.Bytes + wantRepos + wantStage + wantScratch + wantRestAdded
+	op := v.Parts["other"]
+	if op.Bytes != wantOther || op.Repositories != base.Repositories+wantRepos || op.Staging != base.Staging+wantStage || op.Scratch != base.Scratch+wantScratch || op.Rest != wantRest {
+		t.Fatalf("other part %+v, baseline %+v, want bytes=%d repos=%d staging=%d scratch=%d rest=%d", op, base, wantOther, base.Repositories+wantRepos, base.Staging+wantStage, base.Scratch+wantScratch, wantRest)
+	}
+	if v.Parts["logs"].Bytes != 100 {
+		t.Fatalf("logs %+v", v.Parts["logs"])
+	}
+	if v.Parts["capabilities"].Tools < 30<<10 {
+		t.Fatalf("tools should stay in capabilities, got %+v", v.Parts["capabilities"])
+	}
+	if v.Parts["sessions"].Bytes < 12<<10 {
+		t.Fatalf("session folder should stay in sessions, got %+v", v.Parts["sessions"])
+	}
+	if v.Parts["artifacts"].Bytes < 3<<10 {
+		t.Fatalf("artifact should stay in artifacts, got %+v", v.Parts["artifacts"])
+	}
+	var sum int64
+	for _, p := range v.Parts {
+		sum += p.Bytes
+	}
+	if v.TotalBytes != sum || v.TotalBytes != wantOther+v.Parts["logs"].Bytes+v.Parts["database"].Bytes+v.Parts["artifacts"].Bytes+v.Parts["backups"].Bytes+v.Parts["sessions"].Bytes+v.Parts["capabilities"].Bytes {
+		t.Fatalf("total %d sum %d parts %+v", v.TotalBytes, sum, v.Parts)
+	}
+	oldTotal := v.TotalBytes - op.Bytes
+	if oldTotal <= 0 || v.TotalBytes-oldTotal != wantOther {
+		t.Fatalf("old total %d new %d other %d", oldTotal, v.TotalBytes, wantOther)
+	}
+	t.Logf("usage bar without other: %d bytes; with other: %d bytes (other %d = repos %d + staging %d + scratch %d + rest %d, undercount %d)", oldTotal, v.TotalBytes, wantOther, wantRepos, wantStage, wantScratch, wantRest, wantOther)
 }

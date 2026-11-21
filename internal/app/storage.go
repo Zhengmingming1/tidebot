@@ -99,6 +99,11 @@ type UsagePart struct {
 	Cache        int64 `json:"cache,omitempty"`
 	Environments int64 `json:"environments,omitempty"`
 	Snapshots    int64 `json:"snapshots,omitempty"`
+	// Other only: trees under the data folder that no other segment measures.
+	Repositories int64 `json:"repositories,omitempty"` // <data>/skill-repositories
+	Staging      int64 `json:"staging,omitempty"`      // <data>/skillstage
+	Scratch      int64 `json:"scratch,omitempty"`      // runsnap, run-mcp, run-work, run-sandbox
+	Rest         int64 `json:"rest,omitempty"`         // other top-level leftovers
 }
 
 // logQuiet: a finished run's log is gzipped once it has been left alone this long, so a
@@ -137,7 +142,7 @@ func (a *App) compactLogs(ctx context.Context, now time.Time) runner.CompactRepo
 type StorageView struct {
 	Policy      RetentionPolicy      `json:"policy"`
 	Defaults    RetentionPolicy      `json:"defaults"`
-	Parts       map[string]UsagePart `json:"parts"` // logs | artifacts | sessions | capabilities | database | backups
+	Parts       map[string]UsagePart `json:"parts"` // logs | artifacts | sessions | capabilities | database | backups | other
 	TotalBytes  int64                `json:"total_bytes"`
 	Reclaimable int64                `json:"db_reclaimable"` // free pages VACUUM would return
 	Preview     struct {
@@ -186,6 +191,7 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 	v.Parts["database"] = db
 	v.Parts["sessions"] = a.sessionUsage()
 	v.Parts["capabilities"] = a.capabilityUsage(ctx)
+	v.Parts["other"] = a.otherUsage()
 	if ents, err := os.ReadDir(a.backupDir()); err == nil {
 		var b UsagePart
 		for _, e := range ents {
@@ -310,6 +316,76 @@ func (a *App) capabilityUsage(ctx context.Context) UsagePart {
 	if p.Bytes > 0 {
 		p.Count = 1
 	}
+	return p
+}
+
+// otherUsage sums data-folder trees that no other usage-bar segment already
+// measures: skill-repository clones (<data>/skill-repositories), skill
+// staging (<data>/skillstage), run scratch (runsnap, run-mcp, run-work,
+// run-sandbox), and any other top-level leftovers. Logs, artifacts, session
+// folders, Claude Code transcripts under claude-config, extension storage
+// (tools, runtimes, envs, cache, capabilities) and the database files are
+// skipped so they are not double-counted. Backups live outside the data
+// folder. "Clean up now" does not delete these trees: staging and run
+// scratch are removed when a run ends or at startup; skill repositories
+// are managed on the skill repositories page.
+func (a *App) otherUsage() UsagePart {
+	var p UsagePart
+	if a.Cfg.DataDir == "" || !filepath.IsAbs(a.Cfg.DataDir) {
+		return p
+	}
+	add := func(n int64) {
+		p.Bytes += n
+		if n > 0 {
+			p.Count++
+		}
+	}
+	sizeOf := func(name string) int64 {
+		n, _ := dirSize(filepath.Join(a.Cfg.DataDir, name))
+		return n
+	}
+	p.Repositories = sizeOf("skill-repositories")
+	add(p.Repositories)
+	p.Staging = sizeOf("skillstage")
+	add(p.Staging)
+	for _, name := range []string{"runsnap", "run-mcp", "run-work", "run-sandbox"} {
+		p.Scratch += sizeOf(name)
+	}
+	add(p.Scratch)
+
+	counted := map[string]bool{
+		"runs": true, "artifacts": true, "chat-sessions": true, "claude-config": true,
+		"tools": true, "runtimes": true, "envs": true, "cache": true, "capabilities": true,
+		"skill-repositories": true, "skillstage": true,
+		"runsnap": true, "run-mcp": true, "run-work": true, "run-sandbox": true,
+	}
+	if a.Cfg.DBPath != "" {
+		base := filepath.Base(a.Cfg.DBPath)
+		for _, suf := range []string{"", "-wal", "-shm", "-journal"} {
+			counted[base+suf] = true
+		}
+	}
+	ents, err := os.ReadDir(a.Cfg.DataDir)
+	if err != nil {
+		return p
+	}
+	for _, e := range ents {
+		if counted[e.Name()] {
+			continue
+		}
+		path := filepath.Join(a.Cfg.DataDir, e.Name())
+		var n int64
+		if e.IsDir() {
+			n, _ = dirSize(path)
+		} else if fi, err := e.Info(); err == nil && fi.Mode().IsRegular() {
+			n = fi.Size()
+		}
+		if n > 0 {
+			p.Rest += n
+			p.Count++
+		}
+	}
+	p.Bytes += p.Rest
 	return p
 }
 

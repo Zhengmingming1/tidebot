@@ -50,9 +50,10 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
-		`var ST_PARTS = ["logs", "artifacts", "sessions", "capabilities", "database", "backups"];`,
+		`var ST_PARTS = ["logs", "artifacts", "sessions", "capabilities", "database", "backups", "other"];`,
 		`T("st.sessions_tip", { f: x.folders || 0, t: x.transcripts || 0 })`,
 		`T("st.capabilities_tip", { tools: fmtBytes(x.tools || 0), env: fmtBytes(x.environments || 0), cache: fmtBytes(x.cache || 0), snap: fmtBytes(x.snapshots || 0) })`,
+		`T("st.other_tip", { repos: fmtBytes(x.repositories || 0), stage: fmtBytes(x.staging || 0), scratch: fmtBytes(x.scratch || 0), rest: fmtBytes(x.rest || 0) })`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lacks %q", want)
@@ -64,6 +65,9 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 	}
 	if !strings.Contains(string(css), ".s-capabilities { background: var(--hue-violet); }") {
 		t.Error("styles.css lacks .s-capabilities")
+	}
+	if !strings.Contains(string(css), ".s-other { background: var(--hue-orange); }") {
+		t.Error("styles.css lacks .s-other")
 	}
 	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
 		raw, _ := os.ReadFile(f)
@@ -77,6 +81,9 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 		if m["st.p_capabilities"] == "" || !strings.Contains(m["st.capabilities_tip"], "{tools}") || !strings.Contains(m["st.capabilities_tip"], "{env}") || !strings.Contains(m["st.capabilities_tip"], "{cache}") || !strings.Contains(m["st.capabilities_tip"], "{snap}") {
 			t.Errorf("%s: st.p_capabilities / st.capabilities_tip missing", f)
 		}
+		if m["st.p_other"] == "" || !strings.Contains(m["st.other_tip"], "{repos}") || !strings.Contains(m["st.other_tip"], "{stage}") || !strings.Contains(m["st.other_tip"], "{scratch}") || !strings.Contains(m["st.other_tip"], "{rest}") {
+			t.Errorf("%s: st.p_other / st.other_tip missing", f)
+		}
 		where, confirm := m["st.where"], m["st.clean_confirm"]
 		if f == "static/i18n/en.json" {
 			for _, w := range []string{"session", "transcript", "scratch", "draft", "extension"} {
@@ -84,10 +91,20 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 					t.Errorf("%s: st.where/st.clean_confirm missing %q: where=%q confirm=%q", f, w, where, confirm)
 				}
 			}
+			for _, w := range []string{"skill repository", "skill staging", "run scratch"} {
+				if !strings.Contains(where, w) {
+					t.Errorf("%s: st.where missing %q: where=%q", f, w, where)
+				}
+			}
 		} else {
 			for _, w := range []string{"会话", "转录", "临时", "草稿", "扩展"} {
 				if !strings.Contains(where, w) && !strings.Contains(confirm, w) {
 					t.Errorf("%s: st.where/st.clean_confirm missing %q: where=%q confirm=%q", f, w, where, confirm)
+				}
+			}
+			for _, w := range []string{"技能仓库", "技能暂存", "运行临时"} {
+				if !strings.Contains(where, w) {
+					t.Errorf("%s: st.where missing %q: where=%q", f, w, where)
 				}
 			}
 		}

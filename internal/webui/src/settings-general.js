@@ -115,11 +115,11 @@
     m.classList.remove("fade"); void m.offsetWidth; m.classList.add("fade");
   }
   // ---- Settings › Data › Storage ----
-  // How much the data folder takes (run logs, artifacts, sessions, database, backups), how long
+  // How much the data folder takes (run logs, artifacts, sessions, extensions, other, database, backups), how long
   // history is kept, and one-click cleanup with a preview of what it frees. Idea from
   // Uptime Kuma's Monitor History settings (keep N days, 0 = forever, DB size next to
   // "shrink database"). Meta info (file counts, last cleanup) lives in tooltips.
-  var ST_PARTS = ["logs", "artifacts", "sessions", "capabilities", "database", "backups"];
+  var ST_PARTS = ["logs", "artifacts", "sessions", "capabilities", "database", "backups", "other"];
   var ST_DAYS = [7, 14, 30, 60, 90, 180, 365, 0];
   var ST_KEEP = [0, 5, 10, 20, 50, 100];
   var ST_CAP_GB = [1, 2, 5, 10, 20, 50, 0];
@@ -194,6 +194,7 @@
       if (k === "database") return line;
       if (k === "sessions") return line + "\n" + T("st.sessions_tip", { f: x.folders || 0, t: x.transcripts || 0 });
       if (k === "capabilities") return line + "\n" + T("st.capabilities_tip", { tools: fmtBytes(x.tools || 0), env: fmtBytes(x.environments || 0), cache: fmtBytes(x.cache || 0), snap: fmtBytes(x.snapshots || 0) });
+      if (k === "other") return line + "\n" + T("st.other_tip", { repos: fmtBytes(x.repositories || 0), stage: fmtBytes(x.staging || 0), scratch: fmtBytes(x.scratch || 0), rest: fmtBytes(x.rest || 0) });
       return line + " · " + T("st.files", { n: x.count || 0 }) + (x.packed ? "\n" + T("st.packed", { n: x.packed, raw: fmtBytes(x.packed_raw), on: fmtBytes(x.packed_bytes) }) : "");
     };
     box.innerHTML = '<div class="st-bar" role="img" aria-label="' + esc(ST_PARTS.map(tipOf).join("; ")) + '">' + ST_PARTS.filter(function (k) { return (parts[k] || {}).bytes > 0; }).map(function (k) {
