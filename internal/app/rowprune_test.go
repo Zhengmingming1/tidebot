@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -474,5 +475,237 @@ func TestCleanupHonorsWorkflowRunDaysSetting(t *testing.T) {
 	}
 	if v.Last == nil || !v.Last.Auto || v.Last.DeletedRows != 1 {
 		t.Fatalf("auto cleanup last %+v", v.Last)
+	}
+}
+
+func countTable(t *testing.T, a *App, q string) int64 {
+	t.Helper()
+	var n int64
+	if err := a.DB.QueryRow(q).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestStorageUsagePreviewPruneRows(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	ago := func(d int) string { return now.Add(-time.Duration(d) * 24 * time.Hour).UTC().Format(time.RFC3339) }
+	seedPolicyFixture := func(t *testing.T, a *App) {
+		t.Helper()
+		exec := func(q string, args ...any) {
+			t.Helper()
+			if _, err := a.DB.Exec(q, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_live','Live',1,0,?,?)`, ago(200), ago(200))
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_gone','Gone',1,1,?,?)`, ago(200), ago(5))
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_gone_new','GoneNew',1,1,?,?)`, ago(200), ago(2))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_old','w_live',1,'succeeded','','{}',?)`, ago(5))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_new','w_live',1,'succeeded','','{}',?)`, ago(1))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_running','w_live',1,'running','','{}',?)`, ago(100))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_queued','w_live',1,'queued','','{}',?)`, ago(100))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_old','w_gone',1,'succeeded','','{}',?)`, ago(5))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_new','w_gone',1,'failed','','{}',?)`, ago(2))
+		exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('w_gone_new',1,'{}',?)`, ago(200))
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_soft5','Soft5',1,1,?,?)`, ago(40), ago(5))
+		exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('w_soft5',1,'{}',?)`, ago(40))
+		if _, err := a.DB.Exec(`INSERT INTO login_attempts(at, ip, ok, detail) VALUES(?, '10.0.0.9', 0, '')`, ago(40)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot := func(t *testing.T, a *App) string {
+		t.Helper()
+		return fmt.Sprintf("runs=%d workflows=%d versions=%d logins=%d",
+			countTable(t, a, `SELECT COUNT(*) FROM workflow_runs`),
+			countTable(t, a, `SELECT COUNT(*) FROM workflows`),
+			countTable(t, a, `SELECT COUNT(*) FROM workflow_versions`),
+			countTable(t, a, `SELECT COUNT(*) FROM login_attempts`))
+	}
+
+	t.Run("days=3 matches prune and does not delete", func(t *testing.T) {
+		a := newTestApp(t)
+		seedPolicyFixture(t, a)
+		p := RetentionPolicy{WorkflowRunDays: 3}
+		before := snapshot(t, a)
+		n, err := a.previewPruneRows(ctx, p, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// wr_old, wr_gone_old, w_soft5 version + stub, plus the 40-day login attempt
+		if n != 5 {
+			t.Fatalf("preview %d, want 5", n)
+		}
+		if got := snapshot(t, a); got != before {
+			t.Fatalf("preview deleted rows: before %s after %s", before, got)
+		}
+		v, err := a.StorageUsage(ctx, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Default policy is 90 days, so only the 40-day login attempt is due.
+		if v.Preview.Rows != 1 {
+			t.Fatalf("default policy preview rows %d, want 1 (login attempt only)", v.Preview.Rows)
+		}
+		if _, err := callStorage(t, a, "storage.settings", map[string]any{"workflow_run_days": 3}); err != nil {
+			t.Fatal(err)
+		}
+		v, err = a.StorageUsage(ctx, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Preview.Rows != 5 {
+			t.Fatalf("storage preview rows %d, want 5 (files=%d sessions=%d)", v.Preview.Rows, v.Preview.Files, v.Preview.Sessions)
+		}
+		if got := snapshot(t, a); got != before {
+			t.Fatalf("StorageUsage deleted rows: before %s after %s", before, got)
+		}
+		deleted, err := a.pruneRows(ctx, p, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if deleted != n {
+			t.Fatalf("prune deleted %d, preview was %d", deleted, n)
+		}
+	})
+
+	t.Run("days=10 soft still 7", func(t *testing.T) {
+		a := newTestApp(t)
+		seedPolicyFixture(t, a)
+		if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_live_8','w_live',1,'succeeded','','{}',?)`, ago(8)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_8','w_gone',1,'succeeded','','{}',?)`, ago(8)); err != nil {
+			t.Fatal(err)
+		}
+		p := RetentionPolicy{WorkflowRunDays: 10}
+		n, err := a.previewPruneRows(ctx, p, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// wr_gone_8 + the 40-day login attempt; 5-day soft stub stays when soft keep is 7
+		if n != 2 {
+			t.Fatalf("preview %d, want 2", n)
+		}
+		if countTable(t, a, `SELECT COUNT(*) FROM workflows WHERE id='w_soft5'`) != 1 {
+			t.Fatal("preview reclaimed the 5-day soft-deleted stub")
+		}
+		if countTable(t, a, `SELECT COUNT(*) FROM workflow_runs WHERE id='wr_live_8'`) != 1 {
+			t.Fatal("preview dropped the 8-day live run")
+		}
+		deleted, err := a.pruneRows(ctx, p, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if deleted != n {
+			t.Fatalf("prune deleted %d, preview was %d", deleted, n)
+		}
+	})
+
+	t.Run("days=0 previews no workflow rows", func(t *testing.T) {
+		a := newTestApp(t)
+		seedPolicyFixture(t, a)
+		if _, err := a.DB.Exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_stub','Stub',1,1,?,?)`, ago(40), ago(14)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('w_stub',1,'{}',?)`, ago(40)); err != nil {
+			t.Fatal(err)
+		}
+		beforeRuns := countTable(t, a, `SELECT COUNT(*) FROM workflow_runs`)
+		n, err := a.previewPruneRows(ctx, RetentionPolicy{WorkflowRunDays: 0}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("preview %d, want only the old login attempt", n)
+		}
+		if countTable(t, a, `SELECT COUNT(*) FROM workflow_runs`) != beforeRuns {
+			t.Fatal("preview deleted workflow runs when WorkflowRunDays=0")
+		}
+		if countTable(t, a, `SELECT COUNT(*) FROM workflows WHERE id='w_stub'`) != 1 || countTable(t, a, `SELECT COUNT(*) FROM workflow_versions WHERE workflow_id='w_stub'`) != 1 {
+			t.Fatal("preview removed soft-deleted history when WorkflowRunDays=0")
+		}
+		if _, err := callStorage(t, a, "storage.settings", map[string]any{"workflow_run_days": 0}); err != nil {
+			t.Fatal(err)
+		}
+		v, err := a.StorageUsage(ctx, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Policy.WorkflowRunDays != 0 || v.Preview.Rows != 1 {
+			t.Fatalf("storage preview with WorkflowRunDays=0: policy=%+v preview=%+v", v.Policy, v.Preview)
+		}
+	})
+}
+
+func TestStorageGetPreviewWhenOnlyRows(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	now := time.Now()
+	ago := now.Add(-10 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := a.DB.Exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w1','W',1,0,?,?)`, ago, ago); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_old','w1',1,'succeeded','','{}',?)`, ago); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_running','w1',1,'running','','{}',?)`, ago); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_queued','w1',1,'queued','','{}',?)`, ago); err != nil {
+		t.Fatal(err)
+	}
+	v, err := a.StorageUsage(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Preview.Rows != 0 || v.Preview.Files != 0 || v.Preview.Sessions != 0 {
+		t.Fatalf("default 90-day policy should preview nothing, got %+v", v.Preview)
+	}
+	if _, err := callStorage(t, a, "storage.settings", map[string]any{"workflow_run_days": 7}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := callStorage(t, a, "storage.get", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view StorageView
+	if err := json.Unmarshal(b, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Preview.Rows != 1 || view.Preview.Files != 0 || view.Preview.Sessions != 0 {
+		t.Fatalf("only-rows preview %+v (raw %s)", view.Preview, b)
+	}
+	if !strings.Contains(string(b), `"rows":1`) {
+		t.Fatalf("storage.get JSON missing preview.rows: %s", b)
+	}
+	if countTable(t, a, `SELECT COUNT(*) FROM workflow_runs`) != 3 {
+		t.Fatal("storage.get preview deleted workflow runs")
+	}
+}
+
+func TestPreviewPruneRowsDoesNotDoubleCountOverlaps(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	now := time.Now()
+	ago := func(d int) string { return now.Add(-time.Duration(d) * 24 * time.Hour).UTC().Format(time.RFC3339) }
+	// Cleared and older than 180 days: matches both notification rules, must count once.
+	if _, err := a.DB.Exec(`INSERT INTO notifications(id, event, body, status, created_at, cleared_at) VALUES('n_both','run_failed','x','logged',?,?)`, ago(200), "nc_old"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := a.previewPruneRows(ctx, DefaultRetention, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("preview %d, want 1 (overlapping notification rules)", n)
+	}
+	deleted, err := a.pruneRows(ctx, DefaultRetention, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("prune deleted %d, want 1", deleted)
 	}
 }

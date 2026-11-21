@@ -144,6 +144,7 @@ type StorageView struct {
 		Files    int   `json:"files"`
 		Bytes    int64 `json:"bytes"`
 		Sessions int   `json:"sessions,omitempty"` // unused empty chats older than LogDays
+		Rows     int64 `json:"rows,omitempty"`     // history rows pruneRows would delete under the current policy
 	} `json:"preview"` // what "Clean up now" would delete under the current policy
 	Last *CleanupRecord `json:"last,omitempty"`
 	Disk *DiskStatus    `json:"disk,omitempty"` // volume holding the data folder; absent if unknown
@@ -212,6 +213,11 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 	} else {
 		v.Preview.Sessions = len(ids)
 	}
+	rows, err := a.previewPruneRows(ctx, v.Policy, now)
+	if err != nil {
+		return v, err
+	}
+	v.Preview.Rows = rows
 	var last CleanupRecord
 	a.loadJSONSetting(ctx, setRetentionLast, &last)
 	if last.At != "" {

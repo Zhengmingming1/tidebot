@@ -101,10 +101,10 @@ func TestStorageEmptyChatCleanupUI(t *testing.T) {
 	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
-		`var sess = pv.sessions || 0;`,
-		`T("st.clean_sub_sessions", { c: sess })`,
-		`T("st.clean_confirm_sessions", { c: sess })`,
-		`cl.disabled = !(pv.files || sess);`,
+		`var sess = pv.sessions || 0, rows = pv.rows || 0;`,
+		`T("st.clean_sub_sessions", args)`,
+		`T("st.clean_confirm_sessions", args)`,
+		`cl.disabled = !(pv.files || sess || rows);`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lacks %q", want)
@@ -166,6 +166,75 @@ func TestStorageWorkflowRunDaysUI(t *testing.T) {
 			for _, w := range []string{"工作流", "节点输出", "90", "永久"} {
 				if !strings.Contains(sub, w) {
 					t.Errorf("%s: st.workflow_run_days_sub missing %q: %q", f, w, sub)
+				}
+			}
+		}
+	}
+}
+
+// Settings › Data "Clean up now" previews pruneable history rows (workflow
+// runs, old notices, etc.), mentions them in the subtitle and confirm, and
+// enables the button when only rows would be deleted.
+func TestStorageCleanupPreviewRowsUI(t *testing.T) {
+	src := strings.ReplaceAll(appJSSource(t), "\r\n", "\n")
+	for _, want := range []string{
+		`var sess = pv.sessions || 0, rows = pv.rows || 0;`,
+		`cl.disabled = !(pv.files || sess || rows);`,
+		`T("st.clean_sub_rows", args)`,
+		`T("st.clean_sub_files_rows", args)`,
+		`T("st.clean_sub_sessions_rows", args)`,
+		`T("st.clean_sub_all", args)`,
+		`T("st.clean_confirm_rows", args)`,
+		`T("st.clean_confirm_files_rows", args)`,
+		`T("st.clean_confirm_sessions_rows", args)`,
+		`T("st.clean_confirm_all", args)`,
+		`T("st.clean_title_rows")`,
+		`T("st.clean_title_data")`,
+		`function storageCleanSub(pv)`,
+		`function storageCleanConfirm(pv)`,
+		`confirmDialog({ title: title, body: body + "\n" + T(keep ? "st.clean_keeps" : "st.clean_keeps0", { k: keep }), ok: T("st.clean_btn"), danger: true })`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
+	}
+	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]string
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		for _, k := range []string{
+			"st.clean_sub_rows", "st.clean_sub_files_rows", "st.clean_sub_sessions_rows", "st.clean_sub_all",
+			"st.clean_confirm_rows", "st.clean_confirm_files_rows", "st.clean_confirm_sessions_rows", "st.clean_confirm_all",
+			"st.clean_title_rows", "st.clean_title_data",
+		} {
+			if m[k] == "" {
+				t.Errorf("%s: missing %s", f, k)
+			}
+			if strings.HasPrefix(k, "st.clean_sub") || strings.HasPrefix(k, "st.clean_confirm") {
+				if (strings.Contains(k, "rows") || strings.HasSuffix(k, "_all")) && !strings.Contains(m[k], "{r}") {
+					t.Errorf("%s: %s should interpolate {r}: %q", f, k, m[k])
+				}
+			}
+		}
+		if f == "static/i18n/en.json" {
+			for _, k := range []string{"st.clean_sub_rows", "st.clean_confirm_rows"} {
+				for _, w := range []string{"history", "workflow"} {
+					if !strings.Contains(m[k], w) {
+						t.Errorf("%s: %s missing %q: %q", f, k, w, m[k])
+					}
+				}
+			}
+		} else {
+			for _, k := range []string{"st.clean_sub_rows", "st.clean_confirm_rows"} {
+				for _, w := range []string{"历史记录", "工作流"} {
+					if !strings.Contains(m[k], w) {
+						t.Errorf("%s: %s missing %q: %q", f, k, w, m[k])
+					}
 				}
 			}
 		}

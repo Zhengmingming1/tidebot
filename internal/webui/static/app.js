@@ -8581,6 +8581,48 @@ r("min_free",T("st.min_free_sub"),sel("st-minfree","min_free"))+
 r("clean","…",'<button class="btn sm" id="st-clean" disabled>'+ic("trash","sm")+esc(T("st.clean_btn"))+"</button>")+
 r("shrink","…",'<button class="btn sm" id="st-shrink" disabled>'+ic("database","sm")+esc(T("st.shrink_btn"))+"</button>")+"</section>";
 }
+function storageCleanArgs(pv){
+return{n:pv.files||0,s:fmtBytes(pv.bytes),c:pv.sessions||0,r:pv.rows||0};
+}
+function storageCleanKind(pv){
+var files=pv.files||0,sess=pv.sessions||0,rows=pv.rows||0;
+if(files&&sess&&rows)return "all";
+if(files&&sess)return "both";
+if(files&&rows)return "files_rows";
+if(sess&&rows)return "sessions_rows";
+if(sess)return "sessions";
+if(files)return "files";
+if(rows)return "rows";
+return "";
+}
+function storageCleanSub(pv){
+var kind=storageCleanKind(pv),args=storageCleanArgs(pv);
+return kind==="all"?T("st.clean_sub_all",args)
+:kind==="both"?T("st.clean_sub_both",args)
+:kind==="files_rows"?T("st.clean_sub_files_rows",args)
+:kind==="sessions_rows"?T("st.clean_sub_sessions_rows",args)
+:kind==="sessions"?T("st.clean_sub_sessions",args)
+:kind==="files"?T("st.clean_sub",args)
+:kind==="rows"?T("st.clean_sub_rows",args)
+:T("st.clean_none");
+}
+function storageCleanConfirm(pv){
+var kind=storageCleanKind(pv),args=storageCleanArgs(pv);
+return kind==="all"?T("st.clean_confirm_all",args)
+:kind==="both"?T("st.clean_confirm_both",args)
+:kind==="files_rows"?T("st.clean_confirm_files_rows",args)
+:kind==="sessions_rows"?T("st.clean_confirm_sessions_rows",args)
+:kind==="sessions"?T("st.clean_confirm_sessions",args)
+:kind==="files"?T("st.clean_confirm",args)
+:T("st.clean_confirm_rows",args);
+}
+function storageCleanTitle(pv){
+var kind=storageCleanKind(pv);
+return kind==="rows"?T("st.clean_title_rows")
+:kind==="sessions"?T("st.clean_title_sessions")
+:(kind==="all"||kind==="files_rows"||kind==="sessions_rows")?T("st.clean_title_data")
+:T("st.clean_title");
+}
 function storagePaint(v){
 var box=$("#st-usage");
 if(!box)return;
@@ -8614,12 +8656,9 @@ $("#st-cap").innerHTML=stOpts(ST_CAP_GB,gb,function(n){return n?n+" GB":T("st.no
 $("#st-minfree").innerHTML=stOpts(ST_MIN_FREE_MB,v.min_free_mb,function(n){return n?mbLabel(n):T("st.min_free_off");});
 $$("[data-st]").forEach(function(el){el.disabled=false;});
 var pv=v.preview||{},cl=$("#st-clean"),sh=$("#st-shrink");
-var sess=pv.sessions||0;
-$("#st-clean-sub").textContent=pv.files&&sess?T("st.clean_sub_both",{n:pv.files,s:fmtBytes(pv.bytes),c:sess})
-:sess?T("st.clean_sub_sessions",{c:sess})
-:pv.files?T("st.clean_sub",{n:pv.files,s:fmtBytes(pv.bytes)})
-:T("st.clean_none");
-cl.disabled=!(pv.files||sess);
+var sess=pv.sessions||0,rows=pv.rows||0;
+$("#st-clean-sub").textContent=storageCleanSub(pv);
+cl.disabled=!(pv.files||sess||rows);
 $("#st-shrink-sub").textContent=v.db_reclaimable>=1048576?T("st.shrink_sub",{s:fmtBytes(v.db_reclaimable)}):T("st.shrink_none",{s:fmtBytes((parts.database||{}).bytes)});
 sh.disabled=!(v.db_reclaimable>=1048576);
 state.storage=v;
@@ -8643,11 +8682,8 @@ rpc("storage.settings",body).then(function(v){storagePaint(v);savedMark(el);}).c
 });
 $("#st-clean").addEventListener("click",function(e){
 var b=e.currentTarget,pv=(state.storage||{}).preview||{},keep=((state.storage||{}).policy||{}).keep_per_task;
-var sess=pv.sessions||0;
-var title=sess&&!pv.files?T("st.clean_title_sessions"):T("st.clean_title");
-var body=pv.files&&sess?T("st.clean_confirm_both",{n:pv.files,s:fmtBytes(pv.bytes),c:sess})
-:sess&&!pv.files?T("st.clean_confirm_sessions",{c:sess})
-:T("st.clean_confirm",{n:pv.files,s:fmtBytes(pv.bytes)});
+var title=storageCleanTitle(pv);
+var body=storageCleanConfirm(pv);
 confirmDialog({title:title,body:body+"\n"+T(keep?"st.clean_keeps":"st.clean_keeps0",{k:keep}),ok:T("st.clean_btn"),danger:true}).then(function(y){
 if(!y)return;
 b.disabled=true;
