@@ -858,13 +858,7 @@ func (a *App) DeleteChatSession(ctx context.Context, sid string) error {
 	// Its capability proposals can no longer be confirmed (that goes through the
 	// session). One being applied finishes first; retention drops it afterwards.
 	_, _ = a.DB.ExecContext(ctx, `DELETE FROM capability_proposals WHERE session_id=? AND status<>'applying'`, sid)
-	for _, p := range a.chatTranscripts(c.ClaudeSessionID) {
-		_ = os.Remove(p)
-		_ = os.RemoveAll(strings.TrimSuffix(p, ".jsonl")) // subagent transcripts, tool results
-	}
-	if err := os.RemoveAll(filepath.Join(a.chatSessionsDir(), safeChatID(sid))); err != nil && a.Log != nil {
-		a.Log.Warn("delete session folder, retried by cleanup", "session", sid, "error", err)
-	}
+	a.removeChatSessionDisk(sid, c.ClaudeSessionID)
 	return nil
 }
 

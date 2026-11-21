@@ -24,9 +24,10 @@ import (
 
 // --- retention ---------------------------------------------------------------
 
-// RetentionPolicy: run logs 30 d, artifacts 90 d, idle chat transcripts and
-// session scratch folders follow log days (orphans always removed), always keep
-// the newest 20 runs per task, never touch runs flagged important, and cap
+// RetentionPolicy: run logs 30 d, artifacts 90 d, idle chat transcripts,
+// session scratch folders, and unused empty chats follow log days (orphan
+// transcripts and leftover folders are always removed), always keep the newest
+// 20 runs per task, never touch runs flagged important, and cap
 // logs+artifacts at 10 GB.
 type RetentionPolicy struct {
 	LogDays       int   `json:"log_days"`
@@ -57,10 +58,12 @@ type runFile struct {
 }
 
 // ApplyRetention deletes old run logs/artifacts, idle/orphan chat transcripts,
-// leftover folders of deleted sessions, and the scratch folder (work/) of
-// sessions idle longer than LogDays. Session rows, turn history and skill
-// drafts stay. A zero LogDays/ArtifactDays keeps that kind forever (orphan
-// chat transcripts and leftover session folders are still removed); a zero
+// leftover folders of deleted sessions, the scratch folder (work/) of sessions
+// idle longer than LogDays, and unused empty chats (origin "chat", no turns,
+// title, bindings, proposals, draft or workspace) older than LogDays. Named
+// chats, chats continued from a run, and anything the user started or bound
+// stay. A zero LogDays/ArtifactDays keeps that kind forever (orphan chat
+// transcripts and leftover session folders are still removed); a zero
 // MaxTotalBytes means no cap on logs+artifacts.
 func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Time) (RetentionReport, error) {
 	plan, err := a.planRetention(ctx, p, now)
@@ -88,6 +91,13 @@ func (a *App) ApplyRetention(ctx context.Context, p RetentionPolicy, now time.Ti
 		}
 	}
 	a.removeEmptyChatProjectDirs()
+	// After file deletes so an empty session's already-planned scratch folder
+	// is counted once. The row is removed only if it is still unused.
+	n, err := a.pruneEmptyChatSessions(ctx, p, now)
+	if err != nil {
+		return rep, err
+	}
+	rep.DeletedRows += n
 	return rep, nil
 }
 

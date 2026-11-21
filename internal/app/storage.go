@@ -61,12 +61,12 @@ func (a *App) runCleanup(ctx context.Context, now time.Time, auto bool) (Retenti
 		return rep, err
 	}
 	rows, rerr := a.pruneRows(ctx, now)
-	rep.DeletedRows = rows
+	rep.DeletedRows += rows
 	if rerr != nil && a.Log != nil {
 		a.Log.Warn("prune rows", "error", rerr, "deleted", rows)
 	}
-	if !auto || rep.DeletedFiles > 0 || rows > 0 {
-		_ = a.saveJSONSetting(ctx, setRetentionLast, CleanupRecord{At: now.UTC().Format(time.RFC3339), Auto: auto, DeletedFiles: rep.DeletedFiles, FreedBytes: rep.FreedBytes, DeletedRows: rows})
+	if !auto || rep.DeletedFiles > 0 || rep.DeletedRows > 0 {
+		_ = a.saveJSONSetting(ctx, setRetentionLast, CleanupRecord{At: now.UTC().Format(time.RFC3339), Auto: auto, DeletedFiles: rep.DeletedFiles, FreedBytes: rep.FreedBytes, DeletedRows: rep.DeletedRows})
 	}
 	return rep, nil
 }
@@ -133,8 +133,9 @@ type StorageView struct {
 	TotalBytes  int64                `json:"total_bytes"`
 	Reclaimable int64                `json:"db_reclaimable"` // free pages VACUUM would return
 	Preview     struct {
-		Files int   `json:"files"`
-		Bytes int64 `json:"bytes"`
+		Files    int   `json:"files"`
+		Bytes    int64 `json:"bytes"`
+		Sessions int   `json:"sessions,omitempty"` // unused empty chats older than LogDays
 	} `json:"preview"` // what "Clean up now" would delete under the current policy
 	Last *CleanupRecord `json:"last,omitempty"`
 	Disk *DiskStatus    `json:"disk,omitempty"` // volume holding the data folder; absent if unknown
@@ -197,6 +198,11 @@ func (a *App) StorageUsage(ctx context.Context, now time.Time) (StorageView, err
 		return v, err
 	}
 	v.Preview.Files, v.Preview.Bytes = len(plan.del), plan.FreeBytes
+	if ids, err := a.emptyChatSessions(ctx, v.Policy, now); err != nil {
+		return v, err
+	} else {
+		v.Preview.Sessions = len(ids)
+	}
 	var last CleanupRecord
 	a.loadJSONSetting(ctx, setRetentionLast, &last)
 	if last.At != "" {

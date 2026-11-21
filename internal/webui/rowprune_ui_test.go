@@ -15,7 +15,7 @@ func TestStorageRowPruneUI(t *testing.T) {
 	for _, want := range []string{
 		`(v.last.deleted_rows > 0 ? "\n" + T("st.rows", { n: v.last.deleted_rows }) : "")`,
 		`tip(T("st.where") + "\n" + T("st.tidy") + "\n"`,
-		`(r.report.deleted_rows > 0 ? " · " + T("st.rows", { n: r.report.deleted_rows }) : "")`,
+		`if (rows) parts.push(T("st.rows", { n: rows }))`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("app.js lacks %q", want)
@@ -83,6 +83,43 @@ func TestStorageSessionsUsageUI(t *testing.T) {
 					t.Errorf("%s: st.where/st.clean_confirm missing %q: where=%q confirm=%q", f, w, where, confirm)
 				}
 			}
+		}
+	}
+}
+
+// Unused empty chats are part of Settings › Data cleanup: preview, confirm, and
+// the log-days subtitle all mention them; the button is enabled when only
+// sessions (no files) would be removed.
+func TestStorageEmptyChatCleanupUI(t *testing.T) {
+	b := []byte(appJSSource(t))
+	src := strings.ReplaceAll(string(b), "\r\n", "\n")
+	for _, want := range []string{
+		`var sess = pv.sessions || 0;`,
+		`T("st.clean_sub_sessions", { c: sess })`,
+		`T("st.clean_confirm_sessions", { c: sess })`,
+		`cl.disabled = !(pv.files || sess);`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
+	}
+	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
+		raw, _ := os.ReadFile(f)
+		var m map[string]string
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		for _, k := range []string{"st.log_days_sub", "st.where", "st.clean_confirm", "st.clean_confirm_both", "st.clean_confirm_sessions", "st.clean_sub_both", "st.clean_sub_sessions", "st.clean_title_sessions"} {
+			if m[k] == "" {
+				t.Errorf("%s: missing %s", f, k)
+			}
+		}
+		if f == "static/i18n/en.json" {
+			if !strings.Contains(m["st.log_days_sub"], "empty chat") {
+				t.Errorf("%s: st.log_days_sub should mention empty chats: %q", f, m["st.log_days_sub"])
+			}
+		} else if !strings.Contains(m["st.log_days_sub"], "空会话") {
+			t.Errorf("%s: st.log_days_sub should mention empty chats: %q", f, m["st.log_days_sub"])
 		}
 	}
 }

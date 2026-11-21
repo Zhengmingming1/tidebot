@@ -8611,8 +8611,12 @@ $("#st-cap").innerHTML=stOpts(ST_CAP_GB,gb,function(n){return n?n+" GB":T("st.no
 $("#st-minfree").innerHTML=stOpts(ST_MIN_FREE_MB,v.min_free_mb,function(n){return n?mbLabel(n):T("st.min_free_off");});
 $$("[data-st]").forEach(function(el){el.disabled=false;});
 var pv=v.preview||{},cl=$("#st-clean"),sh=$("#st-shrink");
-$("#st-clean-sub").textContent=pv.files?T("st.clean_sub",{n:pv.files,s:fmtBytes(pv.bytes)}):T("st.clean_none");
-cl.disabled=!pv.files;
+var sess=pv.sessions||0;
+$("#st-clean-sub").textContent=pv.files&&sess?T("st.clean_sub_both",{n:pv.files,s:fmtBytes(pv.bytes),c:sess})
+:sess?T("st.clean_sub_sessions",{c:sess})
+:pv.files?T("st.clean_sub",{n:pv.files,s:fmtBytes(pv.bytes)})
+:T("st.clean_none");
+cl.disabled=!(pv.files||sess);
 $("#st-shrink-sub").textContent=v.db_reclaimable>=1048576?T("st.shrink_sub",{s:fmtBytes(v.db_reclaimable)}):T("st.shrink_none",{s:fmtBytes((parts.database||{}).bytes)});
 sh.disabled=!(v.db_reclaimable>=1048576);
 state.storage=v;
@@ -8636,10 +8640,21 @@ rpc("storage.settings",body).then(function(v){storagePaint(v);savedMark(el);}).c
 });
 $("#st-clean").addEventListener("click",function(e){
 var b=e.currentTarget,pv=(state.storage||{}).preview||{},keep=((state.storage||{}).policy||{}).keep_per_task;
-confirmDialog({title:T("st.clean_title"),body:T("st.clean_confirm",{n:pv.files,s:fmtBytes(pv.bytes)})+"\n"+T(keep?"st.clean_keeps":"st.clean_keeps0",{k:keep}),ok:T("st.clean_btn"),danger:true}).then(function(y){
+var sess=pv.sessions||0;
+var title=sess&&!pv.files?T("st.clean_title_sessions"):T("st.clean_title");
+var body=pv.files&&sess?T("st.clean_confirm_both",{n:pv.files,s:fmtBytes(pv.bytes),c:sess})
+:sess&&!pv.files?T("st.clean_confirm_sessions",{c:sess})
+:T("st.clean_confirm",{n:pv.files,s:fmtBytes(pv.bytes)});
+confirmDialog({title:title,body:body+"\n"+T(keep?"st.clean_keeps":"st.clean_keeps0",{k:keep}),ok:T("st.clean_btn"),danger:true}).then(function(y){
 if(!y)return;
 b.disabled=true;
-rpc("storage.cleanup",{}).then(function(r){toast(T("st.cleaned",{n:r.report.deleted_files,s:fmtBytes(r.report.freed_bytes)})+(r.report.deleted_rows>0?" · "+T("st.rows",{n:r.report.deleted_rows}):""));storagePaint(r.storage);}).catch(function(err){fail(err);b.disabled=false;});
+rpc("storage.cleanup",{}).then(function(r){
+var files=(r.report||{}).deleted_files||0,rows=(r.report||{}).deleted_rows||0,parts=[];
+if(files)parts.push(T("st.cleaned",{n:files,s:fmtBytes(r.report.freed_bytes)}));
+if(rows)parts.push(T("st.rows",{n:rows}));
+if(parts.length)toast(parts.join(" · "));
+storagePaint(r.storage);
+}).catch(function(err){fail(err);b.disabled=false;});
 });
 });
 $("#st-shrink").addEventListener("click",function(e){
