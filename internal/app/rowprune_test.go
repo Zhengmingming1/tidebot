@@ -46,7 +46,7 @@ func TestPruneRowsKeepsRecentAndQueued(t *testing.T) {
 	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_gone_mid','a','succeeded',?)`, strings.Repeat("y", 2048))
 	exec(`INSERT INTO workflow_run_nodes(workflow_run_id,node_id,status,output) VALUES('wr_new_ok','a','succeeded','keep')`)
 
-	n, err := a.pruneRows(ctx, now)
+	n, err := a.pruneRows(ctx, DefaultRetention, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestPruneRowsKeepsRecentAndQueued(t *testing.T) {
 	if got := ids(`SELECT workflow_run_id||':'||node_id FROM workflow_run_nodes ORDER BY 1`); got != "wr_new_ok:a" {
 		t.Fatalf("workflow nodes left: %s", got)
 	}
-	if n, _ := a.pruneRows(ctx, now); n != 0 {
+	if n, _ := a.pruneRows(ctx, DefaultRetention, now); n != 0 {
 		t.Fatalf("second pass deleted %d", n)
 	}
 }
@@ -107,13 +107,13 @@ func TestPruneRowsBatchesBigBacklog(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	n, err := a.pruneRows(context.Background(), time.Now())
+	n, err := a.pruneRows(context.Background(), DefaultRetention, time.Now())
 	if err != nil || n != int64(total) {
 		t.Fatalf("deleted %d (%v), want %d", n, err, total)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := a.pruneRows(ctx, time.Now()); err == nil {
+	if _, err := a.pruneRows(ctx, DefaultRetention, time.Now()); err == nil {
 		t.Fatal("canceled context should stop the pass")
 	}
 }
@@ -199,7 +199,7 @@ func TestPruneWorkflowRunsReclaimsNodeOutput(t *testing.T) {
 	_ = a.DB.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
 	_ = a.DB.QueryRow(`PRAGMA freelist_count`).Scan(&freelist)
 	beforeFile := (pageCount) * pageSize
-	n, err := a.pruneRows(ctx, now)
+	n, err := a.pruneRows(ctx, DefaultRetention, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestPruneSoftDeletedWorkflowVersionsReclaimsDefinition(t *testing.T) {
 	_ = a.DB.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
 	beforeFile := pageCount * pageSize
 
-	n, err := a.pruneRows(ctx, now)
+	n, err := a.pruneRows(ctx, DefaultRetention, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,4 +310,169 @@ func TestPruneSoftDeletedWorkflowVersionsReclaimsDefinition(t *testing.T) {
 	}
 	t.Logf("soft-deleted workflow versions: removed 2 defs / %d KB; db %d KB → %d KB after vacuum (−%d KB)",
 		beforeDef>>10, beforeFile>>10, afterFile>>10, (beforeFile-afterFile)>>10)
+}
+
+func TestPruneWorkflowRunsHonorsRetentionPolicy(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	ago := func(d int) string { return now.Add(-time.Duration(d) * 24 * time.Hour).UTC().Format(time.RFC3339) }
+	seed := func(t *testing.T, a *App) {
+		t.Helper()
+		exec := func(q string, args ...any) {
+			t.Helper()
+			if _, err := a.DB.Exec(q, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_live','Live',1,0,?,?)`, ago(200), ago(200))
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_gone','Gone',1,1,?,?)`, ago(200), ago(5))
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_gone_new','GoneNew',1,1,?,?)`, ago(200), ago(2))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_old','w_live',1,'succeeded','','{}',?)`, ago(5))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_new','w_live',1,'succeeded','','{}',?)`, ago(1))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_running','w_live',1,'running','','{}',?)`, ago(100))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_queued','w_live',1,'queued','','{}',?)`, ago(100))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_old','w_gone',1,'succeeded','','{}',?)`, ago(5))
+		exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_new','w_gone',1,'failed','','{}',?)`, ago(2))
+		exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('w_gone_new',1,'{}',?)`, ago(200))
+		// Soft-deleted, no runs, updated 5 days ago: reclaimed when keep < 5 (e.g. min(7,3)=3), kept when soft is 7.
+		exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_soft5','Soft5',1,1,?,?)`, ago(40), ago(5))
+		exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('w_soft5',1,'{}',?)`, ago(40))
+		if _, err := a.DB.Exec(`INSERT INTO login_attempts(at, ip, ok, detail) VALUES(?, '10.0.0.9', 0, '')`, ago(40)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := func(t *testing.T, a *App, q string) string {
+		t.Helper()
+		rows, err := a.DB.Query(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			_ = rows.Scan(&s)
+			out = append(out, s)
+		}
+		return strings.Join(out, ",")
+	}
+
+	t.Run("days=3", func(t *testing.T) {
+		a := newTestApp(t)
+		seed(t, a)
+		n, err := a.pruneRows(ctx, RetentionPolicy{WorkflowRunDays: 3}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// wr_old, wr_gone_old, w_soft5 version + stub, plus the 40-day login attempt
+		if n != 5 {
+			t.Fatalf("deleted %d, want 5", n)
+		}
+		if got := ids(t, a, `SELECT id FROM workflow_runs ORDER BY id`); got != "wr_gone_new,wr_new,wr_queued,wr_running" {
+			t.Fatalf("runs left: %s", got)
+		}
+		if got := ids(t, a, `SELECT id FROM workflows WHERE deleted=1 ORDER BY id`); got != "w_gone,w_gone_new" {
+			t.Fatalf("soft-deleted workflows left: %s", got)
+		}
+		var vers int
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflow_versions WHERE workflow_id='w_gone_new'`).Scan(&vers)
+		if vers != 1 {
+			t.Fatalf("recent soft-deleted version dropped, count=%d", vers)
+		}
+	})
+
+	t.Run("days=10 soft still 7", func(t *testing.T) {
+		a := newTestApp(t)
+		seed(t, a)
+		// Soft-deleted run 8 days old is past min(7, 10)=7; a live run 8 days old stays.
+		if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_live_8','w_live',1,'succeeded','','{}',?)`, ago(8)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_gone_8','w_gone',1,'succeeded','','{}',?)`, ago(8)); err != nil {
+			t.Fatal(err)
+		}
+		n, err := a.pruneRows(ctx, RetentionPolicy{WorkflowRunDays: 10}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// wr_gone_8 + the 40-day login attempt (wr_old is 5d, under 10 and under soft? wr_old is on live wf)
+		// wr_gone_old is 5d, under 7, stays.
+		if n != 2 {
+			t.Fatalf("deleted %d, want 2", n)
+		}
+		if got := ids(t, a, `SELECT id FROM workflow_runs ORDER BY id`); got != "wr_gone_new,wr_gone_old,wr_live_8,wr_new,wr_old,wr_queued,wr_running" {
+			t.Fatalf("runs left: %s", got)
+		}
+		var soft5 int
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflows WHERE id='w_soft5'`).Scan(&soft5)
+		if soft5 != 1 {
+			t.Fatal("5-day soft-deleted stub should stay when soft keep is 7")
+		}
+	})
+
+	t.Run("days=0 skips all workflow rules", func(t *testing.T) {
+		a := newTestApp(t)
+		seed(t, a)
+		// Soft-deleted stub past a week, no runs: would go under the default 7-day rule.
+		if _, err := a.DB.Exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w_stub','Stub',1,1,?,?)`, ago(40), ago(14)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.DB.Exec(`INSERT INTO workflow_versions(workflow_id,version,definition_json,created_at) VALUES('w_stub',1,'{}',?)`, ago(40)); err != nil {
+			t.Fatal(err)
+		}
+		n, err := a.pruneRows(ctx, RetentionPolicy{WorkflowRunDays: 0}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("deleted %d, want only the old login attempt", n)
+		}
+		if got := ids(t, a, `SELECT id FROM workflow_runs ORDER BY id`); got != "wr_gone_new,wr_gone_old,wr_new,wr_old,wr_queued,wr_running" {
+			t.Fatalf("runs left: %s", got)
+		}
+		var stubs, vers, soft5 int
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflows WHERE id='w_stub'`).Scan(&stubs)
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflow_versions WHERE workflow_id='w_stub'`).Scan(&vers)
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflows WHERE id='w_soft5'`).Scan(&soft5)
+		if stubs != 1 || vers != 1 || soft5 != 1 {
+			t.Fatalf("soft-deleted history removed despite WorkflowRunDays=0: stub=%d versions=%d soft5=%d", stubs, vers, soft5)
+		}
+	})
+}
+
+func TestCleanupHonorsWorkflowRunDaysSetting(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	now := time.Now()
+	ago := now.Add(-10 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := a.DB.Exec(`INSERT INTO workflows(id,name,version,deleted,created_at,updated_at) VALUES('w1','W',1,0,?,?)`, ago, ago); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec(`INSERT INTO workflow_runs(id,workflow_id,workflow_version,status,input,snapshot_json,created_at) VALUES('wr_old','w1',1,'succeeded','','{}',?)`, ago); err != nil {
+		t.Fatal(err)
+	}
+	a.retentionTick(ctx, now) // default 90 days: the run stays, nothing recorded
+	var left int
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflow_runs WHERE id='wr_old'`).Scan(&left)
+	if left != 1 {
+		t.Fatal("default policy deleted a 10-day-old workflow run")
+	}
+	if v, _ := a.StorageUsage(ctx, now); v.Last != nil {
+		t.Fatalf("default policy recorded cleanup: %+v", v.Last)
+	}
+	if _, err := callStorage(t, a, "storage.settings", map[string]any{"workflow_run_days": 7}); err != nil {
+		t.Fatal(err)
+	}
+	a.retentionTick(ctx, now)
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM workflow_runs WHERE id='wr_old'`).Scan(&left)
+	if left != 0 {
+		t.Fatal("stored WorkflowRunDays=7 did not prune the 10-day-old run")
+	}
+	v, err := a.StorageUsage(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Last == nil || !v.Last.Auto || v.Last.DeletedRows != 1 {
+		t.Fatalf("auto cleanup last %+v", v.Last)
+	}
 }

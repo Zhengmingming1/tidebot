@@ -136,6 +136,7 @@
       '<div id="st-disk"></div><div class="st-usage" id="st-usage" aria-live="polite"><div class="st-bar sk"></div></div>' +
       r("log_days", T("st.log_days_sub"), sel("st-log", "log_days")) +
       r("artifact_days", T("st.artifact_days_sub"), sel("st-art", "artifact_days")) +
+      r("workflow_run_days", T("st.workflow_run_days_sub"), sel("st-wfrun", "workflow_run_days")) +
       r("keep_per_task", T("st.keep_per_task_sub"), sel("st-keep", "keep_per_task")) +
       r("max_total", T("st.max_total_sub"), sel("st-cap", "max_total")) +
       r("min_free", T("st.min_free_sub"), sel("st-minfree", "min_free")) +
@@ -170,6 +171,7 @@
     var day = function (n) { return n ? T("st.days", { n: n }) : T("st.forever"); };
     $("#st-log").innerHTML = stOpts(ST_DAYS, p.log_days, day);
     $("#st-art").innerHTML = stOpts(ST_DAYS, p.artifact_days, day);
+    $("#st-wfrun").innerHTML = stOpts(ST_DAYS, p.workflow_run_days, day);
     $("#st-keep").innerHTML = stOpts(ST_KEEP, p.keep_per_task, function (n) { return n ? T("st.runs", { n: n }) : T("st.none"); });
     var gb = Math.round((p.max_total_bytes || 0) / 1073741824 * 100) / 100;
     $("#st-cap").innerHTML = stOpts(ST_CAP_GB, gb, function (n) { return n ? n + " GB" : T("st.no_cap"); });

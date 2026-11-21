@@ -94,7 +94,7 @@ func TestStorageSettingsValidateAndPersist(t *testing.T) {
 	if got := a.RetentionSettings(ctx); got != DefaultRetention {
 		t.Fatalf("default %+v", got)
 	}
-	for _, bad := range []map[string]any{{"log_days": -1}, {"log_days": 5000}, {"keep_per_task": 2000}, {"max_total_bytes": -5}, {"log_days": "x"}} {
+	for _, bad := range []map[string]any{{"log_days": -1}, {"log_days": 5000}, {"workflow_run_days": -1}, {"workflow_run_days": 5000}, {"keep_per_task": 2000}, {"max_total_bytes": -5}, {"log_days": "x"}} {
 		if _, err := callStorage(t, a, "storage.settings", bad); err == nil {
 			t.Errorf("accepted %v", bad)
 		}
@@ -103,13 +103,37 @@ func TestStorageSettingsValidateAndPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := a.RetentionSettings(ctx)
-	if got.LogDays != 7 || got.MaxTotalBytes != 2<<30 || got.ArtifactDays != DefaultRetention.ArtifactDays || got.KeepPerTask != DefaultRetention.KeepPerTask {
+	if got.LogDays != 7 || got.MaxTotalBytes != 2<<30 || got.ArtifactDays != DefaultRetention.ArtifactDays || got.KeepPerTask != DefaultRetention.KeepPerTask || got.WorkflowRunDays != DefaultRetention.WorkflowRunDays {
 		t.Fatalf("partial update %+v", got)
+	}
+	for _, days := range []int{0, 90, 3650} {
+		if _, err := callStorage(t, a, "storage.settings", map[string]any{"workflow_run_days": days}); err != nil {
+			t.Fatalf("workflow_run_days %d: %v", days, err)
+		}
+		if got := a.RetentionSettings(ctx); got.WorkflowRunDays != days || got.LogDays != 7 {
+			t.Fatalf("workflow_run_days %d: %+v", days, got)
+		}
+	}
+	// A stored policy written before this field existed keeps the 90-day default.
+	_ = a.Auth.SetSetting(ctx, setRetention, `{"log_days":14,"artifact_days":90,"keep_per_task":20,"max_total_bytes":10737418240}`)
+	if got := a.RetentionSettings(ctx); got.WorkflowRunDays != 90 || got.LogDays != 14 {
+		t.Fatalf("omitted workflow_run_days %+v", got)
 	}
 	// A corrupt stored value falls back to the defaults instead of deleting everything.
 	_ = a.Auth.SetSetting(ctx, setRetention, `{"log_days":-3}`)
 	if got := a.RetentionSettings(ctx); got != DefaultRetention {
 		t.Fatalf("corrupt fallback %+v", got)
+	}
+}
+
+func TestStorageGetIncludesWorkflowRunDaysDefault(t *testing.T) {
+	a := newTestApp(t)
+	v, err := a.StorageUsage(context.Background(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Policy.WorkflowRunDays != 90 || v.Defaults.WorkflowRunDays != 90 {
+		t.Fatalf("policy %+v defaults %+v", v.Policy, v.Defaults)
 	}
 }
 

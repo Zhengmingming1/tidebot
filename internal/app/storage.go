@@ -38,7 +38,7 @@ func (a *App) RetentionSettings(ctx context.Context) RetentionPolicy {
 
 func validRetention(p RetentionPolicy) error {
 	switch {
-	case p.LogDays < 0 || p.LogDays > maxRetentionDays, p.ArtifactDays < 0 || p.ArtifactDays > maxRetentionDays:
+	case p.LogDays < 0 || p.LogDays > maxRetentionDays, p.ArtifactDays < 0 || p.ArtifactDays > maxRetentionDays, p.WorkflowRunDays < 0 || p.WorkflowRunDays > maxRetentionDays:
 		return errors.New("days must be 0..3650 (0 = keep forever)")
 	case p.KeepPerTask < 0 || p.KeepPerTask > maxKeepPerTask:
 		return errors.New("keep_per_task must be 0..1000")
@@ -58,11 +58,12 @@ type CleanupRecord struct {
 }
 
 func (a *App) runCleanup(ctx context.Context, now time.Time, auto bool) (RetentionReport, error) {
-	rep, err := a.ApplyRetention(ctx, a.RetentionSettings(ctx), now)
+	p := a.RetentionSettings(ctx)
+	rep, err := a.ApplyRetention(ctx, p, now)
 	if err != nil {
 		return rep, err
 	}
-	rows, rerr := a.pruneRows(ctx, now)
+	rows, rerr := a.pruneRows(ctx, p, now)
 	rep.DeletedRows += rows
 	if rerr != nil && a.Log != nil {
 		a.Log.Warn("prune rows", "error", rerr, "deleted", rows)
@@ -336,11 +337,12 @@ func (a *App) storageRPC() map[string]rpcFunc {
 		// "clean up now" preview follows the new policy immediately.
 		"storage.settings": func(ctx context.Context, raw json.RawMessage) (any, error) {
 			in, err := decode[struct {
-				LogDays       *int   `json:"log_days"`
-				ArtifactDays  *int   `json:"artifact_days"`
-				KeepPerTask   *int   `json:"keep_per_task"`
-				MaxTotalBytes *int64 `json:"max_total_bytes"`
-				MinFreeMB     *int   `json:"min_free_mb"`
+				LogDays         *int   `json:"log_days"`
+				ArtifactDays    *int   `json:"artifact_days"`
+				WorkflowRunDays *int   `json:"workflow_run_days"`
+				KeepPerTask     *int   `json:"keep_per_task"`
+				MaxTotalBytes   *int64 `json:"max_total_bytes"`
+				MinFreeMB       *int   `json:"min_free_mb"`
 			}](raw)
 			if err != nil {
 				return nil, errors.New("bad request")
@@ -359,6 +361,9 @@ func (a *App) storageRPC() map[string]rpcFunc {
 			}
 			if in.ArtifactDays != nil {
 				p.ArtifactDays = *in.ArtifactDays
+			}
+			if in.WorkflowRunDays != nil {
+				p.WorkflowRunDays = *in.WorkflowRunDays
 			}
 			if in.KeepPerTask != nil {
 				p.KeepPerTask = *in.KeepPerTask

@@ -53,7 +53,7 @@ func TestPruneRowsCapabilityProposals(t *testing.T) {
 	addProposalRow(t, a, "p_orphan_old", "chat_gone", "pending", now.Add(-2*day), "{}")     // session gone: goes
 	addProposalRow(t, a, "p_orphan_new", "chat_gone", "pending", now.Add(-time.Hour), "{}") // gone, within a day: stays
 	addProposalRow(t, a, "p_orphan_applying", "chat_gone", "applying", now.Add(-2*day), "{}")
-	n, err := a.pruneRows(ctx, now)
+	n, err := a.pruneRows(ctx, DefaultRetention, now)
 	if err != nil {
 		t.Fatal(err)
 	}

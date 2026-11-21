@@ -24,20 +24,22 @@ import (
 
 // --- retention ---------------------------------------------------------------
 
-// RetentionPolicy: run logs 30 d, artifacts 90 d, idle chat transcripts,
+// RetentionPolicy: run logs 30 d, artifacts 90 d, finished workflow execution
+// history 90 d (0 = keep forever; see pruneRows), idle chat transcripts,
 // session scratch folders, and unused empty chats follow log days (orphan
 // transcripts and leftover folders are always removed), always keep the newest
 // 20 runs per task, never touch runs flagged important, and cap
 // logs+artifacts at 10 GB.
 type RetentionPolicy struct {
-	LogDays       int   `json:"log_days"`
-	ArtifactDays  int   `json:"artifact_days"`
-	KeepPerTask   int   `json:"keep_per_task"`
-	MaxTotalBytes int64 `json:"max_total_bytes"`
+	LogDays         int   `json:"log_days"`
+	ArtifactDays    int   `json:"artifact_days"`
+	WorkflowRunDays int   `json:"workflow_run_days"`
+	KeepPerTask     int   `json:"keep_per_task"`
+	MaxTotalBytes   int64 `json:"max_total_bytes"`
 }
 
 // DefaultRetention is the suggested policy.
-var DefaultRetention = RetentionPolicy{LogDays: 30, ArtifactDays: 90, KeepPerTask: 20, MaxTotalBytes: 10 << 30}
+var DefaultRetention = RetentionPolicy{LogDays: 30, ArtifactDays: 90, WorkflowRunDays: 90, KeepPerTask: 20, MaxTotalBytes: 10 << 30}
 
 // RetentionReport says what was deleted.
 type RetentionReport struct {

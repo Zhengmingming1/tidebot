@@ -1621,6 +1621,8 @@
   "st.last_none": "Nothing has been cleaned up yet. Automatic cleanup checks every 6 hours.",
   "st.log_days": "Keep run logs",
   "st.log_days_sub": "Older run transcripts are deleted. Runs marked important are always kept. Unused empty chats (no messages, no title, no bindings or drafts) are removed after the same period.",
+  "st.workflow_run_days": "Keep workflow history",
+  "st.workflow_run_days_sub": "Finished workflow execution history, including node outputs in the database, is deleted after this. Default is 90 days; 0 keeps it forever. Queued and running executions stay.",
   "st.max_total": "Size cap",
   "st.max_total_sub": "When logs + artifacts go over this, the oldest are deleted first.",
   "st.min_free": "Keep free at least",

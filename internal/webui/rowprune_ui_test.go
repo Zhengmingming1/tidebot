@@ -130,3 +130,44 @@ func TestStorageEmptyChatCleanupUI(t *testing.T) {
 		}
 	}
 }
+
+// Settings › Data exposes the workflow execution history keep period next to
+// the run-log / artifact day controls (default 90 days, 0 = forever).
+func TestStorageWorkflowRunDaysUI(t *testing.T) {
+	src := strings.ReplaceAll(appJSSource(t), "\r\n", "\n")
+	for _, want := range []string{
+		`r("workflow_run_days", T("st.workflow_run_days_sub"), sel("st-wfrun", "workflow_run_days"))`,
+		`$("#st-wfrun").innerHTML = stOpts(ST_DAYS, p.workflow_run_days, day);`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
+	}
+	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]string
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if m["st.workflow_run_days"] == "" || m["st.workflow_run_days_sub"] == "" {
+			t.Errorf("%s: missing workflow run days strings", f)
+		}
+		sub := m["st.workflow_run_days_sub"]
+		if f == "static/i18n/en.json" {
+			for _, w := range []string{"workflow execution history", "node outputs", "90", "forever"} {
+				if !strings.Contains(sub, w) {
+					t.Errorf("%s: st.workflow_run_days_sub missing %q: %q", f, w, sub)
+				}
+			}
+		} else {
+			for _, w := range []string{"工作流", "节点输出", "90", "永久"} {
+				if !strings.Contains(sub, w) {
+					t.Errorf("%s: st.workflow_run_days_sub missing %q: %q", f, w, sub)
+				}
+			}
+		}
+	}
+}
