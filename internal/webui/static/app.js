@@ -2208,7 +2208,8 @@ if(!edit&&!readyProviders(st).some(function(p){return p.name===lastProv;}))lastP
 modal('<div class="card-head"><span class="ico">'+ic(edit?"edit":"play")+"</span><h2>"+esc(T(edit?"qr.edit_title":"rn.title"))+"</h2></div>"+
 '<form id="qr" class="rn-form">'+
 '<input type="hidden" name="skill_id" id="rn-skill"><div id="rn-bindings"></div><div class="rn-two">'+
-'<label class="field"><span>'+esc(T("f.provider"))+'</span><select name="provider">'+providerOptions(st,lastProv,!!(edit&&edit.provider),false)+"</select></label></div>"+
+'<label class="field"><span>'+esc(T("f.provider"))+'</span><select name="provider">'+providerOptions(st,lastProv,!!(edit&&edit.provider),false)+"</select></label>"+
+'<label class="field"><span>'+esc(T("tf.effort"))+tip(T("tf.effort_tip"))+'</span><select name="effort">'+effortOptions(pre.effort)+"</select></label></div>"+
 '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">'+esc(T("rn.folder"))+"</span>"+tip(T("rn.folder_tip"))+'<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>'+
 modeSegHtml("mode","exec",st.sandbox)+"</span>"+
 '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="rn-wlbl" placeholder="'+esc(T("rn.folder_ph"))+'">'+
@@ -2226,12 +2227,12 @@ var editor=skillBindingEditor($("#rn-bindings",root),skills,initial,function(bs)
 form.skill_id.value=editor.value().length?editor.value()[0].skill_id:"";
 $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:ws.value.trim()?modeVal():(modeVal()==="exec"?"exec":"edit")});});
 var pill=$("#rn-ws-st",root),pick=$("#rn-ws-pick",root),clear=$("#rn-ws-clear",root),dirsBox=$("#rn-dirs",root),hint=$("#rn-hint",root),err=$("#rn-err",root),argEl=$("#rn-arg",root);
-var wsState={problem:"",git:null},seq=0,timer=0,wsTouched=false,recentDirs=[];
+var wsState={problem:"",git:null},seq=0,timer=0,wsTouched=false,effTouched=!!edit,recentDirs=[];
 var modeVal=function(){var c=form.querySelector('input[name="mode"]:checked');return c?c.value:"read";};
 var setMode=function(m){$$('input[name="mode"]',form).forEach(function(i){i.checked=i.value===(m==="edit"||m==="exec"?m:"read");});};
 var sentMode=function(){var m=modeVal();return ws.value.trim()?m:(m==="exec"?"exec":"");};
-var cur=function(){return{prompt:ta.value,provider:form.provider.value,skill_id:form.skill_id.value,skill_bindings:editor.value(),skill_set_source:editor.source(),workspace:ws.value.trim(),mode:sentMode(),effort:(edit&&edit.effort)||""};};
-var orig=edit?{prompt:edit.prompt,provider:form.provider.value,skill_id:form.skill_id.value,skill_bindings:editor.value(),skill_set_source:editor.source(),workspace:edit.workspace||"",mode:edit.workspace?(edit.mode||"read"):(edit.mode==="exec"?"exec":"")}:null;
+var cur=function(){return{prompt:ta.value,provider:form.provider.value,skill_id:form.skill_id.value,skill_bindings:editor.value(),skill_set_source:editor.source(),workspace:ws.value.trim(),mode:sentMode(),effort:form.effort.value};};
+var orig=edit?{prompt:edit.prompt,provider:form.provider.value,skill_id:form.skill_id.value,skill_bindings:editor.value(),skill_set_source:editor.source(),workspace:edit.workspace||"",mode:edit.workspace?(edit.mode||"read"):(edit.mode==="exec"?"exec":""),effort:form.effort.value}:null;
 var paintHint=function(){
 var dir=ws.value.trim(),g=wsState.git,warn=false,txt,sb=st.sandbox||{};
 $$('input[name="mode"]',form).forEach(function(i){i.disabled=!dir&&i.value==="edit";});
@@ -2276,6 +2277,7 @@ var sk=form.skill_id.value;
 api("/api/runs/defaults"+(sk?"?skill_id="+enc(sk):"")).then(function(d){
 if(form.skill_id.value!==sk)return;
 recentDirs=(d&&d.recent_dirs)||[];
+if(fill&&sk&&!effTouched){var e=(d&&d.effort)||"";if(e===""||e==="low"||e==="medium"||e==="high")form.effort.value=e;}
 drawDirs();
 var l=d&&d.last;
 if(fill&&sk&&l&&!wsTouched&&!ws.value.trim()){
@@ -2308,12 +2310,13 @@ else setMode(edit.mode==="exec"?"exec":"read");
 paintSkill();filterChips();sync();check();loadDefaults(!edit&&!!pre.skill_id);
 ta.addEventListener("input",function(){filterChips();sync();});
 form.provider.addEventListener("change",sync);
+form.effort.addEventListener("change",function(){effTouched=true;sync();});
 form.skill_id.addEventListener("change",function(){paintSkill();paintHint();loadDefaults(true);syncEdit();});
 ws.addEventListener("input",function(){wsTouched=true;err.textContent="";clear.classList.toggle("hidden",!ws.value.trim());clearTimeout(timer);timer=setTimeout(check,300);syncEdit();drawDirs();});
 $$('input[name="mode"]',form).forEach(function(i){i.addEventListener("change",function(){paintHint();syncEdit();});});
 clear.addEventListener("click",function(){wsTouched=true;setWs("");drawDirs();ws.focus();});
 dirsBox.addEventListener("click",function(e){var b=e.target.closest(".rn-dir");if(!b)return;wsTouched=true;setWs(b.getAttribute("data-dir"));drawDirs();});
-if(reset)reset.addEventListener("click",function(){ta.value=orig.prompt;form.provider.value=orig.provider;editor.set(orig.skill_bindings,orig.skill_set_source);form.skill_id.value=orig.skill_id;setWs(orig.workspace);setMode(orig.mode);paintSkill();sync();ta.focus();});
+if(reset)reset.addEventListener("click",function(){ta.value=orig.prompt;form.provider.value=orig.provider;editor.set(orig.skill_bindings,orig.skill_set_source);form.skill_id.value=orig.skill_id;setWs(orig.workspace);setMode(orig.mode);form.effort.value=orig.effort;paintSkill();sync();ta.focus();});
 box.addEventListener("click",function(e){var b=e.target.closest(".qr-chip");if(!b)return;ta.value=recent[+b.dataset.i];filterChips();sync();ta.focus();});
 folderPickable().then(function(ok){
 if(!ok||!root.contains(pick))return;
@@ -2380,7 +2383,7 @@ $("#nosb-ok",bar).focus();
 function rnEdited(orig,c){
 if(!orig)return false;
 var bindingsChanged=JSON.stringify(c.skill_bindings||[])!==JSON.stringify(orig.skill_bindings||[])||JSON.stringify(c.skill_set_source)!==JSON.stringify(orig.skill_set_source);
-return bindingsChanged||qrEdited(orig,c.prompt,c.provider)||(c.skill_id||"")!==(orig.skill_id||"")||(c.workspace||"")!==(orig.workspace||"")||(c.workspace?c.mode:"")!==(orig.workspace?orig.mode:"");
+return bindingsChanged||qrEdited(orig,c.prompt,c.provider)||(c.skill_id||"")!==(orig.skill_id||"")||(c.workspace||"")!==(orig.workspace||"")||(c.workspace?c.mode:"")!==(orig.workspace?orig.mode:"")||(c.effort||"")!==(orig.effort||"");
 }
 function qrEdited(orig,prompt,provider){
 if(!orig)return false;
@@ -5540,7 +5543,7 @@ costFieldsHtml(tf.cost_control,(st.fx||{}).display||state.currency,tf.budget_usd
 fieldHtml(T("tf.timeout"),'<input name="timeout_minutes" type="number" min="1" max="1440" value="'+esc(tf.timeout_minutes>0?tf.timeout_minutes:"")+'">',T("tf.timeout_hint"))+"</div>"+
 '<div'+(wf?" hidden":"")+">"+wsFieldHtml(tf.workspace||"")+"</div>"+
 '<div class="form-row tf-perm"'+(wf?" hidden":"")+">"+'<div class="field"><span>'+esc(T("rn.mode"))+tip(T("tf.mode_tip"))+"</span>"+modeSegHtml("run_mode",tf.run_mode||"edit",st.sandbox)+"</div>"+
-'<label class="field"><span>'+esc(T("tf.effort"))+tip(T("tf.effort_tip"))+'</span><select name="effort">'+["","low","medium","high"].map(function(v){return '<option value="'+v+'"'+((tf.effort||"")===v?" selected":"")+">"+esc(T("tf.effort_"+(v||"auto")))+"</option>";}).join("")+"</select></label></div>"+
+'<label class="field"><span>'+esc(T("tf.effort"))+tip(T("tf.effort_tip"))+'</span><select name="effort">'+effortOptions(tf.effort)+"</select></label></div>"+
 policyFieldsHtml(pol,streak,brkAt)+
 '<label class="check"><input type="checkbox" name="enabled"'+(tf.enabled?" checked":"")+"> "+esc(T("tf.task_enabled"))+"</label>"+(taskId&&!tf.enabled?'<p class="hint">'+esc(T("costmode.paused"))+'</p>':"")+
 '<div class="actions"><button type="button" class="btn'+(wf?" hidden":"")+'" id="tf-dependencies">'+esc(T("ss.dependencies"))+'</button><button type="button" class="btn ghost" data-close>'+esc(T("btn.cancel"))+'</button><button class="btn primary">'+esc(T(taskId?"btn.save":"tf.create"))+"</button></div></form>",function(root,close){
@@ -6889,6 +6892,9 @@ return '<section class="card rd-acc" id="rd-acc" role="alert"><div class="card-h
 function runModeTag(m){
 var k=m==="edit"||m==="exec"?m:"read";
 return '<span class="tag '+(k==="read"?"perm":"warn")+'" data-tip="'+esc(T("rn."+k+"_tip"))+'">'+ic({read:"eye",edit:"edit",exec:"terminal"}[k],"sm")+esc(T("rn."+k))+"</span>";
+}
+function effortOptions(cur){
+return["","low","medium","high"].map(function(v){return '<option value="'+v+'"'+((cur||"")===v?" selected":"")+">"+esc(T("tf.effort_"+(v||"auto")))+"</option>";}).join("");
 }
 function effortTag(e){
 if(e!=="low"&&e!=="medium"&&e!=="high")return "";

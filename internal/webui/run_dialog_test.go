@@ -177,8 +177,8 @@ func TestRunDialogUI(t *testing.T) {
 		`r.task_name || r.skill_name || T(r.trigger === "session" ? "trig.session" : "trig.quick")`,
 		`function runCtxText(r, short)`,
 		`setWs(l.workspace || ""); setMode(l.mode); drawDirs();`,
-		// edit & rerun keeps the source run's --effort (no picker yet)
-		`effort: (edit && edit.effort) || ""`,
+		// edit & rerun keeps the source run's --effort (the picker starts there)
+		`effortOptions(pre.effort)`,
 		`workspace: r.workspace, mode: r.run_mode, effort: r.effort`,
 	} {
 		if !strings.Contains(string(js), want) {

@@ -169,7 +169,8 @@ func hasGitDir(dir string) bool {
 
 // handleRunDefaults: GET /api/runs/defaults?skill_id= → what the Run dialog fills in:
 // the folder, mode and provider of the last run with this skill (else the last run
-// with a folder), and up to 4 recent folders that are still allowed.
+// with a folder), the effort of the last run with this skill ("effort", only with
+// skill_id; "" = Claude Code decided), and up to 4 recent folders that are still allowed.
 func (s *Server) handleRunDefaults(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "GET only")
@@ -206,6 +207,15 @@ WHERE trigger_kind='quick' AND workspace_dir<>'' AND run_mode<>''`
 	}
 	if l == nil {
 		l = pick("")
+	}
+	if skill != "" {
+		var e string
+		// newest quick run with this skill, folder or not (idx_runs_skill_created)
+		if err := s.deps.DB.QueryRowContext(ctx, `SELECT COALESCE(effort,'') FROM runs WHERE skill_id=? AND trigger_kind='quick' ORDER BY created_at DESC LIMIT 1`, skill).Scan(&e); err == nil && tasksvc.ValidEffort(e) {
+			out["effort"] = e
+		} else {
+			out["effort"] = ""
+		}
 	}
 	if l != nil {
 		if appHome != "" && guard.Within(l.Workspace, appHome) {

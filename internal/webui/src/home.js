@@ -167,9 +167,9 @@
   // a folder the run is read-only unless "Can edit files" is chosen.
   // quickRunModal(pre): pre.prompt set = "edit & rerun" from a run page (the old run's
   // fields are filled in, "Revert" appears once you change them, the original run is left
-  // alone); pre.effort is submitted as-is so a rerun keeps the source run's --effort
-  // (the dialog has no effort control yet). pre = {skill_id} alone opens it with that
-  // skill picked (skills page, palette).
+  // alone); the effort picker starts at pre.effort so a rerun keeps the source run's
+  // --effort, and picking a skill fills in the effort of its last run unless you changed
+  // it. pre = {skill_id} alone opens it with that skill picked (skills page, palette).
   function quickRunModal(pre) {
     var edit = pre && pre.prompt ? pre : null;
     pre = pre || {};
@@ -182,7 +182,8 @@
       modal('<div class="card-head"><span class="ico">' + ic(edit ? "edit" : "play") + "</span><h2>" + esc(T(edit ? "qr.edit_title" : "rn.title")) + "</h2></div>" +
         '<form id="qr" class="rn-form">' +
         '<input type="hidden" name="skill_id" id="rn-skill"><div id="rn-bindings"></div><div class="rn-two">' +
-        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + providerOptions(st, lastProv, !!(edit && edit.provider), false) + "</select></label></div>" +
+        '<label class="field"><span>' + esc(T("f.provider")) + '</span><select name="provider">' + providerOptions(st, lastProv, !!(edit && edit.provider), false) + "</select></label>" +
+        '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + effortOptions(pre.effort) + "</select></label></div>" +
         '<div class="field ws-field rn-ws"><span class="rn-ws-lbl"><span id="rn-wlbl">' + esc(T("rn.folder")) + "</span>" + tip(T("rn.folder_tip")) + '<span class="pill sm hidden" id="rn-ws-st"></span><span class="spacer"></span>' +
           modeSegHtml("mode", "exec", st.sandbox) + "</span>" +
           '<div class="in-group ws-in"><input name="workspace" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-labelledby="rn-wlbl" placeholder="' + esc(T("rn.folder_ph")) + '">' +
@@ -200,13 +201,13 @@
           form.skill_id.value=editor.value().length?editor.value()[0].skill_id:"";
           $("#rn-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",prompt:ta.value,provider:form.provider.value,skill_bindings:editor.value(),workspace:ws.value.trim(),mode:ws.value.trim()?modeVal():(modeVal()==="exec"?"exec":"edit")});});
           var pill = $("#rn-ws-st", root), pick = $("#rn-ws-pick", root), clear = $("#rn-ws-clear", root), dirsBox = $("#rn-dirs", root), hint = $("#rn-hint", root), err = $("#rn-err", root), argEl = $("#rn-arg", root);
-          var wsState = { problem: "", git: null }, seq = 0, timer = 0, wsTouched = false, recentDirs = [];
+          var wsState = { problem: "", git: null }, seq = 0, timer = 0, wsTouched = false, effTouched = !!edit, recentDirs = [];
           var modeVal = function () { var c = form.querySelector('input[name="mode"]:checked'); return c ? c.value : "read"; };
           var setMode = function (m) { $$('input[name="mode"]', form).forEach(function (i) { i.checked = i.value === (m === "edit" || m === "exec" ? m : "read"); }); };
           // without a folder: 只读 = tidebot's scratch folder (""), 可执行命令 = a scratch folder that runs commands
           var sentMode = function () { var m = modeVal(); return ws.value.trim() ? m : (m === "exec" ? "exec" : ""); };
-          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: sentMode(), effort: (edit && edit.effort) || "" }; };
-          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : (edit.mode === "exec" ? "exec" : "") } : null;
+          var cur = function () { return { prompt: ta.value, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: ws.value.trim(), mode: sentMode(), effort: form.effort.value }; };
+          var orig = edit ? { prompt: edit.prompt, provider: form.provider.value, skill_id: form.skill_id.value, skill_bindings: editor.value(), skill_set_source: editor.source(), workspace: edit.workspace || "", mode: edit.workspace ? (edit.mode || "read") : (edit.mode === "exec" ? "exec" : ""), effort: form.effort.value } : null;
           // the hint under the form says what the run may do; a dirty git folder warns before "Can edit"
           var paintHint = function () {
             var dir = ws.value.trim(), g = wsState.git, warn = false, txt, sb = st.sandbox || {};
@@ -254,6 +255,8 @@
             api("/api/runs/defaults" + (sk ? "?skill_id=" + enc(sk) : "")).then(function (d) {
               if (form.skill_id.value !== sk) return;
               recentDirs = (d && d.recent_dirs) || [];
+              // the skill's last effort, only into a picker you haven't touched ("" without one)
+              if (fill && sk && !effTouched) { var e = (d && d.effort) || ""; if (e === "" || e === "low" || e === "medium" || e === "high") form.effort.value = e; }
               drawDirs();
               var l = d && d.last;
               if (fill && sk && l && !wsTouched && !ws.value.trim()) {
@@ -286,12 +289,13 @@
           paintSkill(); filterChips(); sync(); check(); loadDefaults(!edit && !!pre.skill_id);
           ta.addEventListener("input", function () { filterChips(); sync(); });
           form.provider.addEventListener("change", sync);
+          form.effort.addEventListener("change", function () { effTouched = true; sync(); });
           form.skill_id.addEventListener("change", function () { paintSkill(); paintHint(); loadDefaults(true); syncEdit(); });
           ws.addEventListener("input", function () { wsTouched = true; err.textContent = ""; clear.classList.toggle("hidden", !ws.value.trim()); clearTimeout(timer); timer = setTimeout(check, 300); syncEdit(); drawDirs(); });
           $$('input[name="mode"]', form).forEach(function (i) { i.addEventListener("change", function () { paintHint(); syncEdit(); }); });
           clear.addEventListener("click", function () { wsTouched = true; setWs(""); drawDirs(); ws.focus(); });
           dirsBox.addEventListener("click", function (e) { var b = e.target.closest(".rn-dir"); if (!b) return; wsTouched = true; setWs(b.getAttribute("data-dir")); drawDirs(); });
-          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; editor.set(orig.skill_bindings, orig.skill_set_source); form.skill_id.value = orig.skill_id; setWs(orig.workspace); setMode(orig.mode); paintSkill(); sync(); ta.focus(); });
+          if (reset) reset.addEventListener("click", function () { ta.value = orig.prompt; form.provider.value = orig.provider; editor.set(orig.skill_bindings, orig.skill_set_source); form.skill_id.value = orig.skill_id; setWs(orig.workspace); setMode(orig.mode); form.effort.value = orig.effort; paintSkill(); sync(); ta.focus(); });
           box.addEventListener("click", function (e) { var b = e.target.closest(".qr-chip"); if (!b) return; ta.value = recent[+b.dataset.i]; filterChips(); sync(); ta.focus(); });
           folderPickable().then(function (ok) {
             if (!ok || !root.contains(pick)) return;
@@ -368,7 +372,7 @@
   function rnEdited(orig, c) {
     if (!orig) return false;
     var bindingsChanged=JSON.stringify(c.skill_bindings||[])!==JSON.stringify(orig.skill_bindings||[]) || JSON.stringify(c.skill_set_source)!==JSON.stringify(orig.skill_set_source);
-    return bindingsChanged || qrEdited(orig, c.prompt, c.provider) || (c.skill_id || "") !== (orig.skill_id || "") || (c.workspace || "") !== (orig.workspace || "") || (c.workspace ? c.mode : "") !== (orig.workspace ? orig.mode : "");
+    return bindingsChanged || qrEdited(orig, c.prompt, c.provider) || (c.skill_id || "") !== (orig.skill_id || "") || (c.workspace || "") !== (orig.workspace || "") || (c.workspace ? c.mode : "") !== (orig.workspace ? orig.mode : "") || (c.effort || "") !== (orig.effort || "");
   }
   // qrEdited: has the edit-&-rerun form moved away from the original run? Trailing
   // whitespace and CRLF vs LF don't count (pasting on Windows adds \r\n).

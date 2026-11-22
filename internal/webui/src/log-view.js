@@ -435,6 +435,10 @@
     return '<span class="tag ' + (k === "read" ? "perm" : "warn") + '" data-tip="' + esc(T("rn." + k + "_tip")) + '">' + ic({ read: "eye", edit: "edit", exec: "terminal" }[k], "sm") + esc(T("rn." + k)) + "</span>";
   }
   // effortTag: the --effort this run used, hidden when Claude Code decided ("").
+  // effortOptions: the <option>s of an effort <select> ("" = Default (auto), Claude Code decides).
+  function effortOptions(cur) {
+    return ["", "low", "medium", "high"].map(function (v) { return '<option value="' + v + '"' + ((cur || "") === v ? " selected" : "") + ">" + esc(T("tf.effort_" + (v || "auto"))) + "</option>"; }).join("");
+  }
   function effortTag(e) {
     if (e !== "low" && e !== "medium" && e !== "high") return "";
     return ' <span class="tag perm" data-tip="' + esc(T("tf.effort_tip")) + '">' + esc(T("tf.effort")) + " · " + esc(T("tf.effort_" + e)) + "</span>";

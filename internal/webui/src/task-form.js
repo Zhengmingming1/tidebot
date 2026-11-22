@@ -407,7 +407,7 @@
         '<div' + (wf ? " hidden" : "") + ">" + wsFieldHtml(tf.workspace || "") + "</div>" +
         // permission level (new tasks: 可执行命令) and effort ("" = Claude Code decides)
         '<div class="form-row tf-perm"' + (wf ? " hidden" : "") + ">" + '<div class="field"><span>' + esc(T("rn.mode")) + tip(T("tf.mode_tip")) + "</span>" + modeSegHtml("run_mode", tf.run_mode || "edit", st.sandbox) + "</div>" +
-        '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + ["", "low", "medium", "high"].map(function (v) { return '<option value="' + v + '"' + ((tf.effort || "") === v ? " selected" : "") + ">" + esc(T("tf.effort_" + (v || "auto"))) + "</option>"; }).join("") + "</select></label></div>" +
+        '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + effortOptions(tf.effort) + "</select></label></div>" +
         policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
         '<div class="actions"><button type="button" class="btn' + (wf ? " hidden" : "") + '" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
