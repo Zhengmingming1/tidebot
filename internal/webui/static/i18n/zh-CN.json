@@ -3223,6 +3223,8 @@
   "wf.budget_note": "总预算 {b}。",
   "wf.serial_note": "会写入的步骤依次运行。",
   "wf.tasks_tip": "定时任务：\n{l}",
+  "wf.ws_bad": "目录：{s}",
+  "wf.ws_bad_tip": "{why}\n{p}\n运行前请编辑工作流，换一个目录。",
   "wf.tasks_n": "{n} 个任务",
   "wf.task_paused": "已暂停",
   "wf.run_notice_read": "每个技能步骤在 {p} 里只读运行。",

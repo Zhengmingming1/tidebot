@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/Zhengmingming1/tidebot/internal/guard"
@@ -50,6 +51,11 @@ func workflowError(w http.ResponseWriter, err error) {
 type workflowItem struct {
 	workflow.Workflow
 	Tasks []workflowTaskRef `json:"tasks"`
+	// WorkspaceProblem is the guard.CheckRunDir problem of the current
+	// definition's folder (moved, deleted, a file, or a sensitive folder), the
+	// same check a run makes before it starts. Empty when the folder is fine
+	// or the workflow has none (each run then gets its own scratch folder).
+	WorkspaceProblem string `json:"workspace_problem,omitempty"`
 }
 
 type workflowTaskRef struct {
@@ -78,9 +84,27 @@ func (s *Server) workflowItems(ctx context.Context, list []workflow.Workflow) []
 		if refs == nil {
 			refs = []workflowTaskRef{}
 		}
-		out = append(out, workflowItem{Workflow: w, Tasks: refs})
+		out = append(out, workflowItem{Workflow: w, Tasks: refs, WorkspaceProblem: s.workflowWorkspaceProblem(w.Definition.WorkspaceDir)})
 	}
 	return out
+}
+
+// workflowWorkspaceProblem checks a workflow's saved folder the way a run's
+// Prepare does ("~" expanded, symlinks resolved, sensitive folders refused), so
+// the library can mark a workflow that would be refused before Run is clicked.
+// It only stats the path; nothing is created or changed.
+func (s *Server) workflowWorkspaceProblem(dir string) string {
+	ws := guard.ExpandHome(dir)
+	if ws == "" {
+		return ""
+	}
+	home, _ := os.UserHomeDir()
+	appHome := ""
+	if s.deps.Cfg != nil {
+		appHome = s.deps.Cfg.HomeDir
+	}
+	_, prob := guard.CheckRunDir(ws, home, appHome)
+	return prob
 }
 
 func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {

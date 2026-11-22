@@ -7431,3 +7431,22 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 运行实际用到的模型可能不止一个（`modelUsage` 里的子代理 / 小模型），现在只显示启动时的主模型；若要列全，可以从 `cost_ledger` 按运行汇总模型名。
 - 其他带 `overflow: hidden` 的卡片里如果也有 `data-tip`，可能有同样的裁切；可以写一个 headless 检查遍历所有 tip 是否落在可见区域。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；工作流库卡片上看不出目录缺失。
+
+### 2026-11-23（续）：工作流库卡片标出运行会被拒的工作目录
+
+这是 2026-11-23 08:00 Asia/Shanghai 的 4 小时优化（两周「只做优化」窗口已过，进入通用改进）。
+
+- **问题**：工作流的工作目录只在编辑器里有检查；换机恢复后的一次性提示关掉之后，或者目录后来被移走 / 删除、`~` 路径在这台机器上不存在、目录被换成文件或指进敏感目录时，工作流库的卡片看起来一切正常，要点了「运行」、在运行对话框里提交后才报「这个目录不存在」。定时任务跑这个工作流也会直接失败。
+- **改法**：`GET /api/workflows` 和 `GET /api/workflows/{id}` 的每一项多一个 `workspace_problem`，用的是运行前 `prepareWorkflow` 同一套检查（`guard.ExpandHome` + `guard.CheckRunDir`：解析符号链接、拒绝敏感目录 / 根目录 / tidebot 自己的目录）。只 `Stat`，不建目录、不改已保存的定义；没设目录（每次运行用临时目录）或目录正常时不输出。卡片标题行在版本标签前显示红色小标签「目录：不存在」/「Folder: Not found」，原因、保存的路径和「运行前请编辑工作流，换一个目录」放进 tooltip；标签本身链接到编辑器。未知的问题代码回落到「不存在」文案，路径和名称都经 `esc` 转义。不加任何限制，运行按钮照旧可点（报错文案不变）。
+- **测试**：`TestWorkflowListWorkspaceProblem`（无目录 / 存在 / `~/proj` 不标；已删、`~/nope` 为 `not_found`；文件为 `not_dir`；`~/.ssh` 为 `sensitive`；列表与单个 GET 一致；检查后缺的目录仍不存在）；`TestWorkflowCardWorkspacePill`（卡片调用、无原生弹窗、中英 `wf.ws_bad` 含 `{s}`、`wf.ws_bad_tip` 含 `{why}`/`{p}`、各问题代码都有文案；node 执行：无问题不出标签、链接和 class、转义、敏感目录文案、未知代码回落）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`build-webui.py --check`、`check-i18n.py` 通过。headless Chrome 1024×655：三张卡片 `scrollWidth == clientWidth`（392/392），页面无横向滚动；石墨 / 潮汐 / 午夜深色都正常。
+- **截图**：`/workspace/tidebot-shots/2026-11-23-0800-wf-ws-missing-{zh-CN,en}.png`（1024×655，石墨主题，悬停标签显示 tooltip）、`…-tide-zh-CN.png`、`…-midnight-zh-CN.png`。
+- **耗时**：不是性能改动。每个有目录的工作流在列表时多一次检查：目录存在约 64 µs（含敏感目录比对），缺失约 1.1 µs；100 个工作流最多约 6 ms。
+
+**心得**：「之后才会失败」的状态应该在列表上就能看到，而且判断必须和运行前的检查是同一个函数，不然会出现卡片说没问题、运行却被拒（或反过来）。只读检查要能证明自己不留痕：测试里顺手确认缺的目录没有被建出来。
+
+**参考**：GitHub Actions 的 workflow 列表会在被禁用 / 配置无效的 workflow 旁直接标出状态，而不是等触发时才报错（只借思路，不抄代码）。
+
+**后续想法**：
+- 任务列表的卡片同样看不出工作目录缺失（只有换机恢复后的一次性提示），可以复用这一字段的做法。
+- 工作流库不会跟着文件系统变化自动刷新；目录补回来后要重新打开页面标签才消失。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；带 `overflow: hidden` 的卡片里 `data-tip` 被裁切的 headless 检查仍未做。

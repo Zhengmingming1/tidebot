@@ -3433,13 +3433,19 @@ var lines=ts.map(function(t){return t.name+' · '+(t.cron?cronHuman(t.cron):T('s
 var first=ts[0];
 return '<a class="pill plain sm wf-sched-pill" href="#/tasks/'+enc(first.id)+'" data-tip="'+esc(T('wf.tasks_tip',{l:lines}))+'">'+ic('clock','sm')+esc(ts.length>1?T('wf.tasks_n',{n:ts.length}):(first.cron?cronHuman(first.cron):T('se.manual')))+'</a>';
 }
+function wfWsPill(w){
+var pr=w.workspace_problem;
+if(!pr)return '';
+var k='rn.ws_'+(state.dict['rn.ws_'+pr+'_tip']!=null?pr:'not_found');
+return '<a class="pill bad sm wf-ws-pill" href="#/workflows/'+enc(w.id)+'" data-tip="'+esc(T('wf.ws_bad_tip',{why:T(k+'_tip'),p:(w.definition&&w.definition.workspace_dir)||''}))+'">'+esc(T('wf.ws_bad',{s:T(k)}))+'</a>';
+}
 function wfSchedule(w){
 taskFormModal(null,{name:w.name,workflow:{id:w.id,version:w.version,current:w.version,name:w.name}});
 }
 function renderWorkflows(){
 return api('/api/workflows').then(function(items){
 mount('<div class="page-head wf-page-head"><div><h1>'+esc(T('nav.workflows'))+'</h1><p>'+esc(T('wf.subtitle'))+'</p></div><div class="actions"><a class="btn primary" href="#/workflows/new">'+ic('plus','sm')+esc(T('wf.create'))+'</a></div></div>'+
-(items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span>'+wfTasksPill(w)+'<span class="tag" data-tip="'+esc(wfModeNotice(w.definition))+'">'+esc(T('rn.'+wfMode(w.definition)))+'</span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
+(items.length?'<div class="wf-library">'+items.map(function(w){return '<article class="card"><div class="row-actions"><span class="ico">'+ic('branch')+'</span><h2><a href="#/workflows/'+enc(w.id)+'">'+esc(w.name)+'</a></h2><span class="grow"></span>'+wfWsPill(w)+wfTasksPill(w)+'<span class="tag" data-tip="'+esc(wfModeNotice(w.definition))+'">'+esc(T('rn.'+wfMode(w.definition)))+'</span><span class="tag">v'+esc(w.version)+'</span></div><p class="muted">'+esc(w.description||T('wf.subtitle'))+'</p><p>'+esc(T('wf.count',{n:w.definition.nodes.length,p:w.definition.max_parallel}))+'</p><div class="row-actions"><a class="btn" href="#/workflows/'+enc(w.id)+'">'+esc(T('btn.edit'))+'</a><button class="btn" data-wf-deps="'+esc(w.id)+'">'+ic('shield','sm')+esc(T('dep.check'))+'</button><button class="btn primary" data-wf-run="'+esc(w.id)+'">'+ic('play','sm')+esc(T('btn.run'))+'</button></div></article>';}).join('')+'</div>':emptyState('branch',T('wf.none'),T('wf.none_hint'))),'workflows',[[T('nav.workflows')]]);
 $$('[data-wf-run]').forEach(function(b){b.onclick=function(){workflowRunModal(b.dataset.wfRun);};});
 $$('[data-wf-deps]').forEach(function(b){b.onclick=function(){dependencyCheck({kind:'workflow',id:b.dataset.wfDeps});};});
 });
