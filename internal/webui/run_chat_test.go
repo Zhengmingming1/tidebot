@@ -190,12 +190,19 @@ ok(odd.indexOf("<a ") < 0 && odd.indexOf("chg-badge") > 0 && odd.indexOf("data-r
 ok(odd.indexOf("href=") < 0, "odd run id badge has no href");
 
 var effHigh = rcTurnHtml({ index: 11, run_id: "run_k", message: "m", status: "succeeded", answer: "ok", effort: "high", created_at: "t" });
-ok(/class="rc-cost num" data-tip="[^"]*rc\.turn_effort\{&quot;e&quot;:&quot;tf\.effort_high&quot;\}"/.test(effHigh), "finished turn: its own effort in the cost tip");
+ok(/class="rc-cost num" data-tip="[^"]*\nrc\.turn_effort\{&quot;e&quot;:&quot;tf\.effort_high&quot;\}\nrc\.turn_model\{/.test(effHigh), "finished turn: its own effort in the cost tip");
 ok(rcTurnHtml({ index: 12, run_id: "run_l", message: "m", status: "succeeded", answer: "ok" }).indexOf("tf.effort_auto") > 0, "no effort: default in the tip");
 var effOdd = rcTurnHtml({ index: 13, run_id: "run_m", message: "m", status: "succeeded", answer: "ok", effort: "max\"><b>" });
 ok(effOdd.indexOf("tf.effort_auto") > 0 && effOdd.indexOf("<b>") < 0 && effOdd.indexOf("max") < 0, "odd effort: default, not echoed");
-ok(/class="rc-act" data-tip="rc\.turn_effort\{&quot;e&quot;:&quot;tf\.effort_low&quot;\}"/.test(rcTurnHtml({ index: 14, run_id: "run_n", message: "m", status: "running", effort: "low" })), "running turn: effort on the answering label");
+ok(/class="rc-act" data-tip="rc\.turn_effort\{&quot;e&quot;:&quot;tf\.effort_low&quot;\}\nrc\.turn_model\{/.test(rcTurnHtml({ index: 14, run_id: "run_n", message: "m", status: "running", effort: "low" })), "running turn: effort on the answering label");
 ok(rcTurnHtml({ index: 15, run_id: "run_o", message: "m", status: "" }).indexOf("rc.turn_effort") < 0, "gone run: no effort claimed");
+
+var mdl = rcTurnHtml({ index: 16, run_id: "run_p", message: "m", status: "succeeded", answer: "ok", provider: "kimi", model: "kimi-k2", created_at: "t" });
+ok(/class="rc-cost num" data-tip="[^"]*rc\.turn_model\{&quot;m&quot;:&quot;kimi-k2&quot;,&quot;p&quot;:&quot;kimi&quot;\}"/.test(mdl), "finished turn: its own provider and model in the cost tip");
+ok(rcTurnHtml({ index: 17, run_id: "run_q", message: "m", status: "succeeded", answer: "ok", provider: "kimi" }).indexOf("rc.turn_model{&quot;m&quot;:&quot;rc.model_default&quot;,&quot;p&quot;:&quot;kimi&quot;}") > 0, "no model: provider default");
+var mdlOdd = rcTurnHtml({ index: 18, run_id: "run_r", message: "m", status: "running", provider: "<i>p</i>", model: "m\"><b>x</b>" });
+ok(mdlOdd.indexOf("<b>") < 0 && mdlOdd.indexOf("<i>") < 0 && mdlOdd.indexOf("&lt;b&gt;") > 0, "odd provider/model escaped in the answering tip");
+ok(rcTurnHtml({ index: 19, run_id: "run_s", message: "m", status: "" }).indexOf("rc.turn_model") < 0, "gone run: no model claimed");
 
 ok(rcErrText({ data: { code: "busy" }, message: "x" }) === "rc.err_busy", "busy code translated");
 ok(rcErrText({ data: { code: "weird" }, message: "raw" }) === "raw", "unknown code: message as sent");
@@ -225,6 +232,7 @@ func TestRunChatTurnTipsNotClipped(t *testing.T) {
 	for _, want := range []string{
 		".rc-a > .rc-live:last-child, .rc-a > .rc-a-body:last-child, .rc-a > .rc-a-err:last-child { border-radius: 0 0 11px 11px; }",
 		".rc-a-head .rc-sp ~ [data-tip]:hover::after, .rc-a-head .rc-sp ~ [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }",
+		".rc-a-head [data-tip]:hover::after, .rc-a-head [data-tip]:focus-visible::after { top: calc(100% + 6px); bottom: auto; }",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("styles.css lacks %q", want)
@@ -238,6 +246,9 @@ func TestRunChatTurnTipsNotClipped(t *testing.T) {
 		}
 		if !strings.Contains(d["rc.turn_effort"], "{e}") {
 			t.Errorf("%s: rc.turn_effort = %q", f, d["rc.turn_effort"])
+		}
+		if m := d["rc.turn_model"]; !strings.Contains(m, "{m}") || !strings.Contains(m, "{p}") || d["rc.model_default"] == "" {
+			t.Errorf("%s: rc.turn_model = %q, rc.model_default = %q", f, m, d["rc.model_default"])
 		}
 	}
 }

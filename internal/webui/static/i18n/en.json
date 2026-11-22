@@ -2830,6 +2830,8 @@
   "rc.run_gone": "This turn's run record was deleted",
   "rc.cost_tip": "This turn's cost · {t}",
   "rc.turn_effort": "Effort: {e}",
+  "rc.turn_model": "Model: {m} ({p})",
+  "rc.model_default": "provider default",
   "rc.open_run": "Open this turn's run (full log)",
   "rc.of": "Session turn {n}",
   "rc.of_tip": "A follow-up turn: open the run it continues to see the whole conversation",

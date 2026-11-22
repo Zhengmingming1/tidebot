@@ -545,3 +545,57 @@ func TestChatTurnEffort(t *testing.T) {
 		t.Fatalf("deleted run %v %+v", err, d.TurnList[0])
 	}
 }
+
+// TestChatTurnModel: each turn reports the provider and model its own run was
+// started with, and a change to them (written again when the run finishes)
+// changes the session fingerprint so the polling page redraws.
+func TestChatTurnModel(t *testing.T) {
+	chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", filepath.Join(t.TempDir(), "args"))
+	rid := originRun(t, a, runner.Options{Prompt: "first", RunMode: "edit", WorkspaceDir: t.TempDir()})
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SendChatTurn(ctx, ses.ID, "one"); err != nil {
+		t.Fatal(err)
+	}
+	d := waitTurn(t, a, ses.ID, 1)
+	for _, tr := range d.TurnList {
+		var prov, model string
+		if err := a.DB.QueryRow(`SELECT COALESCE(provider_name,''), COALESCE(model,'') FROM runs WHERE id=?`, tr.RunID).Scan(&prov, &model); err != nil {
+			t.Fatal(err)
+		}
+		if tr.Provider != prov || tr.Model != model {
+			t.Fatalf("turn %d: %q/%q, run row %q/%q", tr.Index, tr.Provider, tr.Model, prov, model)
+		}
+	}
+	sig1, err := a.ChatSessionSig(ctx, ses.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec(`UPDATE runs SET provider_name='kimi', model='kimi-k2' WHERE id=?`, d.TurnList[1].RunID); err != nil {
+		t.Fatal(err)
+	}
+	sig2, err := a.ChatSessionSig(ctx, ses.ID)
+	if err != nil || sig2 == sig1 {
+		t.Fatalf("model change not in the fingerprint %v %q", err, sig2)
+	}
+	if d, err = a.GetChatSession(ctx, ses.ID); err != nil || d.TurnList[1].Provider != "kimi" || d.TurnList[1].Model != "kimi-k2" {
+		t.Fatalf("after update %v %+v", err, d.TurnList[1])
+	}
+	if _, err := a.DB.Exec(`UPDATE runs SET model=NULL WHERE id=?`, d.TurnList[1].RunID); err != nil {
+		t.Fatal(err)
+	}
+	if d, err = a.GetChatSession(ctx, ses.ID); err != nil || d.TurnList[1].Model != "" || d.TurnList[1].Provider != "kimi" {
+		t.Fatalf("null model %v %+v", err, d.TurnList[1])
+	}
+	if _, err := a.DB.Exec(`DELETE FROM runs WHERE id=?`, d.TurnList[0].RunID); err != nil {
+		t.Fatal(err)
+	}
+	if d, err = a.GetChatSession(ctx, ses.ID); err != nil || d.TurnList[0].Provider != "" || d.TurnList[0].Model != "" {
+		t.Fatalf("deleted run %v %+v", err, d.TurnList[0])
+	}
+}

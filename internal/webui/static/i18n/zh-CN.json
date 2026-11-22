@@ -2830,6 +2830,8 @@
   "rc.run_gone": "这一轮的运行记录已删除",
   "rc.cost_tip": "这一轮的花费 · {t}",
   "rc.turn_effort": "推理强度：{e}",
+  "rc.turn_model": "模型：{m}（{p}）",
+  "rc.model_default": "提供商默认模型",
   "rc.open_run": "打开这一轮的运行（完整日志）",
   "rc.of": "会话第 {n} 轮",
   "rc.of_tip": "这是一轮续聊，打开它接着的运行查看完整对话",

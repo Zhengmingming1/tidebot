@@ -7356,15 +7356,21 @@ function rcTurnEffortTip(t){
 var e=t.effort==="low"||t.effort==="medium"||t.effort==="high"?t.effort:"auto";
 return T("rc.turn_effort",{e:T("tf.effort_"+e)});
 }
+function rcTurnModelTip(t){
+return T("rc.turn_model",{m:t.model||T("rc.model_default"),p:t.provider||"—"});
+}
+function rcTurnTip(t){
+return rcTurnEffortTip(t)+"\n"+rcTurnModelTip(t);
+}
 function rcTurnHtml(t){
 var busy=rcBusy(t.status),ok=/^[\w-]{1,64}$/.test(t.run_id||"");
 var head='<div class="rc-a-head"><span class="rc-av">'+ic("sparkle","sm")+"</span>";
-if(busy)head+='<span class="rc-act"'+(t.run_id?' data-tip="'+esc(rcTurnEffortTip(t))+'"':"")+'><span class="rc-dot"></span>'+esc(T(t.status==="queued"?"rc.queued":"rc.answering"))+' <span class="rc-el num" data-since="'+esc(t.created_at||"")+'"></span></span>';
+if(busy)head+='<span class="rc-act"'+(t.run_id?' data-tip="'+esc(rcTurnTip(t))+'"':"")+'><span class="rc-dot"></span>'+esc(T(t.status==="queued"?"rc.queued":"rc.answering"))+' <span class="rc-el num" data-since="'+esc(t.created_at||"")+'"></span></span>';
 else if(t.status!=="succeeded")head+=t.status?statusPill(t.status,0,t.error):'<span class="muted">'+esc(T("rc.run_gone"))+"</span>";
 if(t.answer_truncated)head+='<span class="pill warn sm" data-tip="'+esc(T("rd.ans_cut_tip"))+'">'+esc(T("rd.ans_cut"))+"</span>";
 if(!busy)head+=rcTurnChgHtml(t);
 head+='<span class="rc-sp"></span>';
-if(!busy&&t.status)head+='<span class="rc-cost num" data-tip="'+esc(T("rc.cost_tip",{t:when(t.created_at)})+(t.run_id?" · "+rcTurnEffortTip(t):""))+'">'+esc(usd(t.cost_usd,4))+"</span>";
+if(!busy&&t.status)head+='<span class="rc-cost num" data-tip="'+esc(T("rc.cost_tip",{t:when(t.created_at)})+(t.run_id?"\n"+rcTurnTip(t):""))+'">'+esc(usd(t.cost_usd,4))+"</span>";
 if(busy&&ok)head+='<button type="button" class="icon-btn sm" data-rc-stop="'+esc(t.run_id)+'" data-st="'+esc(t.status)+'" aria-label="'+esc(T("run.stop"))+'" data-tip="'+esc(T("run.stop_tip"))+'">'+ic("stop","sm")+"</button>";
 if(!busy&&t.answer)head+='<button type="button" class="icon-btn sm" data-rc-copy="'+t.index+'" aria-label="'+esc(T("rd.ans_copy"))+'" data-tip="'+esc(T("rd.ans_copy"))+'">'+ic("copy","sm")+"</button>";
 if(ok)head+='<a class="icon-btn sm" href="#/runs/'+enc(t.run_id)+'" aria-label="'+esc(T("rc.open_run"))+'" data-tip="'+esc(T("rc.open_run"))+'">'+ic("terminal","sm")+"</a>";

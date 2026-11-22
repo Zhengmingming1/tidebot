@@ -2496,6 +2496,7 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale{min-width:0;}
 .rc-a-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;row-gap:4px;min-height:40px;padding:4px 8px 4px 12px;box-sizing:border-box;font-size:12px;color:var(--text-2);}
 .rc-a-head .icon-btn,.rc-a-head .chg-badge,.rc-a-head .rd-chg-stale{flex:none;}
 .rc-a-head .rc-sp~[data-tip]:hover::after,.rc-a-head .rc-sp~[data-tip]:focus-visible::after{left:auto;right:0;transform:none;}
+.rc-a-head [data-tip]:hover::after,.rc-a-head [data-tip]:focus-visible::after{top:calc(100% + 6px);bottom:auto;}
 .rc-av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:8px;background:var(--hue-violet-bg);color:var(--hue-violet-fg);flex:none;}
 .rc-sp{flex:1;}
 .rc-cost{color:var(--text-2);font-weight:500;padding:0 4px;}

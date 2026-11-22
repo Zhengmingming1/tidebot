@@ -7412,3 +7412,22 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 每轮 tooltip 还可以带上该轮实际的模型（`runs.model`），但模型可能在运行中才写入，需要一并进会话指纹。
 - 其他带 `overflow: hidden` 的卡片里如果也有 `data-tip`，可能有同样的裁切；可以写一个 headless 检查遍历所有 tip 是否落在可见区域。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；工作流库卡片上看不出目录缺失。
+
+### 2026-11-23（续）：会话每轮卡片显示该轮实际用的提供商和模型，头部 tooltip 改为向下展开
+
+这是 2026-11-23 04:00 Asia/Shanghai 的 4 小时优化。
+
+- **问题**：上一轮在花费 tooltip 里加了每轮的推理强度，后续想法里留了「每轮还应带上实际的模型」。会话可以跨很长时间续聊，期间用户可能改了默认提供商或提供商的默认模型，时间线上却看不出每一轮是哪个模型答的，回看调技能的过程、决定「采用」和存为任务时容易对不上。另外 tooltip 变成三行后，最上面一轮向上弹出的 tooltip 会被会话线程的滚动容器裁掉顶边。
+- **改法**：`GetChatSession` 的轮次查询多取 `runs.provider_name`、`runs.model`，`ChatTurn` 增加 `provider`、`model`（运行已删为空，不输出）。`runs.model` 在运行结束时会随 `UpdateRunFinish` 再写一次，所以两列一并加进 `ChatSessionSig` 的轮次指纹（`%q` 编码），轮询能看到变化。花费 tooltip 改为分行：「这一轮的花费 · 时间 / 推理强度：… / 模型：k3-256k（kimi-coding）」；没有模型名时显示「提供商默认模型」；正在回答的轮次同样挂在「正在回答」标签上；运行已删的轮次不显示。提供商名、模型名都经 `esc` 转义。CSS 让 `.rc-a-head` 里的 tooltip 向下展开（盖在回答正文上），不再被线程顶边裁掉。不引入任何限制。
+- **测试**：`TestChatTurnModel`（每轮与运行行一致、改模型后指纹变化且详情更新、`model` 为 NULL 读作空、运行已删为空）；`TestRunChatUI` 增加花费 tip 带模型和提供商、无模型为「提供商默认」、怪值转义、运行已删不显示，原有强度断言改为分行格式；`TestRunChatTurnTipsNotClipped` 增加向下展开的规则和中英文 `rc.turn_model` 含 `{m}`/`{p}`。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`build-webui.py --check`、`check-i18n.py` 通过。headless Chrome 实测：两轮 tooltip 中英文完整显示在卡片下方，会话线程 `scrollWidth == clientWidth`（619/619）。
+- **截图**：`/workspace/tidebot-shots/2026-11-23-0400-turn-model-{zh-CN,en}.png`（1024×655，石墨主题，悬停第一轮花费）。
+- **耗时**：不是性能改动。轮次查询和指纹查询各多读两列短文本。
+
+**心得**：会话里「之后可变」的东西（强度、模型）都要按轮次从运行行读，而不是读会话当前值；只要列会在运行结束时再写一次，就必须进指纹，否则 1.5 s 轮询会一直回「未变化」。多行 tooltip 在滚动容器顶部要向下开。
+
+**参考**：Open WebUI `src/lib/components/chat/Messages/ResponseMessage.svelte` 在每条回答头部标出这条回答所用的模型（只借思路，不抄代码）。
+
+**后续想法**：
+- 运行实际用到的模型可能不止一个（`modelUsage` 里的子代理 / 小模型），现在只显示启动时的主模型；若要列全，可以从 `cost_ledger` 按运行汇总模型名。
+- 其他带 `overflow: hidden` 的卡片里如果也有 `data-tip`，可能有同样的裁切；可以写一个 headless 检查遍历所有 tip 是否落在可见区域。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；工作流库卡片上看不出目录缺失。

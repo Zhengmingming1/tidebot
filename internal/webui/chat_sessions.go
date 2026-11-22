@@ -68,6 +68,11 @@ type ChatTurn struct {
 	// for a deleted run or a stored value that is not low/medium/high). The
 	// session's own effort can change between turns; this one never does.
 	Effort string `json:"effort,omitempty"`
+	// Provider and Model are what this turn's run was started with (the run
+	// row's provider_name / model; Model "" = the provider's default model).
+	// Empty for a deleted run.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 	// Changes is how much this turn changed in the owner's folder, same
 	// summary as a run list row. Nil when nothing was recorded. The file
 	// list itself stays on the run detail.

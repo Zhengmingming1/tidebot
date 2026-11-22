@@ -522,7 +522,7 @@ func (a *App) GetChatSession(ctx context.Context, sid string) (webui.ChatSession
 	fx := a.cachedFX()
 	rows, err := a.DB.QueryContext(ctx, `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.prompt,''), COALESCE(r.status,''),
   COALESCE(r.result_text,''), COALESCE(r.result_truncated,0), COALESCE(r.error_message,''), COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,''),
-  COALESCE(r.effort,''), `+chatTurnChangeCols+`
+  COALESCE(r.effort,''), COALESCE(r.provider_name,''), COALESCE(r.model,''), `+chatTurnChangeCols+`
 FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=? ORDER BY t.turn_index`, sid)
 	if err != nil {
 		return d, err
@@ -534,7 +534,7 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 		var undone bool
 		var amount float64
 		var cur string
-		if err := rows.Scan(&t.Index, &t.RunID, &t.CreatedAt, &t.Message, &t.Status, &t.Answer, &trunc, &t.Error, &amount, &cur, &t.Effort,
+		if err := rows.Scan(&t.Index, &t.RunID, &t.CreatedAt, &t.Message, &t.Status, &t.Answer, &trunc, &t.Error, &amount, &cur, &t.Effort, &t.Provider, &t.Model,
 			&files, &add, &del, &undone, &undoneN, &patchCut); err != nil {
 			return d, err
 		}
@@ -556,10 +556,12 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 // its answer (result_text, up to 128 KB) in a later statement, so the answer's
 // byte length is part of the fingerprint. octet_length() comes from the record
 // header; the answer text is not loaded. The prompt (the turn's message) never
-// changes once the run exists; a deleted run shows as an empty status.
+// changes once the run exists; a deleted run shows as an empty status. The
+// provider and model are written again when the run finishes, so they are
+// hashed too.
 const chatTurnSigQuery = `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.status,''), COALESCE(r.finished_at,''),
   COALESCE(octet_length(r.result_text),-1), COALESCE(r.result_truncated,0), COALESCE(octet_length(r.error_message),-1),
-  COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,''), ` + chatTurnChangeCols + `
+  COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,''), COALESCE(r.provider_name,''), COALESCE(r.model,''), ` + chatTurnChangeCols + `
 FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=? ORDER BY t.turn_index`
 
 // ChatSessionSig is a fingerprint of what GetChatSession would return. The
@@ -593,17 +595,17 @@ func (a *App) ChatSessionSig(ctx context.Context, sid string) (string, error) {
 	for rows.Next() {
 		var (
 			idx, trunc, files, add, del, undoneN, patchCut int
-			runID, at, status, fin, cur                    string
+			runID, at, status, fin, cur, prov, model       string
 			ansLen, errLen                                 int64
 			amount                                         float64
 			undone                                         bool
 		)
-		if err = rows.Scan(&idx, &runID, &at, &status, &fin, &ansLen, &trunc, &errLen, &amount, &cur,
+		if err = rows.Scan(&idx, &runID, &at, &status, &fin, &ansLen, &trunc, &errLen, &amount, &cur, &prov, &model,
 			&files, &add, &del, &undone, &undoneN, &patchCut); err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%d\x00%g\x00%s\x00%d\x00%d\x00%d\x00%t\x00%d\x00%d\n",
-			idx, runID, at, status, fin, ansLen, trunc, errLen, amount, cur, files, add, del, undone, undoneN, patchCut)
+		fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%d\x00%g\x00%s\x00%q\x00%q\x00%d\x00%d\x00%d\x00%t\x00%d\x00%d\n",
+			idx, runID, at, status, fin, ansLen, trunc, errLen, amount, cur, prov, model, files, add, del, undone, undoneN, patchCut)
 	}
 	if err = rows.Err(); err != nil {
 		return "", err
