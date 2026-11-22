@@ -3363,9 +3363,14 @@ html[lang="en"] .rd-chg-list .diff-file .rd-chg-stale { min-width: 0; }
 .rc-turn { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .rc-q { display: flex; justify-content: flex-end; min-width: 0; }
 .rc-bubble { max-width: min(80%, 640px); padding: 8px 12px; border: 1px solid var(--accent-100); border-radius: 12px 12px 4px 12px; background: var(--accent-50); color: var(--text); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.rc-a { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
+/* no overflow: hidden here: it clipped every tooltip in the turn head (cost, copy, undo …);
+   the last child rounds its own bottom corners instead (12px card − 1px border) */
+.rc-a { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.rc-a > .rc-live:last-child, .rc-a > .rc-a-body:last-child, .rc-a > .rc-a-err:last-child { border-radius: 0 0 11px 11px; }
 .rc-a-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; row-gap: 4px; min-height: 40px; padding: 4px 8px 4px 12px; box-sizing: border-box; font-size: 12px; color: var(--text-2); }
 .rc-a-head .icon-btn, .rc-a-head .chg-badge, .rc-a-head .rd-chg-stale { flex: none; }
+/* right of the spacer: tooltips open leftwards so they stay inside the thread (no sideways scroll) */
+.rc-a-head .rc-sp ~ [data-tip]:hover::after, .rc-a-head .rc-sp ~ [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
 .rc-av { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 8px; background: var(--hue-violet-bg); color: var(--hue-violet-fg); flex: none; }
 .rc-sp { flex: 1; }
 .rc-cost { color: var(--text-2); font-weight: 500; padding: 0 4px; }

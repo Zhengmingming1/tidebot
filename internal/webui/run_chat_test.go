@@ -189,6 +189,14 @@ var odd = rcTurnChgHtml({ run_id: "bad id\"", changes: { files: 1, add: 1, del: 
 ok(odd.indexOf("<a ") < 0 && odd.indexOf("chg-badge") > 0 && odd.indexOf("data-rc-undo") < 0, "odd run id: badge is not a link, no undo");
 ok(odd.indexOf("href=") < 0, "odd run id badge has no href");
 
+var effHigh = rcTurnHtml({ index: 11, run_id: "run_k", message: "m", status: "succeeded", answer: "ok", effort: "high", created_at: "t" });
+ok(/class="rc-cost num" data-tip="[^"]*rc\.turn_effort\{&quot;e&quot;:&quot;tf\.effort_high&quot;\}"/.test(effHigh), "finished turn: its own effort in the cost tip");
+ok(rcTurnHtml({ index: 12, run_id: "run_l", message: "m", status: "succeeded", answer: "ok" }).indexOf("tf.effort_auto") > 0, "no effort: default in the tip");
+var effOdd = rcTurnHtml({ index: 13, run_id: "run_m", message: "m", status: "succeeded", answer: "ok", effort: "max\"><b>" });
+ok(effOdd.indexOf("tf.effort_auto") > 0 && effOdd.indexOf("<b>") < 0 && effOdd.indexOf("max") < 0, "odd effort: default, not echoed");
+ok(/class="rc-act" data-tip="rc\.turn_effort\{&quot;e&quot;:&quot;tf\.effort_low&quot;\}"/.test(rcTurnHtml({ index: 14, run_id: "run_n", message: "m", status: "running", effort: "low" })), "running turn: effort on the answering label");
+ok(rcTurnHtml({ index: 15, run_id: "run_o", message: "m", status: "" }).indexOf("rc.turn_effort") < 0, "gone run: no effort claimed");
+
 ok(rcErrText({ data: { code: "busy" }, message: "x" }) === "rc.err_busy", "busy code translated");
 ok(rcErrText({ data: { code: "weird" }, message: "raw" }) === "raw", "unknown code: message as sent");
 ok(rcErrText({ message: "net" }) === "net", "no code");
@@ -199,4 +207,37 @@ ok(line.indexOf("tool-chip") > 0 && line.indexOf("ls &lt;x&gt;") > 0 && line.ind
 ok(rcLiveLine("assistant: <b>t</b>").indexOf("&lt;b&gt;t") > 0, "text line escaped");
 if (bad.length) { console.error(bad.join("\n")); process.exitCode = 1; }
 `, nil)
+}
+
+// TestRunChatTurnTipsNotClipped: the answer card must not clip its head's
+// tooltips (cost with the turn's effort, copy, undo …). The card used to have
+// overflow: hidden, so every tip opening upwards was cut to a sliver; the last
+// child now rounds its own corners, and tips right of the spacer open leftwards.
+func TestRunChatTurnTipsNotClipped(t *testing.T) {
+	css := cssSource(t)
+	m := regexp.MustCompile(`(?m)^\.rc-a \{([^}]*)\}`).FindStringSubmatch(css)
+	if m == nil {
+		t.Fatal("no .rc-a rule")
+	}
+	if strings.Contains(m[1], "overflow") {
+		t.Errorf(".rc-a clips its tooltips: %q", m[1])
+	}
+	for _, want := range []string{
+		".rc-a > .rc-live:last-child, .rc-a > .rc-a-body:last-child, .rc-a > .rc-a-err:last-child { border-radius: 0 0 11px 11px; }",
+		".rc-a-head .rc-sp ~ [data-tip]:hover::after, .rc-a-head .rc-sp ~ [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("styles.css lacks %q", want)
+		}
+	}
+	for _, f := range []string{"static/i18n/zh-CN.json", "static/i18n/en.json"} {
+		var d map[string]string
+		raw, _ := os.ReadFile(f)
+		if err := json.Unmarshal(raw, &d); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(d["rc.turn_effort"], "{e}") {
+			t.Errorf("%s: rc.turn_effort = %q", f, d["rc.turn_effort"])
+		}
+	}
 }

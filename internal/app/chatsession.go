@@ -522,7 +522,7 @@ func (a *App) GetChatSession(ctx context.Context, sid string) (webui.ChatSession
 	fx := a.cachedFX()
 	rows, err := a.DB.QueryContext(ctx, `SELECT t.turn_index, t.run_id, t.created_at, COALESCE(r.prompt,''), COALESCE(r.status,''),
   COALESCE(r.result_text,''), COALESCE(r.result_truncated,0), COALESCE(r.error_message,''), COALESCE(r.cost_amount,0), COALESCE(r.cost_currency,''),
-  `+chatTurnChangeCols+`
+  COALESCE(r.effort,''), `+chatTurnChangeCols+`
 FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=? ORDER BY t.turn_index`, sid)
 	if err != nil {
 		return d, err
@@ -534,11 +534,14 @@ FROM chat_session_turns t LEFT JOIN runs r ON r.id=t.run_id WHERE t.session_id=?
 		var undone bool
 		var amount float64
 		var cur string
-		if err := rows.Scan(&t.Index, &t.RunID, &t.CreatedAt, &t.Message, &t.Status, &t.Answer, &trunc, &t.Error, &amount, &cur,
+		if err := rows.Scan(&t.Index, &t.RunID, &t.CreatedAt, &t.Message, &t.Status, &t.Answer, &trunc, &t.Error, &amount, &cur, &t.Effort,
 			&files, &add, &del, &undone, &undoneN, &patchCut); err != nil {
 			return d, err
 		}
 		t.Truncated = trunc != 0
+		if t.Effort != "" && !tasksvc.ValidEffort(t.Effort) {
+			t.Effort = ""
+		}
 		if amount != 0 && cur != "" {
 			t.CostUSD = fx.Convert(amount, cur, fx.Display)
 		}

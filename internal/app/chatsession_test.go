@@ -497,3 +497,51 @@ func TestChatSessionSetEffort(t *testing.T) {
 		t.Fatalf("invalid stored %v %q", err, d.Effort)
 	}
 }
+
+// TestChatTurnEffort: each turn reports the --effort its own run used, so a
+// session whose effort changed between turns still shows what each turn ran
+// with. A value that is not low/medium/high reads as default.
+func TestChatTurnEffort(t *testing.T) {
+	chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", filepath.Join(t.TempDir(), "args"))
+	rid := originRun(t, a, runner.Options{Prompt: "first", RunMode: "edit", Effort: "high", WorkspaceDir: t.TempDir()})
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetChatEffort(ctx, ses.ID, "low"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SendChatTurn(ctx, ses.ID, "one"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, a, ses.ID, 1)
+	if _, err := a.SetChatEffort(ctx, ses.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SendChatTurn(ctx, ses.ID, "two"); err != nil {
+		t.Fatal(err)
+	}
+	d := waitTurn(t, a, ses.ID, 2)
+	got := map[int]string{}
+	for _, tr := range d.TurnList {
+		got[tr.Index] = tr.Effort
+	}
+	if got[0] != "high" || got[1] != "low" || got[2] != "" || len(got) != 3 {
+		t.Fatalf("turn efforts %v", got)
+	}
+	if _, err := a.DB.Exec(`UPDATE runs SET effort='max' WHERE id=?`, d.TurnList[1].RunID); err != nil {
+		t.Fatal(err)
+	}
+	if d, err = a.GetChatSession(ctx, ses.ID); err != nil || d.TurnList[1].Effort != "" {
+		t.Fatalf("invalid stored %v %+v", err, d.TurnList[1])
+	}
+	if _, err := a.DB.Exec(`DELETE FROM runs WHERE id=?`, d.TurnList[0].RunID); err != nil {
+		t.Fatal(err)
+	}
+	if d, err = a.GetChatSession(ctx, ses.ID); err != nil || d.TurnList[0].Effort != "" || d.TurnList[0].Status != "" {
+		t.Fatalf("deleted run %v %+v", err, d.TurnList[0])
+	}
+}

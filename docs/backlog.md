@@ -7393,3 +7393,22 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 会话（`chat_sessions.workspace_dir`）在恢复时会按 home 改写，但用户自选目录同样可能不在；会话打开时已标红，暂不进这个对话框。
 - 工作流库列表卡片上还看不出目录缺失（编辑器里已有目录检查）；若常见，可在卡片上加一个提示标签。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-23：会话每轮卡片显示该轮实际的推理强度，卡片头部的 tooltip 不再被裁掉（业务逻辑矛盾 / BUG）
+
+这是 2026-11-23 00:00 Asia/Shanghai 的 4 小时优化。
+
+- **问题**：会话的推理强度可以在轮与轮之间改（上一轮 129c60c），但时间线上每一轮只显示花费，看不出这一轮到底用的是什么强度；输入框下拉显示的是「下一轮」的值，用户回看调技能的过程时容易把两者混淆。顺带发现：回答卡片 `.rc-a` 有 `overflow: hidden`，头部所有向上弹出的 tooltip（花费、复制、撤销、改动徽标、打开运行）都被裁成卡片顶边的一道黑线，会话页和运行页续聊区都一样。
+- **改法**：`GetChatSession` 的轮次查询多取 `runs.effort`，`ChatTurn` 增加 `effort`（不是 low/medium/high 的值、运行已删的都按「默认」，空值不输出）。花费的 tooltip 追加「推理强度：高 / 默认（自动）」；正在回答的轮次挂在「正在回答」标签上。运行记录已删的轮次不显示强度。`effort` 写入后不变，会话指纹不需要改。CSS 去掉 `.rc-a` 的 `overflow: hidden`，改由最后一个子元素（实时日志 / 回答 / 报错）自己圆角（12px − 1px 边框 = 11px）；头部间隔符右边的 tooltip 改为向左展开，避免在会话线程里撑出横向滚动。不引入任何限制。
+- 测试：`TestChatTurnEffort`（两轮间改强度后每轮各报自己的值、第 0 轮为源运行的值、库里无效值读作默认、运行已删时为空）；`TestRunChatUI` 增加花费 tip 带强度、无值为默认、怪值不回显、进行中挂在「正在回答」上、运行已删不显示；`TestRunChatTurnTipsNotClipped`（`.rc-a` 不再有 overflow、最后子元素圆角、右侧 tip 向左、中英文案含 `{e}`）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`build-webui.py --check`、`check-i18n.py` 通过。另用 headless Chrome 实测：两轮分别为「高」「默认（自动）」，tooltip 完整显示，会话线程 `scrollWidth == clientWidth`（619/619，无横向滚动）。
+- 截图：`/workspace/tidebot-shots/2026-11-23-0000-turn-effort-{zh-CN,en}.png`（1024×655，石墨主题，悬停花费显示该轮强度）。
+- 耗时：不是性能改动。轮次查询多读一列。
+
+**心得**：「之后可改」的会话级设置，历史里必须能看到每一轮当时的值，否则存为任务前回看调优过程会对不上。容器上的 `overflow: hidden` 只为圆角，代价是吞掉所有 CSS tooltip；圆角交给最后一个子元素更安全。
+
+**参考**：Open WebUI `src/lib/components/chat/Messages/ResponseMessage.svelte` 在每条回答的信息 tooltip 里列出这一条的用量等元数据（只借思路，不抄代码）。
+
+**后续想法**：
+- 每轮 tooltip 还可以带上该轮实际的模型（`runs.model`），但模型可能在运行中才写入，需要一并进会话指纹。
+- 其他带 `overflow: hidden` 的卡片里如果也有 `data-tip`，可能有同样的裁切；可以写一个 headless 检查遍历所有 tip 是否落在可见区域。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；工作流库卡片上看不出目录缺失。

@@ -64,6 +64,10 @@ type ChatTurn struct {
 	ErrorInfo *errInfo `json:"error_info,omitempty"`
 	CostUSD   float64  `json:"cost_usd"` // display currency
 	CreatedAt string   `json:"created_at"`
+	// Effort is the --effort this turn's run actually used ("" = default, also
+	// for a deleted run or a stored value that is not low/medium/high). The
+	// session's own effort can change between turns; this one never does.
+	Effort string `json:"effort,omitempty"`
 	// Changes is how much this turn changed in the owner's folder, same
 	// summary as a run list row. Nil when nothing was recorded. The file
 	// list itself stays on the run detail.
