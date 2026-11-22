@@ -412,3 +412,88 @@ func TestChatSessionInheritsEffort(t *testing.T) {
 		t.Fatalf("from session %v %+v", err, p)
 	}
 }
+
+// A session's effort can be changed: the next turn passes the new value (or
+// none for "default"), "save as task" takes it, a blank session can start with
+// one, and a bad value or a running session is refused.
+func TestChatSessionSetEffort(t *testing.T) {
+	chatHome(t)
+	a := newTestApp(t)
+	ctx := context.Background()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("TIDEBOT_MOCK_ARGS_FILE", argsFile)
+	rid := originRun(t, a, runner.Options{Prompt: "first", RunMode: "edit", Effort: "high", WorkspaceDir: t.TempDir()})
+	ses, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid})
+	if err != nil || ses.Effort != "high" {
+		t.Fatalf("inherit %v %+v", err, ses)
+	}
+	if got, err := a.SetChatEffort(ctx, ses.ID, "low"); err != nil || got.Effort != "low" {
+		t.Fatalf("set low %v %+v", err, got)
+	}
+	if _, err := a.SendChatTurn(ctx, ses.ID, "continue"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, a, ses.ID, 1)
+	if argAfter(readArgs(t, argsFile), "--effort") != "low" {
+		t.Fatalf("turn args %q", readArgs(t, argsFile))
+	}
+	if p, err := a.ChatTaskPreset(ctx, ses.ID, false); err != nil || p.Effort != "low" {
+		t.Fatalf("preset %v %+v", err, p)
+	}
+	if got, err := a.SetChatEffort(ctx, ses.ID, ""); err != nil || got.Effort != "" {
+		t.Fatalf("set default %v %+v", err, got)
+	}
+	if _, err := a.SendChatTurn(ctx, ses.ID, "again"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, a, ses.ID, 2)
+	if contains(readArgs(t, argsFile), "--effort") {
+		t.Fatalf("default effort still passed: %q", readArgs(t, argsFile))
+	}
+	if _, err := a.SetChatEffort(ctx, ses.ID, "max"); !errors.Is(err, webui.ErrChatInvalid) {
+		t.Fatalf("bad effort %v", err)
+	}
+	if _, err := a.SetChatEffort(ctx, "chat_missing", "low"); !errors.Is(err, webui.ErrChatSessionNotFound) {
+		t.Fatalf("missing %v", err)
+	}
+	if _, err := a.DB.Exec(`UPDATE chat_sessions SET status='running' WHERE id=?`, ses.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetChatEffort(ctx, ses.ID, "medium"); !errors.Is(err, webui.ErrChatSessionBusy) {
+		t.Fatalf("running %v", err)
+	}
+	if _, err := a.DB.Exec(`UPDATE chat_sessions SET status='idle' WHERE id=?`, ses.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Asked for at creation: overrides the run's value, including "default".
+	rid2 := originRun(t, a, runner.Options{Prompt: "second", Effort: "high", WorkspaceDir: t.TempDir()})
+	none := ""
+	s2, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{RunID: rid2, Effort: &none})
+	if err != nil || s2.Effort != "" {
+		t.Fatalf("asked default %v %+v", err, s2)
+	}
+	med := "medium"
+	blank, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{Origin: "chat", Effort: &med})
+	if err != nil || blank.Effort != "medium" {
+		t.Fatalf("blank %v %+v", err, blank)
+	}
+	if _, err := a.SendChatTurn(ctx, blank.ID, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, a, blank.ID, 1)
+	if argAfter(readArgs(t, argsFile), "--effort") != "medium" {
+		t.Fatalf("blank turn args %q", readArgs(t, argsFile))
+	}
+	bad := "max"
+	if _, err := a.CreateChatSession(ctx, webui.ChatSessionCreate{Origin: "chat", Effort: &bad}); !errors.Is(err, webui.ErrChatInvalid) {
+		t.Fatalf("bad create %v", err)
+	}
+	// A stored value from elsewhere that isn't valid reads as default.
+	if _, err := a.DB.Exec(`UPDATE chat_sessions SET effort='max' WHERE id=?`, blank.ID); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := a.GetChatSession(ctx, blank.ID); err != nil || d.Effort != "" {
+		t.Fatalf("invalid stored %v %q", err, d.Effort)
+	}
+}

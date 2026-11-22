@@ -7353,3 +7353,24 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 工作流节点的强度目前跟节点任务走，工作流编辑器里不单独显示；若用户需要按节点覆盖，再考虑。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
 - 工作流定义里用户自选的 `workspace_dir` 在换机恢复后仍不提示（任务已提示）。
+
+### 2026-11-22（续）：会话输入框可以选推理强度，存为任务时带上
+
+这是 2026-11-22 16:00 Asia/Shanghai 的 4 小时优化。
+
+- **问题**：上一轮让运行对话框能选 `--effort`，但会话里还没有：每一轮都沿用源运行的值（`runEffort(origin_run_id)`），空白会话只能是「默认」，从会话「存为任务」也只能带源运行的值。「在会话里把技能调顺→采用→存为任务」这条主路径上，推理强度既看不到也改不了。
+- **改法**：`chat_sessions` 加 `effort` 列（迁移 049，旧会话按源运行的有效值回填，空白会话、源运行已删或值无效的为 `""`）。建会话时可带 `effort`（不带＝沿用源运行；`""`＝默认），`PUT /api/chat-sessions/{id}/effort` 随时改（登录 + CSRF；运行中不能改，回 409 `busy`；值只接受 `""`/low/medium/high，坏值在 handler 就拒绝）。每一轮按会话的值传 `--effort`（`""` 不传），「存为任务」预填会话的值。输入框标签栏在权限档右边加一个小下拉（默认强度 / 低 / 中 / 高强度，紫色图标，说明放 tooltip），改动后 toast「下一轮生效」；未建会话前随创建请求一起发。默认仍不传 `--effort`，没有引入任何限制。
+- **顺带**：标签栏的两个小下拉原本继承全局 `select` 的 34px 箭头留白，而且原生下拉按最长选项定宽，英文界面 1024 宽时加上新下拉会把「No web」压到「1 turns」上。改为 12px 小箭头 + 按当前选项文字宽度定宽（`rcFitSelect`，canvas 量字，WebKit/WebView2/Chrome 一致；字体晚到时再量一次），权限档下拉也有了可见的下拉箭头。
+- 测试：`TestChatSessionSetEffort`（改强度后下一轮传新值、改回默认后不传、存为任务带会话值、建会话显式值覆盖源运行、空白会话带强度、坏值/不存在/运行中拒绝、库里无效值读作默认）；`TestChatSessionInheritsEffort`（不带强度建会话仍沿用源运行）；`TestChatSessionEffortBackfill`（049 回填）；`TestChatEffortAPI`（建会话带/不带/默认、PUT 四种值、坏 body 不到 app、GET 405、无 CSRF 403、busy 409、无 setter 404）；`TestChatEffortUI`（node 下渲染与选中、转义、标签顺序、运行页取会话或运行的值、接线、CSS、中英文案）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`node --check`、`check-i18n.py` 通过。另用 headless Chrome 实测：改下拉后会话 `effort` 变为 low；新建空白会话选「中」后发送，会话带 medium。
+- 截图：`/workspace/tidebot-shots/2026-11-22-1600-session-effort-{zh-CN,en}.png`（1024×655，石墨主题，悬停显示 tooltip）、`2026-11-22-1600-session-effort-midnight-en.png`（午夜深色）。
+- 耗时：不是性能改动。会话行多读一列；改强度是一条按主键的 UPDATE。
+
+**心得**：会话是调技能的主场，凡是「存为任务」会带走的参数，都应在会话里当场可见、可改，否则存出来的任务和调的时候不一样。原生下拉按最长选项定宽，在紧凑标签栏里很容易把右侧挤出界，得按当前选项量宽。
+
+**参考**：沿用本仓库会话权限档的做法（`SetChatMode`、`PUT …/mode`、运行中不可改）；在对话输入区就近调推理强度，参考 Open WebUI `src/lib/components/chat/MessageInput.svelte` 输入框旁的对话级设置与 `Settings/Advanced/AdvancedParams.svelte` 的 `reasoning_effort`（默认不传；只借思路，不抄代码）。
+
+**后续想法**：
+- 运行页（续聊框）在会话建立前显示的是运行的强度，建立后跟会话走；如果用户想在运行页就看到「这一轮实际用了什么强度」，可以在每轮卡片的 tooltip 里加上该轮运行记录的 `effort`。
+- 工作流节点的强度仍跟节点任务走，编辑器里不单独显示。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；工作流 `workspace_dir` 换机恢复后仍不提示。
+- 本机 box 缺 `socat`，可执行命令档的会话发送会报「command sandbox unavailable」，截图时只能用可修改档；这是环境问题，不是回归。

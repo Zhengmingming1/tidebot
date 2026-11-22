@@ -179,14 +179,17 @@ type chatRow struct {
 }
 
 const chatCols = `id, title, origin, origin_run_id, workspace_dir, permission_mode, provider, claude_session_id,
-  turns, cost_total, web_access, status, created_at, updated_at, bindings_json`
+  turns, cost_total, web_access, status, created_at, updated_at, bindings_json, effort`
 
 func scanChat(sc interface{ Scan(...any) error }) (chatRow, error) {
 	var c chatRow
 	var web int
 	err := sc.Scan(&c.ID, &c.Title, &c.Origin, &c.OriginRunID, &c.WorkspaceDir, &c.PermissionMode, &c.Provider,
-		&c.ClaudeSessionID, &c.Turns, &c.CostUSD, &web, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.bindingsRaw)
+		&c.ClaudeSessionID, &c.Turns, &c.CostUSD, &web, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.bindingsRaw, &c.Effort)
 	c.WebAccess = web != 0
+	if !tasksvc.ValidEffort(c.Effort) {
+		c.Effort = ""
+	}
 	c.TurnHint = chatLongTurns
 	return c, err
 }
@@ -235,9 +238,9 @@ func (a *App) CreateChatSession(ctx context.Context, req webui.ChatSessionCreate
 		status, trigger, prompt, ws string
 		taskID, provName            sql.NullString
 	)
-	var runMode string
-	err := a.DB.QueryRowContext(ctx, `SELECT status, trigger_kind, prompt, workspace_dir, task_id, provider_name, run_mode FROM runs WHERE id=?`, rid).
-		Scan(&status, &trigger, &prompt, &ws, &taskID, &provName, &runMode)
+	var runMode, runEffort string
+	err := a.DB.QueryRowContext(ctx, `SELECT status, trigger_kind, prompt, workspace_dir, task_id, provider_name, run_mode, COALESCE(effort,'') FROM runs WHERE id=?`, rid).
+		Scan(&status, &trigger, &prompt, &ws, &taskID, &provName, &runMode, &runEffort)
 	if errors.Is(err, sql.ErrNoRows) {
 		return webui.ChatSession{}, webui.ErrChatRunNotFound
 	}
@@ -246,6 +249,10 @@ func (a *App) CreateChatSession(ctx context.Context, req webui.ChatSessionCreate
 	}
 	if !finishedRun[status] {
 		return webui.ChatSession{}, webui.ErrChatRunNotFinished
+	}
+	effort, err := chatCreateEffort(req.Effort, runEffort)
+	if err != nil {
+		return webui.ChatSession{}, err
 	}
 	sid := id.New("chat")
 	title := strings.Join(strings.Fields(req.Title), " ")
@@ -264,8 +271,8 @@ func (a *App) CreateChatSession(ctx context.Context, req webui.ChatSessionCreate
 		web = 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO chat_sessions(id, title, origin, origin_run_id, workspace_dir, permission_mode, provider,
-  web_access, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		sid, title, "run", rid, a.chatWorkspace(ws, taskID.String), chatCreateMode(req.PermissionMode, runMode), provName.String, web, "idle", now, now); err != nil {
+  web_access, status, created_at, updated_at, effort) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sid, title, "run", rid, a.chatWorkspace(ws, taskID.String), chatCreateMode(req.PermissionMode, runMode), provName.String, web, "idle", now, now, effort); err != nil {
 		return webui.ChatSession{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO chat_session_turns(session_id, turn_index, run_id, created_at) VALUES(?,?,?,?)`, sid, 0, rid, now); err != nil {
@@ -290,20 +297,19 @@ func chatCreateMode(asked, runMode string) string {
 	return chatMode(runMode)
 }
 
-// runEffort is the --effort value a run recorded ("" = not passed, or the run
-// was saved before this was stored). Invalid values are treated as empty.
-func (a *App) runEffort(ctx context.Context, runID string) string {
-	if runID == "" {
-		return ""
+// chatCreateEffort: the effort asked for (nil = not asked, "" = default), else
+// the effort of the run the session continues (invalid stored values = default).
+func chatCreateEffort(asked *string, runEffort string) (string, error) {
+	if asked != nil {
+		if !tasksvc.ValidEffort(*asked) {
+			return "", fmt.Errorf("%w: effort must be empty, low, medium or high", webui.ErrChatInvalid)
+		}
+		return *asked, nil
 	}
-	var e string
-	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(effort,'') FROM runs WHERE id=?`, runID).Scan(&e); err != nil {
-		return ""
+	if !tasksvc.ValidEffort(runEffort) {
+		return "", nil
 	}
-	if !tasksvc.ValidEffort(e) {
-		return ""
-	}
-	return e
+	return runEffort, nil
 }
 
 // SetChatMode changes a session's permission level (read | edit | exec); the
@@ -326,12 +332,36 @@ func (a *App) SetChatMode(ctx context.Context, sid, mode string) (webui.ChatSess
 	return c.ChatSession, err
 }
 
+// SetChatEffort changes the --effort the session's next turns use ("" = not
+// passed, Claude Code decides; low | medium | high). Not while a turn is running.
+func (a *App) SetChatEffort(ctx context.Context, sid, effort string) (webui.ChatSession, error) {
+	if !tasksvc.ValidEffort(effort) {
+		return webui.ChatSession{}, fmt.Errorf("%w: effort must be empty, low, medium or high", webui.ErrChatInvalid)
+	}
+	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET effort=?, updated_at=? WHERE id=? AND status<>'running'`, effort, nowUTC(), sid)
+	if err != nil {
+		return webui.ChatSession{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		if _, err := a.chatSession(ctx, sid); err != nil {
+			return webui.ChatSession{}, err
+		}
+		return webui.ChatSession{}, webui.ErrChatSessionBusy
+	}
+	c, err := a.chatSession(ctx, sid)
+	return c.ChatSession, err
+}
+
 // createBlankChat starts a session that continues no run: it reads only its own
 // scratch folder and keeps the provider that is the default now. Its title is
 // the first message unless one is given.
 func (a *App) createBlankChat(ctx context.Context, req webui.ChatSessionCreate) (webui.ChatSession, error) {
 	prov := a.Cfg.DefaultProvider
 	if _, err := a.ResolveProfile(prov); err != nil {
+		return webui.ChatSession{}, err
+	}
+	effort, err := chatCreateEffort(req.Effort, "")
+	if err != nil {
 		return webui.ChatSession{}, err
 	}
 	sid := id.New("chat")
@@ -347,8 +377,8 @@ func (a *App) createBlankChat(ctx context.Context, req webui.ChatSessionCreate) 
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO chat_sessions(id, title, origin, origin_run_id, workspace_dir, permission_mode, provider,
-  web_access, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		sid, title, "chat", "", "", chatMode(req.PermissionMode), prov, web, "idle", now, now); err != nil {
+  web_access, status, created_at, updated_at, effort) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sid, title, "chat", "", "", chatMode(req.PermissionMode), prov, web, "idle", now, now, effort); err != nil {
 		return webui.ChatSession{}, err
 	}
 	if err := applyCapabilityDefaults(ctx, tx, sid); err != nil {
@@ -708,7 +738,7 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 		mcp["tidebot"] = srv
 		args = append(args, "--allowedTools", "mcp__tidebot")
 	}
-	effort := a.runEffort(ctx, c.OriginRunID)
+	effort := c.Effort
 	runID, err := launch(startWait, func(onStart func(string)) error {
 		// The turn's stage, tool token and folder lock go before the session is
 		// idle again: a next message sent the moment it is would otherwise find

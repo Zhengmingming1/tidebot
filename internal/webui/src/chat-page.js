@@ -82,7 +82,7 @@
       '<section class="cs-main" id="rc" aria-label="' + esc(csTitle(s)) + '">' + csHeadHtml(s) +
       '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">' + thread + "</div>" +
       (s ? '<div class="cs-draft" id="cs-draft" role="region" aria-label="' + esc(T("sd.label")) + '" hidden></div>' : "") +
-      rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s), mode: s ? s.permission_mode : "exec" }) + "</section></div>";
+      rcBoxHtml({ ph: s ? "cs.ph" : "cs.ph_new", label: "cs.label", read_tip: "cs.read_tip", tags: csDirTag(s) + csCapsTag(s), mode: s ? s.permission_mode : "exec", effort: s ? s.effort : "" }) + "</section></div>";
   }
   function renderChat(id) {
     if (id && !CS_ID.test(id)) id = "";
@@ -95,7 +95,7 @@
       if (!s) {
         bindChat(sec, {
           id: "", key: "cs_new", ph: "cs.ph_new", send_tip: "cs.send_tip", dropEmpty: true, turns: csAll,
-          create: function (mode) { return api("/api/chat-sessions", { method: "POST", body: { origin: "chat", permission_mode: mode } }); },
+          create: function (mode, effort) { return api("/api/chat-sessions", { method: "POST", body: { origin: "chat", permission_mode: mode, effort: effort } }); },
           onSent: function (x) { location.hash = "#/chat/" + enc(x.id); return true; }
         });
         $("#rc-in", sec).focus();

@@ -7216,12 +7216,12 @@ if((cs&&cs.turn>0)||r.trigger==="session"||!rcDone(r.status))return "";
 var pre=rcTurns(r._chat);
 return '<section class="rc" id="rc" aria-label="'+esc(T("rc.title"))+'"><div class="rc-sep" id="rc-sep"'+(pre.length||(cs&&!r._chat)?"":" hidden")+"><span>"+esc(T("rc.title"))+'</span>'+rcOpenHtml(cs&&cs.id)+'</div><div class="rc-thread" id="rc-thread" aria-live="polite">'+
 (r._chat?pre.map(rcTurnHtml).join(""):cs?skeleton("list"):"")+"</div>"+
-rcBoxHtml({mode:(r._chat&&r._chat.permission_mode)||r.run_mode||"read"})+"</section>";
+rcBoxHtml({mode:(r._chat&&r._chat.permission_mode)||r.run_mode||"read",effort:r._chat?r._chat.effort:r.effort})+"</section>";
 }
 function rcBoxHtml(o){
 return '<form class="rc-box" id="rc-form" novalidate><label class="sr-only" for="rc-in">'+esc(T(o.label||"rc.label"))+"</label>"+
 '<textarea id="rc-in" rows="1" maxlength="16384" data-noguard placeholder="'+esc(T(o.ph||"rc.ph"))+'"></textarea>'+
-'<div class="rc-bar"><span class="rc-tags">'+(o.tags||"")+rcModeHtml(o.mode||"read",o.read_tip)+
+'<div class="rc-bar"><span class="rc-tags">'+(o.tags||"")+rcModeHtml(o.mode||"read",o.read_tip)+rcEffortHtml(o.effort)+
 '<span class="rc-tag rc-noweb" id="rc-noweb" tabindex="0" data-tip="'+esc(T("rc.noweb_tip"))+'">'+ic("offline","sm")+esc(T("rc.noweb"))+"</span></span>"+
 '<span class="rc-meta" id="rc-meta"></span>'+
 '<button type="submit" class="btn primary sm" id="rc-send">'+ic("send","sm")+esc(T("rc.send"))+"</button></div>"+
@@ -7232,6 +7232,23 @@ var m=mode==="edit"||mode==="exec"?mode:"read";
 var tipOf=function(v){return T(v==="read"?readTip||"rc.read_tip":"rn."+v+"_tip");};
 return '<label class="rc-tag rc-mode" data-tip="'+esc(tipOf(m))+'" data-read-tip="'+esc(readTip||"rc.read_tip")+'">'+ic({read:"eye",edit:"edit",exec:"terminal"}[m],"sm")+
 '<select id="rc-mode" aria-label="'+esc(T("rn.mode"))+'">'+["read","edit","exec"].map(function(v){return '<option value="'+v+'"'+(v===m?" selected":"")+">"+esc(T("rn."+v))+"</option>";}).join("")+"</select></label>";
+}
+function rcEffortHtml(effort){
+var e=effort==="low"||effort==="medium"||effort==="high"?effort:"";
+return '<label class="rc-tag rc-effort" data-tip="'+esc(T("rc.effort_tip"))+'">'+ic("sparkle","sm")+
+'<select id="rc-effort" aria-label="'+esc(T("tf.effort"))+'">'+["","low","medium","high"].map(function(v){return '<option value="'+v+'"'+(v===e?" selected":"")+">"+esc(T("rc.effort_"+(v||"auto")))+"</option>";}).join("")+"</select></label>";
+}
+var rcFitCtx=null;
+function rcFitSelect(sel){
+if(!sel||typeof getComputedStyle!=="function")return;
+var o=sel.options[sel.selectedIndex];
+if(!o)return;
+if(!rcFitCtx){var cv=document.createElement("canvas");rcFitCtx=cv.getContext&&cv.getContext("2d");}
+if(!rcFitCtx)return;
+var cs=getComputedStyle(sel);
+rcFitCtx.font=cs.fontWeight+" "+cs.fontSize+" "+cs.fontFamily;
+var w=Math.ceil(rcFitCtx.measureText(o.text).width+(parseFloat(cs.paddingLeft)||0)+(parseFloat(cs.paddingRight)||0))+2;
+if(w>2)sel.style.width=w+"px";
 }
 function sandboxInfo(){
 if(state.sandbox)return Promise.resolve(state.sandbox);
@@ -7397,14 +7414,20 @@ fix.addEventListener("click",function(){fix.disabled=true;api("/api/capabilities
 }
 bindChat(sec,{
 id:r.chat_session?r.chat_session.id:"",key:rcDraftKey(r.id),pre:r._chat,turns:rcTurns,
-create:function(mode){return api("/api/chat-sessions",{method:"POST",body:{run_id:r.id,permission_mode:mode}});},
+create:function(mode,effort){return api("/api/chat-sessions",{method:"POST",body:{run_id:r.id,permission_mode:mode,effort:effort}});},
 onPaint:function(s){var a=$("#rc-open",sec);if(a&&s&&/^[\w-]{1,64}$/.test(s.id||"")){a.href="#/chat/"+enc(s.id);a.hidden=false;}}
 });
 }
 function bindChat(sec,o){
 var thread=$("#rc-thread",sec),form=$("#rc-form",sec),ta=$("#rc-in",sec),send=$("#rc-send",sec),meta=$("#rc-meta",sec),err=$("#rc-err",sec);
 var st={id:o.id||"",ses:null,sending:false,painted:{}},turnsOf=o.turns||rcTurns;
-var modeSel=$("#rc-mode",sec),modeLbl=modeSel&&modeSel.parentNode;
+var modeSel=$("#rc-mode",sec),modeLbl=modeSel&&modeSel.parentNode,effSel=$("#rc-effort",sec),effBusy=false;
+var paintEffort=function(e){
+if(!effSel)return;
+effSel.value=e==="low"||e==="medium"||e==="high"?e:"";
+effSel.parentNode.classList.toggle("on",!!effSel.value);
+rcFitSelect(effSel);
+};
 var paintMode=function(m){
 if(!modeSel)return;
 if(m)modeSel.value=m;
@@ -7413,6 +7436,7 @@ modeLbl.setAttribute("data-tip",T(tipKey));
 var icon=$(".i",modeLbl),tmp=document.createElement("span");tmp.innerHTML=ic({read:"eye",edit:"edit",exec:"terminal"}[v],"sm");
 if(icon&&tmp.firstChild)modeLbl.replaceChild(tmp.firstChild,icon);
 modeLbl.classList.toggle("warn",v!=="read");
+rcFitSelect(modeSel);
 };
 var key=o.key,d=draftLoad(key);
 if(d)ta.value=d.text;
@@ -7431,10 +7455,12 @@ if(s)html=(long()?'<span class="pill sm" tabindex="0" data-tip="'+esc(T("rc.long
 if(meta._h!==html){meta.innerHTML=html;meta._h=html;}
 $("#rc-noweb",sec).hidden=!!(s&&s.web_access)||!!(modeSel&&modeSel.value==="exec");
 if(modeSel)modeSel.disabled=b;
+if(effSel)effSel.disabled=b;
 };
 var paint=function(s){
 st.ses=s;
 if(s&&s.permission_mode&&document.activeElement!==modeSel)paintMode(s.permission_mode);
+if(s&&typeof s.effort==="string"&&document.activeElement!==effSel&&!effBusy)paintEffort(s.effort);
 var turns=turnsOf(s),seen={};
 if(thread.firstElementChild&&!thread.firstElementChild.classList.contains("rc-turn"))thread.innerHTML="";
 turns.forEach(function(t){
@@ -7490,7 +7516,7 @@ if(!v||busy())return;
 if(new Blob([v]).size>16384){showErr(T("rc.err_too_long"));return;}
 showErr("");st.sending=true;sync();
 var made=null;
-(st.id?Promise.resolve({id:st.id}):o.create(modeSel?modeSel.value:undefined).then(function(s){made=s;return s;})).then(function(s){
+(st.id?Promise.resolve({id:st.id}):o.create(modeSel?modeSel.value:undefined,effSel?effSel.value:undefined).then(function(s){made=s;return s;})).then(function(s){
 st.id=s.id;
 return api("/api/chat-sessions/"+enc(s.id)+"/turns",{method:"POST",body:{message:v}});
 }).then(function(){
@@ -7517,6 +7543,18 @@ return api("/api/chat-sessions/"+enc(st.id)+"/mode",{method:"PUT",body:{mode:v}}
 });
 });
 paintMode();
+if(effSel)effSel.addEventListener("change",function(){
+var v=effSel.value,prev=st.ses&&typeof st.ses.effort==="string"?st.ses.effort:effSel._prev||"";
+showErr("");paintEffort(v);
+if(!st.id){effSel._prev=v;return;}
+effBusy=true;
+api("/api/chat-sessions/"+enc(st.id)+"/effort",{method:"PUT",body:{effort:v}}).then(function(x){
+st.ses=Object.assign(st.ses||{},{effort:x.effort||""});effSel._prev=v;
+toast(T("rc.effort_saved",{e:T("rc.effort_"+(v||"auto"))}));
+}).catch(function(e){paintEffort(prev);showErr(rcErrText(e));}).then(function(){effBusy=false;if(document.contains(sec))sync();});
+});
+paintEffort(effSel?effSel.value:"");
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){if(document.contains(sec)){rcFitSelect(modeSel);rcFitSelect(effSel);}});
 var rcTurnOf=function(el){
 var art=el&&el.closest&&el.closest(".rc-turn");
 return(st.ses&&st.ses.turn_list||[]).filter(function(x){return art&&String(x.index)===art.getAttribute("data-turn");})[0];
@@ -8093,7 +8131,7 @@ return '<h1 class="sr-only">'+esc(T("nav.chat"))+'</h1><div class="cs'+(!s?" cs-
 '<section class="cs-main" id="rc" aria-label="'+esc(csTitle(s))+'">'+csHeadHtml(s)+
 '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">'+thread+"</div>"+
 (s?'<div class="cs-draft" id="cs-draft" role="region" aria-label="'+esc(T("sd.label"))+'" hidden></div>':"")+
-rcBoxHtml({ph:s?"cs.ph":"cs.ph_new",label:"cs.label",read_tip:"cs.read_tip",tags:csDirTag(s)+csCapsTag(s),mode:s?s.permission_mode:"exec"})+"</section></div>";
+rcBoxHtml({ph:s?"cs.ph":"cs.ph_new",label:"cs.label",read_tip:"cs.read_tip",tags:csDirTag(s)+csCapsTag(s),mode:s?s.permission_mode:"exec",effort:s?s.effort:""})+"</section></div>";
 }
 function renderChat(id){
 if(id&&!CS_ID.test(id))id="";
@@ -8106,7 +8144,7 @@ var bottom=function(){if(stick)thread.scrollTop=thread.scrollHeight;};
 if(!s){
 bindChat(sec,{
 id:"",key:"cs_new",ph:"cs.ph_new",send_tip:"cs.send_tip",dropEmpty:true,turns:csAll,
-create:function(mode){return api("/api/chat-sessions",{method:"POST",body:{origin:"chat",permission_mode:mode}});},
+create:function(mode,effort){return api("/api/chat-sessions",{method:"POST",body:{origin:"chat",permission_mode:mode,effort:effort}});},
 onSent:function(x){location.hash="#/chat/"+enc(x.id);return true;}
 });
 $("#rc-in",sec).focus();

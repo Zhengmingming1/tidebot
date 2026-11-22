@@ -24,6 +24,7 @@ type ChatSession struct {
 	// opening a session so the directory tag can show it before Send.
 	WorkspaceProblem string  `json:"workspace_problem,omitempty"`
 	PermissionMode   string  `json:"permission_mode"` // read | edit | exec
+	Effort           string  `json:"effort"`          // "" (not passed) | low | medium | high; the next turns use it
 	Provider         string  `json:"provider"`
 	Turns            int     `json:"turns"`     // turns sent (the origin run is turn 0)
 	TurnHint         int     `json:"turn_hint"` // from this many turns the page shows a soft "long session" hint (no limit)
@@ -93,6 +94,12 @@ type chatModeSetter interface {
 	SetChatMode(ctx context.Context, id, mode string) (ChatSession, error)
 }
 
+// chatEffortSetter is optional: an app that lets the owner change a session's
+// --effort (PUT /api/chat-sessions/{id}/effort).
+type chatEffortSetter interface {
+	SetChatEffort(ctx context.Context, id, effort string) (ChatSession, error)
+}
+
 // chatSessionSigner is optional: an app that can fingerprint a session cheaply
 // lets the session page's 1.5 s poll skip unchanged sessions.
 type chatSessionSigner interface {
@@ -108,6 +115,8 @@ type ChatSessionCreate struct {
 	WebAccess bool   `json:"web_access"`
 	// PermissionMode: read | edit | exec; "" = the run's level (blank: read).
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// Effort: nil = the run's effort (blank: default); "" = default; low | medium | high.
+	Effort *string `json:"effort,omitempty"`
 }
 
 // ChatTurnStarted is the answer to sending a turn.
@@ -217,6 +226,10 @@ func (s *Server) handleChatSessions(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": "run_id required", "code": "invalid"})
 			return
 		}
+		if body.Effort != nil && !validChatEffort(*body.Effort) {
+			writeJSON(w, 400, map[string]string{"error": "effort must be empty, low, medium or high", "code": "invalid"})
+			return
+		}
 		ses, err := api.CreateChatSession(r.Context(), body)
 		if err != nil {
 			chatErr(w, err)
@@ -229,7 +242,8 @@ func (s *Server) handleChatSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleChatSessionSub: GET/DELETE /api/chat-sessions/{id}, POST /api/chat-sessions/{id}/turns,
-// PUT /api/chat-sessions/{id}/bindings, PUT /api/chat-sessions/{id}/mode.
+// PUT /api/chat-sessions/{id}/bindings, PUT /api/chat-sessions/{id}/mode,
+// PUT /api/chat-sessions/{id}/effort.
 func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 	api := s.deps.ChatSessions
 	if api == nil {
@@ -335,13 +349,37 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, ses)
+	case sub == "effort" && r.Method == http.MethodPut:
+		es, ok := api.(chatEffortSetter)
+		if !ok {
+			writeErr(w, 404, "not available")
+			return
+		}
+		var body struct {
+			Effort *string `json:"effort"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&body); err != nil || body.Effort == nil || !validChatEffort(*body.Effort) {
+			writeJSON(w, 400, map[string]string{"error": "effort must be empty, low, medium or high", "code": "invalid"})
+			return
+		}
+		ses, err := es.SetChatEffort(r.Context(), id, *body.Effort)
+		if err != nil {
+			chatErr(w, err)
+			return
+		}
+		writeJSON(w, 200, ses)
 	case sub == "draft" || strings.HasPrefix(sub, "draft/") || sub == "task-preset":
 		s.handleChatDraft(w, r, id, sub)
-	case sub == "" || sub == "turns" || sub == "bindings" || sub == "mode":
+	case sub == "" || sub == "turns" || sub == "bindings" || sub == "mode" || sub == "effort":
 		writeErr(w, 405, "method")
 	default:
 		writeErr(w, 404, "not found")
 	}
+}
+
+// validChatEffort: "" (not passed) or one of Claude Code's --effort levels.
+func validChatEffort(e string) bool {
+	return e == "" || e == "low" || e == "medium" || e == "high"
 }
 
 func attachTurnErrInfo(turns []ChatTurn) {
