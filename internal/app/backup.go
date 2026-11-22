@@ -314,7 +314,7 @@ func RestoreBackup(file, home, passphrase string) (*BackupManifest, error) {
 		}
 		// User-selected folders live outside the install and are not rewritten
 		// (version content is immutable). Mark a one-time notice so the UI can
-		// list tasks whose folders are missing on this computer.
+		// list tasks and workflows whose folders are missing on this computer.
 		if err := webui.MarkMissingWorkspaceNotice(context.Background(), sqlDB); err != nil {
 			return nil, err
 		}

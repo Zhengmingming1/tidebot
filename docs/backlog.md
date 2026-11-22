@@ -7374,3 +7374,22 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 工作流节点的强度仍跟节点任务走，编辑器里不单独显示。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；工作流 `workspace_dir` 换机恢复后仍不提示。
 - 本机 box 缺 `socat`，可执行命令档的会话发送会报「command sandbox unavailable」，截图时只能用可修改档；这是环境问题，不是回归。
+
+### 2026-11-22（续）：换机恢复后的工作目录提示也列出工作流
+
+这是 2026-11-22 20:00 Asia/Shanghai 的 4 小时优化。
+
+- **问题**：上一轮（00f240c）恢复备份后只提示了工作目录不在这台电脑上的任务。工作流定义里用户自选的 `workspace_dir` 同样不会在恢复时改写（版本按内容存），而工作流没有「第一次运行再建」的默认目录，`prepareWorkflow` 会直接以 `not_found` 拒绝，用户只能等到点「运行」才发现。另外任务检查直接 `os.Stat` 原始路径，保存成 `~/proj` 的目录（运行时按 `ExpandHome` 展开）即使存在也会被误列。
+- **改法**：`GET /api/tasks/missing-workspaces` 增加 `workflows`：未删除的工作流按当前版本定义的 `workspace_dir`（空则跳过），像运行一样展开 `~` 后不存在或不是目录就列入（名字、路径，按名字排序，最多 200 个）；只有工作流缺目录时也保持待提示，任务和工作流都不缺时才自动取消。任务检查改为同样先展开 `~`。对话框标题和说明改为「工作目录」通称，按「N 个任务 / N 个工作流」分两段列出（空段不显示，单复数分开），工作流链接到 `#/workflows/{id}`，点链接关闭对话框。不改任何定义或版本内容。
+- 测试：`TestMissingWorkspacesWorkflows`（缺目录的工作流和 `~/nope` 列入；无目录、目录存在、`~/proj` 存在、已删除、旧版本缺但当前版本已改的不列入；只有工作流时仍 pending；版本定义未被改写；`~/proj` 任务不再误列；全部补齐后自动取消且 `workflows` 为空数组）；`TestMissingWorkspacesUI` 增加只有工作流、两段并存（任务在前）、链接与转义、单复数键的检查。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`build-webui.py --check`、`check-i18n.py` 通过。
+- 截图：`/workspace/tidebot-shots/2026-11-22-2000-missing-ws-workflows-{zh-CN,en}.png`（1024×655，石墨主题，headless Chrome + 演示数据：2 个任务、1 个工作流的目录已删除）。
+- 耗时：不是性能改动。只在恢复后待提示时多读一次工作流列表，并对有目录的工作流各做一次 `Stat`。
+
+**心得**：「恢复后路径对不上」这类提示要覆盖所有保存了用户目录的实体，否则用户会以为提示里没列的都没事。检查目录是否存在必须和运行时取路径的方式完全一致（这里是 `~` 展开），否则会误报。
+
+**参考**：沿用 00f240c 的一次性说明和应用内对话框（Uptime Kuma `src/components/Confirm.vue` 同类做法，只借思路）。
+
+**后续想法**：
+- 会话（`chat_sessions.workspace_dir`）在恢复时会按 home 改写，但用户自选目录同样可能不在；会话打开时已标红，暂不进这个对话框。
+- 工作流库列表卡片上还看不出目录缺失（编辑器里已有目录检查）；若常见，可在卡片上加一个提示标签。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。

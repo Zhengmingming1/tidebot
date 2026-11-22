@@ -9,6 +9,8 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 )
 
 // missingWorkspaceNoticeKey is set by agentd restore so the WebUI can tell the
@@ -26,6 +28,15 @@ type MissingWorkspaceTask struct {
 	Name         string `json:"name"`
 	WorkspaceDir string `json:"workspace_dir"`
 	Status       string `json:"status,omitempty"`
+}
+
+// MissingWorkspaceWorkflow is one workflow whose working folder (the current
+// definition's workspace_dir) is missing after a restore. Workflows have no
+// per-run default folder, so a run would be refused until the owner picks one.
+type MissingWorkspaceWorkflow struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	WorkspaceDir string `json:"workspace_dir"`
 }
 
 type missingWorkspaceNoticeState struct {
@@ -74,7 +85,7 @@ func missingWorkspaceNoticePending(ctx context.Context, db *sql.DB) (bool, error
 	return v.State == "pending", nil
 }
 
-// handleMissingWorkspaces: GET /api/tasks/missing-workspaces → {pending, tasks};
+// handleMissingWorkspaces: GET /api/tasks/missing-workspaces → {pending, tasks, workflows};
 // POST dismisses the notice. When a restore is pending but every current folder
 // exists (or is the per-task default under the tidebot home), GET clears the
 // flag and returns pending=false so the dialog is not shown.
@@ -91,7 +102,7 @@ func (s *Server) handleMissingWorkspaces(w http.ResponseWriter, r *http.Request)
 			writeErr(w, 500, err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"pending": false, "tasks": []MissingWorkspaceTask{}})
+		writeJSON(w, 200, noMissingWorkspaces)
 	default:
 		writeErr(w, 405, "GET or POST only")
 	}
@@ -105,7 +116,7 @@ func (s *Server) getMissingWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !pending {
-		writeJSON(w, 200, map[string]any{"pending": false, "tasks": []MissingWorkspaceTask{}})
+		writeJSON(w, 200, noMissingWorkspaces)
 		return
 	}
 	tasks, err := s.listMissingTaskWorkspaces(ctx)
@@ -113,15 +124,29 @@ func (s *Server) getMissingWorkspaces(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if len(tasks) == 0 {
+	flows, err := s.listMissingWorkflowWorkspaces(ctx)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if len(tasks) == 0 && len(flows) == 0 {
 		if err := DismissMissingWorkspaceNotice(ctx, s.deps.DB); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"pending": false, "tasks": []MissingWorkspaceTask{}})
+		writeJSON(w, 200, noMissingWorkspaces)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"pending": true, "tasks": tasks})
+	writeJSON(w, 200, map[string]any{"pending": true, "tasks": tasks, "workflows": flows})
+}
+
+var noMissingWorkspaces = map[string]any{"pending": false, "tasks": []MissingWorkspaceTask{}, "workflows": []MissingWorkspaceWorkflow{}}
+
+// folderMissing reports whether a saved working folder is absent on this
+// computer, expanding "~" the same way a run does.
+func folderMissing(ws string) bool {
+	fi, err := os.Stat(guard.ExpandHome(ws))
+	return err != nil || !fi.IsDir()
 }
 
 func (s *Server) listMissingTaskWorkspaces(ctx context.Context) ([]MissingWorkspaceTask, error) {
@@ -150,14 +175,44 @@ func (s *Server) listMissingTaskWorkspaces(ctx context.Context) ([]MissingWorksp
 		}
 		// Default folders under the (already remapped) tidebot home are created
 		// on the first run; they are not the user's own project folder.
-		if home != "" && within(ws, home) {
+		if home != "" && within(guard.ExpandHome(ws), home) {
 			continue
 		}
-		fi, err := os.Stat(ws)
-		if err == nil && fi.IsDir() {
+		if !folderMissing(ws) {
 			continue
 		}
 		out = append(out, MissingWorkspaceTask{ID: v.Task.ID, Name: v.Task.Name, WorkspaceDir: ws, Status: v.Task.Status})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	if len(out) > maxMissingWorkspaceTasks {
+		out = out[:maxMissingWorkspaceTasks]
+	}
+	return out, nil
+}
+
+// listMissingWorkflowWorkspaces lists live workflows whose current definition
+// names a folder that is not on this computer. Definitions are versioned and
+// left as they are; the owner edits the workflow to pick a new folder.
+func (s *Server) listMissingWorkflowWorkspaces(ctx context.Context) ([]MissingWorkspaceWorkflow, error) {
+	out := make([]MissingWorkspaceWorkflow, 0)
+	if s.deps.Workflows == nil {
+		return out, nil
+	}
+	list, err := s.deps.Workflows.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, wf := range list {
+		ws := wf.Definition.WorkspaceDir
+		if ws == "" || !folderMissing(ws) {
+			continue
+		}
+		out = append(out, MissingWorkspaceWorkflow{ID: wf.ID, Name: wf.Name, WorkspaceDir: ws})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {

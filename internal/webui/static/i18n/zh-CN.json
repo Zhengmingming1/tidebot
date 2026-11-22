@@ -3383,8 +3383,11 @@
   "dep.txt.dep_title_workspace": "工作目录",
   "dep.txt.dep_title_task_workspace": "任务工作目录",
   "dep.txt.dep_title_origin": "{name}（{origin}）",
-  "mw.title": "有些任务的工作目录不在这台电脑上",
-  "mw.body": "换机恢复备份后，这些任务仍指向这里不存在的目录。版本里记下的目录不会自动改写。请打开任务，改成这台电脑上的目录。",
+  "mw.title": "有些工作目录不在这台电脑上",
+  "mw.body": "换机恢复备份后，下面的任务或工作流仍指向这里不存在的目录。已保存的目录不会自动改写。请打开它们，改成这台电脑上的目录。",
   "mw.n": "{n} 个任务",
+  "mw.n_wf": "{n} 个工作流",
+  "mw.n_one": "{n} 个任务",
+  "mw.n_wf_one": "{n} 个工作流",
   "mw.got_it": "知道了"
 }

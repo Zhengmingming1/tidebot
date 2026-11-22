@@ -932,6 +932,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg-sunk); pa
 .mw-list li:first-child { border-top: 0; }
 .mw-list strong { font-weight: 600; }
 .mw-list .mw-path { color: var(--text-3); font-size: 12px; word-break: break-all; }
+.mw-list + .mw-n { margin-top: 16px; }
 .td-wf-runs { margin-bottom: 8px; }
 .td-wf-runs h3, .td-node-runs h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 .td-node-runs { margin-top: 16px; }
