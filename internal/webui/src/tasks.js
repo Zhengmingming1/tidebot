@@ -305,3 +305,33 @@
       }
     });
   }
+
+  // After a backup is restored on another computer, list tasks whose working
+  // folders are missing (user-selected paths are not rewritten). Shown once
+  // until the owner acknowledges; closing without "Got it" brings it back
+  // on the next load. The in-app dialog is used, never a native alert.
+  var missingWsAsked = false;
+  function offerMissingWorkspaces() {
+    if (missingWsAsked) return;
+    missingWsAsked = true;
+    api("/api/tasks/missing-workspaces").then(function (d) {
+      if (!d || !d.pending || !(d.tasks || []).length) return;
+      var rows = d.tasks.map(function (t) {
+        return '<li><a href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + '</strong></a><div class="mw-path">' + esc(t.workspace_dir) + "</div></li>";
+      }).join("");
+      modal('<div class="card-head"><span class="ico warn">' + ic("folder") + "</span><h2>" + esc(T("mw.title")) + "</h2></div>" +
+        '<p class="confirm-body">' + esc(T("mw.body")) + "</p>" +
+        '<p class="muted">' + esc(T("mw.n", { n: num(d.tasks.length) })) + "</p>" +
+        '<ul class="mw-list">' + rows + '</ul>' +
+        '<div class="actions"><button type="button" class="btn primary" id="mw-ok" autofocus>' + esc(T("mw.got_it")) + "</button></div>", function (root, close) {
+        $("#mw-ok", root).addEventListener("click", function () {
+          var b = $("#mw-ok", root); b.disabled = true;
+          api("/api/tasks/missing-workspaces", { method: "POST", body: {} }).then(close).catch(function (e) { b.disabled = false; fail(e); });
+        });
+        $$("a[href^='#/tasks/']", root).forEach(function (a) {
+          a.addEventListener("click", function () { close(); });
+        });
+      });
+    }).catch(function () {});
+  }
+

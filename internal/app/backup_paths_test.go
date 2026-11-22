@@ -294,6 +294,13 @@ func TestRestoreRemapsPathsFromAnotherMachine(t *testing.T) {
 	if tb2 != `{"path":"/Users/张三/code/app"}` {
 		t.Errorf("user project trigger remapped: %s", tb2)
 	}
+	var notice string
+	if err := rdb.QueryRow(`SELECT value_json FROM settings WHERE user_id='owner' AND key='restore.missing_workspaces'`).Scan(&notice); err != nil {
+		t.Fatalf("missing-workspace notice not marked: %v", err)
+	}
+	if !strings.Contains(notice, `"state":"pending"`) {
+		t.Errorf("notice state %s", notice)
+	}
 }
 
 // A Windows backup may store 8.3 short paths (C:\Users\RUNNER~1\...) while the
@@ -440,4 +447,48 @@ func walkJSONStrings(t *testing.T, raw string, fn func(string)) {
 		}
 	}
 	walk(v)
+}
+
+// Restoring onto the same home path still marks the one-time notice: user-selected
+// folders are not rewritten either way, and they may be missing on this computer.
+func TestRestoreMarksMissingWorkspaceNoticeWhenHomeUnchanged(t *testing.T) {
+	home := t.TempDir()
+	src := filepath.Join(t.TempDir(), "src.db")
+	sdb, err := db.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sdb.Exec(`VACUUM INTO ?`, src+".snap"); err != nil {
+		t.Fatal(err)
+	}
+	sdb.Close()
+
+	bak := filepath.Join(t.TempDir(), "x.agentbak")
+	f, _ := os.Create(bak)
+	zw := zip.NewWriter(f)
+	mw, _ := zw.Create("manifest.json")
+	_ = json.NewEncoder(mw).Encode(BackupManifest{Format: BackupFormat, HomeDir: home, DataDir: filepath.Join(home, "data")})
+	dw, _ := zw.Create("data/tidebot.db")
+	raw, _ := os.ReadFile(src + ".snap")
+	_, _ = dw.Write(raw)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if _, err := RestoreBackup(bak, home, ""); err != nil {
+		t.Fatal(err)
+	}
+	rdb, err := db.Open(filepath.Join(home, "data", "tidebot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rdb.Close()
+	var notice string
+	if err := rdb.QueryRow(`SELECT value_json FROM settings WHERE user_id='owner' AND key='restore.missing_workspaces'`).Scan(&notice); err != nil {
+		t.Fatalf("missing-workspace notice not marked: %v", err)
+	}
+	if !strings.Contains(notice, `"state":"pending"`) {
+		t.Errorf("notice state %s", notice)
+	}
 }

@@ -55,6 +55,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/providers/infer", s.withAuthCSRF(postOnly(s.handleProviderInfer)))
 	mux.HandleFunc("/api/plugins/prefill", s.withAuthCSRF(postOnly(s.handlePluginPrefill)))
 	mux.HandleFunc("/api/tasks/workspace-check", s.withAuthCSRF(s.handleWorkspaceCheck))
+	mux.HandleFunc("/api/tasks/missing-workspaces", s.withAuthCSRF(s.handleMissingWorkspaces))
 	mux.HandleFunc("/api/tasks/infer", s.withAuthCSRF(postOnly(s.handleTaskInfer)))
 	mux.HandleFunc("/api/plugins/upload", s.withAuthCSRF(s.handlePluginUpload))
 	mux.HandleFunc("/api/providers/", s.withAuthCSRF(s.handleProviderSub))

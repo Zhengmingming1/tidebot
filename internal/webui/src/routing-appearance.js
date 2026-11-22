@@ -242,6 +242,7 @@
       renderShell();
       route();
       evsStart();
+      offerMissingWorkspaces();
     }).catch(function (e) {
       // Unreachable at start: keep the splash, the connection bar retries and boots again.
       if (e && e.offline) return;

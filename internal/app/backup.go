@@ -21,6 +21,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
 	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
+	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
 
 // BackupFormat identifies .agentbak archives (zip).
@@ -300,15 +301,25 @@ func RestoreBackup(file, home, passphrase string) (*BackupManifest, error) {
 	if m.DataDir != "" && m.DataDir != dataDir {
 		moves = append(moves, homeMove{m.DataDir, dataDir})
 	}
-	if len(moves) > 0 {
+	if _, err := os.Stat(dbPath); err == nil {
 		sqlDB, err := db.Open(dbPath)
 		if err != nil {
 			return nil, err
 		}
 		defer sqlDB.Close()
-		if err := remapRestoredPaths(context.Background(), sqlDB, moves); err != nil {
+		if len(moves) > 0 {
+			if err := remapRestoredPaths(context.Background(), sqlDB, moves); err != nil {
+				return nil, err
+			}
+		}
+		// User-selected folders live outside the install and are not rewritten
+		// (version content is immutable). Mark a one-time notice so the UI can
+		// list tasks whose folders are missing on this computer.
+		if err := webui.MarkMissingWorkspaceNotice(context.Background(), sqlDB); err != nil {
 			return nil, err
 		}
+	} else if len(moves) > 0 {
+		return nil, fmt.Errorf("restore database: %w", err)
 	}
 	return &m, nil
 }

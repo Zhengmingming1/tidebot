@@ -3376,5 +3376,9 @@
   "dep.txt.dep_title_task_policy": "Task policy",
   "dep.txt.dep_title_workspace": "Workspace",
   "dep.txt.dep_title_task_workspace": "Task workspace",
-  "dep.txt.dep_title_origin": "{name} ({origin})"
+  "dep.txt.dep_title_origin": "{name} ({origin})",
+  "mw.title": "Some tasks' folders aren't on this computer",
+  "mw.body": "After restoring a backup here, these tasks still point to folders that aren't on this computer. The folder stored in a task version isn't rewritten. Open a task and pick a folder on this computer.",
+  "mw.n": "{n} tasks",
+  "mw.got_it": "Got it"
 }

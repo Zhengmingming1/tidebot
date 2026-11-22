@@ -87,6 +87,10 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		s.handleTaskBatch(w, r)
 		return
 	}
+	if id == "missing-workspaces" && len(parts) == 1 {
+		s.handleMissingWorkspaces(w, r)
+		return
+	}
 	if len(parts) == 1 && r.Method == http.MethodPut {
 		s.updateTask(w, r, id)
 		return
