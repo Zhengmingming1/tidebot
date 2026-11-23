@@ -70,13 +70,16 @@ type taskDTO struct {
 	// SkipRuns: upcoming fire times skipped by hand (RFC 3339 UTC, oldest first); the
 	// schedule stays on and next_run_at is already the run after them.
 	SkipRuns []string `json:"skip_runs,omitempty"`
-	// List answer only: what the next run would find at the task's own folder.
+	// List and detail answers: what the next run would find at the task's folder.
 	// A guard problem (sensitive, not_dir, relative, ...) means the run is
 	// refused, the same guard.CheckPlannedDir check runTaskTriggerOn makes;
 	// "missing" means a task that has run before lost its folder and the next
 	// run would start in a new, empty one. Omitted when the folder is fine,
-	// tidebot's own, or the task runs a workflow (its card shows its folder).
-	WorkspaceProblem string `json:"workspace_problem,omitempty"`
+	// or tidebot's own. A workflow task carries the guard.CheckRunDir problem of
+	// the folder in the workflow version it runs, and that folder in
+	// WorkflowWorkspace (only set with a problem).
+	WorkspaceProblem  string `json:"workspace_problem,omitempty"`
+	WorkflowWorkspace string `json:"workflow_workspace,omitempty"`
 }
 
 func toTaskDTO(v tasksvc.TaskView) taskDTO {

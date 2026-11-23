@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/guard"
+	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
+	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
 
 // TestTaskListWorkspaceProblem: the task list marks a task whose own folder the
@@ -167,6 +170,143 @@ if (h.indexOf("s=rn.ws_not_found]") < 0 || h.indexOf("brand_new") >= 0) bad("fal
 `
 	cmd := exec.Command(node, "-e", script)
 	if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+}
+
+// TestTaskDetailWorkspaceProblem: the task detail answer carries the same
+// problem as its list row (checked on the saved folder, before an empty one
+// becomes the default), and a workflow task carries the problem of the folder
+// in the workflow version it runs: pinned to an old version with a gone folder
+// it is flagged, following the current one with an existing folder it is not.
+func TestTaskDetailWorkspaceProblem(t *testing.T) {
+	c := login(t)
+	ctx := context.Background()
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
+	c.s.deps.Cfg.HomeDir = t.TempDir()
+	svc := workflow.New(c.s.deps.DB, func(context.Context, workflow.Node, string, string, func(string)) (string, error) {
+		return "", nil
+	})
+	c.s.deps.Workflows = svc
+	root := t.TempDir()
+	gone, kept, planned := filepath.Join(root, "gone"), filepath.Join(root, "kept"), filepath.Join(root, "later")
+	for _, p := range []string{gone, kept} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk := func(body map[string]any) string {
+		t.Helper()
+		body["provider"] = "anthropic"
+		code, out := c.json(http.MethodPost, "/api/tasks", body)
+		if code >= 300 {
+			t.Fatalf("create %v: %d %v", body["name"], code, out)
+		}
+		return fmt.Sprint(out["id"])
+	}
+	ranID := mk(map[string]any{"name": "Ran", "prompt": "p", "workspace": gone})
+	seedRun(t, c, "r-det", "p", "succeeded", 0.01, time.Now())
+	if _, err := c.s.deps.DB.Exec(`UPDATE runs SET task_id=? WHERE id=?`, ranID, "r-det"); err != nil {
+		t.Fatal(err)
+	}
+	neverID := mk(map[string]any{"name": "Never ran", "prompt": "p", "workspace": planned})
+	defID := mk(map[string]any{"name": "Default", "prompt": "p"})
+
+	bind := []tasksvc.SkillBinding{{SkillID: "fixture", Mode: "follow"}}
+	def := func(ws string) workflow.Definition {
+		return workflow.Definition{Name: "Flow", WorkspaceDir: ws, Nodes: []workflow.Node{{ID: "a", Kind: "skill", Prompt: "{{input}}", SkillBindings: bind}}}
+	}
+	w1, err := svc.Save(ctx, "", 0, def(gone))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Save(ctx, w1.ID, w1.Version, def(kept)); err != nil {
+		t.Fatal(err)
+	}
+	pinID := mk(map[string]any{"name": "Pinned", "workflow": map[string]any{"id": w1.ID, "version": w1.Version}})
+	followID := mk(map[string]any{"name": "Follows", "workflow": map[string]any{"id": w1.ID, "version": 0}})
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	type exp struct{ prob, wfDir string }
+	want := map[string]exp{
+		ranID:    {taskWsMissing, ""},
+		neverID:  {"", ""},
+		defID:    {"", ""},
+		pinID:    {guard.DirNotFound, gone},
+		followID: {"", ""},
+	}
+	rr := c.do(http.MethodGet, "/api/tasks", "", nil)
+	var list []map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != len(want) {
+		t.Fatalf("listed %d, want %d", len(list), len(want))
+	}
+	for _, tk := range list {
+		w := want[fmt.Sprint(tk["id"])]
+		if got, _ := tk["workspace_problem"].(string); got != w.prob {
+			t.Errorf("list %s: workspace_problem %q, want %q", tk["name"], got, w.prob)
+		}
+		if got, _ := tk["workflow_workspace"].(string); got != w.wfDir {
+			t.Errorf("list %s: workflow_workspace %q, want %q", tk["name"], got, w.wfDir)
+		}
+	}
+	for id, w := range want {
+		code, d := c.json(http.MethodGet, "/api/tasks/"+id, nil)
+		if code != 200 {
+			t.Fatalf("get %s: %d", id, code)
+		}
+		if got, _ := d["workspace_problem"].(string); got != w.prob {
+			t.Errorf("detail %s: workspace_problem %q, want %q", d["name"], got, w.prob)
+		}
+		if got, _ := d["workflow_workspace"].(string); got != w.wfDir {
+			t.Errorf("detail %s: workflow_workspace %q, want %q", d["name"], got, w.wfDir)
+		}
+	}
+	if code, d := c.json(http.MethodGet, "/api/tasks/"+defID, nil); code != 200 || d["workspace_default"] != true {
+		t.Fatalf("default folder still resolved in the detail answer: %v", d)
+	}
+	// Read-only: neither the list nor the detail created the missing folders.
+	for _, p := range []string{gone, planned} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s was created: %v", p, err)
+		}
+	}
+}
+
+// TestTaskDetailWorkspacePill: the overview shows the pill next to the saved
+// folder for a prompt task and next to the workflow for a workflow task, whose
+// tooltip names the workflow's folder.
+func TestTaskDetailWorkspacePill(t *testing.T) {
+	src := strings.ReplaceAll(appJSSource(t), "\r\n", "\n")
+	if !strings.Contains(src, `(tk.workflow?"":taskWsPill(tk))`) && !strings.Contains(src, `(tk.workflow ? "" : taskWsPill(tk))`) {
+		t.Error("overview folder row does not render taskWsPill")
+	}
+	if !strings.Contains(src, `T("tf.wf_follow"))+"</span>"+taskWsPill(tk)`) && !strings.Contains(src, `T("tf.wf_follow")) + "</span>" + taskWsPill(tk)`) {
+		t.Error("overview workflow row does not render taskWsPill")
+	}
+	fn := regexp.MustCompile(`(?s)  function taskWsPill\(t\) \{\n.*?\n  \}\n`).FindString(src)
+	node, err := exec.LookPath("node")
+	if fn == "" || err != nil {
+		t.Skip("node not installed or taskWsPill not found")
+	}
+	script := `var state = { dict: { "rn.ws_not_found": "x", "rn.ws_not_found_tip": "x" } };
+function T(k, v) { return k + (v ? "[" + Object.keys(v).map(function (n) { return n + "=" + v[n]; }).join("|") + "]" : ""); }
+function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+` + fn + `
+function bad(m, h) { console.error(m, h); process.exitCode = 1; }
+var h = taskWsPill({ id: "t", workflow: { id: "w" }, workspace: "/own", workspace_problem: "not_found", workflow_workspace: "/old/<b>" });
+if (h.indexOf("pill bad sm tl-ws-pill") < 0 || h.indexOf("wf.ws_bad_tip[why=rn.ws_not_found_tip|p=/old/&lt;b&gt;]") < 0 || h.indexOf("/own") >= 0) bad("workflow task", h);
+if (taskWsPill({ id: "t", workflow: { id: "w" } }) !== "") bad("workflow task without problem", "");
+h = taskWsPill({ id: "t", workflow: { id: "w" }, workspace_problem: "missing", workflow_workspace: "/x" });
+if (h.indexOf("pill bad") < 0 || h.indexOf("s=rn.ws_not_found]") < 0) bad("workflow fallback", h);
+`
+	if out, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil || len(out) > 0 {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
 }

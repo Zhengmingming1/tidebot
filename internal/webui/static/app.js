@@ -2447,6 +2447,10 @@ return(h>>>8)%6;
 function taskWsPill(t){
 var pr=t.workspace_problem;
 if(!pr)return "";
+if(t.workflow){
+var wk="rn.ws_"+(state.dict["rn.ws_"+pr+"_tip"]!=null?pr:"not_found");
+return '<span class="pill bad sm tl-ws-pill" data-tip="'+esc(T("wf.ws_bad_tip",{why:T(wk+"_tip"),p:t.workflow_workspace||""}))+'">'+esc(T("wf.ws_bad",{s:T(wk)}))+"</span>";
+}
 if(pr==="missing")return '<span class="pill warn sm tl-ws-pill" data-tip="'+esc(T("tl.ws_missing_tip",{p:t.workspace||""}))+'">'+esc(T("wf.ws_bad",{s:T("rn.ws_not_found")}))+"</span>";
 var k="rn.ws_"+(state.dict["rn.ws_"+pr+"_tip"]!=null?pr:"not_found");
 return '<span class="pill bad sm tl-ws-pill" data-tip="'+esc(T("tl.ws_bad_tip",{why:T(k+"_tip"),p:t.workspace||""}))+'">'+esc(T("wf.ws_bad",{s:T(k)}))+"</span>";
@@ -2891,10 +2895,10 @@ return '<div class="thread"><dl class="kv ov">'+
 "<dt>"+esc(T("td.requirements"))+"</dt><dd>"+(tk.constraints.length?'<ul class="list-plain">'+tk.constraints.map(function(c){return "<li>"+esc(c)+"</li>";}).join("")+"</ul>":'<span class="muted">'+esc(T("td.none_yet"))+"</span>")+"</dd>"+
 "<dt>"+esc(T("col.schedule"))+"</dt><dd>"+esc(cronHuman(tk.cron))+(tk.cron?'<span class="ov-next" id="ov-next"></span>':"")+"</dd>"+
 "<dt>"+esc(T("f.provider"))+"</dt><dd>"+esc(tk.provider||T("td.default"))+"</dd>"+
-(tk.workflow?"<dt>"+esc(T("tf.wf"))+"</dt><dd>"+(tk.workflow.name?'<a href="#/workflows/'+enc(tk.workflow.id)+'">'+esc(tk.workflow.name)+"</a> "+'<span class="tag" data-tip="'+esc(T("tf.wf_version"))+'">'+esc(tk.workflow.version?"v"+tk.workflow.version:T("tf.wf_follow"))+"</span>":'<span class="muted">'+esc(T("tf.wf_gone"))+"</span>")+"</dd>":
+(tk.workflow?"<dt>"+esc(T("tf.wf"))+"</dt><dd>"+(tk.workflow.name?'<a href="#/workflows/'+enc(tk.workflow.id)+'">'+esc(tk.workflow.name)+"</a> "+'<span class="tag" data-tip="'+esc(T("tf.wf_version"))+'">'+esc(tk.workflow.version?"v"+tk.workflow.version:T("tf.wf_follow"))+"</span>"+taskWsPill(tk):'<span class="muted">'+esc(T("tf.wf_gone"))+"</span>")+"</dd>":
 "<dt>"+esc(T("nav.skills"))+"</dt><dd>"+(tk.skills.length?tk.skills.map(esc).join(", "):'<span class="muted">'+esc(T("td.none"))+"</span>")+"</dd>")+
 "<dt>"+esc(T("td.workspace"))+'</dt><dd class="ws-row">'+(tk.workspace?'<code class="ws-path">'+esc(tk.workspace)+"</code>"+
-(tk.workspace_default?'<span class="tag" data-tip="'+esc(T("ws.default_tip"))+'">'+esc(T("ws.default"))+"</span>":"")+
+(tk.workspace_default?'<span class="tag" data-tip="'+esc(T("ws.default_tip"))+'">'+esc(T("ws.default"))+"</span>":"")+(tk.workflow?"":taskWsPill(tk))+
 '<button type="button" class="icon-btn sm" id="ws-copy" data-tip="'+esc(T("ws.copy"))+'" aria-label="'+esc(T("ws.copy"))+'">'+ic("copy","sm")+"</button>"+
 '<button type="button" class="icon-btn sm hidden" id="ws-open" aria-label="">'+ic("folder","sm")+"</button>":'<span class="muted">—</span>')+"</dd></dl></div>";
 }

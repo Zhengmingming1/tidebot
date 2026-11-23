@@ -2327,6 +2327,8 @@ button.spc-col:focus-visible .spc-bar { outline: 2px solid var(--accent); outlin
 .kv dd.ws-row .ws-path { min-width: 0; flex: 0 1 auto; padding: 4px 8px; line-height: 20px; word-break: break-all; }
 .kv dd.ws-row .tag { flex: none; margin-top: 4px; line-height: 18px; }
 .kv dd.ws-row .icon-btn { flex: none; }
+.kv dd.ws-row .tl-ws-pill { flex: none; margin-top: 4px; white-space: nowrap; }
+.kv dd .tag + .tl-ws-pill { margin-left: 8px; white-space: nowrap; }
 .kv dd.ws-row [data-tip]:hover::after, .kv dd.ws-row [data-tip]:focus-visible::after { left: auto; right: -4px; transform: none; }
 /* Task form: working folder (path input + pick / reset icons, status pill in the label row) */
 .ws-field > span .pill { height: 18px; padding: 0 6px; font-size: var(--fs-xs); cursor: help; }

@@ -12,11 +12,17 @@
     return (h >>> 8) % 6;
   }
   // taskWsPill: the task's own folder its next run would refuse (moved into a sensitive
-  // place, now a file, ...) or would replace with a new empty one (gone since the last run).
+  // place, now a file, ...) or would replace with a new empty one (gone since the last run);
+  // for a workflow task, the folder of the workflow version it runs, which a run refuses.
   // Reasons and the saved path go in the tooltip; the row still opens the task to edit it.
+  // Used by the task list row and the task detail overview.
   function taskWsPill(t) {
     var pr = t.workspace_problem;
     if (!pr) return "";
+    if (t.workflow) {
+      var wk = "rn.ws_" + (state.dict["rn.ws_" + pr + "_tip"] != null ? pr : "not_found");
+      return '<span class="pill bad sm tl-ws-pill" data-tip="' + esc(T("wf.ws_bad_tip", { why: T(wk + "_tip"), p: t.workflow_workspace || "" })) + '">' + esc(T("wf.ws_bad", { s: T(wk) })) + "</span>";
+    }
     if (pr === "missing") return '<span class="pill warn sm tl-ws-pill" data-tip="' + esc(T("tl.ws_missing_tip", { p: t.workspace || "" })) + '">' + esc(T("wf.ws_bad", { s: T("rn.ws_not_found") })) + "</span>";
     var k = "rn.ws_" + (state.dict["rn.ws_" + pr + "_tip"] != null ? pr : "not_found");
     return '<span class="pill bad sm tl-ws-pill" data-tip="' + esc(T("tl.ws_bad_tip", { why: T(k + "_tip"), p: t.workspace || "" })) + '">' + esc(T("wf.ws_bad", { s: T(k) })) + "</span>";

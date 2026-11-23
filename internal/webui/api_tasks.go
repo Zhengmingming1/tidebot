@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"os"
 
 	"io"
 
@@ -47,7 +48,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.applyPolicyWaits(out)
-	s.applyTaskWorkspaceProblems(out)
+	s.applyTaskWorkspaceProblems(r.Context(), out)
 	writeJSON(w, 200, out)
 }
 
@@ -130,6 +131,8 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d := toTaskDTO(v)
+		home, _ := os.UserHomeDir()
+		s.applyTaskWorkspaceProblem(ctx, &d, home, nil, func() bool { return s.taskHasRun(ctx, id) }) // on the saved folder, before "" becomes the default one
 		d.Workspace, d.WorkspaceDefault = s.taskWorkspace(d.ID, d.Workspace)
 		if d.Workflow != nil {
 			d.Workflow = s.taskWorkflowRef(ctx, d.Workflow.ID, d.Workflow.Version)
