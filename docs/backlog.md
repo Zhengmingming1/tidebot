@@ -7561,3 +7561,4 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - `execRunTools` 与 `applyExecSandbox` 里的清单还是两处字面量，可以让 `applyExecSandbox` 直接调用 `execRunTools`（本轮未动运行路径，避免影响运行）。
 - 编辑表单里「检查依赖」对工作流任务仍按提示词任务预览；任务列表接口给工作流任务返回的仍是任务自己的目录。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+- 推送后 Windows CI 上 `TestListRunsByTask` 偶发失败：同一毫秒里启动的几次工作流运行 `created_at` 和 id 的时间前缀都相同，排序由随机后缀决定。测试里给三次运行写入不同的开始时间修好。产品侧：`now()` 用 `RFC3339Nano` 会去掉末尾的 0，整秒时间（`…:00Z`）在字符串排序里会排到同一秒带小数的时间之后，可以改成定长小数格式（需迁移旧行，先记下）。

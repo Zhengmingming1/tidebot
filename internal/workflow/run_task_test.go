@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -64,6 +65,13 @@ func TestListRunsByTask(t *testing.T) {
 	finished(t, s, first)
 	finished(t, s, other)
 	finished(t, s, second)
+	// starts in the same millisecond share created_at and the id's time prefix
+	// (seen on Windows CI): give each a distinct start time
+	for i, rid := range []string{first, other, second} {
+		if _, err := s.DB.Exec(`UPDATE workflow_runs SET created_at=? WHERE id=?`, fmt.Sprintf("2026-11-24T00:00:0%dZ", i), rid); err != nil {
+			t.Fatal(err)
+		}
+	}
 	list, err := s.ListRunsByTask(context.Background(), "  tsk_night  ", 10)
 	if err != nil || len(list) != 2 {
 		t.Fatalf("task list: %d %v", len(list), err)
