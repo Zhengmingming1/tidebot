@@ -7562,3 +7562,24 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 编辑表单里「检查依赖」对工作流任务仍按提示词任务预览；任务列表接口给工作流任务返回的仍是任务自己的目录。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
 - 推送后 Windows CI 上 `TestListRunsByTask` 偶发失败：同一毫秒里启动的几次工作流运行 `created_at` 和 id 的时间前缀都相同，排序由随机后缀决定。测试里给三次运行写入不同的开始时间修好。产品侧：`now()` 用 `RFC3339Nano` 会去掉末尾的 0，整秒时间（`…:00Z`）在字符串排序里会排到同一秒带小数的时间之后，可以改成定长小数格式（需迁移旧行，先记下）。
+
+### 2026-11-24（续 2）：工作流时间改为定长格式，同一秒内的执行不再排错（BUG）
+
+这是 2026-11-24 11:00（Australia/Sydney）的一轮优化，接上一轮记下的「`RFC3339Nano` 去掉末尾的 0 导致排序不对」。
+
+- **问题**：`internal/workflow` 的 `now()` 用 `time.RFC3339Nano`，它会去掉小数末尾的 0，整秒时直接写成 `…:05Z`。执行列表、任务详情里的「该任务启动的工作流运行」、工作流库都按这些列做文本排序（`ORDER BY created_at DESC` / `updated_at DESC`），而 `'.'` 排在 `'Z'` 前面，所以整秒的 `…:05Z` 会排到同一秒更晚的 `…:05.3Z` 之后——更早的执行显示成「最新」。上一轮 Windows CI 上 `TestListRunsByTask` 偶发失败就碰到了同一类问题。
+- **改法**：
+  - `now()` 改为定长 `2006-01-02T15:04:05.000000000Z`（新函数 `stamp`，始终 UTC、9 位小数），和 `internal/optimize` 的 `nowUTC` 同一个格式。仍是合法的 RFC 3339，前端 `new Date()` 和 Go `time.Parse(time.RFC3339Nano, …)` 照常解析，接口字段不变。
+  - 迁移 `050_workflow_fixed_width_times.sql`：把 `workflows.created_at/updated_at`、`workflow_versions.created_at`、`workflow_runs.created_at/started_at/finished_at`、`workflow_run_nodes.started_at/finished_at` 里形如 `YYYY-MM-DDTHH:MM:SS[.f{1,8}]Z` 的旧值补齐到 9 位小数；空串和其他形状的值不动。纯 SQL，参数化无关（无外部输入），不改表结构、不重建索引。
+- **测试**：`TestStampSortsLikeTime`（整秒、末尾带 0、1 ns 等 6 个时间的文本顺序与时间顺序一致；非 UTC 输入转成 UTC；可被 RFC3339Nano 解析回原值。用旧的 `RFC3339Nano` 跑会失败）；`TestRunTimesFixedWidth`（真实执行后 run、节点、工作流的时间都是定长）；`TestWorkflowFixedWidthTimesMigration`（迁移前同一秒的整秒执行排在前面——复现 BUG；迁移后补齐为 9 位、顺序正确，空串、`t`、带空格的旧值不动）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）通过。
+- **耗时**：不是性能改动。迁移一次性执行：内存库 10,000 次执行 + 100,000 个节点约 306 ms（Python sqlite3 实测），常见数据量是毫秒级。
+- **不是 UI 改动**，没有截图。
+
+**心得**：只要时间按文本比较，就必须定长。`RFC3339Nano` 适合展示和解析，不适合当排序键；仓库里 `optimize` 早就踩过同一个坑（`tsLayout`），这次把工作流也对齐了。
+
+**参考**：go-gitea/gitea `modules/timeutil/timestamp.go` 把时间存成整数 `TimeStamp`，排序和比较不依赖字符串格式；这里保留 TEXT 列，用定长格式达到同样「文本序 = 时间序」的效果（只借思路，不抄代码）。
+
+**后续想法**：
+- `rowprune` 的截止时间用 `time.RFC3339`（无小数），与定长的工作流时间比较时，截止那一秒内的行会被当作「更早」，最多提前不到 1 秒删除，影响可忽略；以后可让清理规则按表用同一定长格式。
+- `capability` 包里的 `proposals`、`lifecycle`、`store` 也用 `RFC3339Nano` 写时间，`rowprune` 用 `created_at < ?` 清理 `capability_proposals`；如有按这些列排序的列表，可同样改定长并迁移。
+- 上轮候选仍在：运行时直接复用 `execRunTools`；编辑表单「检查依赖」对工作流任务仍按提示词任务预览；任务列表接口给工作流任务返回的仍是任务自己的目录。

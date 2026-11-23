@@ -37,7 +37,16 @@ type Service struct {
 func New(db *sql.DB, execute Executor) *Service {
 	return &Service{DB: db, Execute: execute, active: map[string]context.CancelCauseFunc{}, done: map[string]chan struct{}{}}
 }
-func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+
+// now is a fixed-width UTC timestamp. Lists order by these columns as text, and
+// RFC3339Nano drops trailing zeros: a whole second ("…:05Z") sorted after a later
+// fraction of the same second ("…:05.3Z" < "…:05Z" because '.' < 'Z').
+// Migration 050 pads rows written before this change.
+func now() string { return stamp(time.Now()) }
+
+const tsLayout = "2006-01-02T15:04:05.000000000Z"
+
+func stamp(t time.Time) string { return t.UTC().Format(tsLayout) }
 func (s *Service) check(ctx context.Context, d *Definition) error {
 	if err := Validate(d); err != nil {
 		return err
