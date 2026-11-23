@@ -7538,3 +7538,26 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 编辑表单里「检查依赖」（`kind: draft, execution: task`）对工作流任务仍按提示词任务预览；工作流任务的表单可以改为检查所选工作流。
 - 其它拼接 key（如 `rn.ws_*`、`wf.*`）也可以用同样的扫描测试覆盖。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-24（续）：「可执行命令」下依赖检查把 Bash / WebFetch / WebSearch 判为可用（业务逻辑矛盾）
+
+这是 2026-11-24 07:00（Australia/Sydney）的一轮优化，接上一轮后续想法的第一条。
+
+- **问题**：默认的「可执行命令」运行由 `applyExecSandbox` 给 `--allowedTools` 加上 Bash（Windows 还有 PowerShell）、WebFetch、WebSearch，但依赖检查的 `checkTool` 只看任务策略的预授权列表，这几个工具在可执行命令下一律显示「尚未核实 / 待核实」——用户默认设置下一个声明需要 Bash 的技能永远拿不到「可用」，和运行实际行为矛盾。
+- **改法**：
+  - 新增 `commandRun()`：目标是可执行命令（工作流或运行 `mode=exec`，或提示词任务——表单所选或已保存的 `run_mode=exec`）。原来判断要不要查沙箱的条件也改用它，两处一致。
+  - `execRunTools(GOOS)` 与 `applyExecSandbox` 加的工具保持同一份清单；命中时按沙箱状态判断：可用 → `present`（依据「系统沙箱中放开，命令只能写工作目录」）；原生 Windows 没有系统沙箱 → `present`（依据说明只受权限规则和运行后配置检查保护）；Linux 缺 bwrap/socat、macOS 缺 sandbox-exec → `blocked`（运行确实会被拒，依据复用「缺少 …，可执行命令的运行会被拒绝」）。
+  - 沙箱缺失时不再额外报「当前目标模式禁止 shell」那条（建议改用 MCP 不对，沙箱自己的 blocked 发现已给出安装命令）。
+  - 不在清单里的工具（如 Write）照旧「尚未核实」；只读模式的 deny 规则仍优先。不加任何限制，没有新弹窗；两条依据文案中英文都进了 `dep.txt.*` 目录。
+- **测试**：`TestDependencyExecModeToolsAvailable`（运行对话框 exec、任务表单 exec、已保存的 exec 任务三种请求：Bash/WebFetch 为 present 且依据正确，Windows 用无沙箱依据；Write 仍 unchecked；任务表单 edit 仍 unchecked、只读运行仍 blocked 且不查沙箱；非 Windows 下沙箱缺失时 Bash blocked、只有沙箱一条 blocked 发现）。原有两条工作流画像测试固定沙箱可用（以前依赖 CI 机器是否装了 bwrap），工作流任务的 Bash 期望从 `unchecked` 改为 `present`。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`build-webui.py --check`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-24-0700-dep-exec-bash-{zh-CN,en,midnight-zh-CN,tide-zh-CN}.png`（1024×655，可执行命令工作流的「检查依赖」：Bash、WebFetch 显示「已发现」及沙箱依据；修改前同一画面这两项为「尚未核实」）。页面无横向滚动（1024/1024）。
+- **耗时**：不是性能改动。exec 下每个工具类依赖多一次 `DetectSandbox`（几次 `LookPath`）。
+
+**心得**：检查器要和「授予权限的代码」读同一份清单——这里把 exec 加的工具抽成 `execRunTools`，否则运行端加了工具，检查端还按旧列表判，就会出现「默认设置永远待核实」。
+
+**参考**：kubernetes/kubectl `pkg/cmd/auth/cani.go` 的 `kubectl auth can-i` 不自己推断权限，而是发 SelfSubjectAccessReview 让真正做授权的组件回答；这里同样以运行时实际加工具的规则来回答「能不能用」（只借思路，不抄代码）。
+
+**后续想法**：
+- `execRunTools` 与 `applyExecSandbox` 里的清单还是两处字面量，可以让 `applyExecSandbox` 直接调用 `execRunTools`（本轮未动运行路径，避免影响运行）。
+- 编辑表单里「检查依赖」对工作流任务仍按提示词任务预览；任务列表接口给工作流任务返回的仍是任务自己的目录。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。

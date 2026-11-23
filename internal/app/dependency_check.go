@@ -54,6 +54,7 @@ type dependencyCollector struct {
 	bytes          int
 	seen           map[string]bool
 	contextMembers map[string]webui.DependencyContextMember
+	req            webui.DependencyCheckRequest
 }
 
 func (c *dependencyCollector) finding(dep, kind, level, reason, evidence, suggestion string) {
@@ -307,7 +308,7 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 	if err := req.Validate(); err != nil {
 		return dependencySnapshot{}, err
 	}
-	c := dependencyCollector{a: a, ctx: ctx, seen: map[string]bool{}, contextMembers: map[string]webui.DependencyContextMember{}, snapshot: dependencySnapshot{Kind: req.Kind, TargetID: req.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339), Materials: []dependencyMaterial{}, Findings: []webui.DependencyFinding{}, RuntimeProfile: initialDependencyProfile(req), ContextUsage: []webui.DependencyContextUsage{}, Requirements: []webui.DependencyRequirementResult{}}}
+	c := dependencyCollector{a: a, ctx: ctx, req: req, seen: map[string]bool{}, contextMembers: map[string]webui.DependencyContextMember{}, snapshot: dependencySnapshot{Kind: req.Kind, TargetID: req.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339), Materials: []dependencyMaterial{}, Findings: []webui.DependencyFinding{}, RuntimeProfile: initialDependencyProfile(req), ContextUsage: []webui.DependencyContextUsage{}, Requirements: []webui.DependencyRequirementResult{}}}
 	if req.Kind == "draft" && req.Execution == "task" && req.ID != "" {
 		c.draftTaskPolicy(req.ID)
 	}
@@ -380,7 +381,7 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 	}
 	c.bindings(req.SkillBindings, "draft-bindings")
 	c.checkWorkspace()
-	if req.Mode == "exec" || c.snapshot.RuntimeProfile.Mode == "exec" || req.Kind == "task" && c.taskRunMode(req.ID) == "exec" {
+	if c.commandRun() {
 		c.checkSandbox()
 	}
 	// JSON escaping can expand source text. Bound the serialized snapshot too,

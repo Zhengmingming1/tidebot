@@ -20,6 +20,8 @@ const (
 	DepAIUnverifiedAvailablePrefix = "The AI only analyzed static materials and did not verify that this is available in the environment. "
 	DepTitleSkillRef               = "Skill reference"
 	DepTitleSandbox                = "Command sandbox"
+	DepEvidenceToolExecSandbox     = "A command run allows this tool inside the system sandbox: commands write only in the working folder, and protection rules still apply"
+	DepEvidenceToolExecNoSandbox   = "A command run allows this tool; this platform has no system sandbox, so only permission rules and the after-run configuration check apply"
 	DepTitleTaskPolicy             = "Task policy"
 	DepTitleWorkspace              = "Workspace"
 	DepTitleTaskWorkspace          = "Task workspace"
@@ -320,6 +322,8 @@ var depExactPatterns = func() []depTextPattern {
 		{"dep_ev_tool_mode_unselected", "The target run mode has not been selected, so tool permissions cannot be determined", "尚未选择目标运行模式，不能确定工具权限"},
 		{"dep_ev_tool_preauthorized", "The task policy pre-authorizes this tool rule; it is still constrained by the workspace, protection rules, and the actual invocation arguments", "任务策略已预授权此工具规则；仍受工作目录、保护规则和实际调用参数约束"},
 		{"dep_ev_tool_readonly", "The target read-only mode does not disable this built-in read tool; file scope is still constrained by the run environment", "目标只读模式未禁用此内置读取工具；文件范围仍受运行环境约束"},
+		{"dep_ev_tool_exec_sandbox", DepEvidenceToolExecSandbox, "可执行命令模式在系统沙箱中放开此工具：命令只能写入工作目录，仍受保护规则约束"},
+		{"dep_ev_tool_exec_nosandbox", DepEvidenceToolExecNoSandbox, "可执行命令模式放开此工具；此平台没有系统沙箱，只受权限规则和运行后的配置检查保护"},
 		{"dep_ev_tool_unproven", "The target run does not explicitly deny this tool, but there is no rule that proves this invocation is authorized", "目标运行未显式禁用此工具，但没有可证明此调用已获授权的规则"},
 		{"dep_ev_mcp_svc", "The plugin configuration service is unavailable", "插件配置服务不可用"},
 		{"dep_ev_mcp_meta", "Plugin authorization metadata could not be read", "无法读取插件授权元数据"},

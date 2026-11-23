@@ -3367,6 +3367,8 @@
   "dep.txt.dep_ev_tool_mode_unselected": "The target run mode has not been selected, so tool permissions cannot be determined",
   "dep.txt.dep_ev_tool_preauthorized": "The task policy pre-authorizes this tool rule; it is still constrained by the workspace, protection rules, and the actual invocation arguments",
   "dep.txt.dep_ev_tool_readonly": "The target read-only mode does not disable this built-in read tool; file scope is still constrained by the run environment",
+  "dep.txt.dep_ev_tool_exec_sandbox": "A command run allows this tool inside the system sandbox: commands write only in the working folder, and protection rules still apply",
+  "dep.txt.dep_ev_tool_exec_nosandbox": "A command run allows this tool; this platform has no system sandbox, so only permission rules and the after-run configuration check apply",
   "dep.txt.dep_ev_tool_unproven": "The target run does not explicitly deny this tool, but there is no rule that proves this invocation is authorized",
   "dep.txt.dep_ev_mcp_svc": "The plugin configuration service is unavailable",
   "dep.txt.dep_ev_mcp_meta": "Plugin authorization metadata could not be read",

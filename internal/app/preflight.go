@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/Zhengmingming1/tidebot/internal/contextplan"
@@ -83,6 +84,27 @@ func initialDependencyProfile(req webui.DependencyCheckRequest) webui.Dependency
 		}
 	}
 	return p
+}
+
+// commandRun: the target runs at 可执行命令 (applyExecSandbox): a workflow or
+// run at exec, or a prompt task (saved, or the form's choice) whose level is exec.
+func (c *dependencyCollector) commandRun() bool {
+	switch c.snapshot.RuntimeProfile.Mode {
+	case "exec":
+		return true
+	case "task":
+		return c.req.Mode == "exec" || c.req.Kind == "task" && c.taskRunMode(c.req.ID) == "exec"
+	}
+	return false
+}
+
+// execRunTools: what applyExecSandbox adds to a command run's --allowedTools.
+func execRunTools(goos string) []string {
+	tools := []string{"Bash", "WebFetch", "WebSearch"}
+	if goos == "windows" {
+		tools = append(tools, "PowerShell")
+	}
+	return tools
 }
 
 func (c *dependencyCollector) taskRunMode(id string) string {
@@ -259,7 +281,7 @@ func (c *dependencyCollector) checkManifest(b tasksvc.SkillBinding) {
 		// Python in a workflow whose shell tools are denied.
 		if req.Kind == "command" || req.Kind == "python_package" {
 			toolStatus, toolEvidence := c.checkTool("Bash")
-			if toolStatus == "blocked" {
+			if toolStatus == "blocked" && !c.commandRun() { // a missing sandbox has its own finding
 				level := "blocked"
 				if req.Optional {
 					level = "uncertain"
@@ -359,6 +381,23 @@ func (c *dependencyCollector) checkTool(name string) (string, string) {
 	}
 	if p.Mode == "unselected" {
 		return "unchecked", "The target run mode has not been selected, so tool permissions cannot be determined"
+	}
+	if c.commandRun() {
+		for _, t := range execRunTools(runtime.GOOS) {
+			if !strings.EqualFold(base, t) {
+				continue
+			}
+			// the run itself adds this tool (applyExecSandbox); it starts only
+			// where the sandbox can (Linux/macOS) or there is none (Windows)
+			switch st := c.a.SandboxStatus(); st.Status {
+			case guard.SandboxMissing:
+				return "blocked", webui.DepSandboxMissingReason(st.Missing)
+			case guard.SandboxNone:
+				return "present", webui.DepEvidenceToolExecNoSandbox
+			default:
+				return "present", webui.DepEvidenceToolExecSandbox
+			}
+		}
 	}
 	for _, allowed := range p.AllowedTools {
 		if allowed == base || allowed == name {

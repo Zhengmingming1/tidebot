@@ -3367,6 +3367,8 @@
   "dep.txt.dep_ev_tool_mode_unselected": "尚未选择目标运行模式，不能确定工具权限",
   "dep.txt.dep_ev_tool_preauthorized": "任务策略已预授权此工具规则；仍受工作目录、保护规则和实际调用参数约束",
   "dep.txt.dep_ev_tool_readonly": "目标只读模式未禁用此内置读取工具；文件范围仍受运行环境约束",
+  "dep.txt.dep_ev_tool_exec_sandbox": "可执行命令模式在系统沙箱中放开此工具：命令只能写入工作目录，仍受保护规则约束",
+  "dep.txt.dep_ev_tool_exec_nosandbox": "可执行命令模式放开此工具；此平台没有系统沙箱，只受权限规则和运行后的配置检查保护",
   "dep.txt.dep_ev_tool_unproven": "目标运行未显式禁用此工具，但没有可证明此调用已获授权的规则",
   "dep.txt.dep_ev_mcp_svc": "插件配置服务不可用",
   "dep.txt.dep_ev_mcp_meta": "无法读取插件授权元数据",

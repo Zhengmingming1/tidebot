@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -36,6 +37,7 @@ func hasFinding(snap dependencySnapshot, dep, level string) bool {
 // The check describes how the workflow's nodes really run: its own permission
 // level and folder, not a fixed read-only scratch folder.
 func TestDependencyWorkflowProfileFollowsDefinition(t *testing.T) {
+	sandboxDeps(t, true)
 	a := newTestApp(t)
 	ctx := context.Background()
 	sk := importPreflightSkill(t, a, "wf-profile", "run a command", skillstore.SkillManifest{Format: skillstore.SkillManifestFormat, Environment: []skillstore.RuntimeRequirement{{Kind: "tool", Name: "Bash"}}})
@@ -91,6 +93,7 @@ func TestDependencyWorkflowProfileFollowsDefinition(t *testing.T) {
 // A workflow task is checked as the workflow version it runs, not as a prompt
 // task in its own (unused, possibly stale) folder.
 func TestDependencyWorkflowTaskChecksItsWorkflow(t *testing.T) {
+	sandboxDeps(t, true)
 	a := newTestApp(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -116,7 +119,7 @@ func TestDependencyWorkflowTaskChecksItsWorkflow(t *testing.T) {
 	if p.Mode != "exec" || p.Workspace != dir || p.WorkspaceKind != "workflow_selected" || p.Restricted {
 		t.Fatalf("profile %+v", p)
 	}
-	if bashStatus(snap) != "unchecked" || len(snap.ContextUsage) != 1 || snap.ContextUsage[0].Origin != "node:A" || !hasFinding(snap, webui.DepTitleSandbox, "") || hasFinding(snap, webui.DepTitleTaskWorkspace, "") {
+	if bashStatus(snap) != "present" || len(snap.ContextUsage) != 1 || snap.ContextUsage[0].Origin != "node:A" || !hasFinding(snap, webui.DepTitleSandbox, "") || hasFinding(snap, webui.DepTitleTaskWorkspace, "") {
 		t.Fatalf("findings %+v", snap.Findings)
 	}
 	// the version it pins is gone: reported, not silently checked as a prompt
@@ -172,5 +175,92 @@ func TestDependencyProfileValuesHaveLabels(t *testing.T) {
 				t.Errorf("%s: no label dep.workspace_%s", lang, k)
 			}
 		}
+	}
+}
+
+func reqStatus(snap dependencySnapshot, name string) (string, string) {
+	for _, r := range snap.Requirements {
+		if r.Requirement.Name == name {
+			return r.Status, r.Evidence
+		}
+	}
+	return "", ""
+}
+
+// 可执行命令 adds Bash (PowerShell on Windows), WebFetch and WebSearch to the
+// run (applyExecSandbox): the check reports them available where the run can
+// start, instead of "unchecked", and blocked when the sandbox is missing.
+func TestDependencyExecModeToolsAvailable(t *testing.T) {
+	sandboxDeps(t, true)
+	a := newTestApp(t)
+	ctx := context.Background()
+	tools := []skillstore.RuntimeRequirement{{Kind: "tool", Name: "Bash"}, {Kind: "tool", Name: "WebFetch"}, {Kind: "tool", Name: "Write"}, {Kind: "command", Name: "go"}}
+	sk := importPreflightSkill(t, a, "exec-tools", "run commands", skillstore.SkillManifest{Format: skillstore.SkillManifestFormat, Environment: tools})
+	bind := []tasksvc.SkillBinding{{SkillID: sk, Mode: "follow"}}
+	wantEv := webui.DepEvidenceToolExecSandbox
+	if runtime.GOOS == "windows" {
+		wantEv = webui.DepEvidenceToolExecNoSandbox
+	}
+	task, err := a.Tasks.Create(ctx, tasksvc.CreateInput{Name: "exec task", Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := *task.Spec
+	spec.RunMode, spec.SkillBindings = "exec", bind
+	if _, err := a.Tasks.UpdateSpec(ctx, task.Task.ID, spec, "test", "exec"); err != nil {
+		t.Fatal(err)
+	}
+	execReqs := map[string]webui.DependencyCheckRequest{
+		"run":        {Kind: "draft", Mode: "exec", SkillBindings: bind},
+		"task form":  {Kind: "draft", Execution: "task", Mode: "exec", SkillBindings: bind},
+		"saved task": {Kind: "task", ID: task.Task.ID},
+	}
+	for name, req := range execReqs {
+		snap, err := a.collectDependencySnapshot(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tool := range []string{"Bash", "WebFetch"} {
+			if st, ev := reqStatus(snap, tool); st != "present" || ev != wantEv {
+				t.Fatalf("%s: %s %q %q", name, tool, st, ev)
+			}
+		}
+		// a tool the run doesn't add stays unproven
+		if st, _ := reqStatus(snap, "Write"); st != "unchecked" {
+			t.Fatalf("%s: Write %q", name, st)
+		}
+		if !hasFinding(snap, webui.DepTitleSandbox, "") {
+			t.Fatalf("%s: no sandbox finding", name)
+		}
+	}
+	// other levels are unchanged: the task form at edit leaves Bash unproven,
+	// a read-only run denies it
+	for name, want := range map[string]struct {
+		req  webui.DependencyCheckRequest
+		bash string
+	}{
+		"task form edit": {webui.DependencyCheckRequest{Kind: "draft", Execution: "task", Mode: "edit", SkillBindings: bind}, "unchecked"},
+		"read run":       {webui.DependencyCheckRequest{Kind: "draft", Mode: "read", Workspace: t.TempDir(), SkillBindings: bind}, "blocked"},
+	} {
+		snap, err := a.collectDependencySnapshot(ctx, want.req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st, _ := reqStatus(snap, "Bash"); st != want.bash || hasFinding(snap, webui.DepTitleSandbox, "") {
+			t.Fatalf("%s: Bash %q findings %+v", name, st, snap.Findings)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		return // no system sandbox to miss
+	}
+	// the sandbox is missing: the run is refused, so Bash is blocked, with one
+	// sandbox finding and no "shell denied by the mode" advice
+	sandboxDeps(t, false)
+	snap, err := a.collectDependencySnapshot(ctx, execReqs["run"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := reqStatus(snap, "Bash"); st != "blocked" || !hasFinding(snap, webui.DepTitleSandbox, "blocked") || hasFinding(snap, webui.DepExecPermSuffix, "") {
+		t.Fatalf("sandbox missing: Bash %q findings %+v", st, snap.Findings)
 	}
 }
