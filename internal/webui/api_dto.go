@@ -34,18 +34,18 @@ type taskDTO struct {
 	Workspace          string `json:"workspace"`
 	// WorkspaceDefault: the task has no folder of its own and runs in the one tidebot
 	// gives it (set on the detail answer only, where Workspace is then that folder).
-	WorkspaceDefault bool     `json:"workspace_default,omitempty"`
+	WorkspaceDefault bool `json:"workspace_default,omitempty"`
 	// WorkspaceWorkflow (detail answer, workflow tasks): Workspace is the folder
 	// saved in the workflow version the task runs ("" = the workflow names none
 	// and each run uses scratch folders); the task's own folder is never used.
-	WorkspaceWorkflow bool `json:"workspace_workflow,omitempty"`
-	NextRunAt        string   `json:"next_run_at"`
-	LastFiredAt      string   `json:"last_fired_at"`
-	CreatedAt        string   `json:"created_at"`
-	UpdatedAt        string   `json:"updated_at"`
-	VersionNo        int      `json:"version_no"`
-	VersionID        string   `json:"version_id"`
-	Constraints      []string `json:"constraints"`
+	WorkspaceWorkflow bool     `json:"workspace_workflow,omitempty"`
+	NextRunAt         string   `json:"next_run_at"`
+	LastFiredAt       string   `json:"last_fired_at"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
+	VersionNo         int      `json:"version_no"`
+	VersionID         string   `json:"version_id"`
+	Constraints       []string `json:"constraints"`
 	// ConstraintIDs parallels Constraints; amendment items refer to constraints by id.
 	ConstraintIDs []string `json:"constraint_ids"`
 	Skills        []string `json:"skills"`
