@@ -24,7 +24,8 @@ There is one main line: **skill → run or chat → adopt → save as a task →
 
 - **Run it first.** Type a sentence in the home composer and hit Run for a one-off, or Chat to take it into a session and work on it back and forth. Every skill has a Chat button: it opens a session with that skill bound; click Tune and the model edits a draft of the skill as you go, "Save version" stores it, and "Adopt" makes it current (always after asking you).
 - **Three permission levels.** Runs, tasks, sessions and workflows can be Read-only, Can edit or Run commands; new ones default to Run commands. Commands run in the system sandbox (macOS Seatbelt; Linux needs bubblewrap + socat; native Windows has no system sandbox, which is labelled and explained the first time). Without a folder, a run works in a temporary folder that is removed afterwards. At every level, your local Claude Code and other agents' configuration (`~/.claude`, `.mcp.json`, `CLAUDE.md`, …) can't be changed and credential folders such as `~/.ssh` can't be read.
-- **Save as a task.** Run and session pages have "Save as task", which carries the instruction, folder and permission level and pins skills to the version you adopted. New tasks are manual until you set a schedule; a time read from the instruction is only a suggestion you click to apply. Workflows get "Schedule / budget" too.
+- **Changes can be undone.** When a run, task or session changes files in your folder, tidebot records which ones: the run page lists them, and each session turn card shows a short summary. Before reverting it checks whether those files have been changed since, and flags the ones that have.
+- **Save as a task.** Run and session pages have "Save as task", which carries the instruction, folder, permission level and reasoning effort and pins skills to the version you adopted. New tasks are manual until you set a schedule; a time read from the instruction is only a suggestion you click to apply. Workflows get "Schedule / budget" too.
 - **Limits come later.** New tasks have no per-run spend cap and no time limit; add per-run / daily caps or a timeout when you want them, and workflows can take a total budget. Values you set on existing tasks and workflows stay as they are.
 - **Imports are scanned.** Skill imports, Git skill repository installs and extension installs share one source and risk scan: low risk imports straight away with no prompt; high-risk findings are listed and import only after you tick "I've reviewed it, import anyway".
 - Automatic skill analysis and canary are off by default, under "Advanced" on the skill page.
@@ -39,7 +40,7 @@ The task list. Each row ends with a strip of the last 10 runs, tags sit next to 
 
 ![Task list](docs/images/tasks.png)
 
-Task detail. The conversation with the task lives in the Requirements tab. What you say gets split into individual requirements, and nothing changes until you confirm. Items from the same message can be confirmed together as a single version; uncheck the ones you don't want.
+Task detail. The conversation with the task lives in the Requirements tab. What you say gets split into individual requirements, and nothing changes until you confirm. Items from the same message can be confirmed together as a single version; uncheck the ones you don't want. If the task starts a workflow, the Runs tab lists the workflow runs rather than just the individual nodes, and a workflow run shows which task started it.
 
 ![Task detail](docs/images/task-detail.png)
 
@@ -51,11 +52,11 @@ Live run log. Output is pushed as soon as it's written, so new lines show up alm
 
 ![Live log](docs/images/run-live.png)
 
-A finished run gets a "Final answer" card: the Markdown is rendered, and you can switch to the source, copy it or download it as .md. "Compare" diffs it line by line against the task's previous successful answer, and an identical answer is marked "Same as last time". At the bottom of the page a run can be rerun with one click; quick runs can also be edited and rerun (press `e`), or saved as a scheduled task.
+A finished run gets a "Final answer" card: the Markdown is rendered, and you can switch to the source, copy it or download it as .md. "Compare" diffs it line by line against the task's previous successful answer, and an identical answer is marked "Same as last time". If the run changed files in your folder, they're listed below and can be reverted in one go. At the bottom of the page a run can be rerun with one click; quick runs can also be edited and rerun (press `e`), or saved as a scheduled task.
 
 ![Run details](docs/images/run-detail.png)
 
-The run dialog ("Skill & folder…" on the home page). Pick a primary skill and helpers, the provider, a folder and the permission level, then write the prompt; Ctrl+Enter (⌘+Enter on a Mac) runs it. Unsent prompts are kept as a draft, so closing the dialog or reloading the page doesn't lose them.
+The run dialog ("Skill & folder…" on the home page). Pick a primary skill and helpers, the provider, reasoning effort, a folder and the permission level, then write the prompt (picking a skill brings back the effort it last ran with); Ctrl+Enter (⌘+Enter on a Mac) runs it. Unsent prompts are kept as a draft, so closing the dialog or reloading the page doesn't lose them.
 
 ![Quick run](docs/images/quick-run.png)
 
@@ -125,7 +126,7 @@ Cost caps (add them when you need them). One global daily cap covers every run, 
 
 Priced per model. Each run is priced from its actual token usage at that model's own rate, instead of applying Claude's prices to everything; subscription plans (like Kimi Coding Plan) just count tokens. The price list syncs itself weekly from a signed price catalog (source and last update live in Settings → Price catalog). The Spend page breaks things down by task, provider and model, and exports CSV.
 
-Data doesn't pile up. Settings → Data & backup shows how much space tidebot uses, lets you change how long logs and runs are kept, and previews what a clean-up would delete. You get a warning when the disk holding the data folder is running low.
+Data doesn't pile up. Settings → Data & backup shows how much space tidebot uses (sessions, Claude Code transcripts, extensions, skill repositories and run temp folders included), lets you change how long logs, runs and workflow runs are kept, and previews what a clean-up would delete. Empty sessions that were never used are removed once they pass the retention window. You get a warning when the disk holding the data folder is running low. After restoring a backup on another machine, tasks and workflows whose folder doesn't exist there are listed once.
 
 Any model provider. Anything with an Anthropic-compatible endpoint works. Built in: Anthropic, Kimi (including Coding Plan), DeepSeek, Zhipu GLM / Z.AI, Qwen DashScope, and the local magpie gateway. Keys are injected only into the `claude` child process environment. They never go into the database or the logs.
 
@@ -205,7 +206,7 @@ Whichever you pick, you still need the `claude` CLI installed to actually run ta
 - **Desktop app**: `.dmg` on macOS (universal, Intel and Apple silicon), `-Windows-x64-Setup.exe` on Windows (per-user, no admin),
   `.deb` or `.AppImage` on Linux (the AppImage doesn't bundle WebKitGTK; you need `libwebkit2gtk-4.1` on the system).
   Unsigned builds: on macOS right-click → Open the first time; Windows shows a SmartScreen prompt.
-- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:latest` (or a version such as `0.2.8`). The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
+- **Docker**: `docker pull ghcr.io/zhengmingming1/tidebot:latest` (or a version such as `0.2.9`). The image doesn't include the `claude` CLI; see [docs/release.md](docs/release.md) for adding it.
 
 Auto-update: the desktop app and the server check for a new version once a day (you can turn that off in Settings → About → Updates). By hand it's `agentctl update check` / `agentctl update apply`: the update manifest's signature and the package's sha256 are verified, the binaries are swapped in place (the old ones stay as `.prev`), and if the new version doesn't come up within 90 seconds it rolls back. Installs owned by a package manager, like `.deb` or Docker, only get a notification. If GitHub is slow or blocked where you are, Settings → Network has proxy and download mirror options.
 
@@ -343,7 +344,8 @@ Works today:
 - Skill import, versions, pinning, rollback; auto-optimization (off / suggest / canary), and a canary that does worse gets withdrawn automatically
 - A global daily spend cap (no cap set means no limit) plus per-task per-run / daily caps, reset at local midnight; per-model pricing with a weekly price catalog sync; spend export to CSV
 - Execution guard: read-only / can edit / can run commands; commands run in an OS sandbox (macOS Seatbelt, Linux bubblewrap), with fixed denies for editing Claude Code or other agents' config, reading credential folders such as `~/.ssh`, `sudo`, force-push and `curl | sh`; agent config is checked after each run; external input wrapped as data
-- Sessions: bind a skill and iterate, edit a skill draft in the session, try it, save it as a version, adopt it by hand, then save as a task
+- Sessions: bind a skill and iterate, edit a skill draft in the session, try it, save it as a version, adopt it by hand, then save as a task; pick reasoning effort per turn, and each turn shows the provider and model it actually used
+- Change tracking and undo: files changed by each run and session turn are recorded, with a pre-check before reverting
 - Capability packages: install proposals, dependency plans, risk scans, credential forms, remote MCP OAuth, per-tool MCP approval, update / rollback / uninstall
 - Plugins: separate processes speaking JSON-RPC over stdio, versioned installs, permissions approved item by item, a breaker after 3 crashes; they can add MCP tools and triggers
 - Triggers: webhook (token or HMAC), file changes, email and IM (via plugins); workflow pack import/export
