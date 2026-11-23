@@ -19,3 +19,11 @@ func TestChangelogCutsCleanly(t *testing.T) {
 		t.Fatal("short")
 	}
 }
+
+func TestChangelogIsPlainText(t *testing.T) {
+	in := "table\n---\n# v1.2.3\n\n## 中文\n\n### 新增\n- **会话**可选 `推理强度`，见 [文档](https://x/y)\n"
+	want := "v1.2.3\n\n中文\n\n新增\n- 会话可选 推理强度，见 文档"
+	if got := changelog(in); got != want {
+		t.Fatalf("got %q", got)
+	}
+}

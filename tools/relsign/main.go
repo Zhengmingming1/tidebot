@@ -114,11 +114,15 @@ func manifest(tag, dist, notesFile string) {
 	fmt.Printf("latest.json: %s, %d assets\n", m.Version, len(m.Assets))
 }
 
-// changelog keeps the per-version part of the notes (after the last "---"), not the download table.
+// changelog keeps the per-version part of the notes (after the last "---"), not the download table,
+// as plain text: older clients show latest.json notes verbatim (v0.2.8's Settings › About card does),
+// so heading marks, emphasis, code ticks and link syntax go. "- " items stay: they read fine as text
+// and the in-app summary picks its items from them.
 func changelog(s string) string {
 	if i := strings.LastIndex(s, "\n---\n"); i >= 0 {
 		s = s[i+5:]
 	}
+	s = plainNotes(s)
 	if len(s) > 4000 { // cut at a line end, never inside a UTF-8 character
 		s = textclip.Head(s, 4000)
 		if i := strings.LastIndex(s, "\n"); i > 0 {
@@ -126,6 +130,24 @@ func changelog(s string) string {
 		}
 	}
 	return strings.TrimSpace(s)
+}
+
+var (
+	mdHeading = regexp.MustCompile(`^\s{0,3}#{1,6}\s+`)
+	mdLink    = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	mdStrong  = regexp.MustCompile(`(\*\*|__)(.+?)(\*\*|__)`)
+	mdCode    = regexp.MustCompile("`([^`]*)`")
+)
+
+func plainNotes(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		l = mdHeading.ReplaceAllString(l, "")
+		l = mdLink.ReplaceAllString(l, "$1")
+		l = mdStrong.ReplaceAllString(l, "$2")
+		lines[i] = strings.TrimRight(mdCode.ReplaceAllString(l, "$1"), " \t")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func hashFile(p string) (string, int64) {
