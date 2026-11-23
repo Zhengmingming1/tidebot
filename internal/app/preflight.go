@@ -17,6 +17,7 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 	"github.com/Zhengmingming1/tidebot/internal/webui"
+	"github.com/Zhengmingming1/tidebot/internal/workflow"
 )
 
 // This is an instruction-body limit, not a model context-window claim. Wrappers,
@@ -45,8 +46,12 @@ func initialDependencyProfile(req webui.DependencyCheckRequest) webui.Dependency
 		p.Notes += " " + webui.DepNotePython
 	}
 	if req.Kind == "workflow" || req.Kind == "workflow_draft" {
-		p.Mode, p.WorkspaceKind = "read", "workflow_scratch"
-		p.DeniedTools = append([]string{}, readOnlyDeny...)
+		// a saved workflow's own level and folder are applied once it is loaded
+		def := workflow.Definition{}
+		if req.Kind == "workflow_draft" && req.Definition != nil {
+			def = *req.Definition
+		}
+		applyWorkflowProfile(&p, def)
 	} else if req.Kind == "draft" && req.Execution == "task" {
 		p.Mode, p.WorkspaceKind = "task", "task_scratch"
 		p.Workspace = guard.ExpandHome(req.Workspace)
@@ -82,10 +87,35 @@ func initialDependencyProfile(req webui.DependencyCheckRequest) webui.Dependency
 
 func (c *dependencyCollector) taskRunMode(id string) string {
 	t, err := c.a.Tasks.Get(c.ctx, id)
-	if err != nil || t.Spec == nil {
-		return ""
+	if err != nil || t.Spec == nil || t.Spec.WorkflowID != "" {
+		return "" // a workflow task runs at the workflow's level (in the profile)
 	}
 	return t.Spec.RunMode
+}
+
+// applyWorkflowProfile describes how a workflow's nodes run, as runWorkflowNode
+// does: every node at the workflow's permission level ("" = read, as saved before
+// the three levels), in its folder; without one, read-only nodes get an empty
+// folder each and edit / exec nodes share a scratch folder per run.
+func applyWorkflowProfile(p *webui.DependencyRuntimeProfile, d workflow.Definition) {
+	mode := d.RunMode
+	if mode != "edit" && mode != "exec" {
+		mode = "read"
+	}
+	p.Mode, p.AllowedTools = mode, nil
+	p.Workspace = guard.ExpandHome(strings.TrimSpace(d.WorkspaceDir))
+	switch {
+	case p.Workspace != "":
+		p.WorkspaceKind = "workflow_selected"
+	case mode == "read":
+		p.WorkspaceKind = "workflow_scratch"
+	default:
+		p.WorkspaceKind = "workflow_shared"
+	}
+	p.Restricted, p.DeniedTools = mode != "exec", nil
+	if mode == "read" {
+		p.DeniedTools = append([]string{}, readOnlyDeny...)
+	}
 }
 
 // checkSandbox: a command run needs the system sandbox where one is expected
@@ -130,7 +160,8 @@ func (c *dependencyCollector) draftTaskPolicy(id string) {
 
 func (c *dependencyCollector) checkWorkspace() {
 	p := &c.snapshot.RuntimeProfile
-	if p.WorkspaceKind == "selected" {
+	if p.WorkspaceKind == "selected" || p.WorkspaceKind == "workflow_selected" {
+		// a workflow run refuses its folder the same way (prepareWorkflow)
 		home, _ := os.UserHomeDir()
 		_, problem := guard.CheckRunDir(p.Workspace, home, c.a.Cfg.HomeDir)
 		if problem != "" {

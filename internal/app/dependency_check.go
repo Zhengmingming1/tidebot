@@ -233,14 +233,29 @@ func (c *dependencyCollector) task(id string) {
 			p.Provider = row.Name
 		}
 	}
-	p.Workspace = t.Task.WorkspaceDir
-	if t.Spec.WorkspaceDir != "" {
-		p.Workspace = t.Spec.WorkspaceDir
-	}
-	if p.Workspace == "" {
-		p.Workspace = guard.TaskWorkspace(c.a.Cfg.HomeDir, id)
+	var def *workflow.Definition
+	if t.Spec.WorkflowID != "" {
+		// A workflow task runs the workflow version it names, in that version's
+		// folder and permission level: check that graph, not the task's own
+		// (unused) folder and the workflow input as if it were a prompt.
+		if c.a.Workflows == nil {
+			c.finding(t.Spec.WorkflowID, "workflow", "missing", webui.DepReasonWFUnavailable, "workflow service is unavailable", webui.DepSuggestRestart)
+		} else if w, err := c.a.Workflows.GetVersion(c.ctx, t.Spec.WorkflowID, t.Spec.WorkflowVersion); err != nil {
+			c.finding(t.Spec.WorkflowID, "workflow", "missing", webui.DepReasonWFMissing, err.Error(), webui.DepSuggestReselectWF)
+		} else {
+			def = &w.Definition
+			applyWorkflowProfile(p, *def)
+		}
 	} else {
-		p.WorkspaceKind = "task_selected"
+		p.Workspace = t.Task.WorkspaceDir
+		if t.Spec.WorkspaceDir != "" {
+			p.Workspace = t.Spec.WorkspaceDir
+		}
+		if p.Workspace == "" {
+			p.Workspace = guard.TaskWorkspace(c.a.Cfg.HomeDir, id)
+		} else {
+			p.WorkspaceKind = "task_selected"
+		}
 	}
 	if c.a.Policy != nil {
 		for _, rule := range strings.Split(c.a.Policy.Get(c.ctx, id).AllowedTools, ",") {
@@ -255,6 +270,10 @@ func (c *dependencyCollector) task(id string) {
 	c.material("task-spec:"+id, t.Spec.Goal+"\n"+t.Spec.Prompt)
 	for _, constraint := range t.Spec.Constraints {
 		c.material("constraint:"+constraint.ID, constraint.Text)
+	}
+	if def != nil {
+		c.graph(*def)
+		return
 	}
 	c.bindings(t.Spec.SkillBindings, "task:"+id)
 }
@@ -311,6 +330,7 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 		} else if w, err := a.Workflows.Get(ctx, req.ID); err != nil {
 			c.finding(req.ID, "workflow", "missing", webui.DepReasonWFMissing, err.Error(), webui.DepSuggestReselectWF)
 		} else {
+			applyWorkflowProfile(&c.snapshot.RuntimeProfile, w.Definition)
 			c.graph(w.Definition)
 		}
 	case "workflow_draft":
@@ -360,7 +380,7 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 	}
 	c.bindings(req.SkillBindings, "draft-bindings")
 	c.checkWorkspace()
-	if req.Mode == "exec" || req.Kind == "task" && c.taskRunMode(req.ID) == "exec" {
+	if req.Mode == "exec" || c.snapshot.RuntimeProfile.Mode == "exec" || req.Kind == "task" && c.taskRunMode(req.ID) == "exec" {
 		c.checkSandbox()
 	}
 	// JSON escaping can expand source text. Bound the serialized snapshot too,

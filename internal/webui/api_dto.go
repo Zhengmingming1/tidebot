@@ -125,6 +125,7 @@ func toTaskDTO(v tasksvc.TaskView) taskDTO {
 		}
 		if v.Spec.WorkflowID != "" {
 			d.Workflow = &taskWorkflowForm{ID: v.Spec.WorkflowID, Version: v.Spec.WorkflowVersion}
+			d.Workspace = "" // runs in the workflow's folder, never one left on the task row
 		}
 	}
 	return d

@@ -79,6 +79,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	if status != "active" && status != "paused" {
 		return TaskView{}, fmt.Errorf("initial status must be active or paused")
 	}
+	if in.WorkflowID != "" {
+		in.WorkspaceDir = "" // a workflow task runs in the workflow's folder
+	}
 	tid := id.New("task")
 	now := nowUTC()
 	spec := Spec{
@@ -141,6 +144,11 @@ func (s *Service) UpdateSpecExpected(ctx context.Context, taskID string, spec Sp
 	}
 	if err := spec.CheckTarget(); err != nil {
 		return TaskView{}, err
+	}
+	if spec.WorkflowID != "" {
+		// a workflow task runs in the workflow's folder: a folder kept from before
+		// it became one would only be shown, opened or checked by mistake
+		spec.WorkspaceDir = ""
 	}
 	specWrites.Lock()
 	defer specWrites.Unlock()
@@ -464,9 +472,13 @@ func (s *Service) Rollback(ctx context.Context, taskID, versionID, actor, reason
 
 // syncTaskRow copies the fields the tasks row keeps from the current version.
 func syncTaskRow(ctx context.Context, tx *sql.Tx, taskID string, spec Spec, now string) error {
+	ws := spec.WorkspaceDir
+	if spec.WorkflowID != "" {
+		ws = "" // also when rolling back to a version saved with one
+	}
 	_, err := tx.ExecContext(ctx, `
 UPDATE tasks SET prompt=?, workspace_dir=?, timeout_minutes=?, updated_at=? WHERE id=?`,
-		spec.Prompt, spec.WorkspaceDir, spec.TimeoutMinutes, now, taskID)
+		spec.Prompt, ws, spec.TimeoutMinutes, now, taskID)
 	return err
 }
 

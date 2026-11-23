@@ -7518,3 +7518,23 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 任务列表行的 `workspace` 对工作流任务仍是任务行的值（列表页不显示路径，暂无影响）；若以后列表显示目录，应同样换成工作流的。
 - 工作流任务的「编辑」表单已隐藏目录字段，但保存时任务行的旧目录仍保留；可以在转为工作流任务时清空，减少残留。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-24：依赖检查按工作流真实的权限和目录描述运行环境，工作流任务检查它运行的工作流（业务逻辑矛盾 / BUG）
+
+这是 2026-11-24 03:00 Australia/Sydney 的优化。
+
+- **问题**：依赖检查的「本次运行环境」和实际运行对不上，三处：① 工作流（库卡片、编辑器的检查）一律写死为「只读 · 工作流节点独立目录」，并按只读禁用 Bash 等工具——而新建工作流默认就是「可执行命令」、可以指定目录，结果检查报 Bash「被阻止」，且不检查系统沙箱和所选目录；② 工作流任务在任务详情页点「检查依赖」时被当成普通提示词任务：不看工作流节点的技能，用的是任务行上转为工作流任务前遗留的目录（`task_selected`），而真正运行时用的是工作流的目录；③ `dep.mode_exec` 缺少文案，默认的「可执行命令」在检查面板里显示成原始 key `dep.mode_exec`。另外任务转为工作流任务后，任务行和新版本仍保存旧目录（上一轮「后续想法」）。
+- **改法**：`applyWorkflowProfile` 按 `runWorkflowNode` 的实际规则描述：权限取工作流的 `run_mode`（空值按只读，与旧工作流的运行一致），只读才带只读禁用列表，只有可执行命令不受 `--restricted`；目录为工作流目录（`~` 展开），没有目录时只读节点各用空目录、编辑 / 可执行节点共用本次运行的临时目录（新文案 `dep.workspace_workflow_shared`）。工作流目录和运行对话框的所选目录一样用 `guard.CheckRunDir` 检查（运行会拒的目录报「被阻止」）；可执行命令时检查系统沙箱。工作流任务按它固定的工作流版本（0 = 当前版本）检查节点技能和运行环境，版本已不在时报缺失，不再当作提示词任务。补 `dep.mode_exec`、`dep.workspace_workflow_selected` 中英文案。`tasksvc` 在创建 / 保存工作流任务时清空规格里的目录，`syncTaskRow` 对工作流任务始终写空目录（回滚到旧版本也一样），任务列表 DTO 对工作流任务不再带任务行目录。不引入任何限制。
+- **测试**：`TestDependencyWorkflowProfileFollowsDefinition`（草稿和已保存工作流 × 5 种权限/目录组合：权限、目录类型、restricted、禁用列表、Bash 状态、沙箱检查、目录检查；tidebot 自己的目录报被阻止）；`TestDependencyWorkflowTaskChecksItsWorkflow`（任务行留有旧目录时仍报工作流目录和可执行命令、检查到节点 A 的技能上下文、不出现任务目录检查；工作流不在时报缺失）；`TestDependencyProfileValuesHaveLabels`（扫描源码里所有 `WorkspaceKind` 取值及全部权限值，中英词典都要有文案）；`tasksvc.TestWorkflowTaskKeepsNoWorkspace`（创建、转换、回滚到带目录的旧工作流版本均不留目录，回滚到提示词版本恢复目录）。新测试在旧代码上失败。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`（单独检查，为空）、`build-webui.py --check`、`node --check`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-24-0300-dep-wf-exec-{zh-CN,en,midnight-zh-CN,tide-zh-CN}.png`（1024×655，工作流库「检查依赖」：权限「可执行命令（系统沙箱，可联网）」、工作目录为工作流目录；修改前同一工作流显示「只读 / 工作流节点独立目录」）。
+- **耗时**：不是性能改动。工作流任务的检查多读一次工作流版本（主键查询）。
+
+**心得**：检查面板描述的「运行环境」必须和运行代码读同一份配置，否则它会对用户默认的设置给出假阳性（「Bash 被阻止」），反而劝人降权限。前端用 `T('dep.mode_'+p.mode)` 这种拼接 key，`check-i18n.py` 只比对两种语言是否一致，发现不了两边都缺的 key；用一个扫描源码取值的测试补上。
+
+**参考**：rhysd/actionlint `rule_shell_name.go` 检查 `shell:` 时先从该 job 实际的 `runs-on` 推出运行平台（`getPlatformFromRunner`），再按那个平台判断可用的 shell，而不是假定一个默认环境；这里同样先按工作流实际的权限和目录建运行环境，再判断工具（只借思路，不抄代码）。
+
+**后续想法**：
+- 可执行命令下 Bash 仍是「未确认」：可以在沙箱可用时直接判为可用。
+- 编辑表单里「检查依赖」（`kind: draft, execution: task`）对工作流任务仍按提示词任务预览；工作流任务的表单可以改为检查所选工作流。
+- 其它拼接 key（如 `rn.ws_*`、`wf.*`）也可以用同样的扫描测试覆盖。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
