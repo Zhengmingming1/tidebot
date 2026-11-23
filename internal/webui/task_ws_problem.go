@@ -66,6 +66,21 @@ func (s *Server) taskWorkflowWorkspaceProblem(ctx context.Context, id string, ve
 	return [2]string{}
 }
 
+// taskWorkflowDir: the folder a workflow task's runs work in, from the
+// definition of the version it runs (version 0 = the current one), with "~"
+// expanded as the workflow run does. "" when the workflow names no folder (each
+// run then uses scratch folders) or the workflow / version is gone.
+func (s *Server) taskWorkflowDir(ctx context.Context, id string, version int) string {
+	if s.deps.Workflows == nil || id == "" {
+		return ""
+	}
+	w, err := s.deps.Workflows.GetVersion(ctx, id, version)
+	if err != nil {
+		return ""
+	}
+	return guard.ExpandHome(w.Definition.WorkspaceDir)
+}
+
 func (s *Server) taskWorkspaceProblem(d taskDTO, userHome string, ran func() bool) string {
 	ws := d.Workspace
 	if ws == "" || d.Workflow != nil {

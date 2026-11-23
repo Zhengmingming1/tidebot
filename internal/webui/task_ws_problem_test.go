@@ -279,16 +279,18 @@ func TestTaskDetailWorkspaceProblem(t *testing.T) {
 	}
 }
 
-// TestTaskDetailWorkspacePill: the overview shows the pill next to the saved
-// folder for a prompt task and next to the workflow for a workflow task, whose
-// tooltip names the workflow's folder.
+// TestTaskDetailWorkspacePill: the overview shows the pill next to the folder
+// row (for a workflow task that row is the workflow's folder), whose tooltip
+// names the workflow's folder for a workflow task.
 func TestTaskDetailWorkspacePill(t *testing.T) {
 	src := strings.ReplaceAll(appJSSource(t), "\r\n", "\n")
-	if !strings.Contains(src, `(tk.workflow?"":taskWsPill(tk))`) && !strings.Contains(src, `(tk.workflow ? "" : taskWsPill(tk))`) {
+	// one pill, next to the folder the runs use (a workflow task's row shows
+	// the workflow's folder), not next to the workflow version tag
+	if !strings.Contains(src, `T("ws.wf"))+"</span>":"")+taskWsPill(tk)`) && !strings.Contains(src, `T("ws.wf")) + "</span>" : "") + taskWsPill(tk)`) {
 		t.Error("overview folder row does not render taskWsPill")
 	}
-	if !strings.Contains(src, `T("tf.wf_follow"))+"</span>"+taskWsPill(tk)`) && !strings.Contains(src, `T("tf.wf_follow")) + "</span>" + taskWsPill(tk)`) {
-		t.Error("overview workflow row does not render taskWsPill")
+	if strings.Contains(src, `T("tf.wf_follow"))+"</span>"+taskWsPill(tk)`) || strings.Contains(src, `T("tf.wf_follow")) + "</span>" + taskWsPill(tk)`) {
+		t.Error("overview workflow row still renders taskWsPill")
 	}
 	fn := regexp.MustCompile(`(?s)  function taskWsPill\(t\) \{\n.*?\n  \}\n`).FindString(src)
 	node, err := exec.LookPath("node")

@@ -166,6 +166,9 @@ func (s *Server) listMissingTaskWorkspaces(ctx context.Context) ([]MissingWorksp
 		if v.Task.Status == "archived" {
 			continue
 		}
+		if v.Spec != nil && v.Spec.WorkflowID != "" {
+			continue // runs in the workflow's folder, listed with the workflows
+		}
 		ws := v.Task.WorkspaceDir
 		if v.Spec != nil && v.Spec.WorkspaceDir != "" {
 			ws = v.Spec.WorkspaceDir

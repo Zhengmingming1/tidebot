@@ -20,7 +20,8 @@ import (
 // GET → {"available": bool, "os": GOOS} (the page names the button after Finder /
 // File Explorer / the file manager). POST {"target": "data"} opens the data folder;
 // {"target": "workspace", "id": <task id>} opens that task's working folder (tidebot's
-// default one is created first, as the next run would); {"target": "saved", "id": …}
+// default one is created first, as the next run would; a workflow task's is the folder
+// of the workflow version it runs, never created); {"target": "saved", "id": …}
 // selects a file this app just saved through the native Save dialog (the id came back
 // from /api/desktop/save). The page never sends a path, so it can't make the desktop
 // open anything else.
@@ -58,6 +59,12 @@ func (s *Server) handleDesktopOpen(w http.ResponseWriter, r *http.Request) {
 		if in.ID == "" || err != nil {
 			writeErr(w, 404, "task not found")
 			return
+		}
+		if v.Spec != nil && v.Spec.WorkflowID != "" {
+			// a workflow task runs in its workflow's folder; nothing is created
+			// (no folder there means the runs use scratch folders)
+			path = s.taskWorkflowDir(r.Context(), v.Spec.WorkflowID, v.Spec.WorkflowVersion)
+			break
 		}
 		ws := v.Task.WorkspaceDir
 		if v.Spec != nil && v.Spec.WorkspaceDir != "" {
