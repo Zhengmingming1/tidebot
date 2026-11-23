@@ -3225,6 +3225,8 @@
   "wf.tasks_tip": "定时任务：\n{l}",
   "wf.ws_bad": "目录：{s}",
   "wf.ws_bad_tip": "{why}\n{p}\n运行前请编辑工作流，换一个目录。",
+  "tl.ws_bad_tip": "{why}\n{p}\n这样运行会被拒绝，请打开任务编辑，换一个目录。",
+  "tl.ws_missing_tip": "这个目录已经不在这台电脑上了（上次运行时还在）。\n{p}\n下次运行会在这里新建一个空目录再跑；如果项目搬了位置，请打开任务编辑，换成新目录。",
   "wf.tasks_n": "{n} 个任务",
   "wf.task_paused": "已暂停",
   "wf.run_notice_read": "每个技能步骤在 {p} 里只读运行。",

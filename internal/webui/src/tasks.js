@@ -11,6 +11,16 @@
     for (var i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
     return (h >>> 8) % 6;
   }
+  // taskWsPill: the task's own folder its next run would refuse (moved into a sensitive
+  // place, now a file, ...) or would replace with a new empty one (gone since the last run).
+  // Reasons and the saved path go in the tooltip; the row still opens the task to edit it.
+  function taskWsPill(t) {
+    var pr = t.workspace_problem;
+    if (!pr) return "";
+    if (pr === "missing") return '<span class="pill warn sm tl-ws-pill" data-tip="' + esc(T("tl.ws_missing_tip", { p: t.workspace || "" })) + '">' + esc(T("wf.ws_bad", { s: T("rn.ws_not_found") })) + "</span>";
+    var k = "rn.ws_" + (state.dict["rn.ws_" + pr + "_tip"] != null ? pr : "not_found");
+    return '<span class="pill bad sm tl-ws-pill" data-tip="' + esc(T("tl.ws_bad_tip", { why: T(k + "_tip"), p: t.workspace || "" })) + '">' + esc(T("wf.ws_bad", { s: T(k) })) + "</span>";
+  }
   function tagChip(name, attrs) { return '<span class="ttag h' + tagHue(name) + '"' + (attrs || "") + ">" + esc(name) + "</span>"; }
   // tagChipsRow: up to TAG_ROW chips that filter the list, the rest as "+N" with the names in the tooltip.
   function tagChipsRow(tags) {
@@ -146,7 +156,7 @@
         var list = base.filter(function (t) { return taskMatchesStatus(t, v.status); }).sort(function (a, b) { var x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * v.dir; });
         $("#tcount").textContent = T("tl.showing", { n: list.length, total: tasks.length });
         body.innerHTML = list.length ? list.map(function (t) {
-          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + costModeBadge(t.cost_control_mode) + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
+          return '<tr class="click" data-href="#/tasks/' + enc(t.id) + '"><td class="ck"><input type="checkbox" data-pick="' + esc(t.id) + '"' + (v.sel[t.id] ? " checked" : "") + ' aria-label="' + esc(t.name) + '"></td><td class="tl-name"><div class="cell-main"><span class="ico" data-hue="' + iconHue(runIcon({ task_name: t.name })) + '">' + ic(runIcon({ task_name: t.name }), "sm") + '</span><div><div class="tl-line"><a class="row-link" href="#/tasks/' + enc(t.id) + '"><strong>' + esc(t.name) + "</strong></a>" + costModeBadge(t.cost_control_mode) + taskWsPill(t) + tagChipsRow(t.tags) + "</div><small class=\"clamp1\">" + esc(t.goal || t.prompt) + "</small></div></div></td>" +
             '<td class="nowrap">' + esc(cronHuman(t.cron)) + (t.next_run_at && t.status === "active" ? "<small>" + heldNext(t.next_run_at) + ((t.skip_runs || []).length ? '<span class="nx-skip" data-tip="' + esc(T("skip.chip_tip", { l: t.skip_runs.map(when).join(T("list.sep")) })) + '">' + ic("skipFwd", "sm") + "</span>" : "") + "</small>" : pauseKind(t) === "snooze" ? "<small>" + esc(T("tpz.wakes", { t: when(t.pause_detail) })) + "</small>" : "") + "</td><td>" + taskPill(t.status, t) + policyWaitPill(t, true) + '</td><td class="c-opt"><span class="tag">v' + esc(t.version_no) + "</span></td><td class=\"tl-last\">" + taskBeatsCell(t) + '</td><td class="num c-opt">' + esc(t.runs_today) + '</td><td class="right c-act"><button type="button" class="icon-btn sm row-act" data-runnow="' + esc(t.id) + '" title="' + esc(T("td.run_now")) + '" aria-label="' + esc(T("td.run_now") + " · " + t.name) + '">' + ic("play", "sm") + "</button></td></tr>";
         }).join("") : '<tr><td colspan="8">' + (tasks.length ? (v.status === "failing" && !q ? emptyState("checkc", T("tl.no_failing"), T("tl.no_failing_sub")) : emptyState("search", T("tl.no_match"), T("tl.no_match_sub"))) : emptyState("tasks", T("tasks.none"), T("tasks.none_sub"))) + "</td></tr>";
         wireRows(body);

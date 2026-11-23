@@ -47,6 +47,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.applyPolicyWaits(out)
+	s.applyTaskWorkspaceProblems(out)
 	writeJSON(w, 200, out)
 }
 

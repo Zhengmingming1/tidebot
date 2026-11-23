@@ -7450,3 +7450,26 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 任务列表的卡片同样看不出工作目录缺失（只有换机恢复后的一次性提示），可以复用这一字段的做法。
 - 工作流库不会跟着文件系统变化自动刷新；目录补回来后要重新打开页面标签才消失。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；带 `overflow: hidden` 的卡片里 `data-tip` 被裁切的 headless 检查仍未做。
+
+### 2026-11-23（续 2）：任务列表标出工作目录有问题的任务
+
+这是 2026-11-23 15:00（Australia/Sydney）的一轮优化，接上一轮「工作流库卡片标出运行会被拒的工作目录」的后续想法。
+
+- **问题**：任务的工作目录只在保存和运行时检查（`runTaskTriggerOn` 里的 `guard.CheckPlannedDir`）。换机恢复后的一次性提示关掉以后，或者目录后来被删 / 移走、换成文件、换成指向 `~/.ssh` 的链接时，任务列表一切正常；手动或定时运行时才被拒绝。更隐蔽的是「跑过的任务目录被移走」：运行不会被拒，而是在原路径新建一个空目录再跑，结果和用户预期不符。
+- **改法**：`GET /api/tasks` 每一行多一个 `workspace_problem`（只读，只 `Stat`，不建目录、不改版本）：
+  - 与运行前同一个 `guard.CheckPlannedDir` 的问题代码（`not_dir`、`sensitive`、`contains_sensitive`、`internal`、`relative`、`root` 等）→ 运行会被拒，名称旁显示红色小标签「目录：不是目录 / 敏感目录…」。
+  - `missing`：跑过的任务（`last_run_at` 非空）目录不在了 → 黄色小标签「目录：不存在」，tooltip 说明下次运行会新建空目录、项目搬了请编辑任务换目录。从没跑过、保存时就是「将新建」的路径不标，免得新任务一建好就报警。
+  - tidebot 分配的默认目录（空目录字段、数据目录、`TaskWorkspace`）不检查，和运行时一致；工作流任务不标（目录在工作流定义里，工作流库卡片已经标出）。
+  - 原因、保存的路径放进 tooltip；标签 `flex: none` 不被压扁，名称过长时由名称省略。未知代码回落到「不存在」文案，路径经 `esc` 转义；无原生弹窗，不加任何限制，「立即运行」照旧可点。
+- **测试**：`TestTaskListWorkspaceProblem`（默认目录 / 正常 / 没跑过的将新建路径不标；跑过后删掉为 `missing`；换成文件为 `not_dir`；换成指向 `~/.ssh` 的链接为 `sensitive`，没有符号链接权限的 Windows 回落为不标；列表后缺的目录仍不存在）；`TestTaskRowWorkspacePill`（行里调用、无原生弹窗、中英文案占位符、各问题代码有文案；node 执行：无问题不出标签、黄 / 红两种 class、转义、未知代码回落）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`build-webui.py --check`、`check-i18n.py` 通过。headless Chrome 1024×655：页面无横向滚动（1024/1024），石墨 / 午夜、中英文都正常。
+- **截图**：`/workspace/tidebot-shots/2026-11-23-1500-task-ws-pill-{zh-CN,en,midnight-zh-CN}.png`（悬停红色标签显示 tooltip）。
+- **耗时**：不是性能改动。每个用自己目录的任务列表时多一次检查：目录正常约 66 µs、缺失约 74 µs（本机 benchmark），100 个任务约 7 ms。
+
+**心得**：任务和工作流的目录语义不同——工作流缺目录直接拒绝，任务缺目录会被「好心」新建。所以任务这边要区分两种状态：会被拒（红）和会悄悄换成空目录（黄），后者只对跑过的任务有意义，否则每个「将新建」的新任务都会误报。
+
+**参考**：沿用上一轮工作流库的 `workspace_problem` 做法；思路同 GitHub Actions workflow 列表在配置无效的条目旁直接标状态（只借思路，不抄代码）。
+
+**后续想法**：
+- 任务详情页目录一栏还没有同样的标记；工作流任务可以在任务行上转述它所用工作流的目录问题。
+- 列表不会随文件系统变化自动刷新，目录补回来后要重新打开页面。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。

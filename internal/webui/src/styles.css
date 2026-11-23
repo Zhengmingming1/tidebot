@@ -2724,6 +2724,7 @@ button.ttag:hover, a.ttag:hover { filter: brightness(.96); text-decoration: none
 .ttag.more { background: var(--bg-sunk); color: var(--text-3); border-color: var(--border); }
 .tl-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tl-line .row-link { min-width: 0; overflow: hidden; }
+.tl-line .tl-ws-pill { flex: none; white-space: nowrap; }
 .ttags { display: inline-flex; gap: 4px; flex: none; min-width: 0; }
 .td-tags { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
 .tag-in { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: var(--ctl-h, 36px); padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: text; }

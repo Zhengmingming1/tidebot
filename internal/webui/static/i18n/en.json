@@ -3225,6 +3225,8 @@
   "wf.tasks_tip": "Scheduled by:\n{l}",
   "wf.ws_bad": "Folder: {s}",
   "wf.ws_bad_tip": "{why}\n{p}\nEdit the workflow and pick another folder before running it.",
+  "tl.ws_bad_tip": "{why}\n{p}\nRuns will be refused. Open the task and edit it to pick another folder.",
+  "tl.ws_missing_tip": "This folder is no longer on this computer (it was there for the last run).\n{p}\nThe next run will create an empty folder here and run in it. If the project moved, open the task and edit it to pick the new folder.",
   "wf.tasks_n": "{n} tasks",
   "wf.task_paused": "paused",
   "wf.run_notice_read": "Each skill step runs read-only in {p}.",
