@@ -167,7 +167,7 @@ func (a *App) DeactivateCapability(ctx context.Context, capID string) (any, erro
 		return nil, err
 	}
 	for _, c := range changes {
-		if _, err = tx.ExecContext(ctx, `UPDATE chat_sessions SET bindings_json=?,updated_at=? WHERE id=?`, c.raw, nowUTC(), c.id); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE chat_sessions SET bindings_json=?,updated_at=? WHERE id=?`, c.raw, chatNow(), c.id); err != nil {
 			return nil, err
 		}
 	}

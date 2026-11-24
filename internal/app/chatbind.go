@@ -136,7 +136,7 @@ func (a *App) SetChatBindings(ctx context.Context, sid string, in webui.ChatBind
 		return webui.ChatSession{}, err
 	}
 	raw, _ := json.Marshal(b)
-	if _, err = tx.ExecContext(ctx, `UPDATE chat_sessions SET bindings_json=?, updated_at=? WHERE id=?`, string(raw), nowUTC(), sid); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE chat_sessions SET bindings_json=?, updated_at=? WHERE id=?`, string(raw), chatNow(), sid); err != nil {
 		return webui.ChatSession{}, err
 	}
 	if err = tx.Commit(); err != nil {

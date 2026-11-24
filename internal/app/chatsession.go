@@ -260,7 +260,7 @@ func (a *App) CreateChatSession(ctx context.Context, req webui.ChatSessionCreate
 		title = strings.Join(strings.Fields(prompt), " ")
 	}
 	title = textclip.Ellipsis(title, chatTitleMax)
-	now := nowUTC()
+	now := chatNow()
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return webui.ChatSession{}, err
@@ -318,7 +318,7 @@ func (a *App) SetChatMode(ctx context.Context, sid, mode string) (webui.ChatSess
 	if mode != "read" && mode != "edit" && mode != "exec" {
 		return webui.ChatSession{}, fmt.Errorf("%w: mode must be read, edit or exec", webui.ErrChatInvalid)
 	}
-	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET permission_mode=?, updated_at=? WHERE id=? AND status<>'running'`, mode, nowUTC(), sid)
+	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET permission_mode=?, updated_at=? WHERE id=? AND status<>'running'`, mode, chatNow(), sid)
 	if err != nil {
 		return webui.ChatSession{}, err
 	}
@@ -338,7 +338,7 @@ func (a *App) SetChatEffort(ctx context.Context, sid, effort string) (webui.Chat
 	if !tasksvc.ValidEffort(effort) {
 		return webui.ChatSession{}, fmt.Errorf("%w: effort must be empty, low, medium or high", webui.ErrChatInvalid)
 	}
-	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET effort=?, updated_at=? WHERE id=? AND status<>'running'`, effort, nowUTC(), sid)
+	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET effort=?, updated_at=? WHERE id=? AND status<>'running'`, effort, chatNow(), sid)
 	if err != nil {
 		return webui.ChatSession{}, err
 	}
@@ -370,7 +370,7 @@ func (a *App) createBlankChat(ctx context.Context, req webui.ChatSessionCreate) 
 	if req.WebAccess {
 		web = 1
 	}
-	now := nowUTC()
+	now := chatNow()
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return webui.ChatSession{}, err
@@ -635,7 +635,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 	}
 	// an untitled session (a blank one) is named after its first message
 	res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='running', updated_at=?, title=CASE WHEN title='' THEN ? ELSE title END WHERE id=? AND status='idle' AND bindings_json=?`,
-		nowUTC(), textclip.Ellipsis(strings.Join(strings.Fields(message), " "), chatTitleMax), sid, c.bindingsRaw)
+		chatNow(), textclip.Ellipsis(strings.Join(strings.Fields(message), " "), chatTitleMax), sid, c.bindingsRaw)
 	if err != nil {
 		return webui.ChatTurnStarted{}, err
 	}
@@ -654,7 +654,7 @@ func (a *App) SendChatTurn(ctx context.Context, sid, message string) (webui.Chat
 		_ = a.chatWrite("session turn end", sid, func(wctx context.Context) error {
 			_, err := a.DB.ExecContext(wctx, `UPDATE chat_sessions SET status='idle', turns=max(turns+?, `+chatTurnCount+`), cost_total=cost_total+?, updated_at=?,
 claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
-				turns, usd, nowUTC(), keepCSID, keepCSID, sid)
+				turns, usd, chatNow(), keepCSID, keepCSID, sid)
 			return err
 		})
 	}
@@ -766,7 +766,7 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 			CostBucket: cost.BucketProduction, RunMode: mode, Effort: effort, KeepSession: true, NoPluginMCP: true, ContextArgs: args, MCPServers: mcp,
 			ContextRequest: st.contextRequest(a.modernClaude(), false),
 			OnStart: a.skillStart(st, func(rid string) {
-				started, createdAt = rid, nowUTC()
+				started, createdAt = rid, chatNow()
 				// One quick try, so the run isn't held up; a busy database (one
 				// connection, a long cleanup) gets more tries in the background, and
 				// the turn's end writes the row in any case (it is the only link
@@ -791,7 +791,7 @@ claude_session_id=CASE WHEN ?<>'' THEN ? ELSE claude_session_id END WHERE id=?`,
 		runCtx := context.WithValue(context.Background(), capabilityOwnerKey{}, capabilityOwner{"session", sid})
 		r, err := a.RunPromptEx(runCtx, opts, c.Provider, 0)
 		if started == "" {
-			started, createdAt = r.RunID, nowUTC()
+			started, createdAt = r.RunID, chatNow()
 		}
 		if started != "" && !rowSaved.Load() { // a no-op if the background try got there
 			_ = a.chatWrite("session turn row", sid, a.chatTurnRow(sid, turn, started, createdAt))
@@ -953,7 +953,7 @@ WHERE s.status='running' AND t.turn_index>0 AND r.cost_amount>0`)
 	}
 	for sid, usd := range add {
 		res, err := a.DB.ExecContext(ctx, `UPDATE chat_sessions SET status='idle', turns=max(turns, `+chatTurnCount+`), cost_total=cost_total+?, updated_at=? WHERE id=? AND status='running'`,
-			usd, nowUTC(), sid)
+			usd, chatNow(), sid)
 		if err != nil {
 			return err
 		}

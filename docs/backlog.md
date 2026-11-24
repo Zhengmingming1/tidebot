@@ -7665,3 +7665,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 **后续想法**：
 - `rowprune` 截止时间格式、`chat_sessions.updated_at` 秒级仍待做。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；runs / sessions 不记录 effort 来源、工作流运行不记录触发任务。
+
+### 2026-11-25（续）：会话时间改为定长格式并迁移旧数据，会话列表在同一秒内也按最近改动排序（BUG）
+
+这是 2026-11-25 03:51 Asia/Shanghai 的优化，接前几轮候选「`chat_sessions.updated_at` 秒级」。
+
+- **问题**：会话列表按 `updated_at DESC, id DESC` 文本排序。会话时间用 `nowUTC()`（`RFC3339`，整秒），而在会话里安装能力包时 `capability/store.go` 用定长 9 位小数格式写 `chat_sessions.updated_at`。两种格式混在一列：同一秒里，整秒的 `…:05Z` 会排在更晚的 `…:05.4…Z` 前面（'Z' > '.'）；两个会话同一秒内被改动时（切权限档、改推理强度、发一轮），排序退回按 id（创建顺序），刚改过的会话可能排在下面。
+- **改法**：新增 `chatNow()`，与能力包共用 `capability.TimeLayout`；会话的建立、切权限档 / 推理强度、发一轮开始和结束、中断恢复、绑定能力包时写 `chat_sessions.created_at/updated_at` 和 `chat_session_turns.created_at` 都改用它。迁移 052 把旧行补齐成同一定长格式（只改形如 `YYYY-MM-DDTHH:MM:SS[.f]Z` 的值，空值和其他值不动；`chat_sessions` 上的能力包触发器只在 `bindings_json` 变化时触发，不受影响）。`capability_bindings.created_at` 不参与排序，保持原样。不加任何限制，没有界面改动；前端解析这种格式与工作流、能力包时间相同。
+- **测试**：`TestChatSessionFixedWidthTimes`（新建、切权限档、改推理强度、发一轮后，最近改动的会话排第一，写入的时间和轮次时间都是定长格式；修改前第一条断言即失败：`created_at "…:51Z" is not in the fixed layout`）；`TestChatSessionFixedWidthTimesMigration`（迁移前复现「整秒排在同一秒更晚的能力包时间前」，迁移后补齐、顺序正确，怪值和空值不动，会话的能力包绑定不受影响）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l` 通过。
+- **不是性能改动**，也不是 UI 改动，没有截图。
+
+**心得**：同一列只能有一种时间格式。之前把能力包时间改成定长时，它顺带写进了 `chat_sessions.updated_at`，让这一列成了两种格式混用；改一处格式时要顺着「谁还写这一列」查一遍。
+
+**参考**：mattermost/mattermost `server/public/model/utils.go` 的 `GetMillis()` 与 `server/public/model/channel.go` 的 `UpdateAt` / `LastPostAt`：所有写入都走同一个时间函数、统一毫秒精度，频道列表按最近活动排序才不会在同一秒内乱序（tidebot 存文本，所以用定长格式达到同样效果；只借思路，不抄代码）。
+
+**后续想法**：
+- `pointers`、`operation_log`、`capability_bindings` 等仍用 `nowUTC()`（整秒）；目前没有按它们在秒内排序的列表，先不动。
+- `rowprune` 截止时间仍是 `RFC3339`，与定长列比较最多提前不到 1 秒删除，影响可忽略。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
