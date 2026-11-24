@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/id"
 )
@@ -122,7 +121,7 @@ func (s *Store) Rollback(ctx context.Context, capID, versionID, actor string) (R
 		return r, err
 	}
 	defer tx.Rollback()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := Now()
 	result, err := tx.ExecContext(ctx, `UPDATE capabilities SET current_version_id=?,title=?,updated_at=? WHERE id=? AND status='installed' AND EXISTS(SELECT 1 FROM capability_versions WHERE capability_id=? AND id=?)`, versionID, r.Title, now, capID, capID, versionID)
 	if err != nil {
 		return r, err
@@ -172,7 +171,7 @@ func (s *Store) Bind(ctx context.Context, b Binding) error {
 			return err
 		}
 	}
-	result, err := s.DB.ExecContext(ctx, `INSERT INTO capability_bindings(owner_kind,owner_id,capability_id,version_id,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM capabilities WHERE id=? AND status='installed') AND (?='' OR EXISTS(SELECT 1 FROM capability_versions WHERE capability_id=? AND id=?)) ON CONFLICT(owner_kind,owner_id,capability_id) DO UPDATE SET version_id=excluded.version_id`, b.OwnerKind, b.OwnerID, b.CapabilityID, b.VersionID, time.Now().UTC().Format(time.RFC3339Nano), b.CapabilityID, b.VersionID, b.CapabilityID, b.VersionID)
+	result, err := s.DB.ExecContext(ctx, `INSERT INTO capability_bindings(owner_kind,owner_id,capability_id,version_id,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM capabilities WHERE id=? AND status='installed') AND (?='' OR EXISTS(SELECT 1 FROM capability_versions WHERE capability_id=? AND id=?)) ON CONFLICT(owner_kind,owner_id,capability_id) DO UPDATE SET version_id=excluded.version_id`, b.OwnerKind, b.OwnerID, b.CapabilityID, b.VersionID, Now(), b.CapabilityID, b.VersionID, b.CapabilityID, b.VersionID)
 	if err != nil {
 		return err
 	}
@@ -336,7 +335,7 @@ func (s *Store) uninstallPinned(ctx context.Context, capID, versionID, actor str
 	if _, err = tx.ExecContext(ctx, `DELETE FROM capability_tool_grants WHERE capability_id=?`, capID); err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := Now()
 	if _, err = tx.ExecContext(ctx, `UPDATE capabilities SET status='uninstalled',updated_at=? WHERE id=?`, now, capID); err != nil {
 		return err
 	}
@@ -535,7 +534,7 @@ func ParseBundle(raw []byte) (Lock, map[string][]byte, error) {
 // RecoverInterruptedProposals is called once at startup, before accepting UI
 // work. It does not retry installations or execute upstream instructions.
 func (s *Store) RecoverInterruptedProposals(ctx context.Context) (int64, error) {
-	result, err := s.DB.ExecContext(ctx, `UPDATE capability_proposals SET status='failed',decided_at=? WHERE status='applying'`, time.Now().UTC().Format(time.RFC3339Nano))
+	result, err := s.DB.ExecContext(ctx, `UPDATE capability_proposals SET status='failed',decided_at=? WHERE status='applying'`, Now())
 	if err != nil {
 		return 0, err
 	}
@@ -659,7 +658,7 @@ func (s *Store) GC(ctx context.Context, capID, actor string) (GCResult, error) {
 			return out, e
 		}
 		if _, e = tx.ExecContext(ctx, `DELETE FROM capability_versions WHERE id=? AND capability_id=?`, v.VersionID, capID); e == nil {
-			e = recordEvent(ctx, tx, capID, v.VersionID, actor, "gc", v.Lock.Scan.Verdict, "snapshot removed", time.Now().UTC().Format(time.RFC3339Nano))
+			e = recordEvent(ctx, tx, capID, v.VersionID, actor, "gc", v.Lock.Scan.Verdict, "snapshot removed", Now())
 		}
 		if e == nil {
 			e = tx.Commit()

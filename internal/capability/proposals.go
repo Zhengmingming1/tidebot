@@ -78,11 +78,11 @@ func (s *Store) CreateProposal(ctx context.Context, p Proposal) (Proposal, error
 	if len(raw) > 1<<20 {
 		return p, errors.New("proposal too large")
 	}
-	now := time.Now().UTC()
+	now := time.Now()
 	p.ID = id.New("capprop")
 	p.Status = "pending"
-	p.CreatedAt = now.Format(time.RFC3339Nano)
-	p.ExpiresAt = now.Add(24 * time.Hour).Format(time.RFC3339Nano)
+	p.CreatedAt = Stamp(now)
+	p.ExpiresAt = Stamp(now.Add(24 * time.Hour))
 	p.DecidedBy = ""
 	p.DecidedAt = ""
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO capability_proposals(id,session_id,run_id,kind,payload_json,status,created_at,expires_at,base_version_id) VALUES(?,?,?,?,?,'pending',?,?,?)`, p.ID, p.SessionID, p.RunID, p.Kind, string(raw), p.CreatedAt, p.ExpiresAt, p.BaseVersionID)
@@ -164,7 +164,7 @@ func (s *Store) ClaimProposal(ctx context.Context, proposalID, sessionID, actor 
 	if actor == "" {
 		return Proposal{}, errors.New("decision requires an actor")
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := Now()
 	result, err := s.DB.ExecContext(ctx, `UPDATE capability_proposals SET status='applying',decided_by=?,decided_at=? WHERE id=? AND session_id=? AND status='pending' AND expires_at>?`, actor, now, proposalID, sessionID, now)
 	if err != nil {
 		return Proposal{}, err
@@ -184,7 +184,7 @@ func (s *Store) FinishProposal(ctx context.Context, proposalID, actor, status st
 	default:
 		return errors.New("invalid final proposal status")
 	}
-	result, err := s.DB.ExecContext(ctx, `UPDATE capability_proposals SET status=?,decided_at=? WHERE id=? AND status='applying' AND decided_by=?`, status, time.Now().UTC().Format(time.RFC3339Nano), proposalID, actor)
+	result, err := s.DB.ExecContext(ctx, `UPDATE capability_proposals SET status=?,decided_at=? WHERE id=? AND status='applying' AND decided_by=?`, status, Now(), proposalID, actor)
 	if err != nil {
 		return err
 	}

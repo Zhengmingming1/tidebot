@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/Zhengmingming1/tidebot/internal/capability"
 	"github.com/Zhengmingming1/tidebot/internal/id"
 )
 
@@ -57,7 +58,7 @@ func (a *App) SetCapabilityDefault(ctx context.Context, capID string, enabled bo
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO capability_events(id,capability_id,version_id,actor,action,result,created_at) VALUES(?,?,?,?,?,?,?)`, id.New("ce"), capID, version, "ui", "session_default", map[bool]string{true: "enabled", false: "disabled"}[enabled], nowUTC()); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO capability_events(id,capability_id,version_id,actor,action,result,created_at) VALUES(?,?,?,?,?,?,?)`, id.New("ce"), capID, version, "ui", "session_default", map[bool]string{true: "enabled", false: "disabled"}[enabled], capability.Now()); err != nil {
 		return nil, err
 	}
 	return map[string]bool{"ok": true, "enabled": enabled}, tx.Commit()
@@ -175,7 +176,7 @@ func (a *App) DeactivateCapability(ctx context.Context, capID string) (any, erro
 			return nil, err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO capability_events(id,capability_id,version_id,actor,action,result,created_at) VALUES(?,?,?,?,?,?,?)`, id.New("ce"), capID, version, "ui", "deactivate", "ok", nowUTC()); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO capability_events(id,capability_id,version_id,actor,action,result,created_at) VALUES(?,?,?,?,?,?,?)`, id.New("ce"), capID, version, "ui", "deactivate", "ok", capability.Now()); err != nil {
 		return nil, err
 	}
 	return map[string]bool{"ok": true}, tx.Commit()

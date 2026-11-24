@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/id"
 )
@@ -142,7 +141,7 @@ func (s *Store) install(ctx context.Context, proposalID, sessionID, actor string
 	if proposalID != "" {
 		lock.InstalledBy = actor
 	}
-	lock.InstalledAt = time.Now().UTC().Format(time.RFC3339Nano)
+	lock.InstalledAt = Now()
 	raw, err := json.Marshal(lock)
 	if err != nil {
 		return empty, err

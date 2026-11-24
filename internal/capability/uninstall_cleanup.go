@@ -280,7 +280,7 @@ var historyRefQueries = []string{
 	// (now 'applying') proposal retain the very skills it removes, so the
 	// recomputed summary never matches and every confirmation fails.
 	`SELECT payload_json FROM capability_proposals WHERE kind<>'uninstall' AND (status='applying'
-	 OR (status='pending' AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 OR (status='pending' AND expires_at > ` + sqlNow + `
 	     AND EXISTS (SELECT 1 FROM chat_sessions s WHERE s.id=capability_proposals.session_id)))`,
 }
 

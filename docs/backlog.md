@@ -7583,3 +7583,24 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - `rowprune` 的截止时间用 `time.RFC3339`（无小数），与定长的工作流时间比较时，截止那一秒内的行会被当作「更早」，最多提前不到 1 秒删除，影响可忽略；以后可让清理规则按表用同一定长格式。
 - `capability` 包里的 `proposals`、`lifecycle`、`store` 也用 `RFC3339Nano` 写时间，`rowprune` 用 `created_at < ?` 清理 `capability_proposals`；如有按这些列排序的列表，可同样改定长并迁移。
 - 上轮候选仍在：运行时直接复用 `execRunTools`；编辑表单「检查依赖」对工作流任务仍按提示词任务预览；任务列表接口给工作流任务返回的仍是任务自己的目录。
+
+### 2026-11-24：能力包的版本、事件、提案时间改为定长格式并迁移旧数据（BUG）
+
+这是 2026-11-24 15:00 Australia/Sydney 的优化，接上轮候选 (1)。
+
+- **问题**：`capability` 包写 `capabilities`、`capability_versions`、`capability_events`、`capability_proposals` 的时间用 `RFC3339Nano`（会去掉末尾的 0），设置里「会话默认启用 / 停用」写的事件又用 `RFC3339`（无小数）。版本历史（`ORDER BY v.created_at DESC`）、事件记录（`ORDER BY created_at DESC`）、会话里的提案卡片（`ORDER BY created_at DESC`，也是轮询签名的来源）都按文本排序，同一秒内整秒的行（`…:05Z`）会排在更晚的小数行（`…:05.3Z`）前面，例如先切会话默认、同一秒内装了新版，事件里「安装」显示在下面；快速更新再回滚时版本列表也会颠倒。`ClaimProposal` 用 `expires_at>?` 文本比较、清理引用扫描用 `strftime('%…%fZ')`（3 位毫秒）比较，同一秒内也会判错。
+- **改动**：
+  - 新增 `internal/capability/timestamp.go`：`TimeLayout`（9 位小数定长 UTC，和 workflow / optimize 一致）、`Stamp`、`Now`，以及 SQL 侧的 `sqlNow`（`strftime` 毫秒后补 6 个 0，同样定长）。包内所有写时间的地方改用它；`app/capability_defaults.go` 的两条事件也改用 `capability.Now()`，不再混用 `RFC3339`。
+  - 迁移 `051_capability_fixed_width_times.sql`：把上述四张表的时间列（含 `decided_at`、`expires_at`）补成 9 位小数；只改形如 `YYYY-MM-DDTHH:MM:SS[.f{1,8}]Z` 的值，空值和其他值不动。版本和事件表有只追加的保护触发器，迁移在同一事务里先删 `…_no_update` 触发器、更新、再原样重建（只改同一时刻的文本形式，`lock_json`、`lock_sha256` 不动；`backup_paths.go` 的路径映射已有同样做法）。`capability_bindings` 不按时间排序且由 `chat_sessions` 触发器写入，不动。
+  - 不加任何限制，没有界面改动。
+- **测试**：`TestStampFixedWidthOrdersAsText`（定长、文本序 = 时间序、`RFC3339Nano` 可解析）；`TestCapabilityWritesFixedWidthTimes`（安装和提案写入的各列、`sqlNow` 都是定长且接近当前时间）；`TestVersionsAndEventsOrderWithinOneSecond`（同一秒内两条版本 / 事件，`Versions`、`Events` 都是新的在前）；`TestCapabilityFixedWidthTimesMigration`（迁移前复现排序错误；迁移后各列补齐、`lock_json`/`lock_sha256` 不变、怪值不动、排序正确，且版本 / 事件的保护触发器仍在）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l` 通过；相关测试 `-race -count=2` 通过。
+- **不是性能改动**，也不是 UI 改动，没有截图。
+
+**心得**：上轮只改了 workflow，同类问题要整包扫一遍：`rg 'RFC3339Nano'` 加上「谁按这列 ORDER BY / 文本比较」两个条件就能列全。只追加的审计表也可能需要一次性格式迁移，做法是在迁移事务里临时摘掉保护触发器并原样重建，测试里要断言触发器还在。
+
+**参考**：pocketbase/pocketbase `tools/types/datetime.go` 把时间统一存成定长文本布局（`DefaultDateLayout`），让 SQLite 的文本排序和比较等于时间序；思路同上轮引用的 go-gitea/gitea `modules/timeutil/timestamp.go`（只借思路，不抄代码）。
+
+**后续想法**：
+- `rowprune` 的截止时间仍是 `RFC3339`（无小数），和定长列比较时截止那一秒内的行会提前不到 1 秒删除，影响可忽略；可以按表给清理规则配同一定长格式（候选 (2)）。
+- `chat_sessions.updated_at`、`pointers`、`operation_log` 等仍用 `app.nowUTC()`（`RFC3339`，秒级），会话列表按 `updated_at DESC, id DESC` 排序，同一秒内顺序取决于 id；要做到毫秒内有序需要整体迁移，先记下。
+- 上轮候选仍在：运行时直接复用 `execRunTools`；编辑表单「检查依赖」对工作流任务仍按提示词任务预览；任务列表接口给工作流任务返回的仍是任务自己的目录。
