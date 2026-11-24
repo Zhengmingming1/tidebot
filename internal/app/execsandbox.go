@@ -93,14 +93,9 @@ func (a *App) applyExecSandbox(ctx context.Context, opts *runner.Options) (func(
 	// Commands need Bash: no --restricted (it drops the code-running tools).
 	opts.ExtraArgs = dropArg(opts.ExtraArgs, "--restricted")
 	opts.ContextArgs = dropArg(opts.ContextArgs, "--restricted")
-	tools := []string{"Bash"}
-	if runtime.GOOS == "windows" {
-		tools = append(tools, "PowerShell")
-	}
-	if opts.Web {
-		tools = append(tools, "WebFetch", "WebSearch")
-	}
-	addAllowed(opts, tools)
+	// One list for the run and the dependency check (preflight.go), so the check
+	// never reports a tool available that the run doesn't actually allow.
+	addAllowed(opts, execRunTools(runtime.GOOS))
 	// See guard.SandboxSettings: env scrub breaks dontAsk and the sandbox.
 	opts.EnvBase = dropEnv(opts.EnvBase, "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB")
 	// Commands don't get the way to tidebot's IPC socket (the sandbox hides it too).
@@ -123,6 +118,17 @@ func (a *App) applyExecSandbox(ctx context.Context, opts *runner.Options) (func(
 	}
 	a.watchAgentConfig(opts, home, dirs)
 	return cleanup, nil
+}
+
+// execRunTools: what applyExecSandbox adds to a command run's --allowedTools.
+// Command runs always have network (owner decision above), so the web tools are
+// always in; the dependency check reports these as available (preflight.go).
+func execRunTools(goos string) []string {
+	tools := []string{"Bash", "WebFetch", "WebSearch"}
+	if goos == "windows" {
+		tools = append(tools, "PowerShell")
+	}
+	return tools
 }
 
 // watchAgentConfig fingerprints agent config right before Claude Code starts and

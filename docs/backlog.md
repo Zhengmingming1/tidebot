@@ -7648,3 +7648,20 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 运行时直接复用 `execRunTools`（`applyExecSandbox` 里清单仍是字面量）。
 - 新建工作流任务（从工作流页「存为任务」）同样走这个表单，已覆盖；工作流编辑器里也可以考虑在「检查」时带上测试输入。
 - `rowprune` 截止时间格式、`chat_sessions.updated_at` 秒级仍待做；CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-25：可执行命令运行直接复用 `execRunTools`，运行和依赖检查只有一份工具清单
+
+这是 2026-11-25 02:53 Australia/Sydney 的优化，接前几轮候选「运行时直接复用 `execRunTools`」。
+
+- **问题**：依赖检查（`preflight.go`）用 `execRunTools` 判断可执行命令下 Bash、WebFetch、WebSearch（Windows 另加 PowerShell）可用，但真正运行时 `applyExecSandbox` 里是另一份字面量清单，还包着一个永远为真的 `if opts.Web`（命令运行按 2026-11-09 的决定总是联网）。两份清单各改各的，迟早出现「检查说可用、运行却没放行」的分叉。
+- **改法**：`execRunTools` 移到 `execsandbox.go`，`applyExecSandbox` 直接 `addAllowed(opts, execRunTools(runtime.GOOS))`，去掉死分支；依赖检查不变，仍调用同一函数。Windows 上 `--allowedTools` 里 PowerShell 的位置从 Bash 之后挪到末尾，集合不变。不加任何限制，没有界面改动。
+- **测试**：新增 `TestExecSandboxAllowsExecRunTools`（已有清单时追加且不重复、无清单时新建，结果都等于 `execRunTools(runtime.GOOS)`；三个平台的清单都含 Bash / WebFetch / WebSearch，只有 Windows 含 PowerShell）；`TestExecSandboxEnv` 的断言改为按 `execRunTools` 生成期望值，不再写死 Linux / macOS 的顺序。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l` 通过。
+- **不是性能改动**，也不是 UI 改动，没有截图。
+
+**心得**：「检查」和「执行」要共用同一个事实来源；只在检查侧抽函数而执行侧留字面量，等于只做了一半，测试也应该从同一函数生成期望值，而不是各写一份。
+
+**参考**：kubernetes/kubernetes `pkg/scheduler/framework/plugins/noderesources/fit.go` 里 `Filter`（调度前检查）和 `computePodResourceRequest` 共用同一份资源计算，避免预检和实际口径不一致（只借思路，不抄代码）。
+
+**后续想法**：
+- `rowprune` 截止时间格式、`chat_sessions.updated_at` 秒级仍待做。
+- CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿；runs / sessions 不记录 effort 来源、工作流运行不记录触发任务。

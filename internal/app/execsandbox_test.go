@@ -184,7 +184,47 @@ func TestExecSandboxEnv(t *testing.T) {
 	if strings.Contains(env, "SCRUB") || strings.Contains(env, "TIDEBOT_IPC") || !strings.Contains(env, "LANG=C") {
 		t.Fatal(env)
 	}
-	if contains(opts.ExtraArgs, "--restricted") || !contains(opts.ExtraArgs, "Read,Bash,WebFetch,WebSearch") || opts.StopGrace != execStopGrace {
+	if contains(opts.ExtraArgs, "--restricted") || !contains(opts.ExtraArgs, "Read,"+strings.Join(execRunTools(runtime.GOOS), ",")) || opts.StopGrace != execStopGrace {
 		t.Fatalf("%v %v", opts.ExtraArgs, opts.StopGrace)
+	}
+}
+
+// The run's --allowedTools come from execRunTools, the same list the dependency
+// check reports as available, on every platform; tools already allowed aren't
+// repeated, and a run without a list gets one.
+func TestExecSandboxAllowsExecRunTools(t *testing.T) {
+	a := newTestApp(t)
+	sandboxDeps(t, true)
+	want := strings.Join(execRunTools(runtime.GOOS), ",")
+	for _, c := range []struct {
+		extra []string
+		want  string
+	}{
+		{[]string{"--allowedTools", "Read,Bash"}, "Read," + want},
+		{nil, want},
+	} {
+		opts := runner.Options{WorkspaceDir: t.TempDir(), ExtraArgs: c.extra}
+		cleanup, err := a.applyExecSandbox(context.Background(), &opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup()
+		got := ""
+		for i := 0; i+1 < len(opts.ExtraArgs); i++ {
+			if opts.ExtraArgs[i] == "--allowedTools" {
+				got = opts.ExtraArgs[i+1]
+				break
+			}
+		}
+		if got != c.want {
+			t.Fatalf("allowed %q, want %q (%v)", got, c.want, opts.ExtraArgs)
+		}
+	}
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		tools := "," + strings.Join(execRunTools(goos), ",") + ","
+		if !strings.Contains(tools, ",Bash,") || !strings.Contains(tools, ",WebFetch,") || !strings.Contains(tools, ",WebSearch,") ||
+			strings.Contains(tools, ",PowerShell,") != (goos == "windows") {
+			t.Fatalf("%s: %s", goos, tools)
+		}
 	}
 }

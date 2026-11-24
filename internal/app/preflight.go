@@ -98,15 +98,6 @@ func (c *dependencyCollector) commandRun() bool {
 	return false
 }
 
-// execRunTools: what applyExecSandbox adds to a command run's --allowedTools.
-func execRunTools(goos string) []string {
-	tools := []string{"Bash", "WebFetch", "WebSearch"}
-	if goos == "windows" {
-		tools = append(tools, "PowerShell")
-	}
-	return tools
-}
-
 func (c *dependencyCollector) taskRunMode(id string) string {
 	t, err := c.a.Tasks.Get(c.ctx, id)
 	if err != nil || t.Spec == nil || t.Spec.WorkflowID != "" {
