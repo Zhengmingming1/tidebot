@@ -24,7 +24,9 @@ func sandboxDeps(t *testing.T, ok bool) {
 		}
 		return "", errors.New("not found")
 	}
-	t.Cleanup(func() { sandboxLook = old })
+	oldProbe := sandboxProbe
+	sandboxProbe = func(string) string { return "" } // never start a real bwrap here
+	t.Cleanup(func() { sandboxLook, sandboxProbe = old, oldProbe })
 }
 
 // A command run: no --restricted, Bash allowed, the

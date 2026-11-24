@@ -138,6 +138,8 @@ func (c *dependencyCollector) checkSandbox() {
 	switch st.Status {
 	case guard.SandboxMissing:
 		c.finding(webui.DepTitleSandbox, "runtime", "blocked", webui.DepSandboxMissingReason(st.Missing), webui.DepSandboxMissingEvidence(st.Missing), webui.DepSandboxInstallSuggestion(st.Install))
+	case guard.SandboxBroken:
+		c.finding(webui.DepTitleSandbox, "runtime", "blocked", webui.DepReasonSandboxBroken, webui.DepSandboxBrokenEvidence(st.Error), webui.DepSuggestSandboxUserns)
 	case guard.SandboxNone:
 		c.finding(webui.DepTitleSandbox, "runtime", "uncertain", webui.DepReasonSandboxNone, webui.DepEvidenceSandboxWindows, webui.DepSuggestSandboxTrust)
 	default:
@@ -383,6 +385,8 @@ func (c *dependencyCollector) checkTool(name string) (string, string) {
 			switch st := c.a.SandboxStatus(); st.Status {
 			case guard.SandboxMissing:
 				return "blocked", webui.DepSandboxMissingReason(st.Missing)
+			case guard.SandboxBroken:
+				return "blocked", webui.DepReasonSandboxBroken
 			case guard.SandboxNone:
 				return "present", webui.DepEvidenceToolExecNoSandbox
 			default:

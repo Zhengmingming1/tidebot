@@ -7683,3 +7683,29 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - `pointers`、`operation_log`、`capability_bindings` 等仍用 `nowUTC()`（整秒）；目前没有按它们在秒内排序的列表，先不动。
 - `rowprune` 截止时间仍是 `RFC3339`，与定长列比较最多提前不到 1 秒删除，影响可忽略。
 - CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-25（续 2）：Linux 上 bubblewrap 装了却被系统拦下时，如实报「命令沙箱无法启动」（BUG，不可用）
+
+这是 2026-11-25 07:45 Asia/Shanghai 的优化，接延后项「CI 中端到端 bwrap 测试」。
+
+- **问题**：`guard.DetectSandbox` 在 Linux 上只看 `bwrap`、`socat` 在不在 PATH。Ubuntu 24.04 起 AppArmor 默认限制非特权用户命名空间（`kernel.apparmor_restrict_unprivileged_userns=1`），Docker 等容器的默认 seccomp 也不允许，这时 bwrap 在 PATH 上但根本起不来。tidebot 仍报「命令沙箱可用」、依赖检查说「命令会在系统沙箱里运行」，而 Claude Code 按 `failIfUnavailable: true` 拒绝启动，每次「可执行命令」的运行都失败，报错和 tidebot 的说法对不上，用户无从下手。
+- **改法**：
+  - `guard.ProbeBwrap`：按 Claude Code Linux 沙箱一定会用的方式（自己的用户和网络命名空间）真正启动一次 `bwrap --unshare-user --unshare-net --dev-bind / / true`，5 秒超时。只有 bubblewrap 自己拒绝（非零退出）才算失败，结果是它 stderr 的第一行（≤200 字节）；启动不了、超时一律当「说不准」，绝不因此拦下运行。
+  - `guard.DetectSandboxProbe`：两个组件都在时调用探测，失败则 `status: "broken"` + `error`。`DetectSandbox` 保持不探测（纯函数，旧测试不变）。
+  - `app.SandboxStatus` 走带缓存的探测（按 bwrap 路径：成功记 10 分钟，失败记 15 秒，改好系统设置后重新打开页面即可，和「装好后重开页面」一致）；`/api/settings` 通过新的 `Deps.Sandbox` 用同一份结果。
+  - 「broken」时：运行在启动 Claude Code 前就以 `ErrSandboxUnavailable` 拒绝并带上 bubblewrap 的原话；依赖检查把命令沙箱和 Bash 等判为被阻止，给出原因、证据（bubblewrap 原话）和建议（为 bwrap 加 AppArmor 配置 / 换允许它的 seccomp 配置，或改用只读 / 可修改）；设置 › 安全 的药丸显示「命令沙箱无法启动」，点开是应用内对话框（原话转义显示，无安装命令可复制）；运行 / 任务 / 工作流的「可执行命令」选项挂「无法启动」标记，运行对话框提示改用只读 / 可修改。只读、可修改的运行不受影响。
+  - 没有加任何新限制：探测只把「本来就会失败」的情况提前说清楚。
+  - CI：Linux 1.26.x 的 core 任务新增一步，装上真的 bubblewrap / socat 后跑 `TestProbeBwrapReal`（探测结果与直接启动 bwrap 一致，并记录结果）——这就是延后的「CI 真 bwrap e2e」的第一步。
+- **测试**：`TestDetectSandboxProbe`（只在 Linux 且两个组件都在时探测；拒绝 → broken + 原话；macOS / Windows / 缺组件不探测）；`TestProbeBwrap`（替身脚本：参数正确、取第一行非空 stderr 并去空白、超长截到 200 字节、无输出用退出码、不存在 / 卡住都返回空且超时生效）；`TestProbeBwrapReal`；`TestSandboxBrokenRefusesCommandRuns`（状态、运行被拒且带原话、依赖检查 finding、只读运行照常、恢复后 ok）；`TestCachedBwrapProbe`（按路径缓存与两种过期时间）；`TestSettingsSandboxBroken`（设置接口与依赖文字本地化）；`TestSandboxBrokenUI`。`sandboxDeps` 测试助手同时把探测换成恒成功，避免在 CI 的真实内核设置下误判。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py` 通过。
+- **性能**（本机 box，Linux x86_64，bwrap 可用）：`DetectSandbox` 只查 PATH 约 6.6 µs/次；未缓存的探测约 2.48 ms/次（启动一次 bwrap）；带缓存后约 11 µs/次。设置页、依赖检查、每次命令运行在 10 分钟内只真正启动一次 bwrap。
+- **截图**：`/workspace/tidebot-shots/2026-11-25-0745-sandbox-broken-pill-{zh-CN,en}.png`（悬停 tooltip）、`2026-11-25-0745-sandbox-broken-help-{zh-CN,en,tide-zh-CN,midnight-zh-CN}.png`（1024×655，用替身 bwrap 复现；无横向滚动、无脚本错误）。
+
+**心得**：「依赖在 PATH 上」不等于「能用」；沙箱这种由内核决定成败的东西，要按真正会用到的参数启动一次才算数，但探测本身失败（超时、起不来）不能反过来拦住用户。
+
+**参考**：anthropic-experimental/sandbox-runtime `src/sandbox/linux-sandbox-utils.ts` 的 `probeUid0UserNamespace`：用 `bwrap --unshare-user --dev-bind / / true` 实际起一次、5 秒超时、取 bubblewrap 的第一行 stderr 并按 bwrap 路径缓存；以及同文件 `checkLinuxDependencies` 把依赖缺失和不可用分开报告（只借思路，不抄代码）。
+
+**后续想法**：
+- macOS 也可以同样实测一次 `sandbox-exec`（目前只看命令在不在）。
+- 根据 `/proc/sys/kernel/apparmor_restrict_unprivileged_userns` 区分「Ubuntu AppArmor」和「容器」两种原因，给更具体的建议。
+- CI 的真 bwrap 测试目前只验证启动；之后可以用 mock Claude 之外的方式验证 `SandboxSettings` 的写入范围。
+- `dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。

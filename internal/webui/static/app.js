@@ -2239,6 +2239,7 @@ $$('input[name="mode"]',form).forEach(function(i){i.disabled=!dir&&i.value==="ed
 if(!dir&&modeVal()==="edit")setMode("exec");
 var m=modeVal();
 if(m==="exec"&&sb.status==="missing"){txt=T("rn.hint_exec_missing",{m:(sb.missing||[]).join(", ")});warn=true;}
+else if(m==="exec"&&sb.status==="broken"){txt=T("rn.hint_exec_broken");warn=true;}
 else if(!dir&&m==="exec")txt=T("rn.hint_exec_scratch");
 else if(!dir)txt=T(form.skill_id.value?"rn.hint_skill":(edit?"qr.edit_hint":"qr.hint"));
 else if(m==="edit"||m==="exec"){txt=T(m==="exec"?"rn.hint_exec":"rn.hint_edit");if(g&&g.dirty>0){txt=T("rn.hint_dirty",{n:g.dirty});warn=true;}}
@@ -2359,7 +2360,8 @@ var opt=function(v,icon,extra){
 return '<label data-tip="'+esc(T("rn."+v+"_tip"))+'"><input type="radio" name="'+esc(name)+'" value="'+v+'"'+(cur===v?" checked":"")+"><span>"+ic(icon,"sm")+esc(T("rn."+v))+(extra||"")+"</span></label>";
 };
 var mark=sb.status==="none"?'<b class="rn-nosb" data-tip="'+esc(T("rn.nosb_tip"))+'">'+esc(T("rn.nosb"))+"</b>":
-sb.status==="missing"?'<b class="rn-nosb bad" data-tip="'+esc(T("pl.sb_missing_tip",{m:(sb.missing||[]).join(", ")}))+'">'+esc(T("rn.sb_missing"))+"</b>":"";
+sb.status==="missing"?'<b class="rn-nosb bad" data-tip="'+esc(T("pl.sb_missing_tip",{m:(sb.missing||[]).join(", ")}))+'">'+esc(T("rn.sb_missing"))+"</b>":
+sb.status==="broken"?'<b class="rn-nosb bad" data-tip="'+esc(T("pl.sb_broken_tip"))+'">'+esc(T("rn.sb_broken"))+"</b>":"";
 return '<span class="rn-mode" role="radiogroup" aria-label="'+esc(T("rn.mode"))+'">'+opt("read","eye")+opt("edit","edit")+opt("exec","terminal",mark)+"</span>";
 }
 function execFirstUse(sb,box){
@@ -6193,12 +6195,21 @@ function rpcRead(method,params){return rpcCall(method,params,undefined,true);}
 function sandboxPill(sb){
 sb=sb||{};
 if(sb.status==="missing")return '<button type="button" class="pill warn sm pl-sb" id="pl-sb" data-tip="'+esc(T("pl.sb_missing_tip",{m:(sb.missing||[]).join(", ")}))+'">'+ic("shield","sm")+esc(T("pl.sb_missing"))+"</button>";
+if(sb.status==="broken")return '<button type="button" class="pill warn sm pl-sb" id="pl-sb" data-tip="'+esc(T("pl.sb_broken_tip"))+'">'+ic("shield","sm")+esc(T("pl.sb_broken"))+"</button>";
 if(sb.status==="none")return '<span class="pill plain sm pl-sb" tabindex="0" data-tip="'+esc(T("pl.sb_none_tip"))+'">'+ic("shield","sm")+esc(T("pl.sb_none"))+"</span>";
 if(sb.status==="ok")return '<span class="pill ok sm pl-sb" tabindex="0" data-tip="'+esc(T("pl.sb_ok_tip"))+'">'+ic("shield","sm")+esc(T("pl.sb_ok"))+"</span>";
 return "";
 }
 function sandboxHelp(sb){
 sb=sb||{};
+if(sb.status==="broken"){
+modal('<div class="card-head"><span class="ico warn">'+ic("shield")+"</span><h2>"+esc(T("pl.sb_broken_title"))+"</h2></div>"+
+'<p class="confirm-body">'+esc(T("pl.sb_broken_body"))+"</p>"+
+(sb.error?'<div class="sb-cmd"><code class="mono">'+esc(sb.error)+"</code></div>":"")+
+'<p class="muted sb-after">'+esc(T("pl.sb_broken_after"))+"</p>"+
+'<div class="actions"><button type="button" class="btn primary" data-close autofocus>'+esc(T("btn.close"))+"</button></div>");
+return;
+}
 var cmd=sb.install||"sudo apt-get install -y bubblewrap socat";
 modal('<div class="card-head"><span class="ico warn">'+ic("shield")+"</span><h2>"+esc(T("pl.sb_help_title"))+"</h2></div>"+
 '<p class="confirm-body">'+esc(T("pl.sb_help_body",{m:(sb.missing||[]).join(", ")}))+"</p>"+

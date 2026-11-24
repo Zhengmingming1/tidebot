@@ -79,6 +79,12 @@ jobs:
       - name: self-update end to end (local signed feed, throwaway key)
         if: runner.os == 'Linux' && matrix.go == '1.26.x'
         run: bash scripts/e2e-update.sh
+      - name: command sandbox start end to end (real bubblewrap)
+        if: runner.os == 'Linux' && matrix.go == '1.26.x'
+        shell: bash
+        run: |
+          bash scripts/ci-apt-install.sh --no-install-recommends bubblewrap socat
+          go test -count=1 -v -run 'TestProbeBwrapReal' ./internal/guard
 
   race:
     runs-on: ubuntu-latest

@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func lookOnly(found ...string) func(string) (string, error) {
@@ -171,4 +174,102 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// The probe only runs on Linux with both parts present; a refusal makes the
+// status "broken" with bubblewrap's message.
+func TestDetectSandboxProbe(t *testing.T) {
+	var probed []string
+	probe := func(msg string) func(string) string {
+		return func(p string) string { probed = append(probed, p); return msg }
+	}
+	st := DetectSandboxProbe("linux", lookOnly("bwrap", "socat"), probe("bwrap: No permissions to create a new namespace"))
+	if st.Status != SandboxBroken || st.Error != "bwrap: No permissions to create a new namespace" || st.Install != "" || len(st.Missing) != 0 {
+		t.Fatalf("%+v", st)
+	}
+	if !reflect.DeepEqual(probed, []string{"/usr/bin/bwrap"}) {
+		t.Fatalf("probed %v", probed)
+	}
+	if st := DetectSandboxProbe("linux", lookOnly("bwrap", "socat"), probe("")); st.Status != SandboxOK || st.Error != "" {
+		t.Fatalf("%+v", st)
+	}
+	probed = nil
+	if st := DetectSandboxProbe("linux", lookOnly("bwrap"), probe("x")); st.Status != SandboxMissing || st.Error != "" {
+		t.Fatalf("%+v", st)
+	}
+	if st := DetectSandboxProbe("darwin", lookOnly("sandbox-exec", "bwrap"), probe("x")); st.Status != SandboxOK {
+		t.Fatalf("%+v", st)
+	}
+	if st := DetectSandboxProbe("windows", lookOnly("bwrap", "socat"), probe("x")); st.Status != SandboxNone {
+		t.Fatalf("%+v", st)
+	}
+	if len(probed) != 0 {
+		t.Fatalf("probed without both parts or off Linux: %v", probed)
+	}
+}
+
+// ProbeBwrap against stand-in bwrap scripts: only bubblewrap's own refusal
+// counts; one that can't be launched or hangs is "can't tell" (never blocks runs).
+func TestProbeBwrap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell stand-ins")
+	}
+	dir := t.TempDir()
+	script := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	args := filepath.Join(dir, "args")
+	ok := script("ok", `echo "$@" > "`+args+`"; exit 0`)
+	if msg := ProbeBwrap(ok); msg != "" {
+		t.Fatalf("ok: %q", msg)
+	}
+	if b, _ := os.ReadFile(args); strings.TrimSpace(string(b)) != "--unshare-user --unshare-net --dev-bind / / true" {
+		t.Fatalf("args %q", b)
+	}
+	refused := script("refused", `printf '\n  bwrap: setting up uid map: Permission denied  \nsecond line\n' >&2; exit 1`)
+	if msg := ProbeBwrap(refused); msg != "bwrap: setting up uid map: Permission denied" {
+		t.Fatalf("refused: %q", msg)
+	}
+	long := script("long", `printf '%0300d' 0 >&2; exit 1`)
+	if msg := ProbeBwrap(long); len(msg) != 200 {
+		t.Fatalf("long: %d bytes", len(msg))
+	}
+	if msg := ProbeBwrap(script("silent", `exit 3`)); msg != "exit status 3" {
+		t.Fatalf("silent: %q", msg)
+	}
+	if msg := ProbeBwrap(filepath.Join(dir, "absent")); msg != "" {
+		t.Fatalf("absent: %q", msg)
+	}
+	old := BwrapProbeTimeout
+	BwrapProbeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { BwrapProbeTimeout = old })
+	start := time.Now()
+	if msg := ProbeBwrap(script("hang", `exec sleep 5`)); msg != "" {
+		t.Fatalf("hang: %q", msg)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("probe waited %v", d)
+	}
+}
+
+// Where a real bubblewrap is installed (Linux CI installs it), the probe
+// agrees with starting it by hand: the end-to-end check of the sandbox start.
+func TestProbeBwrapReal(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("bubblewrap is the Linux sandbox")
+	}
+	p, err := exec.LookPath("bwrap")
+	if err != nil {
+		t.Skip("bwrap not installed")
+	}
+	msg := ProbeBwrap(p)
+	direct := exec.Command(p, "--unshare-user", "--unshare-net", "--dev-bind", "/", "/", "true").Run()
+	if (msg == "") != (direct == nil) {
+		t.Fatalf("probe %q, direct start %v", msg, direct)
+	}
+	t.Logf("bwrap %s: probe %q", p, msg)
 }

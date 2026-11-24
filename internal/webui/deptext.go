@@ -64,6 +64,8 @@ const (
 	DepSuggestSandboxTrust         = "Use command execution only on trusted directories and skills"
 	DepReasonSandboxOK             = "Commands will run in the system sandbox"
 	DepEvidenceSandboxOK           = "Sandbox components are present"
+	DepReasonSandboxBroken         = "bubblewrap is installed but this system won't let it start; command execution runs will be refused"
+	DepSuggestSandboxUserns        = "Allow unprivileged user namespaces for bwrap (Ubuntu 24.04+: an AppArmor profile for bwrap; containers: a seccomp profile that permits them), or switch to read-only / editable"
 	DepSuggestNone                 = "No action needed"
 	DepReasonTaskPolicyUnread      = "The task's saved tool policy could not be verified"
 	DepEvidenceNoTaskVersion       = "The task or a valid version was not found"
@@ -128,6 +130,10 @@ func DepSandboxMissingReason(missing []string) string {
 
 func DepSandboxMissingEvidence(missing []string) string {
 	return "tidebot could not find these on this computer: " + strings.Join(missing, ", ")
+}
+
+func DepSandboxBrokenEvidence(msg string) string {
+	return "bubblewrap said: " + msg
 }
 
 func DepSandboxInstallSuggestion(install string) string {
@@ -208,6 +214,7 @@ var depTextPatterns = []depTextPattern{
 	depRE("dep_sandbox_missing_ev", `tidebot could not find these on this computer: (.+)`, "missing"),
 	depRE("dep_sandbox_missing_ev", `tidebot 在这台电脑上找不到：(.+)`, "missing"),
 	depRE("dep_sandbox_install", `Run (.+) in a terminal, or switch to read-only / editable`, "install"),
+	depRE("dep_sandbox_broken_ev", `bubblewrap said: (.+)`, "error"),
 	depRE("dep_sandbox_install", `在终端运行 (.+)，或改用只读 / 可修改`, "install"),
 	depRE("dep_context_over_ev", `(\d+) bytes; about (\d+) estimated tokens`, "bytes", "tokens"),
 	depRE("dep_context_over_ev", `(\d+) bytes；约 (\d+) tokens（估算）`, "bytes", "tokens"),
@@ -272,6 +279,8 @@ var depExactPatterns = func() []depTextPattern {
 		{"dep_suggest_sandbox_trust", DepSuggestSandboxTrust, "只在信任的目录和技能上使用可执行命令"},
 		{"dep_reason_sandbox_ok", DepReasonSandboxOK, "命令会在系统沙箱里运行"},
 		{"dep_evidence_sandbox_ok", DepEvidenceSandboxOK, "沙箱组件齐全"},
+		{"dep_reason_sandbox_broken", DepReasonSandboxBroken, "已安装 bubblewrap，但系统不允许它启动，可执行命令的运行会被拒绝"},
+		{"dep_suggest_sandbox_userns", DepSuggestSandboxUserns, "允许 bwrap 使用非特权用户命名空间（Ubuntu 24.04 及以上：为 bwrap 添加 AppArmor 配置；容器：使用允许它的 seccomp 配置），或改用只读 / 可修改"},
 		{"dep_suggest_none", DepSuggestNone, "无需处理"},
 		{"dep_reason_task_policy_unread", DepReasonTaskPolicyUnread, "无法核对该任务已保存的工具策略"},
 		{"dep_evidence_no_task_version", DepEvidenceNoTaskVersion, "未找到任务或有效版本"},

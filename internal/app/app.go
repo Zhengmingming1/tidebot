@@ -191,7 +191,7 @@ func Open(cfg config.Config) (*App, error) {
 	a.WebUI = webui.New(webui.Deps{
 		DependencyPreflight: a.dependencyPreflight,
 		StartSkillSetEval:   a.startSkillSetEval, GetSkillSetEval: a.getSkillSetEval, ListSkillSetEvals: a.listSkillSetEvals, CancelSkillSetEval: a.cancelSkillSetEval,
-		StartDependencyCheck: a.startDependencyCheck, DependencyCheckStatus: a.dependencyCheckStatus,
+		StartDependencyCheck: a.startDependencyCheck, DependencyCheckStatus: a.dependencyCheckStatus, Sandbox: a.SandboxStatus,
 		Cfg: &a.Cfg, DB: sqlDB, Store: store, Auth: a.Auth, Cost: a.Cost,
 		Tasks: a.Tasks, Amend: a.Amend, Skills: a.Skills, Workflows: a.Workflows, Ver: ver, Reg: reg, Log: log,
 		RunTask: a.startTaskAsync, QuickRun: a.startQuickRunAsync, CapabilityBindings: a, CapabilitySecrets: a, RunCapabilityButton: a.startCapabilityButton,

@@ -231,7 +231,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"tz_offset":        tzOffsetMin(s.loc(), time.Now()),
 		"version":          Version,
 		// can command runs be sandboxed here (P1): bubblewrap/socat on Linux, Seatbelt on macOS
-		"sandbox": guard.DetectSandbox(runtime.GOOS, exec.LookPath),
+		"sandbox": s.sandboxStatus(),
 	})
 }
 
@@ -395,4 +395,11 @@ func (s *Server) handleLanguage(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 405, "method not allowed")
 	}
+}
+
+func (s *Server) sandboxStatus() guard.SandboxStatus {
+	if s.deps.Sandbox != nil {
+		return s.deps.Sandbox()
+	}
+	return guard.DetectSandbox(runtime.GOOS, exec.LookPath)
 }

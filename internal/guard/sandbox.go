@@ -1,11 +1,16 @@
 package guard
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Command runs ("exec" mode) rely on Claude Code's own OS sandbox (Seatbelt on
@@ -18,6 +23,7 @@ import (
 const (
 	SandboxOK      = "ok"      // the platform sandbox can start
 	SandboxMissing = "missing" // a dependency is not installed (Linux: bubblewrap, socat)
+	SandboxBroken  = "broken"  // installed but can't start here (Linux: user namespaces blocked)
 	SandboxNone    = "none"    // the platform has no system sandbox (native Windows)
 )
 
@@ -28,10 +34,20 @@ type SandboxStatus struct {
 	Status   string   `json:"status"`
 	Missing  []string `json:"missing,omitempty"`
 	Install  string   `json:"install,omitempty"`
+	Error    string   `json:"error,omitempty"` // SandboxBroken: bubblewrap's own first error line
 }
 
 // DetectSandbox checks the sandbox's dependencies on PATH (look is exec.LookPath).
 func DetectSandbox(goos string, look func(string) (string, error)) SandboxStatus {
+	return DetectSandboxProbe(goos, look, nil)
+}
+
+// DetectSandboxProbe is DetectSandbox plus, on Linux with both parts present,
+// one start of bubblewrap (probe, e.g. ProbeBwrap; nil skips it): bwrap on PATH
+// can still be refused by the kernel (Ubuntu 24.04+ AppArmor's
+// apparmor_restrict_unprivileged_userns, a container's seccomp profile), and
+// Claude Code then refuses every command run (failIfUnavailable).
+func DetectSandboxProbe(goos string, look func(string) (string, error), probe func(bwrap string) string) SandboxStatus {
 	st := SandboxStatus{Platform: goos, Status: SandboxOK}
 	switch goos {
 	case "linux":
@@ -43,6 +59,12 @@ func DetectSandbox(goos string, look func(string) (string, error)) SandboxStatus
 		if len(st.Missing) > 0 {
 			st.Status = SandboxMissing
 			st.Install = installHint(look, st.Missing)
+		} else if probe != nil {
+			if p, err := look("bwrap"); err == nil {
+				if msg := probe(p); msg != "" {
+					st.Status, st.Error = SandboxBroken, msg
+				}
+			}
 		}
 	case "darwin":
 		if _, err := look("sandbox-exec"); err != nil {
@@ -52,6 +74,37 @@ func DetectSandbox(goos string, look func(string) (string, error)) SandboxStatus
 		st.Status = SandboxNone
 	}
 	return st
+}
+
+// BwrapProbeTimeout bounds ProbeBwrap; a probe that takes longer counts as "can't tell".
+var BwrapProbeTimeout = 5 * time.Second
+
+// ProbeBwrap starts bubblewrap with what Claude Code's Linux sandbox always asks
+// for (its own user and network namespace) and runs true. "" means it started,
+// or the probe couldn't tell (bwrap couldn't be launched, it timed out): only a
+// refusal from bubblewrap itself blocks command runs. Otherwise the result is
+// bubblewrap's first stderr line (at most 200 bytes), or its exit status.
+func ProbeBwrap(bwrap string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), BwrapProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bwrap, "--unshare-user", "--unshare-net", "--dev-bind", "/", "/", "true")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.WaitDelay = time.Second // don't wait on a child that kept stderr open
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if err == nil || ctx.Err() != nil || !errors.As(err, &exit) {
+		return ""
+	}
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			if len(line) > 200 {
+				line = strings.ToValidUTF8(line[:200], "")
+			}
+			return line
+		}
+	}
+	return exit.Error()
 }
 
 // installHint is the install command for the first package manager found.

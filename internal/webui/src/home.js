@@ -216,6 +216,7 @@
             if (!dir && modeVal() === "edit") setMode("exec");
             var m = modeVal();
             if (m === "exec" && sb.status === "missing") { txt = T("rn.hint_exec_missing", { m: (sb.missing || []).join(", ") }); warn = true; }
+            else if (m === "exec" && sb.status === "broken") { txt = T("rn.hint_exec_broken"); warn = true; }
             else if (!dir && m === "exec") txt = T("rn.hint_exec_scratch");
             else if (!dir) txt = T(form.skill_id.value ? "rn.hint_skill" : (edit ? "qr.edit_hint" : "qr.hint"));
             else if (m === "edit" || m === "exec") { txt = T(m === "exec" ? "rn.hint_exec" : "rn.hint_edit"); if (g && g.dirty > 0) { txt = T("rn.hint_dirty", { n: g.dirty }); warn = true; } }
@@ -335,14 +336,16 @@
   // modeSegHtml: the three permission levels (只读 / 可修改 / 可执行命令) as a
   // segmented control; radios named name, cur checked. sb is the sandbox status from
   // /api/settings: on a platform with none (Windows) 可执行命令 carries a small
-  // 「无系统沙箱」 mark, with sandbox parts missing a warning mark (details in tooltips).
+  // 「无系统沙箱」 mark, with sandbox parts missing or refused by the system a
+  // warning mark (details in tooltips).
   function modeSegHtml(name, cur, sb) {
     sb = sb || {};
     var opt = function (v, icon, extra) {
       return '<label data-tip="' + esc(T("rn." + v + "_tip")) + '"><input type="radio" name="' + esc(name) + '" value="' + v + '"' + (cur === v ? " checked" : "") + "><span>" + ic(icon, "sm") + esc(T("rn." + v)) + (extra || "") + "</span></label>";
     };
     var mark = sb.status === "none" ? '<b class="rn-nosb" data-tip="' + esc(T("rn.nosb_tip")) + '">' + esc(T("rn.nosb")) + "</b>" :
-      sb.status === "missing" ? '<b class="rn-nosb bad" data-tip="' + esc(T("pl.sb_missing_tip", { m: (sb.missing || []).join(", ") })) + '">' + esc(T("rn.sb_missing")) + "</b>" : "";
+      sb.status === "missing" ? '<b class="rn-nosb bad" data-tip="' + esc(T("pl.sb_missing_tip", { m: (sb.missing || []).join(", ") })) + '">' + esc(T("rn.sb_missing")) + "</b>" :
+      sb.status === "broken" ? '<b class="rn-nosb bad" data-tip="' + esc(T("pl.sb_broken_tip")) + '">' + esc(T("rn.sb_broken")) + "</b>" : "";
     return '<span class="rn-mode" role="radiogroup" aria-label="' + esc(T("rn.mode")) + '">' + opt("read", "eye") + opt("edit", "edit") + opt("exec", "terminal", mark) + "</span>";
   }
   // execFirstUse: on a platform without a system sandbox (native Windows) the first

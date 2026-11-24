@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/guard"
@@ -38,15 +39,51 @@ const EventAgentConfigChanged = "agent_config_changed"
 // execStopGrace: how long a stopped command run gets to clean up (runner.Options.StopGrace).
 const execStopGrace = 10 * time.Second
 
-// ErrSandboxUnavailable: the platform sandbox can't start (a dependency is missing).
+// ErrSandboxUnavailable: the platform sandbox can't start (a dependency is
+// missing, or bubblewrap is refused by the kernel).
 var ErrSandboxUnavailable = errors.New("command sandbox unavailable")
 
 // sandboxLook finds the sandbox's dependencies (a var for tests).
 var sandboxLook = exec.LookPath
 
+// sandboxProbe starts bubblewrap once (a var for tests; guard.ProbeBwrap).
+var sandboxProbe = cachedBwrapProbe(guard.ProbeBwrap, time.Now)
+
+// Probe results are kept so the Settings page, every dependency check and every
+// command run don't each start bubblewrap: a start is kept 10 minutes, a refusal
+// 15 seconds (fixing the kernel setting shows up on the next page open, as an
+// install does).
+const (
+	bwrapProbeOKFor     = 10 * time.Minute
+	bwrapProbeRefuseFor = 15 * time.Second
+)
+
+func cachedBwrapProbe(probe func(string) string, now func() time.Time) func(string) string {
+	type entry struct {
+		msg   string
+		until time.Time
+	}
+	var mu sync.Mutex
+	cache := map[string]entry{}
+	return func(bwrap string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		if e, ok := cache[bwrap]; ok && now().Before(e.until) {
+			return e.msg
+		}
+		msg := probe(bwrap)
+		ttl := bwrapProbeOKFor
+		if msg != "" {
+			ttl = bwrapProbeRefuseFor
+		}
+		cache[bwrap] = entry{msg, now().Add(ttl)}
+		return msg
+	}
+}
+
 // SandboxStatus reports whether command runs can be sandboxed on this machine.
 func (a *App) SandboxStatus() guard.SandboxStatus {
-	return guard.DetectSandbox(runtime.GOOS, sandboxLook)
+	return guard.DetectSandboxProbe(runtime.GOOS, sandboxLook, sandboxProbe)
 }
 
 func (a *App) runSandboxDir() string { return filepath.Join(a.Cfg.DataDir, "run-sandbox") }
@@ -72,8 +109,12 @@ func (a *App) purgeRunSandbox() {
 func (a *App) applyExecSandbox(ctx context.Context, opts *runner.Options) (func(), error) {
 	nop := func() {}
 	st := a.SandboxStatus()
-	if st.Status == guard.SandboxMissing {
+	switch st.Status {
+	case guard.SandboxMissing:
 		return nop, fmt.Errorf("%w: missing %s (install: %s)", ErrSandboxUnavailable, strings.Join(st.Missing, ", "), st.Install)
+	case guard.SandboxBroken:
+		// Claude Code would refuse to start anyway (failIfUnavailable); say why here.
+		return nop, fmt.Errorf("%w: bubblewrap can't start here: %s (unprivileged user namespaces are blocked; see Settings › Security › Command sandbox)", ErrSandboxUnavailable, st.Error)
 	}
 	home, _ := os.UserHomeDir()
 	dirs := runWriteDirs(opts)
