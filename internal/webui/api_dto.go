@@ -35,7 +35,7 @@ type taskDTO struct {
 	// WorkspaceDefault: the task has no folder of its own and runs in the one tidebot
 	// gives it (set on the detail answer only, where Workspace is then that folder).
 	WorkspaceDefault bool `json:"workspace_default,omitempty"`
-	// WorkspaceWorkflow (detail answer, workflow tasks): Workspace is the folder
+	// WorkspaceWorkflow (list and detail answers, workflow tasks): Workspace is the folder
 	// saved in the workflow version the task runs ("" = the workflow names none
 	// and each run uses scratch folders); the task's own folder is never used.
 	WorkspaceWorkflow bool     `json:"workspace_workflow,omitempty"`

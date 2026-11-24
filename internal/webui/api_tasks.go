@@ -132,10 +132,12 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		}
 		d := toTaskDTO(v)
 		home, _ := os.UserHomeDir()
-		s.applyTaskWorkspaceProblem(ctx, &d, home, nil, func() bool { return s.taskHasRun(ctx, id) }) // on the saved folder, before "" becomes the default one
+		// the workflow version is read once for the problem and the folder
+		seen := map[string]taskWfFolder{}
+		s.applyTaskWorkspaceProblem(ctx, &d, home, seen, func() bool { return s.taskHasRun(ctx, id) }) // on the saved folder, before "" becomes the default one
 		if d.Workflow != nil {
 			// a workflow run works in the workflow's folder, not the task's own
-			d.Workspace, d.WorkspaceWorkflow = s.taskWorkflowDir(ctx, d.Workflow.ID, d.Workflow.Version), true
+			d.Workspace, d.WorkspaceWorkflow = s.taskWorkflowFolder(ctx, d.Workflow.ID, d.Workflow.Version, seen).dir, true
 			d.Workflow = s.taskWorkflowRef(ctx, d.Workflow.ID, d.Workflow.Version)
 		} else {
 			d.Workspace, d.WorkspaceDefault = s.taskWorkspace(d.ID, d.Workspace)

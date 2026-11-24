@@ -7604,3 +7604,25 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - `rowprune` 的截止时间仍是 `RFC3339`（无小数），和定长列比较时截止那一秒内的行会提前不到 1 秒删除，影响可忽略；可以按表给清理规则配同一定长格式（候选 (2)）。
 - `chat_sessions.updated_at`、`pointers`、`operation_log` 等仍用 `app.nowUTC()`（`RFC3339`，秒级），会话列表按 `updated_at DESC, id DESC` 排序，同一秒内顺序取决于 id；要做到毫秒内有序需要整体迁移，先记下。
 - 上轮候选仍在：运行时直接复用 `execRunTools`；编辑表单「检查依赖」对工作流任务仍按提示词任务预览；任务列表接口给工作流任务返回的仍是任务自己的目录。
+
+### 2026-11-24（续 3）：任务列表接口给工作流任务返回工作流的目录，和详情一致（业务逻辑矛盾）
+
+这是 2026-11-24 19:00 Australia/Sydney 的优化，接前几轮候选「任务列表接口给工作流任务返回的仍是任务自己的目录」。
+
+- **问题**：工作流任务的运行只用所跑工作流版本里的目录。`GET /api/tasks/{id}` 已经（2026-11-23 续 4）把工作流任务的 `workspace` 换成工作流的目录并标 `workspace_workflow: true`，但 `GET /api/tasks` 列表仍原样返回任务行自己的目录（转成工作流任务后通常是空串，旧数据或换机恢复时可能是残留路径），也没有 `workspace_workflow`。同一个任务在列表和详情里「工作目录」不一样，脚本 / 外部调用方按列表看会以为工作流任务没有目录或用的是旧路径。
+- **改法**：
+  - `task_ws_problem.go` 新增 `taskWorkflowFolder`（`taskWfFolder{problem, problemDir, dir}`）：按 `id@version` 读一次工作流版本，同时给出目录问题（和运行同一个 `CheckRunDir` 检查）和 `~` 展开后的目录。列表原有的按版本缓存改存它，所以列表不多查数据库；`taskWorkflowDir` 和旧的 `taskWorkflowWorkspaceProblem` 合并进来。
+  - 列表：工作流任务的 `workspace` 改为工作流（固定版本或跟随时的当前版本）的目录，加 `workspace_workflow: true`；工作流已删、版本不在或没设目录时为空。提示词任务不变（仍是保存的目录，列表不给默认目录）。
+  - 详情：问题检查和目录共用同一个缓存，工作流版本从读两次变成一次。
+  - 前端不用改（列表行的目录标签对工作流任务本来就读 `workflow_workspace`）；不加任何限制，没有界面改动。
+- **测试**：`TestWorkflowTaskWorkspaceIsWorkflows` 增加列表断言：固定版本、跟随（`~/proj` 展开）、没设目录三种工作流任务的 `workspace` 与详情一致且带 `workspace_workflow`，提示词任务保留自己的残留目录、不带标记、都没有 `workspace_default`。修改前这段断言失败（三个工作流任务都返回 `""` 且无标记）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l` 通过。
+- **不是性能改动**（列表查询次数不变，详情少读一次工作流版本），也不是 UI 改动，没有截图。
+
+**心得**：同一个字段在列表和详情两个接口各算一遍，迟早会分叉；这次把「读版本 → 目录 + 问题」收成一个带缓存的函数，两个接口都走它。
+
+**参考**：go-gitea/gitea `services/convert/repository.go` 的 `ToRepo` 让列表和单个仓库接口共用同一个转换函数，字段口径只有一处定义（只借思路，不抄代码）。
+
+**后续想法**：
+- 运行时直接复用 `execRunTools`（`applyExecSandbox` 里清单仍是字面量）。
+- 编辑表单对工作流任务隐藏了「检查依赖」，可以改成检查它运行的工作流（服务端 `kind=task` 已支持工作流任务）。
+- `rowprune` 截止时间格式、`chat_sessions.updated_at` 秒级仍待做；CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。

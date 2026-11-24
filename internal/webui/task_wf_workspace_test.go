@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -87,6 +88,21 @@ func TestWorkflowTaskWorkspaceIsWorkflows(t *testing.T) {
 	}
 	if _, d := c.json(http.MethodGet, "/api/tasks/"+plainID, nil); d["workspace_workflow"] != nil || d["workspace"] != stale {
 		t.Errorf("plain task: %v", d)
+	}
+	// The list answer says the same as the detail answer: the workflow's
+	// folder for workflow tasks, the task's own (as saved) for the others.
+	want[plainID] = stale
+	rec := c.do(http.MethodGet, "/api/tasks", "", nil)
+	var list []map[string]any
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &list) != nil || len(list) != 4 {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body)
+	}
+	for _, d := range list {
+		id, _ := d["id"].(string)
+		wfTask := id != plainID
+		if got, _ := d["workspace"].(string); got != want[id] || (d["workspace_workflow"] == true) != wfTask || d["workspace_default"] != nil {
+			t.Errorf("list %s: workspace %q workflow %v default %v, want %q", d["name"], got, d["workspace_workflow"], d["workspace_default"], want[id])
+		}
 	}
 
 	var opened []string
