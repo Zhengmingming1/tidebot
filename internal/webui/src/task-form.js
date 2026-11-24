@@ -410,7 +410,7 @@
         '<label class="field"><span>' + esc(T("tf.effort")) + tip(T("tf.effort_tip")) + '</span><select name="effort">' + effortOptions(tf.effort) + "</select></label></div>" +
         policyFieldsHtml(pol, streak, brkAt) +
         '<label class="check"><input type="checkbox" name="enabled"' + (tf.enabled ? " checked" : "") + "> " + esc(T("tf.task_enabled")) + "</label>" + (taskId && !tf.enabled ? '<p class="hint">' + esc(T("costmode.paused")) + '</p>' : "") +
-        '<div class="actions"><button type="button" class="btn' + (wf ? " hidden" : "") + '" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
+        '<div class="actions"><button type="button" class="btn" id="tf-dependencies">' + esc(T("ss.dependencies")) + '</button><button type="button" class="btn ghost" data-close>' + esc(T("btn.cancel")) + '</button><button class="btn primary">' + esc(T(taskId ? "btn.save" : "tf.create")) + "</button></div></form>", function (root, close) {
         var f = $("#tf", root);
         var runMode = function () { var c = f.querySelector('input[name="run_mode"]:checked'); return c ? c.value : "edit"; };
         var syncTimeout = function () {
@@ -424,7 +424,8 @@
         var initial=tf.skill_bindings||(tf.skill_id?[{skill_id:tf.skill_id,mode:tf.skill_version_id?"pinned":"follow",version_id:tf.skill_version_id||"",role:"primary"}]:[]);
         var editor=skillBindingEditor($("#tf-bindings",root),skills,initial,function(bs){f.skill_id.value=bs.length?bs[0].skill_id:"";f.skill_version_id.value=bs.length?bs[0].version_id:"";f.skill_id.dispatchEvent(new Event("change",{bubbles:true}));},{source:tf.skill_set_source,checkRequest:function(){return {kind:"draft",execution:"task",id:taskId||"",workspace:f.workspace.value.trim(),prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value(),mode:runMode()};}});
         var first=editor.value()[0];f.skill_id.value=first?first.skill_id:"";f.skill_version_id.value=first?first.version_id:"";
-        $("#tf-dependencies",root).addEventListener("click",function(){dependencyCheck({kind:"draft",execution:"task",id:taskId||"",prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value(),workspace:f.workspace.value.trim(),mode:runMode()});});
+        // a workflow task runs the workflow: check the version picked here (0 = current) with this input
+        $("#tf-dependencies",root).addEventListener("click",function(){if(wf){dependencyCheck({kind:"workflow",id:wf.id,version:Number(f.wf_version.value)||0,prompt:f.prompt.value});return;}dependencyCheck({kind:"draft",execution:"task",id:taskId||"",prompt:f.prompt.value,provider:f.provider.value,skill_bindings:editor.value(),workspace:f.workspace.value.trim(),mode:runMode()});});
         var se = scheduleEditor($("#sched-host", root), tf.cron, state.tz);
         var tgs = tagInput($("#tg-host", root), tf.tags || pre.tags || [], inUse);
         if (drafty) wireDraft(root, f.prompt, "task");

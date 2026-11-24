@@ -264,3 +264,54 @@ func TestDependencyExecModeToolsAvailable(t *testing.T) {
 		t.Fatalf("sandbox missing: Bash %q findings %+v", st, snap.Findings)
 	}
 }
+
+// The task form checks a workflow task before it is saved: the version picked
+// there (pinned, or 0 = following the current one) with the input typed there,
+// not the saved task and not always the workflow's current version.
+func TestDependencyWorkflowVersionFromTaskForm(t *testing.T) {
+	sandboxDeps(t, true)
+	a := newTestApp(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	sk := importPreflightSkill(t, a, "wf-form-version", "run a command", skillstore.SkillManifest{Format: skillstore.SkillManifestFormat})
+	node := []workflow.Node{{ID: "A", Kind: "skill", Prompt: "x", SkillBindings: []tasksvc.SkillBinding{{SkillID: sk, Mode: "follow"}}}}
+	v1, err := a.Workflows.Save(ctx, "", 0, workflow.Definition{Name: "wf", RunMode: "exec", WorkspaceDir: dir, Nodes: node})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, err := a.Workflows.Save(ctx, v1.ID, v1.Version, workflow.Definition{Name: "wf", RunMode: "read", Nodes: node})
+	if err != nil || v2.Version == v1.Version {
+		t.Fatalf("second version: %+v %v", v2, err)
+	}
+	for _, tc := range []struct {
+		version          int
+		wantMode, wantWS string
+	}{{v1.Version, "exec", dir}, {0, "read", ""}, {v2.Version, "read", ""}} {
+		snap, err := a.collectDependencySnapshot(ctx, webui.DependencyCheckRequest{Kind: "workflow", ID: v1.ID, Version: tc.version, Prompt: "input for the run"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p := snap.RuntimeProfile; p.Mode != tc.wantMode || p.Workspace != tc.wantWS {
+			t.Fatalf("version %d: profile %+v", tc.version, p)
+		}
+		found := false
+		for _, m := range snap.Materials {
+			found = found || m.Source == "workflow-input" && m.Content == "input for the run"
+		}
+		if !found {
+			t.Fatalf("version %d: input not in materials %+v", tc.version, snap.Materials)
+		}
+	}
+	snap, err := a.collectDependencySnapshot(ctx, webui.DependencyCheckRequest{Kind: "workflow", ID: v1.ID, Version: 99})
+	if err != nil || len(snap.Findings) == 0 || snap.Findings[0].Kind != "workflow" || snap.Findings[0].Level != "missing" || !strings.Contains(snap.Findings[0].Evidence, "version 99") {
+		t.Fatalf("missing version: %+v %v", snap.Findings, err)
+	}
+	for _, m := range snap.Materials {
+		if m.Source == "workflow-input" {
+			t.Fatalf("empty input added: %+v", snap.Materials)
+		}
+	}
+	if _, err := a.collectDependencySnapshot(ctx, webui.DependencyCheckRequest{Kind: "task", ID: "t1", Version: 1}); err == nil {
+		t.Fatal("version accepted for a task check")
+	}
+}

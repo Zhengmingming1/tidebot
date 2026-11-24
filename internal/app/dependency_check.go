@@ -328,9 +328,14 @@ func (a *App) collectDependencySnapshot(ctx context.Context, req webui.Dependenc
 	case "workflow":
 		if a.Workflows == nil {
 			c.finding(req.ID, "workflow", "missing", webui.DepReasonWFUnavailable, "workflow service is unavailable", webui.DepSuggestRestart)
-		} else if w, err := a.Workflows.Get(ctx, req.ID); err != nil {
+		} else if w, err := a.Workflows.GetVersion(ctx, req.ID, req.Version); err != nil {
+			// Version: a workflow task's form checks the version the task would run
+			// (pinned, or 0 = following the current one) before it is saved.
 			c.finding(req.ID, "workflow", "missing", webui.DepReasonWFMissing, err.Error(), webui.DepSuggestReselectWF)
 		} else {
+			if strings.TrimSpace(req.Prompt) != "" {
+				c.material("workflow-input", req.Prompt) // the task's input, as a saved task's prompt
+			}
 			applyWorkflowProfile(&c.snapshot.RuntimeProfile, w.Definition)
 			c.graph(w.Definition)
 		}

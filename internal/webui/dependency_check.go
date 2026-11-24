@@ -26,6 +26,7 @@ type DependencyCheckRequest struct {
 	PythonEnvironment string                 `json:"python_environment,omitempty"`
 	Execution         string                 `json:"execution,omitempty"`     // draft: quick (default) | task
 	AllowedTools      []string               `json:"allowed_tools,omitempty"` // draft task policy preview only
+	Version           int                    `json:"version,omitempty"`       // workflow: the saved version to check (0 = current)
 }
 
 // RuntimeProfile describes the target run, never the tool-free AI checker.
@@ -138,6 +139,9 @@ func (r DependencyCheckRequest) Validate() error {
 	}
 	if len(r.Workspace) > 4096 || len(r.PythonEnvironment) > 4096 || strings.ContainsAny(r.Workspace+r.PythonEnvironment, "\x00\r\n") {
 		return errors.New("invalid runtime path")
+	}
+	if r.Version < 0 || r.Version != 0 && r.Kind != "workflow" {
+		return errors.New("version is only for a saved workflow")
 	}
 	if r.Mode != "" && r.Mode != "read" && r.Mode != "edit" && r.Mode != "exec" {
 		return errors.New("runtime mode must be read, edit or exec")

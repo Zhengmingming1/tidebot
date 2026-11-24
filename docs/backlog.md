@@ -7626,3 +7626,25 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 运行时直接复用 `execRunTools`（`applyExecSandbox` 里清单仍是字面量）。
 - 编辑表单对工作流任务隐藏了「检查依赖」，可以改成检查它运行的工作流（服务端 `kind=task` 已支持工作流任务）。
 - `rowprune` 截止时间格式、`chat_sessions.updated_at` 秒级仍待做；CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-24（续 4）：工作流任务的编辑表单也能「检查依赖」，检查它要运行的工作流版本（业务逻辑矛盾）
+
+这是 2026-11-24 22:50 Australia/Sydney 的优化，接上轮候选「编辑表单对工作流任务隐藏了『检查依赖』」。
+
+- **问题**：任务详情页的「检查依赖」对工作流任务已经按它运行的工作流版本检查（2026-11-23），但新建 / 编辑工作流任务的表单把这个按钮直接藏了起来；表单里还可以在「固定当前版本 / 跟随当前版本」之间切换，保存前没法确认所选版本的权限、目录和技能依赖。`kind=workflow` 的检查也只会看工作流当前版本，固定在旧版本时查的不是实际要跑的那份。
+- **改法**：
+  - `DependencyCheckRequest` 增加可选 `version`（只对 `kind=workflow` 有效，0 = 当前版本；负数或用在其他种类上返回 400）。`kind=workflow` 改用 `Workflows.GetVersion` 读取该版本，版本不在时照常报「工作流不存在或无法读取」；填写了输入（`prompt`）时作为材料 `workflow-input` 交给 AI 补充分析（和已保存任务把提示词作为材料一致，同样先脱敏）。
+  - 任务表单：工作流任务也显示「检查依赖」，点击后检查表单里所选的版本（跟随 = 当前版本），带上输入框里的内容；提示词任务不变。工作流已删时检查会如实报缺失。
+  - 不加任何限制；按钮沿用原有样式和文案，无新 i18n 键。
+- **测试**：`TestDependencyWorkflowVersionFromTaskForm`（v1 = 可执行命令 + 选定目录，v2 = 只读：固定 v1 得到 v1 的权限和目录，0 和 v2 得到当前版本；输入进入材料；版本 99 报缺失且空输入不加材料；`kind=task` 带 version 被拒）。修改前该测试编译失败（无 `Version` 字段），前端此前也拒绝未知字段。`TestTaskFormWorkflowDependencyCheck`（按钮对工作流任务不再隐藏、请求带所选版本和输入；`Validate` 对 version 的五种组合）。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-24-2250-taskform-wf-deps-{zh-CN,en,midnight-zh-CN,tide-zh-CN}.png`（1024×655，编辑工作流任务 → 检查依赖，抽屉显示固定版本 v1 的「可执行命令」和工作流目录；无横向滚动、无脚本错误）。
+- **不是性能改动**。
+
+**心得**：一个对象能在多个入口检查时，要以「它实际会跑什么」为准，而且表单里还没保存的选择（这里是版本）也要能传给检查，否则只能先保存再查。
+
+**参考**：argoproj/argo-workflows `workflow/validate/validate.go` 的 `ValidateCronWorkflow` 校验定时工作流时按它引用的模板去校验，而不是只看外壳（只借思路，不抄代码）。
+
+**后续想法**：
+- 运行时直接复用 `execRunTools`（`applyExecSandbox` 里清单仍是字面量）。
+- 新建工作流任务（从工作流页「存为任务」）同样走这个表单，已覆盖；工作流编辑器里也可以考虑在「检查」时带上测试输入。
+- `rowprune` 截止时间格式、`chat_sessions.updated_at` 秒级仍待做；CI 真 bwrap e2e、`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
