@@ -7798,7 +7798,7 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 
 **心得**：跨多个服务的导入做不成一个数据库事务时，「先把下游会拒绝的全部检查完再动手」+「可变的东西失败时撤回、不可变的按内容复用」就够了；检查函数要从下游抽出来共用，而不是在上游另写一份规则。「先建再改状态」的写法要警惕中间态：状态应该在创建那一刻就是对的。
 
-**参考**：kubernetes/kubectl `pkg/cmd/apply`（`--dry-run=server` / 先 `Validate` 全部对象再逐个提交的思路）和 helm/helm `pkg/action/install.go`（安装前先渲染、校验全部资源，失败时 `--atomic` 回滚已建资源）——只借思路，不抄代码。
+**参考**：helm/helm `pkg/action/install.go`：`RunWithContext` 在创建任何资源前先用 `existingResourceConflict` 检查全部资源；`failRelease` 在设了 `RollbackOnFailure` 时卸载已建的部分（只借思路，不抄代码）。
 
 **后续想法**：
 - `DuplicateTask` 建出的暂停任务没有暂停原因（`pause_kind` 为空），可以用 `PauseKind` 补上「复制后待审」。
