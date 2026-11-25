@@ -7750,3 +7750,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 **后续想法**：
 - AppArmor 情况下也可以给「只为 bwrap 加一个 AppArmor 配置」的更窄做法（不放宽整台电脑），但需要写 `/etc/apparmor.d/` 的多行文件，界面要做成可复制的多行块。
 - macOS 上实测一次 `sandbox-exec` 仍待做；`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-25（续 5）：导入工作流包时不再把 8 MB 以上的技能文件悄悄截断（BUG，数据丢失）
+
+这是 2026-11-25 19:45 Asia/Shanghai 的优化，换了个方向（不再继续 Linux 沙箱诊断），看工作流包（`tidebot-pack/1`）的导入。
+
+- **问题**：`ImportPack` 读 zip 里每个文件时用 `io.LimitReader(rc, 8<<20)`，超过 8 MB 的部分直接丢掉、不报错；而技能本身允许单个文件到 10 MB（`skillpkg.MaxFileBytes`），所以一个 9 MB 文件的技能导出成包、再导入，得到的是被截短的文件，技能照样「导入成功」。超过 10 MB 的文件同样被截到 8 MB 后导入，原本应该报错。另外两处：zip 里两个条目清理后是同一路径（如 `a.md` 和 `./a.md`）时后一个悄悄覆盖前一个；技能文件先写到临时目录再用 `ImportDir` 读回，写入失败（`MkdirAll` / `WriteFile` 的错误被 `_ =` 吞掉）就会导入少文件的技能。
+- **改法**：`skillstore` 新增 `CheckFiles`（与导入文件夹同一套规则：`skillpkg.CleanRel` 安全路径、最多 `MaxEntries` 个文件、单文件 `MaxFileBytes`、总量 `MaxTotalBytes`，跳过 `.git/`，清理后重名报错）和 `ImportFiles`（直接把内存里的文件存成技能版本），`ImportDir` 改为读目录后调用 `ImportFiles`，规则只有一份。`ImportPack`：单个文件按 zip 头里的大小超过 10 MB 直接拒绝，读取上限改为 `MaxFileBytes+1` 并在超出时报错；同名条目报错；所有技能先过 `CheckFiles` 再导入任何技能或建任何任务；导入时用 `ImportFiles`，不再落临时目录。没有加新的限制（10 MB 是技能已有的上限），没有界面改动。
+- **测试**：`TestPackImportKeepsLargeSkillFileWhole`（9 MB 多的文件导入后逐字节一致；旧代码得到 8388608 字节）；`TestPackImportRejectsBadSkillFilesBeforeImport`（超 10 MB、Windows 设备名 `CON.txt`、同一路径两次，都报错且不建技能和任务；旧代码前一、三项不报错）；`skillstore.TestCheckFiles`。`go test ./...`、`go vet ./...`（另对 GOOS=windows/darwin vet 改动包）、`gofmt -l` 通过。
+- **性能**（`BenchmarkImportPack`：一个技能 300 个 4 KB 文件 + 1 个 4 MB 文件，`-benchtime 20x -count 5`，本机 8 核 Xeon）：每次导入 46–54 ms → 28–31 ms；内存分配 27.4 MB → 14.0 MB；分配次数 25.3k → 18.0k。省下的是写临时目录再整棵读回的那一趟。
+
+**心得**：「读到上限就停」的 `LimitReader` 只有配合「读满上限就报错」才是限额，单独用就是静默截断；限额应该和下游真正的上限一致（多读 1 字节判断超限），而不是另写一个更小的数。
+
+**参考**：helm/helm `pkg/chart/loader/archive/archive.go` 的 `LoadArchiveFiles`：解包时直接缓冲到内存里的文件列表、不落临时目录，并在 `LimitReader` 读到的字节数少于头里声明的大小时报错而不是截断（只借思路，不抄代码）。
+
+**后续想法**：
+- `ImportPack` 在导入第二个技能失败时，第一个技能已经入库（技能有版本，不会坏数据，但会多出一个版本）；可以先全部校验后在一个事务里提交。
+- 官方「每日资讯摘要」预设建任务时写死 `TimeoutMinutes: 15`，与「先不设限」矛盾，可以改成 0（用户之后可在任务里自己加时长上限）。
+- `official.go` 生成摘要包仍写临时 zip 再读回，可以直接传内存里的字节。

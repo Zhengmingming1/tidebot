@@ -61,6 +61,56 @@ func (s *Service) ImportDir(ctx context.Context, name, dir, actor string) (Skill
 	if err != nil {
 		return SkillView{}, err
 	}
+	return s.ImportFiles(ctx, name, files, actor)
+}
+
+// CheckFiles applies the folder import rules to an in-memory file set: safe
+// relative paths (skillpkg.CleanRel), at most skillpkg.MaxEntries files,
+// skillpkg.MaxFileBytes per file and skillpkg.MaxTotalBytes in all. Paths
+// under .git/ are dropped, as a folder import skips .git. Returns the files
+// keyed by their cleaned path.
+func CheckFiles(files map[string][]byte) (map[string][]byte, error) {
+	out := make(map[string][]byte, len(files))
+	total := 0
+	for rel, b := range files {
+		c, err := skillpkg.CleanRel(rel)
+		if err != nil {
+			return nil, err
+		}
+		if c == ".git" || strings.HasPrefix(c, ".git/") {
+			continue
+		}
+		if _, dup := out[c]; dup {
+			return nil, fmt.Errorf("duplicate skill file %q", c)
+		}
+		if len(out) >= skillpkg.MaxEntries {
+			return nil, fmt.Errorf("too many skill files")
+		}
+		total += len(b)
+		if len(b) > skillpkg.MaxFileBytes {
+			return nil, fmt.Errorf("skill file %s is larger than %d MB", c, skillpkg.MaxFileBytes>>20)
+		}
+		if total > skillpkg.MaxTotalBytes {
+			return nil, fmt.Errorf("skill import exceeds size limit")
+		}
+		out[c] = b
+	}
+	return out, nil
+}
+
+// ImportFiles imports an in-memory file set (path -> content) as a new skill
+// version under the same rules as ImportDir, without a temporary folder.
+func (s *Service) ImportFiles(ctx context.Context, name string, files map[string][]byte, actor string) (SkillView, error) {
+	if name == "" {
+		return SkillView{}, fmt.Errorf("skill name is required")
+	}
+	if actor == "" {
+		actor = "user"
+	}
+	files, err := CheckFiles(files)
+	if err != nil {
+		return SkillView{}, err
+	}
 	if _, ok := files["SKILL.md"]; !ok {
 		// allow lowercase
 		if _, ok2 := files["skill.md"]; !ok2 {

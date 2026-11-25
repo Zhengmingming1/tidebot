@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zhengmingming1/tidebot/internal/skillpkg"
+	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
 )
 
@@ -138,13 +140,24 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 	var p Pack
 	skillFiles := map[string]map[string][]byte{}
 	var total int64
+	seen := map[string]bool{}
 	for _, f := range zr.File {
 		name := path.Clean(f.Name)
-		if strings.HasPrefix(name, "../") || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") || f.Mode()&os.ModeSymlink != 0 {
+		if strings.HasPrefix(name, "../") || strings.HasPrefix(name, "/") || strings.Contains(f.Name, "\\") || f.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("unsafe path in pack: %s", f.Name)
 		}
 		if f.FileInfo().IsDir() {
 			continue
+		}
+		// Two entries that clean to one path would silently replace each other.
+		if seen[name] {
+			return nil, fmt.Errorf("duplicate file in pack: %s", name)
+		}
+		seen[name] = true
+		// A skill file is at most skillpkg.MaxFileBytes (as for any skill import);
+		// refuse a bigger one instead of importing it cut short.
+		if f.UncompressedSize64 > skillpkg.MaxFileBytes {
+			return nil, fmt.Errorf("%s in pack is larger than %d MB", name, skillpkg.MaxFileBytes>>20)
 		}
 		total += int64(f.UncompressedSize64)
 		if total > 4*packMaxBytes {
@@ -154,10 +167,13 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 		if err != nil {
 			return nil, err
 		}
-		data, err := io.ReadAll(io.LimitReader(rc, 8<<20))
+		data, err := io.ReadAll(io.LimitReader(rc, skillpkg.MaxFileBytes+1))
 		rc.Close()
 		if err != nil {
 			return nil, err
+		}
+		if len(data) > skillpkg.MaxFileBytes {
+			return nil, fmt.Errorf("%s in pack is larger than %d MB", name, skillpkg.MaxFileBytes>>20)
 		}
 		if name == "pack.json" {
 			if err := json.Unmarshal(data, &p); err != nil {
@@ -190,9 +206,13 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 		}
 		return nil
 	}
-	for sn := range skillFiles {
+	for sn, files := range skillFiles {
 		if err := checkSkill(sn); err != nil {
 			return nil, err
+		}
+		// Same path, count and size rules as importing the skill's folder.
+		if _, err := skillstore.CheckFiles(files); err != nil {
+			return nil, fmt.Errorf("pack skill %q: %w", sn, err)
 		}
 	}
 	for _, sn := range p.Skills {
@@ -209,17 +229,7 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 	}
 	skillIDs := map[string]string{}
 	for sn, files := range skillFiles {
-		tmp, err := os.MkdirTemp("", "pack-skill-")
-		if err != nil {
-			return nil, err
-		}
-		for fn, data := range files {
-			dst := filepath.Join(tmp, filepath.FromSlash(fn))
-			_ = os.MkdirAll(filepath.Dir(dst), 0o755)
-			_ = os.WriteFile(dst, data, 0o644)
-		}
-		sv, err := a.Skills.ImportDir(ctx, sn, tmp, "pack")
-		os.RemoveAll(tmp)
+		sv, err := a.Skills.ImportFiles(ctx, sn, files, "pack")
 		if err != nil {
 			return nil, fmt.Errorf("skill %s: %w", sn, err)
 		}
