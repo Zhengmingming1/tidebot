@@ -7721,7 +7721,7 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 
 **心得**：给一个不能被取消的操作加超时，只会把「慢」变成「失败」，拦不住「卡死」；加期限前先确认下层真的响应 context。等锁这类有原生超时的场景，用原生超时，错误信息也更准。
 
-**参考**：grafana/grafana `pkg/services/sqlstore/sqlstore.go` 打开 SQLite 时不给连接设墙钟期限，而是靠连接串里的 `_busy_timeout` 处理锁等待；以及 golang/go `src/database/sql/sql.go` 中 `dsnConnector.Connect` 直接调用无 ctx 的 `driver.Open`、忽略传入的 context（只借思路，不抄代码）。
+**参考**：golang/go `src/database/sql/sql.go` 中 `dsnConnector.Connect(_ context.Context)` 直接调用无 ctx 的 `driver.Open`，传入的 context 被丢弃——这说明给 `PingContext` 加期限拦不住打开阶段的卡死；grafana/grafana `pkg/services/sqlstore/database_config.go` 打开 SQLite 时同样只在连接串里设定模式（`mode=rwc`、`_journal_mode`），不给打开加墙钟期限（只借思路，不抄代码）。
 
 **后续想法**：
 - 其它测试里若还有对 SQLite 的短墙钟期限（例如等待某个后台写入的 2 秒轮询），在 Windows Runner 上也可能偶发，可以统一放宽或改为条件等待。
