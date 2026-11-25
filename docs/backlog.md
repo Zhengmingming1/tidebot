@@ -7804,3 +7804,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - `DuplicateTask` 建出的暂停任务没有暂停原因（`pause_kind` 为空），可以用 `PauseKind` 补上「复制后待审」。
 - 包导入的任务仍是先建 v1 再 `UpdateSpec` 出 v2（挂技能）；`Create` 可以直接接受约束、允许的工具和技能，一步建成一个版本。
 - `ExportPack` 仍按 map 顺序写技能文件并带 `created_at`；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-26（续）：复制出的任务一开始就写明「副本待启用」和复制来源，不再是没有原因的「已暂停」（业务逻辑矛盾 / 可见性）
+
+这是 2026-11-26 07:47 Asia/Shanghai 的优化，接上一轮后续想法「`DuplicateTask` 建出的暂停任务没有暂停原因」。
+
+- **问题**：`Duplicate` 为免副本和原任务同时按计划运行，建出来就是暂停，但 `pause_kind`、`paused_at` 都是空的。列表和详情只显示一个光秃秃的「已暂停」，没有 tooltip、没有说明条，看起来像用户自己停的；而包导入的任务同样是「建出来就暂停待审」，却有「待启用」和说明。同一种状态两种表现。
+- **改法**：`tasksvc` 新增 `PauseCopy = "copy"`；`Duplicate` 在插入任务的同一事务里写 `pause_kind='copy'`、`pause_detail=源任务名`、`paused_at=现在`（和 `Create` 写 `PausePack` 的方式一致）。前端 `PAUSE_KINDS` 加 `copy`：标签「副本待启用 / Copy · to review」（info 色，同包导入），tooltip「复制自「源任务名」，检查无误后再启用 · 时间」，详情页说明条讲清为什么暂停、点「恢复」启用。源任务名经 `esc` 转义。恢复时照常清空原因；之后的自动暂停（预算等）不会改写第一个原因。没有新增任何限制，副本暂停是原有行为。
+- **测试**：新增 `TestDuplicateRecordsPauseReason`（返回值和数据库里都是 `copy` + 源任务名 + 时间；再触发预算暂停不改写；恢复后全部清空；源任务不受影响）；`TestDuplicateTask` 断言接口返回 `pause_kind/pause_detail/paused_at`；`pause_reason_test` 更新 `PAUSE_KINDS` 并检查中英文 `pz.pill_copy / pz.why_copy / pz.note_copy`。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`scripts/check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-26-0800-copy-pause-reason-{zh-CN,en,tide-zh-CN,midnight-zh-CN,list-zh-CN}.png`（1024×655，无横向溢出）。
+- **不是性能改动**（插入事务里多一条按主键的 UPDATE）。
+
+**心得**：「状态 + 原因 + 时间」要在进入状态的那一刻一起写；任何一条创建路径漏写原因，界面就只能退回最模糊的说法。新增一种暂停原因时，前端白名单、标签/tooltip/说明条三处文案和测试里的清单要一起改。
+
+**参考**：kubernetes/apimachinery `pkg/apis/meta/v1/types.go` 的 `Condition`：`reason` 必填且不能为空、`lastTransitionTime` 必填，`message` 给人看（只借思路，不抄代码）。
+
+**后续想法**：
+- 任务文件导入（`task_transfer.go` 的 `createImported`）在不启用时走 `applyTaskExtras` → `SetStatus`，原因被记成「手动暂停」，而且是先建成 active、再设计划、最后暂停；可以像包导入一样建出来就带「导入待审」原因。
+- 包导入的任务仍是先建 v1 再 `UpdateSpec` 出 v2；`ExportPack` 仍按 map 顺序写技能文件；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。

@@ -581,7 +581,7 @@ if(m)return T("be.token_cap",{name:name,used:m[1],cap:m[2]});
 if(/remaining daily budget is zero/.test(d))return T("be.zero",{name:name||T("sp.scope_global")});
 return d;
 }
-var PAUSE_KINDS=["user","snooze","breaker","budget","pack","plugin"];
+var PAUSE_KINDS=["user","snooze","breaker","budget","pack","copy","plugin"];
 function pauseKind(t){return t&&t.status==="paused"&&PAUSE_KINDS.indexOf(t.pause_kind)>=0?t.pause_kind:"";}
 function pauseClass(c){return state.dict["pz.cls."+c]?T("pz.cls."+c):T("pz.cls.unknown");}
 function pauseWhy(t){
@@ -591,13 +591,14 @@ if(k==="breaker")return T("pz.why_breaker",{n:t.breaker_at||3,t:at,c:pauseClass(
 if(k==="budget")return T("pz.why_budget",{t:at,r:budgetWhy(t.pause_detail||"")});
 if(k==="plugin")return T("pz.why_plugin",{t:at,p:t.pause_detail||""});
 if(k==="pack")return T("pz.why_pack");
+if(k==="copy")return T("pz.why_copy",{n:t.pause_detail||"",t:at});
 if(k==="snooze")return T("pz.why_snooze",{u:when(t.pause_detail),t:at});
 return at?T("pz.why_user",{t:at}):"";
 }
 function taskPill(st,t,small){
 var m={active:["ok",T("task.active")],paused:["warn",T("task.paused")],archived:["",T("task.archived")]}[st]||["",st];
 var k=pauseKind(t),why=k?pauseWhy(t):"";
-if(k&&k!=="user")m=[k==="pack"?"info":"warn",T("pz.pill_"+k)];
+if(k&&k!=="user")m=[k==="pack"||k==="copy"?"info":"warn",T("pz.pill_"+k)];
 return '<span class="pill '+m[0]+(small?" sm":"")+(why?' pz-pill"'+(small?"":' tabindex="0"')+' data-tip="'+esc(why)+'" aria-label="'+esc(m[1]+" · "+why):"")+'">'+esc(m[1])+"</span>";
 }
 var POLICY_WAITS=["dir_busy","accounting_pending"];
@@ -611,9 +612,10 @@ return '<span class="pill info'+(small?" sm":"")+' pw-pill" tabindex="0" data-ti
 function pauseNotice(t){
 var k=pauseKind(t);
 if(!k||k==="user"||k==="snooze")return "";
-var body=k==="breaker"?T("pz.note_breaker",{n:t.breaker_at||3,c:pauseClass(t.pause_detail)}):k==="budget"?T("pz.note_budget"):k==="plugin"?T("pz.note_plugin",{p:t.pause_detail||""}):T("pz.note_pack");
+var body=k==="breaker"?T("pz.note_breaker",{n:t.breaker_at||3,c:pauseClass(t.pause_detail)}):k==="budget"?T("pz.note_budget"):k==="plugin"?T("pz.note_plugin",{p:t.pause_detail||""}):k==="copy"?T("pz.note_copy"):T("pz.note_pack");
 var link=k==="breaker"?'<a class="link" href="#/runs?task='+enc(t.id)+'&status=failed">'+esc(T("pz.see_failed"))+"</a>":k==="budget"?'<a class="link" href="#/spend">'+esc(T("pz.see_spend"))+"</a>":"";
-return '<p class="notice '+(k==="pack"?"":"warn ")+'pz-note" id="pz-note"'+(t.paused_at?' data-tip="'+esc(pauseWhy(t))+'"':"")+">"+ic(k==="pack"?"info":"pause","sm")+"<span>"+esc(body)+"</span>"+link+"</p>";
+var info=k==="pack"||k==="copy";
+return '<p class="notice '+(info?"":"warn ")+'pz-note" id="pz-note"'+(t.paused_at?' data-tip="'+esc(pauseWhy(t))+'"':"")+">"+ic(info?"info":"pause","sm")+"<span>"+esc(body)+"</span>"+link+"</p>";
 }
 function triggerText(tr){
 return{cron:T("trig.cron"),manual:T("trig.manual"),quick:T("trig.quick"),button:T("trig.button"),session:T("trig.session")}[tr]||T("trig.other",{t:tr});

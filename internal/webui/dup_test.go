@@ -42,6 +42,10 @@ func TestDuplicateTask(t *testing.T) {
 		d["prompt"] != "summarize" || d["version_no"].(float64) != 1 {
 		t.Fatalf("copy %v", d)
 	}
+	// paused with a reason from the start, so the list says "copy" rather than a bare "paused"
+	if d["pause_kind"] != tasksvc.PauseCopy || d["pause_detail"] != "Daily Report" || d["paused_at"] == nil || d["paused_at"] == "" {
+		t.Fatalf("pause reason %v %v %v", d["pause_kind"], d["pause_detail"], d["paused_at"])
+	}
 	if cs, _ := d["constraints"].([]any); len(cs) != 1 || cs[0] != "always add a summary" {
 		t.Fatalf("constraints %v", d["constraints"])
 	}

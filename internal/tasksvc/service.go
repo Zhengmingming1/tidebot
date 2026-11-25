@@ -303,6 +303,7 @@ const (
 	PauseBudget  = "budget"  // a budget cap was hit (detail: the budget reason)
 	PausePack    = "pack"    // imported from a pack, waiting for review
 	PausePlugin  = "plugin"  // its trigger plugin was uninstalled (detail: plugin id)
+	PauseCopy    = "copy"    // made by Duplicate, waiting for review (detail: the source task's name)
 	// PauseSnooze: paused by hand until a time (detail: the end, RFC3339 UTC). It resumes by
 	// itself then (WakeSnoozed), and the fire times that fell inside it are skipped.
 	PauseSnooze = "snooze"
@@ -647,8 +648,11 @@ func (s *Service) Duplicate(ctx context.Context, srcID, name, actor string) (Tas
 		WorkspaceDir: src.Task.WorkspaceDir, ProviderID: src.Task.ProviderID, CronExpr: src.Task.CronExpr,
 		OverlapPolicy: src.Task.OverlapPolicy, TimeoutMinutes: src.Task.TimeoutMinutes,
 		NextRunAt: next, CreatedAt: now, UpdatedAt: now,
+		// The copy says why it is paused from the start, like a pack import: a bare
+		// "paused" with no reason or time looks like the user stopped it.
+		PauseKind: PauseCopy, PauseDetail: src.Task.Name, PausedAt: sql.NullString{String: now, Valid: true},
 	}
-	// Row, budgets and first version go in together (see Create).
+	// Row, reason, budgets and first version go in together (see Create).
 	unlock := s.lockCostPolicy(ctx)
 	defer unlock()
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
@@ -656,6 +660,10 @@ func (s *Service) Duplicate(ctx context.Context, srcID, name, actor string) (Tas
 		Content: spec, Source: "user_edit", Actor: actor, Reason: "duplicate of " + src.Task.ID, Message: "v1",
 		Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
 			if err := db.InsertTaskOn(ctx, tx, task); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE tasks SET pause_kind=?, pause_detail=?, paused_at=? WHERE id=?`,
+				task.PauseKind, task.PauseDetail, task.PausedAt, task.ID); err != nil {
 				return err
 			}
 			return copyCostPolicy(ctx, tx, srcID, task.ID)
