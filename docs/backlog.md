@@ -7709,3 +7709,20 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 根据 `/proc/sys/kernel/apparmor_restrict_unprivileged_userns` 区分「Ubuntu AppArmor」和「容器」两种原因，给更具体的建议。
 - CI 的真 bwrap 测试目前只验证启动；之后可以用 mock Claude 之外的方式验证 `SandboxSettings` 的写入范围。
 - `dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。
+
+### 2026-11-25（续 3）：打开数据库不再有 5 秒硬超时，慢盘 / 杀毒扫描时不会启动失败（BUG，CI 偶发失败）
+
+这是 2026-11-25 11:47 Asia/Shanghai 的优化，接上一轮 CI 里 Windows 上 `internal/auth` 的 `TestSessionSeenThrottled` 偶发失败（run 45513703861 第 1 次尝试：`ping sqlite: context deadline exceeded`，5.21s）。
+
+- **问题**：`db.Open` 在迁移前用 5 秒期限的 `PingContext` 检查连接。modernc 驱动打开连接时并不看 context（`driver.Open` 无 ctx），所以这个期限拦不住真正的卡死；它唯一的效果是：连接其实打开成功、只是慢了（Windows Runner 负载高、Defender 扫描新建的数据库文件、开机自启时磁盘还冷），过期的 ctx 让随后的 `select 1` 立刻失败，整个 tidebot 启动失败或测试红掉。被别的进程锁住的情况本来就由 `busy_timeout(5000)` 兜底，而且报的是 SQLite 自己的「database is locked」，比「context deadline exceeded」更说明问题；两者都是 5 秒时还会互相抢。不是测试本身的问题，生产里同样会发生。
+- **改法**：改为不带期限的 `db.Ping()`，注释说明原因。迁移本来就没有期限，现在打开和迁移口径一致。不加任何限制，没有界面改动。
+- **测试**：`TestOpenSlowConnection`（用 modernc 的 `RegisterConnectionHook` 让带标记目录的新连接慢 5.3 秒，模拟冷盘 / 杀毒扫描；修改前稳定复现 CI 的原话 `ping sqlite: context deadline exceeded`，修改后打开成功且迁移已应用）；`TestOpenLockedDatabase`（另一连接持有 `BEGIN EXCLUSIVE` 时，`Open` 仍会在 busy_timeout 后失败，错误里带 locked/busy）。两个测试并行，`internal/db` 包只多约 5 秒。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l` 通过。
+- **不是性能改动**，也不是 UI 改动，没有截图。
+
+**心得**：给一个不能被取消的操作加超时，只会把「慢」变成「失败」，拦不住「卡死」；加期限前先确认下层真的响应 context。等锁这类有原生超时的场景，用原生超时，错误信息也更准。
+
+**参考**：grafana/grafana `pkg/services/sqlstore/sqlstore.go` 打开 SQLite 时不给连接设墙钟期限，而是靠连接串里的 `_busy_timeout` 处理锁等待；以及 golang/go `src/database/sql/sql.go` 中 `dsnConnector.Connect` 直接调用无 ctx 的 `driver.Open`、忽略传入的 context（只借思路，不抄代码）。
+
+**后续想法**：
+- 其它测试里若还有对 SQLite 的短墙钟期限（例如等待某个后台写入的 2 秒轮询），在 Windows Runner 上也可能偶发，可以统一放宽或改为条件等待。
+- `dangerouslyDisableSandbox` 直接实测、macOS 上实测 `sandbox-exec`、按 `apparmor_restrict_unprivileged_userns` 区分原因仍待做；一个会话仍只能有一份草稿。

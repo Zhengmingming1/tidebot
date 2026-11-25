@@ -38,9 +38,11 @@ func Open(path string) (*sql.DB, error) {
 	// Close result sets before querying this pool again; nested reads would wait on themselves.
 	db.SetMaxOpenConns(1)
 	db.SetConnMaxLifetime(0)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	// No wall-clock deadline here: the driver's open ignores contexts, so a deadline could not stop
+	// a hang, only fail an open that was slow but fine (a cold disk or an antivirus scanning the
+	// new file at login). Waiting on another process's lock is bounded by busy_timeout, which
+	// reports "database is locked" instead of a bare "context deadline exceeded".
+	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
