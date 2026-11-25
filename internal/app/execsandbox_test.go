@@ -26,7 +26,9 @@ func sandboxDeps(t *testing.T, ok bool) {
 	}
 	oldProbe := sandboxProbe
 	sandboxProbe = func(string) string { return "" } // never start a real bwrap here
-	t.Cleanup(func() { sandboxLook, sandboxProbe = old, oldProbe })
+	oldDiag := sandboxDiag
+	sandboxDiag = func() (string, string) { return "", "" } // nor read this machine's kernel settings
+	t.Cleanup(func() { sandboxLook, sandboxProbe, sandboxDiag = old, oldProbe, oldDiag })
 }
 
 // A command run: no --restricted, Bash allowed, the

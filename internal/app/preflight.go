@@ -139,7 +139,7 @@ func (c *dependencyCollector) checkSandbox() {
 	case guard.SandboxMissing:
 		c.finding(webui.DepTitleSandbox, "runtime", "blocked", webui.DepSandboxMissingReason(st.Missing), webui.DepSandboxMissingEvidence(st.Missing), webui.DepSandboxInstallSuggestion(st.Install))
 	case guard.SandboxBroken:
-		c.finding(webui.DepTitleSandbox, "runtime", "blocked", webui.DepReasonSandboxBroken, webui.DepSandboxBrokenEvidence(st.Error), webui.DepSuggestSandboxUserns)
+		c.finding(webui.DepTitleSandbox, "runtime", "blocked", webui.DepReasonSandboxBroken, webui.DepSandboxBrokenEvidence(st.Error), webui.DepSandboxBrokenSuggestion(st.Cause))
 	case guard.SandboxNone:
 		c.finding(webui.DepTitleSandbox, "runtime", "uncertain", webui.DepReasonSandboxNone, webui.DepEvidenceSandboxWindows, webui.DepSuggestSandboxTrust)
 	default:

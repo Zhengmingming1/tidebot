@@ -215,29 +215,40 @@
     if (sb.status === "ok") return '<span class="pill ok sm pl-sb" tabindex="0" data-tip="' + esc(T("pl.sb_ok_tip")) + '">' + ic("shield", "sm") + esc(T("pl.sb_ok")) + "</span>";
     return "";
   }
+  // A copyable command (tidebot never runs it): the code block plus a copy button,
+  // falling back to selecting the text where the clipboard API is unavailable.
+  function sbCmdHTML(cmd) {
+    return '<div class="sb-cmd"><code class="mono" id="sb-cmd">' + esc(cmd) + '</code><button type="button" class="icon-btn sm" id="sb-copy" aria-label="' + esc(T("pl.sb_copy")) + '" data-tip="' + esc(T("pl.sb_copy")) + '">' + ic("copy", "sm") + "</button></div>";
+  }
+  function sbCmdWire(root, cmd) {
+    $("#sb-copy", root).addEventListener("click", function () {
+      (navigator.clipboard ? navigator.clipboard.writeText(cmd) : Promise.reject()).then(function () { toast(T("tr.copied")); }, function () {
+        var r = document.createRange(); r.selectNodeContents($("#sb-cmd", root)); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      });
+    });
+  }
+  var SB_CAUSE_BODY = { apparmor: "pl.sb_broken_body_apparmor", userns_off: "pl.sb_broken_body_userns_off", container: "pl.sb_broken_body_container" };
   function sandboxHelp(sb) {
     sb = sb || {};
     // bubblewrap is there but the kernel refuses it: nothing to install, say why
+    // (the cause when the server could tell) and the setting that lets it start
     if (sb.status === "broken") {
+      var body = Object.prototype.hasOwnProperty.call(SB_CAUSE_BODY, sb.cause) ? SB_CAUSE_BODY[sb.cause] : "pl.sb_broken_body";
+      var fix = sb.cause === "apparmor" || sb.cause === "userns_off" ? sb.fix || "" : "";
       modal('<div class="card-head"><span class="ico warn">' + ic("shield") + "</span><h2>" + esc(T("pl.sb_broken_title")) + "</h2></div>" +
-        '<p class="confirm-body">' + esc(T("pl.sb_broken_body")) + "</p>" +
+        '<p class="confirm-body">' + esc(T(body)) + "</p>" +
         (sb.error ? '<div class="sb-cmd"><code class="mono">' + esc(sb.error) + "</code></div>" : "") +
-        '<p class="muted sb-after">' + esc(T("pl.sb_broken_after")) + "</p>" +
-        '<div class="actions"><button type="button" class="btn primary" data-close autofocus>' + esc(T("btn.close")) + "</button></div>");
+        (fix ? '<p class="confirm-body">' + esc(T("pl.sb_fix_label")) + "</p>" + sbCmdHTML(fix) : "") +
+        '<p class="muted sb-after">' + esc(T(fix ? "pl.sb_fix_after" : "pl.sb_broken_after")) + "</p>" +
+        '<div class="actions"><button type="button" class="btn primary" data-close autofocus>' + esc(T("btn.close")) + "</button></div>", fix ? function (root) { sbCmdWire(root, fix); } : undefined);
       return;
     }
     var cmd = sb.install || "sudo apt-get install -y bubblewrap socat";
     modal('<div class="card-head"><span class="ico warn">' + ic("shield") + "</span><h2>" + esc(T("pl.sb_help_title")) + "</h2></div>" +
       '<p class="confirm-body">' + esc(T("pl.sb_help_body", { m: (sb.missing || []).join(", ") })) + "</p>" +
-      '<div class="sb-cmd"><code class="mono" id="sb-cmd">' + esc(cmd) + '</code><button type="button" class="icon-btn sm" id="sb-copy" aria-label="' + esc(T("pl.sb_copy")) + '" data-tip="' + esc(T("pl.sb_copy")) + '">' + ic("copy", "sm") + "</button></div>" +
+      sbCmdHTML(cmd) +
       '<p class="muted sb-after">' + esc(T("pl.sb_help_after")) + "</p>" +
-      '<div class="actions"><button type="button" class="btn primary" data-close autofocus>' + esc(T("btn.close")) + "</button></div>", function (root) {
-        $("#sb-copy", root).addEventListener("click", function () {
-          (navigator.clipboard ? navigator.clipboard.writeText(cmd) : Promise.reject()).then(function () { toast(T("tr.copied")); }, function () {
-            var r = document.createRange(); r.selectNodeContents($("#sb-cmd", root)); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
-          });
-        });
-      });
+      '<div class="actions"><button type="button" class="btn primary" data-close autofocus>' + esc(T("btn.close")) + "</button></div>", function (root) { sbCmdWire(root, cmd); });
   }
   function renderPlugins() {
     var seq = routeSeq;

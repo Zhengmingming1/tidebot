@@ -35,6 +35,43 @@ type SandboxStatus struct {
 	Missing  []string `json:"missing,omitempty"`
 	Install  string   `json:"install,omitempty"`
 	Error    string   `json:"error,omitempty"` // SandboxBroken: bubblewrap's own first error line
+	Cause    string   `json:"cause,omitempty"` // SandboxBroken: why, when it can be told (SandboxCause*)
+	Fix      string   `json:"fix,omitempty"`   // SandboxBroken: the setting that lets bwrap start (tidebot never runs sudo)
+}
+
+// Why bubblewrap is refused (SandboxStatus.Cause); "" means tidebot can't tell.
+const (
+	SandboxCauseContainer = "container"  // inside a container: its seccomp / AppArmor profile decides
+	SandboxCauseAppArmor  = "apparmor"   // Ubuntu 24.04+: kernel.apparmor_restrict_unprivileged_userns=1
+	SandboxCauseUsernsOff = "userns_off" // unprivileged user namespaces switched off (sysctl)
+)
+
+// DiagnoseBwrap says why bubblewrap is refused here and, when a kernel setting is
+// the reason, the command that changes it (read is os.ReadFile, getenv
+// os.Getenv). A container comes first: its /proc/sys is the host's and can't be
+// changed from inside, so it gets no command. Only reads files; changes nothing.
+func DiagnoseBwrap(read func(string) ([]byte, error), getenv func(string) string) (cause, fix string) {
+	val := func(p string) string {
+		b, err := read(p)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
+	}
+	exists := func(p string) bool { _, err := read(p); return err == nil }
+	if getenv("container") != "" || exists("/.dockerenv") || exists("/run/.containerenv") {
+		return SandboxCauseContainer, ""
+	}
+	if val("/proc/sys/user/max_user_namespaces") == "0" {
+		return SandboxCauseUsernsOff, "sudo sysctl -w user.max_user_namespaces=10000"
+	}
+	if val("/proc/sys/kernel/unprivileged_userns_clone") == "0" {
+		return SandboxCauseUsernsOff, "sudo sysctl -w kernel.unprivileged_userns_clone=1"
+	}
+	if val("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") == "1" {
+		return SandboxCauseAppArmor, "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+	}
+	return "", ""
 }
 
 // DetectSandbox checks the sandbox's dependencies on PATH (look is exec.LookPath).

@@ -7726,3 +7726,27 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 **后续想法**：
 - 其它测试里若还有对 SQLite 的短墙钟期限（例如等待某个后台写入的 2 秒轮询），在 Windows Runner 上也可能偶发，可以统一放宽或改为条件等待。
 - `dangerouslyDisableSandbox` 直接实测、macOS 上实测 `sandbox-exec`、按 `apparmor_restrict_unprivileged_userns` 区分原因仍待做；一个会话仍只能有一份草稿。
+
+### 2026-11-25（续 4）：命令沙箱无法启动时说清原因，内核设置导致的给出可复制的命令（一般改进 / 可用性）
+
+这是 2026-11-25 15:54 Asia/Shanghai 的优化，接上一轮记下的「按 `apparmor_restrict_unprivileged_userns` 区分原因」。
+
+- **问题**：bubblewrap 被系统拦下时，设置 › 安全的对话框和依赖检查只给一段笼统的说明（「Ubuntu 24.04 及以上可为 bwrap 添加 AppArmor 配置，或容器的 seccomp 不允许」），用户得自己判断是哪种情况、要改什么。Ubuntu 24.04+ 是最常见的情况，但界面没有给出能直接用的办法。
+- **改法**：
+  - `guard.DiagnoseBwrap`：只读文件，不改任何东西。先看是否在容器里（`container` 环境变量、`/.dockerenv`、`/run/.containerenv`）——容器里的 `/proc/sys` 是宿主机的，改不了，所以不给命令；再看 `user.max_user_namespaces=0`、`kernel.unprivileged_userns_clone=0`（关闭了用户命名空间）；最后看 `kernel.apparmor_restrict_unprivileged_userns=1`（Ubuntu AppArmor）。前两类给出对应的 `sudo sysctl -w …` 命令；判断不了就留空，照旧显示原来的通用说明。
+  - `SandboxStatus` 新增 `cause`、`fix` 两个字段，只在 `broken` 时由 `app.SandboxStatus` 填写（`sandboxDiag` 可在测试里替换）。
+  - 设置 › 安全的「命令沙箱无法启动」对话框按原因显示说明；能改的内核设置显示可复制的命令（与「缺组件」对话框共用复制块），并说明这会放宽整台电脑的一项保护、重启后恢复、长期生效要写进 `/etc/sysctl.d/`。tidebot 仍然不会替用户运行 sudo。
+  - 依赖检查的建议按原因给出（AppArmor / 关闭了用户命名空间 / 容器 / 判断不了）。建议文字里**不放**命令本身：依赖检查的结果会经过密钥脱敏，`apparmor_restrict_unprivileged_userns` 这种长标识符会被当成 token 换成 `[redacted]`，所以只指向设置页。
+  - 运行被拒的报错在知道命令时附上命令。
+  - 没有加任何限制，也不改变是否拒绝运行，只是把原因说清楚。
+- **测试**：`TestDiagnoseBwrap`（8 种文件 / 环境组合：Ubuntu AppArmor、AppArmor 已关、Debian 关闭 clone、max=0、Docker、Podman、`container` 环境变量、全都读不到；容器优先且不给命令）；`TestSandboxBrokenRefusesCommandRuns` 增加：有原因时状态带 `cause/fix`、运行报错带命令、AppArmor 和容器各自的建议、bubblewrap 能启动时不读诊断；`TestSettingsSandboxBroken` 增加每种原因对应的建议文字、建议里不含设置名、新文字能翻译；`TestSandboxBrokenUI` 增加按原因选说明、只有内核设置才给命令。`sandboxDeps` 测试助手把诊断换成空结果，避免读 CI 机器自己的内核设置。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`build-webui.py`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-25-1600-sandbox-apparmor-fix-{zh-CN,en,tide-zh-CN,midnight-zh-CN}.png`（1024×655，替身 bwrap 复现被拒；本机没有 AppArmor，原因字段在截图脚本里注入到 `/api/settings` 的应答中；无横向滚动、对话框不溢出、无脚本错误）。
+- **耗时**：不是性能改动。只在 bubblewrap 被拒时多读最多 5 个小文件，且仍受探测缓存约束（被拒结果缓存 15 秒）。
+
+**心得**：报错能定位到「哪个开关」时，就直接给出开关和代价，比列出所有可能原因好用；但脱敏会改写长标识符，带命令的文字要放在不经过脱敏的地方。
+
+**参考**：anthropic-experimental/sandbox-runtime `README.md` 的 Ubuntu 24.04+ 说明（`apparmor_restrict_unprivileged_userns` 及对应的 sysctl）和 `src/sandbox/linux-sandbox-utils.ts` 里把依赖缺失和不可用分开报告的做法（只借思路，不抄代码）。
+
+**后续想法**：
+- AppArmor 情况下也可以给「只为 bwrap 加一个 AppArmor 配置」的更窄做法（不放宽整台电脑），但需要写 `/etc/apparmor.d/` 的多行文件，界面要做成可复制的多行块。
+- macOS 上实测一次 `sandbox-exec` 仍待做；`dangerouslyDisableSandbox` 直接实测仍未做；一个会话仍只能有一份草稿。

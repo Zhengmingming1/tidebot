@@ -46,14 +46,46 @@ func TestSandboxBrokenRefusesCommandRuns(t *testing.T) {
 	if sb == nil || sb.Level != "blocked" || sb.Reason != webui.DepReasonSandboxBroken || !strings.Contains(sb.Evidence, userns) || sb.Suggestion != webui.DepSuggestSandboxUserns {
 		t.Fatalf("sandbox finding %+v", sb)
 	}
+	// when the cause is known: the run's error and the finding give the setting to change
+	fix := "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+	sandboxDiag = func() (string, string) { return guard.SandboxCauseAppArmor, fix }
+	if st := a.SandboxStatus(); st.Cause != guard.SandboxCauseAppArmor || st.Fix != fix {
+		t.Fatalf("diagnosed status %+v", st)
+	}
+	if _, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "x", WorkspaceDir: t.TempDir(), RunMode: "exec"}, "", 0); !errors.Is(err, ErrSandboxUnavailable) || !strings.Contains(err.Error(), fix) {
+		t.Fatalf("err %v", err)
+	}
+	for cause, want := range map[string]string{guard.SandboxCauseAppArmor: webui.DepSuggestSandboxAppArmor, guard.SandboxCauseContainer: webui.DepSuggestSandboxContainer} {
+		c, f := cause, fix
+		if c == guard.SandboxCauseContainer {
+			f = ""
+		}
+		sandboxDiag = func() (string, string) { return c, f }
+		rep, err := a.dependencyPreflight(context.Background(), webui.DependencyCheckRequest{Kind: "draft", Prompt: "hi", Mode: "exec"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		for _, f := range rep.Findings {
+			if f.Dependency == webui.DepTitleSandbox {
+				got = f.Suggestion
+			}
+		}
+		if got != want {
+			t.Fatalf("%s suggestion %q, want %q", cause, got, want)
+		}
+	}
+	// the diagnosis is only read when bubblewrap was refused
+	diagCalls := 0
+	sandboxDiag = func() (string, string) { diagCalls++; return "", "" }
 	// read-only runs don't need the sandbox and still start
 	if _, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "x", WorkspaceDir: t.TempDir(), RunMode: "read"}, "", 0); err != nil {
 		t.Fatalf("read-only run: %v", err)
 	}
 	// once bubblewrap starts again, command runs do too
 	sandboxProbe = func(string) string { return "" }
-	if st := a.SandboxStatus(); st.Status != guard.SandboxOK {
-		t.Fatalf("after fix %+v", st)
+	if st := a.SandboxStatus(); st.Status != guard.SandboxOK || st.Cause != "" || st.Fix != "" || diagCalls != 0 {
+		t.Fatalf("after fix %+v (diagnosed %d times)", st, diagCalls)
 	}
 }
 

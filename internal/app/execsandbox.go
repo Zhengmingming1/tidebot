@@ -49,6 +49,9 @@ var sandboxLook = exec.LookPath
 // sandboxProbe starts bubblewrap once (a var for tests; guard.ProbeBwrap).
 var sandboxProbe = cachedBwrapProbe(guard.ProbeBwrap, time.Now)
 
+// sandboxDiag says why bubblewrap was refused (a var for tests; guard.DiagnoseBwrap).
+var sandboxDiag = func() (string, string) { return guard.DiagnoseBwrap(os.ReadFile, os.Getenv) }
+
 // Probe results are kept so the Settings page, every dependency check and every
 // command run don't each start bubblewrap: a start is kept 10 minutes, a refusal
 // 15 seconds (fixing the kernel setting shows up on the next page open, as an
@@ -83,7 +86,11 @@ func cachedBwrapProbe(probe func(string) string, now func() time.Time) func(stri
 
 // SandboxStatus reports whether command runs can be sandboxed on this machine.
 func (a *App) SandboxStatus() guard.SandboxStatus {
-	return guard.DetectSandboxProbe(runtime.GOOS, sandboxLook, sandboxProbe)
+	st := guard.DetectSandboxProbe(runtime.GOOS, sandboxLook, sandboxProbe)
+	if st.Status == guard.SandboxBroken {
+		st.Cause, st.Fix = sandboxDiag()
+	}
+	return st
 }
 
 func (a *App) runSandboxDir() string { return filepath.Join(a.Cfg.DataDir, "run-sandbox") }
@@ -114,7 +121,11 @@ func (a *App) applyExecSandbox(ctx context.Context, opts *runner.Options) (func(
 		return nop, fmt.Errorf("%w: missing %s (install: %s)", ErrSandboxUnavailable, strings.Join(st.Missing, ", "), st.Install)
 	case guard.SandboxBroken:
 		// Claude Code would refuse to start anyway (failIfUnavailable); say why here.
-		return nop, fmt.Errorf("%w: bubblewrap can't start here: %s (unprivileged user namespaces are blocked; see Settings › Security › Command sandbox)", ErrSandboxUnavailable, st.Error)
+		hint := "unprivileged user namespaces are blocked"
+		if st.Fix != "" {
+			hint += "; to allow them run: " + st.Fix
+		}
+		return nop, fmt.Errorf("%w: bubblewrap can't start here: %s (%s; see Settings › Security › Command sandbox)", ErrSandboxUnavailable, st.Error, hint)
 	}
 	home, _ := os.UserHomeDir()
 	dirs := runWriteDirs(opts)

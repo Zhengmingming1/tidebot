@@ -273,3 +273,53 @@ func TestProbeBwrapReal(t *testing.T) {
 	}
 	t.Logf("bwrap %s: probe %q", p, msg)
 }
+
+// DiagnoseBwrap names why bubblewrap is refused from /proc/sys and container
+// markers: a container first (no command, its /proc/sys is the host's), then
+// switched-off user namespaces, then Ubuntu's AppArmor restriction.
+func TestDiagnoseBwrap(t *testing.T) {
+	fs := func(files map[string]string) func(string) ([]byte, error) {
+		return func(p string) ([]byte, error) {
+			if v, ok := files[p]; ok {
+				return []byte(v), nil
+			}
+			return nil, os.ErrNotExist
+		}
+	}
+	noEnv := func(string) string { return "" }
+	const (
+		aa    = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+		clone = "/proc/sys/kernel/unprivileged_userns_clone"
+		max   = "/proc/sys/user/max_user_namespaces"
+	)
+	for _, c := range []struct {
+		name       string
+		files      map[string]string
+		env        string
+		cause, fix string
+	}{
+		{"ubuntu apparmor", map[string]string{aa: "1\n", clone: "1\n", max: "63432\n"}, "", SandboxCauseAppArmor, "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"},
+		{"apparmor off", map[string]string{aa: "0\n", max: "63432\n"}, "", "", ""},
+		{"debian clone off", map[string]string{clone: "0\n", aa: "1\n"}, "", SandboxCauseUsernsOff, "sudo sysctl -w kernel.unprivileged_userns_clone=1"},
+		{"max zero", map[string]string{max: " 0\n", clone: "0\n"}, "", SandboxCauseUsernsOff, "sudo sysctl -w user.max_user_namespaces=10000"},
+		{"docker", map[string]string{"/.dockerenv": "", aa: "1\n"}, "", SandboxCauseContainer, ""},
+		{"podman", map[string]string{"/run/.containerenv": "engine=podman\n", max: "0"}, "", SandboxCauseContainer, ""},
+		{"container env", map[string]string{aa: "1"}, "lxc", SandboxCauseContainer, ""},
+		{"nothing readable", map[string]string{}, "", "", ""},
+	} {
+		env := noEnv
+		if c.env != "" {
+			v := c.env
+			env = func(k string) string {
+				if k == "container" {
+					return v
+				}
+				return ""
+			}
+		}
+		cause, fix := DiagnoseBwrap(fs(c.files), env)
+		if cause != c.cause || fix != c.fix {
+			t.Errorf("%s: %q %q, want %q %q", c.name, cause, fix, c.cause, c.fix)
+		}
+	}
+}
