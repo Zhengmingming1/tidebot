@@ -87,13 +87,16 @@ type SkillBinding struct {
 	VersionID string `json:"version_id,omitempty"`
 }
 
+// MaxSkillBindings is how many skills one task may have attached.
+const MaxSkillBindings = 16
+
 // NormalizeBindings validates the explicit composition and preserves legacy single-skill specs.
 func NormalizeBindings(in []SkillBinding) ([]SkillBinding, error) {
 	if len(in) == 0 {
 		return nil, nil
 	}
-	if len(in) > 16 {
-		return nil, fmt.Errorf("at most 16 skills may be attached")
+	if len(in) > MaxSkillBindings {
+		return nil, fmt.Errorf("at most %d skills may be attached", MaxSkillBindings)
 	}
 	out := append([]SkillBinding(nil), in...)
 	explicit := false

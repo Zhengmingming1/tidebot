@@ -7782,3 +7782,25 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 **后续想法**：
 - `ImportPack` 多技能导入仍不在一个事务里（见上一条）。
 - `ExportPack` 也按 map 顺序写技能文件并带 `created_at`；导出的包本来就是一次性的，不影响去重，但如果以后要比较导出包是否变化，可以同样排序。
+
+### 2026-11-26：导入工作流包先检查所有任务再动手，导入的任务一开始就是暂停待审；中途失败不再留下半个导入（BUG，数据重复 / 未审先跑）
+
+这是 2026-11-26 04:00 Asia/Shanghai 的优化，接上一轮记下的「`ImportPack` 多技能导入不在一个事务里」。
+
+- **问题**：`ImportPack` 先校验了技能，但任务只在导入时才由 `Tasks.Create` / `UpdateSpec` 检查。包里第二个任务的 cron 写错、时长超过 1440 分钟、缺名字或提示词、同一技能挂两次、或挂了 16 个以上技能时：技能已经入库，第一个任务已经建好，包却没有记下「已导入」，修好包再导入就多出一份任务。更糟的是任务先以 `active` 建出来，再 `UpdateSpec` 挂技能，最后才 `Pause`（错误被忽略）：`UpdateSpec` 失败时（同一技能两次、技能过多）任务停在**启用且没有技能**的状态，带 cron 的会按时直接跑，违背「导入的任务先暂停待审」。
+- **改法**：
+  - `tasksvc.CheckCreate`：把 `Create` 的输入检查（名字 / 提示词、时长 0–1440、初始状态、cron 能解析）抽成不写库的函数，`Create` 自己也调它，规则只有一份；`MaxSkillBindings` 常量取代写死的 16。
+  - `CreateInput.PauseKind`：以暂停状态创建时，在建任务的同一事务里写入暂停原因和时间。包导入的任务直接建成「暂停 · 来自工作流包」，不再有先启用后暂停的空档。
+  - `importPackBytes`：在导入任何技能、建任何任务之前，逐个任务跑 `CheckCreate`、检查技能数和重复技能；技能按名字排序导入（结果里的技能顺序固定）。之后若仍因数据库错误失败，把本次已建的任务归档，包不记为已导入，下次导入重新开始。技能版本按内容去重、不可变，失败时留下的技能版本再导入会复用，不需要回滚。
+  - 没有新增任何限制：检查的都是 `Create` / `UpdateSpec` 原本就会拒绝的情况，只是提前到动手之前。
+- **测试**：`TestPackImportChecksAllTasksBeforeImport`（第二个任务 cron 错、时长 2000、时长 -1、缺提示词、缺名字、同一技能两次、17 个技能，都报错且不建任务、不导入技能；旧代码前五项留下 1 个任务，「17 个技能」留下 2 个任务——第二个是启用且无技能的，「同一技能两次」报的是内部 ID 错误）；`TestPackImportTasksStartPausedAndFailedImportArchives`（导入的任务状态 `paused`、原因 `pack`、有暂停时间；用 SQLite 触发器模拟建第二个任务时磁盘写满，第一个任务被归档，去掉故障后再导入不算重复并建出两个任务；旧代码第一个任务停在暂停而非归档）。`go test ./...`、`go vet ./...`（另对 GOOS=windows/darwin vet `internal/app`、`internal/tasksvc`）、`gofmt -l` 通过。
+- **性能**：不是性能改动；多一次 cron 解析（每个任务微秒级），少一次 `Pause` 事务。
+
+**心得**：跨多个服务的导入做不成一个数据库事务时，「先把下游会拒绝的全部检查完再动手」+「可变的东西失败时撤回、不可变的按内容复用」就够了；检查函数要从下游抽出来共用，而不是在上游另写一份规则。「先建再改状态」的写法要警惕中间态：状态应该在创建那一刻就是对的。
+
+**参考**：kubernetes/kubectl `pkg/cmd/apply`（`--dry-run=server` / 先 `Validate` 全部对象再逐个提交的思路）和 helm/helm `pkg/action/install.go`（安装前先渲染、校验全部资源，失败时 `--atomic` 回滚已建资源）——只借思路，不抄代码。
+
+**后续想法**：
+- `DuplicateTask` 建出的暂停任务没有暂停原因（`pause_kind` 为空），可以用 `PauseKind` 补上「复制后待审」。
+- 包导入的任务仍是先建 v1 再 `UpdateSpec` 出 v2（挂技能）；`Create` 可以直接接受约束、允许的工具和技能，一步建成一个版本。
+- `ExportPack` 仍按 map 顺序写技能文件并带 `created_at`；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。

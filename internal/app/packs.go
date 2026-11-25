@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -226,28 +227,63 @@ func (a *App) importPackBytes(ctx context.Context, raw []byte) (*PackImportResul
 			return nil, err
 		}
 	}
-	for _, task := range p.Tasks {
+	// Check every task the way Create and UpdateSpec will, so a bad task later
+	// in the pack cannot leave the skills and earlier tasks imported without a
+	// record of the pack (importing it again would make them twice).
+	inputs := make([]tasksvc.CreateInput, len(p.Tasks))
+	for i, task := range p.Tasks {
+		if len(task.Skills) > tasksvc.MaxSkillBindings {
+			return nil, fmt.Errorf("task %q: at most %d skills may be attached", task.Name, tasksvc.MaxSkillBindings)
+		}
+		attached := map[string]bool{}
 		for _, sn := range task.Skills {
 			if err := checkSkill(sn); err != nil {
 				return nil, fmt.Errorf("task %q: %w", task.Name, err)
 			}
+			if attached[sn] {
+				return nil, fmt.Errorf("task %q: skill %q is attached twice", task.Name, sn)
+			}
+			attached[sn] = true
+		}
+		// Created paused for review, with the reason, in one step: an imported
+		// task is never active, not even if a later step fails.
+		inputs[i] = tasksvc.CreateInput{Name: task.Name, Goal: task.Goal, Prompt: task.Prompt, CronExpr: task.CronExpr,
+			OverlapPolicy: task.OverlapPolicy, TimeoutMinutes: task.TimeoutMinutes, Actor: "pack",
+			InitialStatus: "paused", PauseKind: tasksvc.PausePack}
+		if err := a.Tasks.CheckCreate(inputs[i]); err != nil {
+			return nil, fmt.Errorf("task %q: %w", task.Name, err)
 		}
 	}
+	names := make([]string, 0, len(skillFiles))
+	for sn := range skillFiles {
+		names = append(names, sn)
+	}
+	sort.Strings(names)
 	skillIDs := map[string]string{}
-	for sn, files := range skillFiles {
-		sv, err := a.Skills.ImportFiles(ctx, sn, files, "pack")
+	for _, sn := range names {
+		// A skill version is immutable and keyed by content: importing the same
+		// files again reuses it, so a skill left by a failed import is harmless.
+		sv, err := a.Skills.ImportFiles(ctx, sn, skillFiles[sn], "pack")
 		if err != nil {
 			return nil, fmt.Errorf("skill %s: %w", sn, err)
 		}
 		skillIDs[sn] = sv.ID
 		res.Skills = append(res.Skills, sn)
 	}
-	for _, t := range p.Tasks {
-		tv, err := a.Tasks.Create(ctx, tasksvc.CreateInput{Name: t.Name, Goal: t.Goal, Prompt: t.Prompt, CronExpr: t.CronExpr,
-			OverlapPolicy: t.OverlapPolicy, TimeoutMinutes: t.TimeoutMinutes, Actor: "pack"})
+	// If a task still fails (database error), archive the ones this import
+	// made so none is left behind half imported.
+	undo := func() {
+		for _, id := range res.TaskIDs {
+			_ = a.Tasks.SetStatusWhy(context.WithoutCancel(ctx), id, "archived", "", "")
+		}
+	}
+	for i, t := range p.Tasks {
+		tv, err := a.Tasks.Create(ctx, inputs[i])
 		if err != nil {
+			undo()
 			return nil, fmt.Errorf("task %s: %w", t.Name, err)
 		}
+		res.TaskIDs = append(res.TaskIDs, tv.Task.ID)
 		spec := *tv.Spec
 		spec.Constraints = t.Constraints
 		spec.AllowedTools = t.AllowedTools
@@ -255,10 +291,9 @@ func (a *App) importPackBytes(ctx context.Context, raw []byte) (*PackImportResul
 			spec.SkillBindings = append(spec.SkillBindings, tasksvc.SkillBinding{SkillID: skillIDs[sn], SkillName: sn, Mode: "follow"})
 		}
 		if _, err := a.Tasks.UpdateSpec(ctx, tv.Task.ID, spec, "pack", "imported from pack "+p.Name); err != nil {
-			return nil, err
+			undo()
+			return nil, fmt.Errorf("task %s: %w", t.Name, err)
 		}
-		_ = a.Tasks.Pause(ctx, tv.Task.ID, tasksvc.PausePack, "")
-		res.TaskIDs = append(res.TaskIDs, tv.Task.ID)
 	}
 	ids, _ := json.Marshal(res.TaskIDs)
 	_ = a.Auth.SetSetting(ctx, "pack.imported."+res.Hash, string(ids))

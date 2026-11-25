@@ -31,7 +31,10 @@ func New(store *db.Store, ver *version.Service, sched *scheduler.Scheduler) *Ser
 
 // CreateInput creates a task with initial v1.
 type CreateInput struct {
-	InitialStatus  string `json:"-"` // empty defaults to active; paused stages editor/import creation
+	InitialStatus string `json:"-"` // empty defaults to active; paused stages editor/import creation
+	// PauseKind records why a task created paused is paused (e.g. PausePack), in
+	// the same transaction: it is never active, not even for a moment.
+	PauseKind      string `json:"-"`
 	Name           string `json:"name"`
 	Prompt         string `json:"prompt"`
 	Goal           string `json:"goal"`
@@ -56,15 +59,35 @@ type TaskView struct {
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // Create inserts task + v1 + current pointer.
-func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) {
+// CheckCreate reports what Create would refuse in the input, without writing
+// anything. Callers that create several tasks (pack import) check them all
+// first so a bad one does not leave the others half made.
+func (s *Service) CheckCreate(in CreateInput) error {
 	if in.Name == "" || in.Prompt == "" && in.WorkflowID == "" {
-		return TaskView{}, fmt.Errorf("name and prompt required")
+		return fmt.Errorf("name and prompt required")
+	}
+	if in.TimeoutMinutes < 0 || in.TimeoutMinutes > 1440 {
+		return fmt.Errorf("timeout must be 0 (unlimited) or 1-1440 minutes")
+	}
+	switch in.InitialStatus {
+	case "", "active", "paused":
+	default:
+		return fmt.Errorf("initial status must be active or paused")
+	}
+	if in.CronExpr != "" && s.Sched != nil {
+		if _, err := s.Sched.ComputeInitialNext(in.CronExpr); err != nil {
+			return fmt.Errorf("cron: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) {
+	if err := s.CheckCreate(in); err != nil {
+		return TaskView{}, err
 	}
 	if in.Actor == "" {
 		in.Actor = "user"
-	}
-	if in.TimeoutMinutes < 0 || in.TimeoutMinutes > 1440 {
-		return TaskView{}, fmt.Errorf("timeout must be 0 (unlimited) or 1-1440 minutes")
 	}
 	if in.OverlapPolicy == "" {
 		in.OverlapPolicy = "skip"
@@ -75,9 +98,6 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	status := in.InitialStatus
 	if status == "" {
 		status = "active"
-	}
-	if status != "active" && status != "paused" {
-		return TaskView{}, fmt.Errorf("initial status must be active or paused")
 	}
 	if in.WorkflowID != "" {
 		in.WorkspaceDir = "" // a workflow task runs in the workflow's folder
@@ -106,13 +126,25 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 		OverlapPolicy: in.OverlapPolicy, TimeoutMinutes: in.TimeoutMinutes,
 		NextRunAt: next, CreatedAt: now, UpdatedAt: now,
 	}
+	if status == "paused" && in.PauseKind != "" {
+		task.PauseKind = in.PauseKind
+		task.PausedAt = sql.NullString{String: now, Valid: true}
+	}
 	// The row and its first version are one transaction: a task never exists
 	// without a version (it would be listed, and scheduled, but not editable).
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
 		EntityType: version.EntityTask, EntityID: tid,
 		Content: spec, Source: "user_edit", Actor: in.Actor, Reason: "create task", Message: "v1",
 		Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
-			return db.InsertTaskOn(ctx, tx, task)
+			if err := db.InsertTaskOn(ctx, tx, task); err != nil {
+				return err
+			}
+			if task.PauseKind == "" {
+				return nil
+			}
+			_, err := tx.ExecContext(ctx, `UPDATE tasks SET pause_kind=?, paused_at=? WHERE id=?`,
+				task.PauseKind, task.PausedAt, tid)
+			return err
 		},
 	})
 	if err != nil {
