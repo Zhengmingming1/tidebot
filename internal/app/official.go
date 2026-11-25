@@ -8,9 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
+	"sort"
 	"strings"
-	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/plugin"
 	"github.com/Zhengmingming1/tidebot/internal/plugin/official"
@@ -163,30 +162,35 @@ func (a *App) applyDigestPack(ctx context.Context, id string) (map[string]any, e
 	if err != nil {
 		return nil, err
 	}
-	pk := Pack{Format: PackFormat, Name: "每日资讯摘要", CreatedAt: time.Now().UTC().Format(time.RFC3339), Skills: []string{"daily-digest"},
+	// No created_at and files in name order: the same settings build the same
+	// bytes, so applying twice is recognised as a duplicate (no second task or
+	// button). No timeout either: like any new task it runs without a hidden cap
+	// and the owner can add one later in the task form.
+	pk := Pack{Format: PackFormat, Name: "每日资讯摘要", Skills: []string{"daily-digest"},
 		Tasks: []PackTask{{Name: "每日资讯摘要", Goal: "Daily news digest from RSS feeds", Prompt: prompt, CronExpr: fmt.Sprintf("0 %d * * *", hour),
-			OverlapPolicy: "skip", TimeoutMinutes: 15, Skills: []string{"daily-digest"},
+			OverlapPolicy: "skip", Skills: []string{"daily-digest"},
 			AllowedTools: []string{mcpTool("rss-feed", "feeds", "fetch_feed"), mcpTool(snd[0], snd[1], snd[2])}}}}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	pj, _ := json.MarshalIndent(pk, "", "  ")
 	w, _ := zw.Create("pack.json")
 	_, _ = w.Write(pj)
-	for name, b := range files {
-		w, _ := zw.Create(name)
-		_, _ = w.Write(b)
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		w, err := zw.Create(name)
+		if err != nil {
+			return nil, err
+		}
+		_, _ = w.Write(files[name])
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
-	tmp, err := os.CreateTemp("", "digest-*.zip")
-	if err != nil {
-		return nil, err
-	}
-	defer os.Remove(tmp.Name())
-	_, _ = tmp.Write(buf.Bytes())
-	tmp.Close()
-	res, err := a.ImportPack(ctx, tmp.Name())
+	res, err := a.importPackBytes(ctx, buf.Bytes())
 	if err != nil {
 		return nil, err
 	}

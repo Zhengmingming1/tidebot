@@ -123,6 +123,12 @@ func (a *App) ImportPack(ctx context.Context, file string) (*PackImportResult, e
 	if err != nil {
 		return nil, err
 	}
+	return a.importPackBytes(ctx, raw)
+}
+
+// importPackBytes imports a pack zip already in memory (built-in packs are
+// assembled in memory and need no temporary file).
+func (a *App) importPackBytes(ctx context.Context, raw []byte) (*PackImportResult, error) {
 	if len(raw) > packMaxBytes {
 		return nil, errors.New("pack too large")
 	}

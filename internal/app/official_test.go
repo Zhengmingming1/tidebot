@@ -122,6 +122,38 @@ func TestDigestPackApply(t *testing.T) {
 	if !strings.Contains(btn, ids[0]) {
 		t.Fatal("button")
 	}
+	// Unlimited first: the preset adds no hidden time cap.
+	if v.Task.TimeoutMinutes != 0 || v.Spec.TimeoutMinutes != 0 {
+		t.Fatalf("preset timeout %d/%d, want 0 (no cap)", v.Task.TimeoutMinutes, v.Spec.TimeoutMinutes)
+	}
+	// Applying again with the same settings (a second later, files in any map
+	// order) is a duplicate: no second task and no second button.
+	time.Sleep(1100 * time.Millisecond)
+	r2, err := a.CallExt(ctx, "plugins.apply_pack", json.RawMessage(`{"id":"daily-digest"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2 := r2.(map[string]any)
+	if res2["duplicate"] != true || res2["button"] == true {
+		t.Fatalf("second apply %v", res2)
+	}
+	if ids2 := res2["task_ids"].([]string); len(ids2) != 1 || ids2[0] != ids[0] {
+		t.Fatalf("second apply tasks %v, want %v", ids2, ids)
+	}
+	if btn2, _ := a.Auth.GetSetting(ctx, "buttons"); strings.Count(btn2, ids[0]) != 1 {
+		t.Fatalf("buttons %s", btn2)
+	}
+	// Changed settings make a new pack and a new task.
+	if err := a.Plugins.SetConfig(ctx, "daily-digest", map[string]any{"feeds": "https://ex.com/a.xml", "notify_via": "wecom", "hour": 9}); err != nil {
+		t.Fatal(err)
+	}
+	r3, err := a.CallExt(ctx, "plugins.apply_pack", json.RawMessage(`{"id":"daily-digest"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res3 := r3.(map[string]any); res3["duplicate"] == true || res3["task_ids"].([]string)[0] == ids[0] {
+		t.Fatalf("changed settings %v", res3)
+	}
 }
 
 func toJSONStr(v any) string { b, _ := json.Marshal(v); return string(b) }
