@@ -7903,3 +7903,23 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 包仍不带 `max_budget_usd`、提供方名字、策略和标签（任务文件都带）；可以考虑让包的任务部分直接复用任务文件的条目格式。
 - 包仍带 `created_at`，同样的任务两次导出哈希仍不同；如果要比较导出包是否变化，可以去掉或移出哈希范围。
 - `app.EnsureTask`、`tasks.create` RPC 仍只建基本字段；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-27：悬停提示改由一个固定浮层显示，不再被卡片、表格滚动区或窗口边缘裁掉（BUG，1024×655 可用性）
+
+这是 2026-11-27 04:00 Asia/Shanghai 的优化，接 11-23 两轮后续想法「带 `overflow: hidden` 的卡片里 `data-tip` 被裁切的 headless 检查」。
+
+- **问题**：所有 `[data-tip]` 提示都是元素自己的 CSS `::after`，被任何 `overflow` 不是 `visible` 的祖先（首页 KPI 条 `.kstrip`、首页卡片 `.hc`、技能表 `.table-scroll`、设置里的 `small`）裁剪，靠近窗口右缘的也会伸出窗口。之前是逐个加 `left:auto; right:-4px` 之类的覆盖规则（styles.css 里已有 30 多条），新页面一加元素就再漏。新写的 `scripts/tip-check.py` 在 1024×655 下扫主要页面（首页、任务、运行、技能、工作流、会话、扩展、花费、按钮、设置 7 个分区、任务 / 运行 / 技能详情）：**中文 13 处、英文 14 处被裁**，例如首页「查看今天的运行」整条被 KPI 条盖掉 35 px、「暂停全部定时」被卡片切掉 45 px、会话「发送」按钮和运行页「继续」的提示伸出窗口、设置 › 安全里时间的完整日期被裁掉 107–126 px、技能下载按钮的提示伸出窗口。
+- **改法**：新增 `src/tooltips.js`：`<body>` 上一个 `position: fixed` 的 `#tip-layer`（`role="tooltip"`，被提示元素临时加 `aria-describedby`），鼠标悬停（`pointerover`，触屏不弹）或键盘焦点（`:focus-visible`）时用 `textContent` 显示同一段 `data-tip` 文本。`tipPlace` 默认放上方；页面 CSS 把这个提示放到下方的（`top` 有值、`bottom: auto`），沿用下方；放不下就翻到另一侧，再横向 / 纵向夹到离窗口边 8 px 以内。提示文本变化（复制成功、实时计数）时跟着更新；元素被重画掉或鼠标离开（每 400 ms 查一次，只在显示期间）、Esc、切页面、窗口缩放时关闭；页面或它所在的滚动框滚动时跟着元素走，别处的日志自动滚动不影响。按钮自己的菜单打开（`aria-expanded="true"`）时不显示，等同原来 `.rr-btn` 的规则。`html.tip-js` 时 `::after` 一律 `display: none`，JS 没跑起来时仍是原来的 CSS 提示。三套主题共用 `--tip-bg` / `--tip-fg`，样式（12 px、6×8 内边距、最宽 280 px、阴影）和原来一致。原有的逐个对齐规则保留为无 JS 时的兜底，不再需要新增。
+- **测试**：`TestTipLayerPlacement`（node 里跑 `tipPlace`：上方居中、要求下方、贴顶翻下、贴底翻上、右缘 / 左缘夹回 8 px、两边都放不下时夹在窗口内、比窗口还宽时贴左；另查文本用 `textContent` 不拼 HTML、`role` / `aria-describedby`、触屏不弹、键盘焦点、`::after` 让位规则和 `.tip-layer` 的 fixed / 不接收指针 / 主题色）。`scripts/tip-check.py` 改后 **27 → 0**；另用键盘 Tab 走首页 40 步，10 个带提示的元素都显示了正确文本，Esc 关闭；新建任务对话框里悬停 9 个提示，浮层都在对话框之上、没被盖住。`TestTipLayerNamesDoNotShadow`：所有源文件共用一个闭包，`tooltips.js` 的顶层名字不能和别的文件重名——第一版用了 `var tip`，覆盖了 `editors-import.js` 的 `tip()`，新建任务对话框直接报「tip is not a function」，而原有的 `go test ./...` 全部通过，是 headless 打开对话框时才发现的。`go test ./...`、`go vet ./...`、`gofmt -l`、`check-i18n.py`、`node --check` 通过。
+- **体积**：app.js 763.4 KB / gzip 212.4 KB → 766.8 KB / 213.5 KB（+1.1 KB gzip）；styles.css gzip 45.1 → 45.2 KB。没有常驻定时器（只在提示显示时有一个 400 ms 检查）。
+- **截图**：`/workspace/tidebot-shots/2026-11-27-0400-tip-layer-home-{zh-CN-graphite,en-tide,zh-CN-midnight}.png`（1024×655，悬停首页「今日运行」，原来整条被 KPI 条裁掉）。
+
+**心得**：提示框挂在触发元素里，就要和它所有祖先的 `overflow` 打交道，逐个打补丁永远补不完；挂到最外层再按窗口算位置，一次解决。前端源文件拼成一个闭包，新文件的顶层名字要先查重，最好有测试兜住。检查也要能自动跑：伪元素拿不到 `getBoundingClientRect`，但可以从计算样式（`width`、`left/right/top/bottom`、`transform` 矩阵）算出它的框，再和每个裁剪祖先比较。
+
+**参考**：radix-ui/primitives `packages/react/tooltip/src/tooltip.tsx`（内容经 Portal 挂到触发元素之外，触发元素所在区域滚动时处理提示）；floating-ui/floating-ui `packages/core/src/middleware/flip.ts` 与 `shift.ts`（放不下就换边、再夹进边界）。只借思路，不抄代码。
+
+**后续想法**：
+- styles.css 里 30 多条逐个对齐 `::after` 的规则现在只在无 JS 时生效，可以在确认没有回归后精简。
+- `tip-check.py` 只扫了每个页面初始可见的元素；对话框、抽屉、工作流编辑器里的提示可以再加几步打开操作后扫一遍。
+- `scripts/flicker-check.py` 仍等待早已不存在的 `.qa`，跑不起来，应改成等 `#shell` 显示。
+- `app.EnsureTask`、`tasks.create` RPC 仍只建基本字段；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做（需要真模型 key）。

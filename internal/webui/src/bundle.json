@@ -3,6 +3,7 @@
   "i18n-time.js",
   "api-connection.js",
   "shell-status.js",
+  "tooltips.js",
   "palette-navigation.js",
   "schedule-controls.js",
   "live-session.js",
