@@ -324,16 +324,12 @@ func (s *Service) ConfirmItems(ctx context.Context, itemIDs []string, actor stri
 		if view.CurrentVersion != nil {
 			expectedVersion = view.CurrentVersion.ID
 		}
-		ids := make([]string, 0, len(perm))
 		for _, i := range perm {
 			spec, err = applyItem(spec, items[i])
 			if err != nil {
 				return BatchResult{}, err
 			}
-			ids = append(ids, items[i].ID)
 		}
-		msg := "confirm amendment " + strings.Join(ids, ",")
-		_ = msg
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -435,13 +431,31 @@ func (s *Service) RejectBatch(ctx context.Context, amendmentID string, include [
 		}
 	}
 	rows.Close()
-	for _, x := range ids {
-		if err := s.Reject(ctx, x); err != nil {
-			return 0, err
-		}
-	}
 	if len(ids) == 0 {
 		return 0, fmt.Errorf("nothing to reject")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := nowUTC()
+	for _, x := range ids {
+		res, err := tx.ExecContext(ctx, `
+UPDATE requirement_items SET status='rejected', decided_at=? WHERE id=? AND status IN ('pending','needs_decision')`, now, x)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if n != 1 {
+			return 0, fmt.Errorf("item %s is not rejectable", x)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
 	return len(ids), nil
 }
@@ -461,15 +475,45 @@ UPDATE requirement_items SET status='rejected', decided_at=? WHERE id=? AND stat
 	return nil
 }
 
-// MarkConsumed marks scheduled items used by a run.
+// MarkConsumed marks scheduled items used by a run. All items change together.
 func (s *Service) MarkConsumed(ctx context.Context, runID string, itemIDs []string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.MarkConsumedTx(ctx, tx, runID, itemIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// MarkConsumedTx consumes scheduled items inside a caller-owned transaction.
+// Repeating the call for the same run is harmless, which lets a caller recover
+// a commit whose result was lost. Any other unexpected state fails the batch.
+func (s *Service) MarkConsumedTx(ctx context.Context, tx *sql.Tx, runID string, itemIDs []string) error {
 	for _, iid := range itemIDs {
-		_, err := s.DB.ExecContext(ctx, `
-UPDATE requirement_items SET status='consumed', consumed_run_id=? WHERE id=? AND status='scheduled'`,
-			runID, iid)
+		res, err := tx.ExecContext(ctx, `
+UPDATE requirement_items SET status='consumed', consumed_run_id=? WHERE id=? AND status='scheduled'`, runID, iid)
 		if err != nil {
 			return err
 		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 1 {
+			continue
+		}
+		var status string
+		var consumedRun sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT status, consumed_run_id FROM requirement_items WHERE id=?`, iid).Scan(&status, &consumedRun); err != nil {
+			return fmt.Errorf("item %s: %w", iid, err)
+		}
+		if status == "consumed" && consumedRun.Valid && consumedRun.String == runID {
+			continue
+		}
+		return fmt.Errorf("item %s is not scheduled for run %s", iid, runID)
 	}
 	return nil
 }
