@@ -73,12 +73,11 @@ func TestRestoreBackupInvalidDatabaseRollsBackFiles(t *testing.T) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	originals := map[string][]byte{
-		filepath.Join(dataDir, "tidebot.db"):      []byte("original database bytes"),
-		filepath.Join(dataDir, "tidebot.db-wal"):  []byte("original wal bytes"),
-		filepath.Join(dataDir, "tidebot.db-shm"):  []byte("original shm bytes"),
-		filepath.Join(home, "config.yaml"):        []byte("original config bytes\n"),
-	}
+	originals := map[string][]byte{}
+	originals[filepath.Join(dataDir, "tidebot.db")] = []byte("original database bytes")
+	originals[filepath.Join(dataDir, "tidebot.db-wal")] = []byte("original wal bytes")
+	originals[filepath.Join(dataDir, "tidebot.db-shm")] = []byte("original shm bytes")
+	originals[filepath.Join(home, "config.yaml")] = []byte("original config bytes\n")
 	for path, content := range originals {
 		if err := os.WriteFile(path, content, 0o600); err != nil {
 			t.Fatal(err)
@@ -88,7 +87,7 @@ func TestRestoreBackupInvalidDatabaseRollsBackFiles(t *testing.T) {
 	writeBackupTransactionArchive(t, archive, BackupManifest{
 		Format: BackupFormat, HomeDir: home, DataDir: dataDir,
 	}, map[string][]byte{
-		"data/tidebot.db":   []byte("not a SQLite database"),
+		"data/tidebot.db":    []byte("not a SQLite database"),
 		"config/config.yaml": []byte("replacement config\n"),
 	})
 	if _, err := RestoreBackup(archive, home, ""); err == nil {

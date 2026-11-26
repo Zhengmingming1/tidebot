@@ -6,6 +6,11 @@ import (
 
 func TestMarkConsumedIsAtomicAndIdempotent(t *testing.T) {
 	f, ctx := newFixture(t)
+	for _, runID := range []string{"run_atomic", "run_other"} {
+		if _, err := f.db.ExecContext(ctx, `INSERT INTO runs(id, task_id, created_at) VALUES(?,?,?)`, runID, f.task, "2026-01-01T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	items, err := f.svc.Propose(ctx, f.task, "!first;!second", "user")
 	if err != nil {
 		t.Fatal(err)
