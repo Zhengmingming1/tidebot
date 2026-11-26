@@ -118,7 +118,7 @@ func TestPauseReasonUI(t *testing.T) {
 	b := []byte(appJSSource(t))
 	src := strings.ReplaceAll(string(b), "\r\n", "\n")
 	for _, want := range []string{
-		`var PAUSE_KINDS = ["user", "snooze", "breaker", "budget", "pack", "copy", "plugin"];`,
+		`var PAUSE_KINDS = ["user", "snooze", "breaker", "budget", "pack", "import", "copy", "plugin"];`,
 		`function taskPill(st, t, small) {`,
 		`function pauseNotice(t) {`,
 		`taskPill(t.status, t) + policyWaitPill(t) + idChip(T("td.task_id"), t.id)`,
@@ -157,7 +157,7 @@ func TestPauseReasonUI(t *testing.T) {
 	}
 	keys := []string{"pz.pill_breaker", "pz.pill_budget", "pz.pill_pack", "pz.pill_plugin", "pz.why_user", "pz.why_breaker", "pz.why_budget",
 		"pz.why_plugin", "pz.why_pack", "pz.note_breaker", "pz.note_budget", "pz.note_plugin", "pz.note_pack", "pz.see_failed", "pz.see_spend",
-		"pz.resumed_reset", "pz.resumed_budget", "pz.cls.unknown", "pz.pill_copy", "pz.why_copy", "pz.note_copy"}
+		"pz.resumed_reset", "pz.resumed_budget", "pz.cls.unknown", "pz.pill_copy", "pz.why_copy", "pz.note_copy", "pz.pill_import", "pz.why_import", "pz.note_import"}
 	// every class policy.Classify can give a failing run
 	for _, c := range []string{"budget", "authentication_failed", "billing_error", "invalid_request", "danger_blocked", "acceptance_failed",
 		"rate_limit", "overloaded", "server_error", "network", "process_exit"} {

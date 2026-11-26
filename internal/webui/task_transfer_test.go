@@ -89,6 +89,14 @@ func TestTaskExportImport(t *testing.T) {
 		t.Fatalf("rows %v %v %v", r1, r2, r3)
 	}
 
+	// record any moment a task row is active (insert or status change)
+	for _, q := range []string{`CREATE TABLE seen_active (task_id TEXT)`,
+		`CREATE TRIGGER seen_active_ins AFTER INSERT ON tasks WHEN NEW.status='active' BEGIN INSERT INTO seen_active VALUES (NEW.id); END`,
+		`CREATE TRIGGER seen_active_upd AFTER UPDATE OF status ON tasks WHEN NEW.status='active' BEGIN INSERT INTO seen_active VALUES (NEW.id); END`} {
+		if _, err := c.s.deps.DB.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// apply only the first row: arrives paused, everything else carried over
 	c.json(http.MethodDelete, "/api/tasks/"+other["id"].(string), nil)
 	code, res := c.json(http.MethodPost, "/api/tasks/import", map[string]any{"file": one, "apply": true, "pick": []int{0}})
@@ -101,6 +109,18 @@ func TestTaskExportImport(t *testing.T) {
 		len(nv.Spec.Constraints) != 1 || nv.Spec.Constraints[0].ID == "c1" || len(nv.Spec.AllowedTools) != 2 || nv.Spec.TimeoutMinutes != 45 ||
 		len(nv.Spec.SkillBindings) != 1 || nv.Spec.SkillBindings[0].SkillID != sk.ID || nv.Spec.WorkspaceDir != "" {
 		t.Fatalf("imported %+v %+v", nv.Task, nv.Spec)
+	}
+	// paused from the start, saying why: never active, never "paused by hand"
+	if nv.Task.PauseKind != tasksvc.PauseImport || !nv.Task.PausedAt.Valid {
+		t.Fatalf("import pause reason %q %v", nv.Task.PauseKind, nv.Task.PausedAt)
+	}
+	var everActive int
+	if err := c.s.deps.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM seen_active WHERE task_id=?`, nid).Scan(&everActive); err != nil || everActive != 0 {
+		t.Fatalf("imported task was active for a moment: %d %v", everActive, err)
+	}
+	_, dd := c.json(http.MethodGet, "/api/tasks/"+nid, nil)
+	if dd["pause_kind"] != "import" || dd["paused_at"] == nil {
+		t.Fatalf("detail %v", dd)
 	}
 	if p := (&policy.Store{DB: c.s.deps.DB}).Get(ctx, nid); p.Priority != "urgent" || p.RetryMax != 1 || p.Catchup != "skip" || !p.NotifySuccess {
 		t.Fatalf("policy %+v", p)
@@ -119,7 +139,7 @@ func TestTaskExportImport(t *testing.T) {
 		t.Fatalf("skill note %v", r)
 	}
 	ev, _ := c.s.deps.Tasks.Get(ctx, r["task_id"].(string))
-	if ev.Task.Status != "active" || len(ev.Spec.SkillBindings) != 0 || ev.Task.NextRunAt.String == "" {
+	if ev.Task.Status != "active" || ev.Task.PauseKind != "" || ev.Task.PausedAt.Valid || len(ev.Spec.SkillBindings) != 0 || ev.Task.NextRunAt.String == "" {
 		t.Fatalf("enabled import %+v", ev.Task)
 	}
 

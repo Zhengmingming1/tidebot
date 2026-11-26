@@ -7822,3 +7822,22 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 **后续想法**：
 - 任务文件导入（`task_transfer.go` 的 `createImported`）在不启用时走 `applyTaskExtras` → `SetStatus`，原因被记成「手动暂停」，而且是先建成 active、再设计划、最后暂停；可以像包导入一样建出来就带「导入待审」原因。
 - 包导入的任务仍是先建 v1 再 `UpdateSpec` 出 v2；`ExportPack` 仍按 map 顺序写技能文件；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-26（续 2）：从任务文件导入的任务一开始就是「导入待启用」，不再先启用、再被记成「手动暂停」（业务逻辑矛盾 / 可见性）
+
+这是 2026-11-26 11:50 Asia/Shanghai 的优化，接上一轮后续想法「任务文件导入（`createImported`）把原因记成手动暂停，而且先建成 active」。
+
+- **问题**：任务列表「导入」（`POST /api/tasks/import`，`tidebot.tasks` 文件）默认不启用，但 `createImported` 先用 `Tasks.Create` 建出 **active** 的任务，再 `UpdateSpec` 挂技能、设预算、`SetSchedule`，最后 `applyTaskExtras` 里 `SetStatus(paused)`。结果：① 原因被记成 `user`，列表和详情显示「手动暂停 · 时间」，像是用户自己停的；而工作流包导入、复制出的任务同样是「建出来就暂停待审」，却有「待启用」标签和说明条——同一种状态三种表现。② 配置过程中任务处于启用状态（虽然那时还没有 cron，不会被调度，但「启用且没有技能/预算」的中间态不该存在）。
+- **改法**：`tasksvc` 新增 `PauseImport = "import"`；`createImported` 用 `InitialStatus: "paused"` + `PauseKind: PauseImport` 建任务，原因和时间在建任务的同一事务里写入（复用上上轮给包导入加的 `CreateInput.PauseKind`）。选择「导入后启用」且文件里是启用的条目，照旧由 `applyTaskExtras` 在最后切成 active（原因清空）；不启用的条目 `SetStatus(paused)` 遇到已暂停的任务不改写原因。前端 `PAUSE_KINDS` 加 `import`：标签「导入待启用 / Imported · to review」（info 色，同包导入和副本），tooltip「从任务文件导入，检查无误后再启用 · 时间」，详情页说明条讲清为什么暂停、检查什么、点「恢复」启用。没有新增任何限制，导入默认暂停是原有行为。
+- **测试**：`TestTaskExportImport` 增加：用 SQLite 触发器记录任务行任何一刻处于 active，导入（不启用）后为 0 次；`pause_kind` 为 `import`、有暂停时间，详情接口返回同样字段；`enable=true` 的导入是 active 且原因为空。旧代码在「import pause reason "user"」处失败。`TestPauseReasonUI` 更新 `PAUSE_KINDS` 并检查中英文 `pz.pill_import / pz.why_import / pz.note_import`。`go test ./...`、`go vet`（含 GOOS=windows/darwin vet `internal/webui`）、`gofmt -l`、`scripts/check-i18n.py`、`node --check` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-26-1150-import-pause-reason-{zh-CN,list-zh-CN,tide-zh-CN,midnight-zh-CN}.png`（1024×655，无横向溢出，无页面错误）。
+- **不是性能改动**（少一次暂停事务）。
+
+**心得**：上一轮「状态 + 原因在进入状态那一刻一起写」的修法只覆盖了包导入和复制，第三条创建路径（任务文件导入）照旧漏掉——修这类问题时应把所有「建出来就暂停」的入口一次列全（`rg 'InitialStatus|SetStatus\(.*paused'`），而不是只修报告到的那条。
+
+**参考**：kubernetes/apimachinery `pkg/apis/meta/v1/types.go` 的 `Condition`（`reason` 必填，用机器可读的原因区分来源）——思路同上一轮，只借思路，不抄代码。
+
+**后续想法**：
+- 任务文件导入的任务仍是先建 v1 再 `UpdateSpec` 出 v2，预算、策略、标签也在建任务之后分别写；可以和包导入一起让 `Create` 一步接受约束、工具和技能。
+- `applyTaskExtras` 在 `SetStatus` 之后才写策略和标签，「导入后启用」时有极短的启用但策略未写的窗口（无 cron 前不会调度，影响小），可以把启用移到最后。
+- `ExportPack` 仍按 map 顺序写技能文件；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。

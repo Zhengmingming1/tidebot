@@ -439,10 +439,14 @@ func firstLine(s string, max int) string {
 
 // createImported writes one checked entry: the task with its spec as version 1's
 // successor (so the history says "imported"), then schedule, status, policy and budget.
+// The task is created paused with its reason ("imported, to review") in the same
+// transaction, so it is never active while half set up, and one left off says why;
+// an entry the user chose to enable is switched on only at the end, by applyTaskExtras.
 func (s *Server) createImported(ctx context.Context, f taskForm, extra tasksvc.Spec) (string, error) {
 	goal := extra.Goal
 	in := tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, Goal: goal, ProviderName: f.Provider,
-		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"}
+		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user",
+		InitialStatus: "paused", PauseKind: tasksvc.PauseImport}
 	if f.Workflow != nil {
 		in.WorkflowID, in.WorkflowVersion = f.Workflow.ID, f.Workflow.Version
 	}

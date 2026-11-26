@@ -304,6 +304,7 @@ const (
 	PausePack    = "pack"    // imported from a pack, waiting for review
 	PausePlugin  = "plugin"  // its trigger plugin was uninstalled (detail: plugin id)
 	PauseCopy    = "copy"    // made by Duplicate, waiting for review (detail: the source task's name)
+	PauseImport  = "import"  // imported from a task file, waiting for review
 	// PauseSnooze: paused by hand until a time (detail: the end, RFC3339 UTC). It resumes by
 	// itself then (WakeSnoozed), and the fire times that fell inside it are skipped.
 	PauseSnooze = "snooze"
