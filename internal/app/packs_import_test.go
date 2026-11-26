@@ -84,6 +84,10 @@ func TestPackImportKeepsLargeSkillFileWhole(t *testing.T) {
 	if err != nil || len(v.Spec.SkillBindings) != 1 {
 		t.Fatalf("task %v %v", v, err)
 	}
+	// its skill is in v1 itself: no skill-less v1 to roll back to
+	if vs, err := a.Tasks.Ver.ListVersions(ctx, "task", res.TaskIDs[0]); err != nil || len(vs) != 1 {
+		t.Fatalf("imported versions %d %v", len(vs), err)
+	}
 	vid, err := a.Skills.ResolveVersion(ctx, tasksvc.SkillBinding{SkillID: v.Spec.SkillBindings[0].SkillID, Mode: "follow"})
 	if err != nil {
 		t.Fatal(err)

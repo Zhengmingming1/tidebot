@@ -7841,3 +7841,21 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 任务文件导入的任务仍是先建 v1 再 `UpdateSpec` 出 v2，预算、策略、标签也在建任务之后分别写；可以和包导入一起让 `Create` 一步接受约束、工具和技能。
 - `applyTaskExtras` 在 `SetStatus` 之后才写策略和标签，「导入后启用」时有极短的启用但策略未写的窗口（无 cron 前不会调度，影响小），可以把启用移到最后。
 - `ExportPack` 仍按 map 顺序写技能文件；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。
+
+### 2026-11-26（续 3）：新建 / 导入的任务把技能、运行方式和推理强度直接写进 v1，历史里不再有一个没有技能的 v1（业务逻辑矛盾）
+
+这是 2026-11-26 15:50 Asia/Shanghai 的优化，接前几轮后续想法「包导入的任务仍是先建 v1 再 `UpdateSpec` 出 v2；`Create` 可以直接接受约束、工具和技能」。
+
+- **问题**：`tasksvc.Create` 只接受提示词、目录、超时等基本字段，于是三条创建路径都是「先建 v1，再马上 `UpdateSpec` 出 v2」：WebUI 新建任务（带技能、运行方式或推理强度时，v2 原因「bind skill」）、任务文件导入（v2「imported」）、工作流包导入（v2「imported from pack …」）。结果：① 刚建的任务历史里就有两个版本，v1 是一个**用户从没保存过**的「没有技能、没有运行方式」的任务，点「回滚到 v1」会悄悄丢掉技能、退回旧的默认权限档；② 两次提交之间若失败，要靠「归档半成品」兜底。
+- **改法**：`CreateInput` 新增 `Spec *Spec`（技能、运行方式、推理强度、约束、允许的工具、预算一起进 v1；名称、提示词、目标、提供商、目录、超时、工作流仍以输入字段为准）和 `Reason`（v1 在历史里的原因，空则仍是「create task」）。`CheckCreate` 对 `Spec` 做和 `UpdateSpec` 一样的检查（运行方式、推理强度、`NormalizeBindings`、技能组合来源格式），`Create` 规整绑定、校验技能组合来源版本、`CheckTarget`（工作流任务不能再绑技能），全部通过才在一个事务里写任务行和 v1。三条路径都改为一次 `Create`：WebUI 新建工作流任务时丢弃表单里的技能字段（原来也不会写入）；任务文件导入 v1 原因「imported」；包导入 v1 原因「imported from pack 名称」。没有新增任何限制，没有界面改动。
+- **测试**：新增 `TestCreateWithSpecIsOneVersion`（只有 1 个版本，内容含技能（规整为 primary / follow）、运行方式、推理强度、约束、工具、预算，输入字段覆盖 Spec 里的提示词；原因记为「imported」，不传时仍为「create task」）、`TestCreateWithBadSpecWritesNothing`（非法运行方式 / 推理强度、重复技能、pinned 无版本、工作流 + 技能都被拒，任务表和版本表都为空）；`TestTaskCompositionEditAndTransfer` 断言 WebUI 新建和任务文件导入都只有 1 个版本且 v1 含技能；`TestPackImportKeepsLargeSkillFileWhole` 断言包导入的任务只有 1 个版本。旧代码在这两处断言失败。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l` 通过。
+- **不是性能改动**：每建一个带技能的任务少一次版本提交事务；`BenchmarkImportPack`（50 次 ×3）前 22.4 / 23.1 / 24.0 ms/op，后 21.9 / 21.9 / 24.0 ms/op，差别在噪声内（耗时主要在技能入库）。不是 UI 改动，没有截图。
+
+**心得**：「创建」和「更新」各有一套字段时，调用方自然会「先建个空壳再更新」，版本化实体里这会把空壳变成一个可回滚的假版本。创建接口应接受和更新一样完整的内容，并做同样的校验。
+
+**参考**：healthchecks/healthchecks `hc/api/views.py` 的 `create_check` 与 `update_check` 共用 `_update(check, spec, v)`：创建时先用完整 spec 校验，再一次性保存，而不是先存一个默认 Check 再改（只借思路，不抄代码）。
+
+**后续想法**：
+- WebUI 新建、任务文件导入仍在 `Create` 之后分别写预算策略、计划、状态、执行策略和标签（`applyTaskExtras`），失败时靠归档兜底；`applyTaskExtras` 里启用仍在写策略和标签之前，可以把启用挪到最后。
+- `app.EnsureTask`、`tasks.create` RPC 仍只建基本字段；agentctl 若以后要带技能建任务，可以直接用 `CreateInput.Spec`。
+- `ExportPack` 仍按 map 顺序写技能文件；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。

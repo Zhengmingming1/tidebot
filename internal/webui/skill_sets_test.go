@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
@@ -72,6 +73,10 @@ func TestTaskCompositionEditAndTransfer(t *testing.T) {
 		t.Fatalf("create %d %v", code, task)
 	}
 	id := task["id"].(string)
+	// the skills are in v1 itself: no skill-less v1 in the history to roll back to
+	if vs, err := c.s.deps.Tasks.Ver.ListVersions(context.Background(), "task", id); err != nil || len(vs) != 1 || !strings.Contains(vs[0].ContentJSON, bs[1].SkillID) {
+		t.Fatalf("created versions %d %v", len(vs), err)
+	}
 	_, form := c.json(http.MethodGet, "/api/tasks/"+id+"/form", nil)
 	if len(form["form"].(map[string]any)["skill_bindings"].([]any)) != 2 {
 		t.Fatal("form dropped helpers")
@@ -101,6 +106,9 @@ func TestTaskCompositionEditAndTransfer(t *testing.T) {
 	copy, _ := c.s.deps.Tasks.Get(context.Background(), newID)
 	if len(copy.Spec.SkillBindings) != 2 || copy.Spec.SkillBindings[0].VersionID != bs[0].VersionID || copy.Spec.SkillBindings[1].Role != "auxiliary" {
 		t.Fatalf("transfer changed selection: %+v", copy.Spec.SkillBindings)
+	}
+	if vs, err := c.s.deps.Tasks.Ver.ListVersions(context.Background(), "task", newID); err != nil || len(vs) != 1 {
+		t.Fatalf("imported versions %d %v", len(vs), err)
 	}
 	file.Tasks[0].Skills[1].ID = "missing"
 	file.Tasks[0].Skills[1].Name = "absent"

@@ -47,6 +47,14 @@ type CreateInput struct {
 	// A workflow task (Spec.WorkflowID): the prompt is the workflow's input and may be empty.
 	WorkflowID      string `json:"workflow_id,omitempty"`
 	WorkflowVersion int    `json:"workflow_version,omitempty"`
+	// Spec, when set, is the rest of the first version: skills, run mode, effort,
+	// constraints, allowed tools and budget go into v1 with everything else, not
+	// into a v2 right after it (whose v1 would be the task without its skills, a
+	// version to roll back to that the owner never saved). Name, prompt, goal,
+	// provider, folder, timeout and workflow still come from the fields above.
+	Spec *Spec `json:"-"`
+	// Reason is v1's reason in the version history ("" = "create task").
+	Reason string `json:"-"`
 }
 
 // TaskView is task row + current version summary.
@@ -79,6 +87,20 @@ func (s *Service) CheckCreate(in CreateInput) error {
 			return fmt.Errorf("cron: %w", err)
 		}
 	}
+	if sp := in.Spec; sp != nil { // the same checks UpdateSpec makes
+		if !ValidRunMode(sp.RunMode) {
+			return fmt.Errorf("run mode must be read, edit or exec")
+		}
+		if !ValidEffort(sp.Effort) {
+			return fmt.Errorf("effort must be low, medium or high")
+		}
+		if _, err := NormalizeBindings(sp.SkillBindings); err != nil {
+			return err
+		}
+		if err := ValidateSkillSetSource(sp.SkillSetSource); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -104,13 +126,27 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	}
 	tid := id.New("task")
 	now := nowUTC()
-	spec := Spec{
-		Goal: in.Goal, Prompt: in.Prompt, Provider: in.ProviderName,
-		WorkspaceDir: in.WorkspaceDir, TimeoutMinutes: in.TimeoutMinutes,
-		WorkflowID: in.WorkflowID, WorkflowVersion: in.WorkflowVersion,
+	var spec Spec
+	if in.Spec != nil {
+		spec = *in.Spec
 	}
+	spec.Goal, spec.Prompt, spec.Provider = in.Goal, in.Prompt, in.ProviderName
+	spec.WorkspaceDir, spec.TimeoutMinutes = in.WorkspaceDir, in.TimeoutMinutes
+	spec.WorkflowID, spec.WorkflowVersion = in.WorkflowID, in.WorkflowVersion
 	if err := spec.CheckTarget(); err != nil {
 		return TaskView{}, err
+	}
+	bindings, err := NormalizeBindings(spec.SkillBindings)
+	if err != nil {
+		return TaskView{}, err
+	}
+	spec.SkillBindings = bindings
+	if err := s.validateSource(ctx, spec.SkillSetSource); err != nil {
+		return TaskView{}, err
+	}
+	reason := in.Reason
+	if reason == "" {
+		reason = "create task"
 	}
 	var next sql.NullString
 	if in.CronExpr != "" && s.Sched != nil {
@@ -134,7 +170,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (TaskView, error) 
 	// without a version (it would be listed, and scheduled, but not editable).
 	res, err := s.Ver.Commit(ctx, version.CommitInput{
 		EntityType: version.EntityTask, EntityID: tid,
-		Content: spec, Source: "user_edit", Actor: in.Actor, Reason: "create task", Message: "v1",
+		Content: spec, Source: "user_edit", Actor: in.Actor, Reason: reason, Message: "v1",
 		Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
 			if err := db.InsertTaskOn(ctx, tx, task); err != nil {
 				return err

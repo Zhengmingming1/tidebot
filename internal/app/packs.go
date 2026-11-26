@@ -278,22 +278,20 @@ func (a *App) importPackBytes(ctx context.Context, raw []byte) (*PackImportResul
 		}
 	}
 	for i, t := range p.Tasks {
-		tv, err := a.Tasks.Create(ctx, inputs[i])
+		// its skills, constraints and tools are in version 1 itself: no v1
+		// without them in the history to roll back to
+		spec := tasksvc.Spec{Constraints: t.Constraints, AllowedTools: t.AllowedTools}
+		for _, sn := range t.Skills {
+			spec.SkillBindings = append(spec.SkillBindings, tasksvc.SkillBinding{SkillID: skillIDs[sn], SkillName: sn, Mode: "follow"})
+		}
+		in := inputs[i]
+		in.Spec, in.Reason = &spec, "imported from pack "+p.Name
+		tv, err := a.Tasks.Create(ctx, in)
 		if err != nil {
 			undo()
 			return nil, fmt.Errorf("task %s: %w", t.Name, err)
 		}
 		res.TaskIDs = append(res.TaskIDs, tv.Task.ID)
-		spec := *tv.Spec
-		spec.Constraints = t.Constraints
-		spec.AllowedTools = t.AllowedTools
-		for _, sn := range t.Skills {
-			spec.SkillBindings = append(spec.SkillBindings, tasksvc.SkillBinding{SkillID: skillIDs[sn], SkillName: sn, Mode: "follow"})
-		}
-		if _, err := a.Tasks.UpdateSpec(ctx, tv.Task.ID, spec, "pack", "imported from pack "+p.Name); err != nil {
-			undo()
-			return nil, fmt.Errorf("task %s: %w", t.Name, err)
-		}
 	}
 	ids, _ := json.Marshal(res.TaskIDs)
 	_ = a.Auth.SetSetting(ctx, "pack.imported."+res.Hash, string(ids))

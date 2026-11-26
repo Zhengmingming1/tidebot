@@ -389,6 +389,12 @@ func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 	if f.Workflow != nil {
 		in.WorkflowID, in.WorkflowVersion = f.Workflow.ID, f.Workflow.Version
 	}
+	// skills, run mode and effort go into v1 itself: no skill-less v1 to roll back to
+	sp := specFromForm(tasksvc.Spec{}, f)
+	if in.WorkflowID != "" { // a workflow task runs the workflow, not skills
+		sp.SkillBindings, sp.SkillSetSource = nil, nil
+	}
+	in.Spec = &sp
 	tv, err := s.deps.Tasks.Create(ctx, in)
 	if err != nil {
 		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
@@ -405,12 +411,6 @@ func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 			_ = s.deps.Tasks.SetSchedule(context.WithoutCancel(ctx), tv.Task.ID, "")
 		}
 	}()
-	if f.Workflow == nil && (f.SkillID != "" || f.SkillBindings != nil || len(f.SkillSetSource) > 0) || f.RunMode != nil && *f.RunMode != "" || f.Effort != nil && *f.Effort != "" {
-		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, specFromForm(*tv.Spec, f), "user", "bind skill"); err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-	}
 	if err := s.applyTaskExtras(ctx, tv.Task.ID, f); err != nil {
 		if errors.Is(err, tasksvc.ErrCostPolicyConflict) {
 			writeErr(w, 409, err.Error())

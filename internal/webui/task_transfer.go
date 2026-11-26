@@ -437,37 +437,33 @@ func firstLine(s string, max int) string {
 	return s
 }
 
-// createImported writes one checked entry: the task with its spec as version 1's
-// successor (so the history says "imported"), then schedule, status, policy and budget.
-// The task is created paused with its reason ("imported, to review") in the same
-// transaction, so it is never active while half set up, and one left off says why;
-// an entry the user chose to enable is switched on only at the end, by applyTaskExtras.
+// createImported writes one checked entry: the task with its whole spec (skills,
+// constraints, tools, budget) as version 1, its history reason "imported", then
+// schedule, status, policy and budget. The task is created paused with its reason
+// ("imported, to review") in the same transaction, so it is never active while half
+// set up, and one left off says why; an entry the user chose to enable is switched
+// on only at the end, by applyTaskExtras.
 func (s *Server) createImported(ctx context.Context, f taskForm, extra tasksvc.Spec) (string, error) {
-	goal := extra.Goal
-	in := tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, Goal: goal, ProviderName: f.Provider,
+	sp := specFromForm(tasksvc.Spec{}, f)
+	sp.Constraints, sp.AllowedTools, sp.MaxBudgetUSD = extra.Constraints, extra.AllowedTools, extra.MaxBudgetUSD
+	in := tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, Goal: extra.Goal, ProviderName: f.Provider,
 		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user",
-		InitialStatus: "paused", PauseKind: tasksvc.PauseImport}
+		InitialStatus: "paused", PauseKind: tasksvc.PauseImport, Spec: &sp, Reason: "imported"}
 	if f.Workflow != nil {
 		in.WorkflowID, in.WorkflowVersion = f.Workflow.ID, f.Workflow.Version
+	}
+	if f.Workspace != nil {
+		in.WorkspaceDir = *f.Workspace
 	}
 	tv, err := s.deps.Tasks.Create(ctx, in)
 	if err != nil {
 		return "", err
 	}
-	undo := func(err error) (string, error) { // no half-made task left behind
+	if err := s.applyTaskExtras(ctx, tv.Task.ID, f); err != nil {
+		// no half-made task left behind
 		_ = s.deps.Tasks.SetStatus(ctx, tv.Task.ID, "archived", "import failed")
 		_ = s.deps.Tasks.SetSchedule(ctx, tv.Task.ID, "")
 		return "", err
-	}
-	sp := specFromForm(*tv.Spec, f)
-	sp.Constraints, sp.AllowedTools, sp.MaxBudgetUSD = extra.Constraints, extra.AllowedTools, extra.MaxBudgetUSD
-	if len(sp.Constraints) > 0 || len(sp.AllowedTools) > 0 || sp.MaxBudgetUSD > 0 || len(sp.SkillBindings) > 0 || sp.RunMode != "" || sp.Effort != "" {
-		if _, err := s.deps.Tasks.UpdateSpec(ctx, tv.Task.ID, sp, "user", "imported"); err != nil {
-			return undo(err)
-		}
-	}
-	if err := s.applyTaskExtras(ctx, tv.Task.ID, f); err != nil {
-		return undo(err)
 	}
 	return tv.Task.ID, nil
 }
