@@ -5,15 +5,13 @@ import (
 	"database/sql"
 
 	"github.com/Zhengmingming1/tidebot/internal/db"
+	"github.com/Zhengmingming1/tidebot/internal/pricing"
 )
 
-// updateRunFinish persists a terminal run. Successful runs may have an
-// OnSuccess callback; it runs in the same transaction so a run cannot be
-// recorded as complete while its related success updates are only half done.
-func (r *Runner) updateRunFinish(ctx context.Context, finish db.Run, opts Options) error {
-	if finish.Status != "succeeded" || opts.OnSuccess == nil {
-		return r.store.UpdateRunFinish(ctx, finish)
-	}
+// updateRunFinish persists a terminal run and every related terminal write in
+// one transaction. A result, pricing or success-callback failure therefore
+// cannot leave a completed run with only part of its outcome saved.
+func (r *Runner) updateRunFinish(ctx context.Context, finish db.Run, opts Options, resultText string, cost *pricing.Cost) error {
 	tx, err := r.store.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -22,8 +20,20 @@ func (r *Runner) updateRunFinish(ctx context.Context, finish db.Run, opts Option
 	if err := updateRunFinishOn(ctx, tx, finish); err != nil {
 		return err
 	}
-	if err := opts.OnSuccess(ctx, tx, finish.ID); err != nil {
-		return err
+	if resultText != "" {
+		if err := db.SetRunResultOn(ctx, tx, finish.ID, resultText); err != nil {
+			return err
+		}
+	}
+	if cost != nil {
+		if err := db.UpdateRunCostOn(ctx, tx, finish.ID, *cost); err != nil {
+			return err
+		}
+	}
+	if finish.Status == "succeeded" && opts.OnSuccess != nil {
+		if err := opts.OnSuccess(ctx, tx, finish.ID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

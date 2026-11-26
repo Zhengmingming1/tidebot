@@ -28,8 +28,15 @@ func CapRunResult(text string) (string, bool) {
 
 // SetRunResult stores the run's final answer (capped).
 func (s *Store) SetRunResult(ctx context.Context, runID, text string) error {
+	return SetRunResultOn(ctx, s.DB, runID, text)
+}
+
+// SetRunResultOn stores the final answer through a DB or transaction.
+func SetRunResultOn(ctx context.Context, ex interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, runID, text string) error {
 	text, cut := CapRunResult(text)
-	_, err := s.DB.ExecContext(ctx, `UPDATE runs SET result_text=?, result_truncated=? WHERE id=?`, text, boolToInt(cut), runID)
+	_, err := ex.ExecContext(ctx, `UPDATE runs SET result_text=?, result_truncated=? WHERE id=?`, text, boolToInt(cut), runID)
 	return err
 }
 
@@ -73,7 +80,7 @@ func (s *Store) MarkAnswerSame(ctx context.Context, runID string) (string, error
 }
 
 // PrevAnswer returns the run the given run's answer is compared with: the task's previous
-// succeeded run that has an answer (its id, answer and finish time). Empty id when there is
+// succeeded run that has one (its id, answer and finish time). Empty id when there is
 // none (first answer, a quick run without a task, or the run does not exist).
 func (s *Store) PrevAnswer(ctx context.Context, runID string) (id, text, at string, err error) {
 	var taskID sql.NullString
