@@ -7883,3 +7883,23 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 **后续想法**：
 - `applyTaskExtras` 的几步仍是各自的事务；以后可以让 `tasksvc` 提供一次写入预算、计划、策略、标签和状态的接口，在一个事务里完成。
 - `app.EnsureTask`、`tasks.create` RPC 仍只建基本字段；`ExportPack` 仍按 map 顺序写技能文件；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做；运行 / 会话仍不记录推理强度。
+
+### 2026-11-26（续 3）：工作流包保留任务的权限级别和推理强度；工作流任务不再被导出成普通提示词任务；技能文件按名字排序写入（业务逻辑矛盾 / 数据丢失）
+
+这是 2026-11-26 23:45 Asia/Shanghai 的优化，接前几轮反复记下的「`ExportPack` 仍按 map 顺序写技能文件」，顺着读导出代码发现更要紧的两处丢失。
+
+- **问题 1（与「先不设限」矛盾）**：`PackTask` 没有 `run_mode`、`effort`。一个「可执行命令」（exec）、推理强度 high 的任务导出成包再导入，变成 `run_mode=""`（按旧的 edit 运行，不能执行命令）、推理强度交给 Claude Code。用户在表单里也看不出是导入把权限降了。任务文件导出（`webui/task_transfer.go`）早就带这两个字段，包导出漏了。
+- **问题 2（静默变成另一个任务）**：工作流任务（`workflow_id` 非空）导出时只写了提示词（即工作流的输入），导入后是一个拿输入当提示词、从不运行工作流的普通任务。Pack/1 没有放工作流定义的地方，现在导出直接报错并指向「导出为任务文件」，不写出半对的包。
+- **问题 3**：技能文件按 map 顺序写入 zip，同样的任务每次导出条目顺序都不同。现在按技能首次出现顺序、文件名排序写入。
+- **兼容**：旧包没有这两个字段，导入后仍是 `""`（不改变旧包的含义，也不替第三方包提权）。包里的权限级别 / 推理强度写错时，在导入任何技能和任务之前就报错（和 cron、时长等一起由 `CheckCreate` 检查）。
+- **测试**：新增 `TestPackKeepsRunModeAndEffort`（exec + high 往返不变，未设置的任务仍为空）、`TestPackExportRefusesWorkflowTask`（报错且不写文件）、`TestPackExportSkillFilesInStableOrder`（20 个文件导出 5 次顺序一致且按名排序）；`TestPackImportRejectsBadTasksBeforeImport` 表格加「未知权限级别」「未知推理强度」两行。三条新测试在旧代码上都失败。`go test ./...`、`go vet ./...`（另对 GOOS=windows/darwin vet `internal/app`）、`gofmt -l` 通过。
+- **不是性能改动，也不是 UI 改动**（包导出目前只在 RPC / `agentctl` 里），没有截图。
+
+**心得**：同一个对象有两种导出格式时，新增字段要两边一起加；最好有一条「导出→导入→逐字段比较」的往返测试，否则漏掉的字段只会在用户发现权限变了时才暴露。格式表达不了的东西（这里是工作流）应当拒绝导出，而不是降级成看似成功的另一种东西。
+
+**参考**：无外部项目参考；对照的是本仓库 `internal/webui/task_transfer.go` 的任务文件格式。
+
+**后续想法**：
+- 包仍不带 `max_budget_usd`、提供方名字、策略和标签（任务文件都带）；可以考虑让包的任务部分直接复用任务文件的条目格式。
+- 包仍带 `created_at`，同样的任务两次导出哈希仍不同；如果要比较导出包是否变化，可以去掉或移出哈希范围。
+- `app.EnsureTask`、`tasks.create` RPC 仍只建基本字段；一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做。

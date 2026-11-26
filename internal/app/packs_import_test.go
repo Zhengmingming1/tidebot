@@ -190,6 +190,8 @@ func TestPackImportChecksAllTasksBeforeImport(t *testing.T) {
 		{"no name", PackTask{Prompt: "Run"}, "name"},
 		{"skill twice", PackTask{Name: "second", Prompt: "Run", Skills: []string{"a", "a"}}, "attached twice"},
 		{"too many skills", PackTask{Name: "second", Prompt: "Run", Skills: many}, "at most 16"},
+		{"unknown run mode", PackTask{Name: "second", Prompt: "Run", RunMode: "root"}, "run mode"},
+		{"unknown effort", PackTask{Name: "second", Prompt: "Run", RunMode: "exec", Effort: "max"}, "effort"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestApp(t)

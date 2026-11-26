@@ -45,6 +45,11 @@ type PackTask struct {
 	TimeoutMinutes int                      `json:"timeout_minutes"`
 	AllowedTools   []string                 `json:"allowed_tools,omitempty"`
 	Skills         []string                 `json:"skills,omitempty"`
+	// RunMode: read | edit | exec; "" = not recorded (a pack made before this
+	// field, or a task saved before the three levels), which runs as edit did.
+	// Effort: "" (Claude Code decides) | low | medium | high.
+	RunMode string `json:"run_mode,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 }
 
 // ExportPack writes the given tasks and their resolved skill versions to a zip.
@@ -57,8 +62,14 @@ func (a *App) ExportPack(ctx context.Context, name string, taskIDs []string, out
 		if err != nil || v.Spec == nil {
 			return "", fmt.Errorf("task %s not found", tid)
 		}
+		// Pack/1 has no place for a workflow: exported as a plain prompt it would
+		// come back as a different task that never runs the workflow.
+		if v.Spec.WorkflowID != "" {
+			return "", fmt.Errorf("task %q runs a workflow, which a pack cannot carry; export it as a task file instead", v.Task.Name)
+		}
 		pt := PackTask{Name: v.Task.Name, Goal: v.Spec.Goal, Prompt: v.Spec.Prompt, Constraints: v.Spec.Constraints,
-			CronExpr: v.Task.CronExpr, OverlapPolicy: v.Task.OverlapPolicy, TimeoutMinutes: v.Spec.TimeoutMinutes, AllowedTools: v.Spec.AllowedTools}
+			CronExpr: v.Task.CronExpr, OverlapPolicy: v.Task.OverlapPolicy, TimeoutMinutes: v.Spec.TimeoutMinutes, AllowedTools: v.Spec.AllowedTools,
+			RunMode: v.Spec.RunMode, Effort: v.Spec.Effort}
 		bindings, err := a.Skills.ResolveBindings(ctx, v.Spec.SkillBindings)
 		if err != nil {
 			return "", fmt.Errorf("task %s: %w", tid, err)
@@ -88,13 +99,21 @@ func (a *App) ExportPack(ctx context.Context, name string, taskIDs []string, out
 	pj, _ := json.MarshalIndent(p, "", "  ")
 	w, _ := zw.Create("pack.json")
 	_, _ = w.Write(pj)
-	for sn, files := range skillFiles {
-		for fn, data := range files {
+	// Skills in first-use order, files by name: the same tasks give the same
+	// entries in the same order (map order would shuffle them on every export).
+	for _, sn := range p.Skills {
+		files := skillFiles[sn]
+		fns := make([]string, 0, len(files))
+		for fn := range files {
+			fns = append(fns, fn)
+		}
+		sort.Strings(fns)
+		for _, fn := range fns {
 			w, err := zw.Create(path.Join("skills", sn, filepath.ToSlash(fn)))
 			if err != nil {
 				return "", err
 			}
-			_, _ = w.Write(data)
+			_, _ = w.Write(files[fn])
 		}
 	}
 	if err := zw.Close(); err != nil {
@@ -249,7 +268,9 @@ func (a *App) importPackBytes(ctx context.Context, raw []byte) (*PackImportResul
 		// task is never active, not even if a later step fails.
 		inputs[i] = tasksvc.CreateInput{Name: task.Name, Goal: task.Goal, Prompt: task.Prompt, CronExpr: task.CronExpr,
 			OverlapPolicy: task.OverlapPolicy, TimeoutMinutes: task.TimeoutMinutes, Actor: "pack",
-			InitialStatus: "paused", PauseKind: tasksvc.PausePack}
+			InitialStatus: "paused", PauseKind: tasksvc.PausePack,
+			// skills are attached after import; checked here: run mode and effort
+			Spec: &tasksvc.Spec{RunMode: task.RunMode, Effort: task.Effort}}
 		if err := a.Tasks.CheckCreate(inputs[i]); err != nil {
 			return nil, fmt.Errorf("task %q: %w", task.Name, err)
 		}
@@ -280,7 +301,7 @@ func (a *App) importPackBytes(ctx context.Context, raw []byte) (*PackImportResul
 	for i, t := range p.Tasks {
 		// its skills, constraints and tools are in version 1 itself: no v1
 		// without them in the history to roll back to
-		spec := tasksvc.Spec{Constraints: t.Constraints, AllowedTools: t.AllowedTools}
+		spec := tasksvc.Spec{Constraints: t.Constraints, AllowedTools: t.AllowedTools, RunMode: t.RunMode, Effort: t.Effort}
 		for _, sn := range t.Skills {
 			spec.SkillBindings = append(spec.SkillBindings, tasksvc.SkillBinding{SkillID: skillIDs[sn], SkillName: sn, Mode: "follow"})
 		}
