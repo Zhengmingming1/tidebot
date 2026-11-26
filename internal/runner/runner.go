@@ -47,7 +47,7 @@ type Options struct {
 	// the Run dialog. Effort ('low' | 'medium' | 'high'; "" = not passed) is written
 	// with the row and added as --effort when set; Claude Code decides otherwise.
 	SkillID, SkillVersionID, RunMode, Effort string
-	// ContextArgs are added after ExtraArgs whether or not the caller set ExtraArgs
+	// ContextArgs are added after ExtraArgs whether or not the caller set them
 	// (e.g. --plugin-dir for skills tidebot staged in its own directory).
 	ContextArgs     []string
 	Profile         provider.Profile
@@ -102,6 +102,9 @@ type Options struct {
 	// sees the run end. It gets a context that isn't canceled with the run; a
 	// non-empty return is written to the run log.
 	AfterExit func(ctx context.Context, runID string) string
+	// OnSuccess runs only for a successful process, inside the terminal run-row
+	// transaction. An error rolls back both the callback's writes and the finish.
+	OnSuccess func(ctx context.Context, tx *sql.Tx, runID string) error
 	// StopGrace > 0 (unix): stopping the run sends Claude Code SIGTERM and waits up
 	// to this long before killing its process group. Command runs need it: on
 	// Linux the sandbox puts empty placeholder files (.bashrc, .gitconfig, .vscode
@@ -158,7 +161,7 @@ type Runner struct {
 	UsageSaveEvery time.Duration
 }
 
-// LogPath returns the log file path for a run ("" if logging disabled).
+// LogPath returns the log file path ("" if logging disabled).
 func (r *Runner) LogPath(runID string) string {
 	if r.LogDir == "" {
 		return ""
@@ -489,8 +492,8 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 		ExitCode:     sql.NullInt64{Int64: int64(res.ExitCode), Valid: true},
 		ErrorMessage: nullStr(res.ErrorMessage),
 		TotalCostUSD: sql.NullFloat64{Float64: res.TotalCostUSD, Valid: res.TotalCostUSD > 0 || status == "succeeded"},
-		InputTokens:  sql.NullInt64{Int64: int64(res.InputTokens), Valid: true},
-		OutputTokens: sql.NullInt64{Int64: int64(res.OutputTokens), Valid: true},
+		InputTokens:  sql.NullInt64{Int64: res.InputTokens, Valid: true},
+		OutputTokens: sql.NullInt64{Int64: res.OutputTokens, Valid: true},
 		DurationMS:   sql.NullInt64{Int64: res.DurationMS, Valid: true},
 		StartedAt:    sql.NullString{String: started.Format(time.RFC3339), Valid: true},
 		FinishedAt:   sql.NullString{String: finished.Format(time.RFC3339), Valid: true},
@@ -500,7 +503,7 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 	if opts.TaskID != "" {
 		finish.TaskID = sql.NullString{String: opts.TaskID, Valid: true}
 	}
-	if dbErr := r.store.UpdateRunFinish(context.Background(), finish); dbErr != nil {
+	if dbErr := r.updateRunFinish(context.Background(), finish, opts); dbErr != nil {
 		r.metrics.persistenceErrors.Add(1)
 		log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
 		err = errors.Join(err, fmt.Errorf("persist run finish: %w", dbErr))
@@ -531,8 +534,7 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 		"run_id", runID,
 		"status", status,
 		"exit_code", res.ExitCode,
-		"duration_ms", res.DurationMS,
-		"cost_usd", res.TotalCostUSD,
+		"error", err,
 		"session_id", res.SessionID,
 	)
 	return res, err
@@ -586,13 +588,11 @@ func (r *Runner) finishUnstarted(runID string, opts Options, logW io.Writer, why
 	return res, err
 }
 
-// ErrSkipped wraps the reason a run was not started when it got its slot
-// (Options.StartCheck, BeforeStart or AtStart said no). The run row ends as skipped, with no start time
-// and no cost.
+// ErrSkipped wraps the reason a run was not started when it got its slot (Options.StartCheck,
+// BeforeStart or AtStart said no). The run row ends as skipped, with no start time and no cost.
 var ErrSkipped = errors.New("skipped")
 
-// finishSkipped records a run that StartCheck / BeforeStart turned away. The stored
-// message is "skipped: <why>" so the WebUI can explain it in the viewer's language.
+// finishSkipped records a run that StartCheck / BeforeStart turned away as skipped.
 func (r *Runner) finishSkipped(runID string, opts Options, logW io.Writer, why error) (Result, error) {
 	why = redactedError{message: provider.MaskSecret(why.Error(), opts.APIKey), cause: why}
 	msg := "skipped: " + why.Error()
@@ -610,7 +610,7 @@ func (r *Runner) finishSkipped(runID string, opts Options, logW io.Writer, why e
 		r.log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
 	}
 	fmt.Fprintf(logW, "[%s] run finished: skipped before it started (%s)\n[[end]]\n", time.Now().Format("15:04:05"), why)
-	r.log.Info("run skipped at start", "run_id", runID, "task_id", opts.TaskID, "why", why.Error())
+	r.log.Info("run skipped at start", "run_id", runID, "task_id", opts.TaskID, "why", why)
 	return res, fmt.Errorf("%w: %w", ErrSkipped, why)
 }
 
@@ -653,7 +653,7 @@ func claudeArgs(opts Options) []string {
 }
 
 // claudeEffort is a --effort value Claude Code accepts. Anything else
-// (including "") is ignored: Claude Code decides, and the run row stays empty.
+// (including "") is ignored: Claude Code decides otherwise.
 func claudeEffort(e string) string {
 	switch e {
 	case "low", "medium", "high":
@@ -766,7 +766,7 @@ func execute(ctx context.Context, opts Options, logW io.Writer, usageEvery time.
 			if s := FormatEvent(ev); s != "" {
 				fmt.Fprintf(logW, "[%s] %s\n", time.Now().Format("15:04:05"), provider.MaskSecret(s, opts.APIKey))
 			}
-			// Events are not kept: a long run streams megabytes of tool output,
+			// Events are not kept: a long run streams megabytes of tool output
 			// and everything needed afterwards is read here as it arrives.
 			mu.Lock()
 			if meter != nil && budgetMsg == "" {
@@ -869,7 +869,7 @@ func endedByContext(ctx context.Context, result Result, logW io.Writer) (Result,
 		return result, ErrShuttingDown
 	}
 	if errors.Is(context.Cause(ctx), ErrStoppedByUser) {
-		fmt.Fprintf(logW, "[%s] stopped by user\n", time.Now().Format("15:04:05"))
+		fmt.Fprintf(logW, "[%s] tidebot is stopping this run\n", time.Now().Format("15:04:05"))
 		result.Status = "canceled"
 		result.ErrorMessage = db.RunStoppedByUserMsg
 		return result, ErrStoppedByUser
@@ -904,7 +904,7 @@ func (e redactedError) Error() string { return e.message }
 func (e redactedError) Unwrap() error { return e.cause }
 
 // withProxyEnv adds tidebot's resolved proxy (Settings → 网络 or the OS proxy)
-// to Claude Code's environment, unless the variables are already set there.
+// to Claude Code's environment, unless the variables are already there.
 func withProxyEnv(env []string) []string {
 	have := map[string]bool{}
 	for _, kv := range env {
@@ -912,7 +912,6 @@ func withProxyEnv(env []string) []string {
 		have[k] = true
 	}
 	for _, kv := range netproxy.Env() {
-		k, _, _ := strings.Cut(kv, "=")
 		if !have[k] {
 			env = append(env, kv)
 		}
@@ -923,28 +922,28 @@ func withProxyEnv(env []string) []string {
 // Local gateway tokens and prompts must never be sent to a configured proxy.
 // Apply last, after inherited and Tidebot-resolved proxy settings have merged.
 func withLoopbackBypass(env []string) []string {
-	out := make([]string, 0, len(env)+2)
+	out := []string{}
 	var hosts []string
 	seen := map[string]bool{}
-	add := func(host string) {
-		host = strings.TrimSpace(host)
-		if host != "" && !seen[host] {
-			hosts = append(hosts, host)
-			seen[host] = true
+	add := func(h string) {
+		if h != "" && !seen[h] {
+			seen[h] = true
+			hosts = append(hosts, h)
 		}
 	}
 	for _, kv := range env {
-		key, value, _ := strings.Cut(kv, "=")
-		if key == "NO_PROXY" || key == "no_proxy" {
-			for _, host := range strings.Split(value, ",") {
-				add(host)
+		k, _, _ := strings.Cut(kv, "=")
+		switch k {
+		case "NO_PROXY", "no_proxy":
+			for _, h := range strings.Split(v, ",") {
+				add(h)
 			}
-		} else {
+		default:
 			out = append(out, kv)
 		}
 	}
-	for _, host := range []string{"127.0.0.1", "localhost", "::1"} {
-		add(host)
+	for _, h := range []string{"127.0.0.1", "localhost", "::1"} {
+		add(h)
 	}
 	value := strings.Join(hosts, ",")
 	return append(out, "NO_PROXY="+value, "no_proxy="+value)
