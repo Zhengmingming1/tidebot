@@ -206,7 +206,7 @@ func Open(cfg config.Config) (*App, error) {
 			return st
 		},
 		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
-		QuietAt:       func() any { return a.QuietAt() },
+		QuietAt:       a.QuietAt,
 		PolicyWaits:   a.PolicyWaits,
 		QuickRunSkill: a.startQuickRunSkill, StartRun: a.startRun, UndoRunChanges: a.undoRunChanges, CheckRunUndo: a.checkRunUndo,
 		Providers: providerAdmin{a}, ChatSessions: a, Capabilities: a,
@@ -598,7 +598,6 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 var errAccountingPending = errors.New("accounting unavailable")
 
 // errBudgetHeld: what is left of a daily budget is held by runs already going.
-// Non-metered runs reserve neither budget scope.
 // Not the task's fault: the run is skipped, no retry, no breaker strike, no pause.
 var errBudgetHeld = errors.New("budget blocked")
 
@@ -610,12 +609,12 @@ func (a *App) budgetBreach(ctx context.Context, taskID, bucket string, chk cost.
 		a.Log.Info("run skipped: budget held by running runs", "task_id", taskID, "detail", chk.Reason)
 		return fmt.Errorf("%w: %s", errBudgetHeld, chk.Reason)
 	}
-	_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, chk.Reason, chk.BreachAction)
+	_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, "cap", chk.Reason, chk.BreachAction)
 	a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: taskID, TaskName: a.taskName(taskID), Detail: chk.Reason})
 	if taskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
 		_ = a.Cost.PauseTask(ctx, taskID, chk.Reason)
 	}
-	return fmt.Errorf("budget blocked: %w", chk.Reason)
+	return fmt.Errorf("budget blocked: %s", chk.Reason)
 }
 
 // holdRunBudget runs right before a run launches: it holds the run's money cap
@@ -637,15 +636,14 @@ func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket strin
 		return nil, fmt.Errorf("budget reservation: %w", err)
 	}
 	if !chk.OK {
-		return nil, a.budgetBreach(ctx, taskID, bucket, chk)
+		return nil, a.budgetBreach(ctx, o.TaskID, bucket, chk)
 	}
 	cc := *o.Cost
-	cc.Calc.Billing.Mode = o.Cost.Calc.Billing.Mode
 	if cc.Calc.Billing.Mode == pricing.ModeMetered {
 		cc.MaxAmount = capAmt
 	}
 	cc.MaxTokens = minPositiveInt(cc.MaxTokens, chk.RunMaxTokens)
-	cc.BudgetSources = sources
+	cc.BudgetSources = chk.LimitSources
 	o.Cost = &cc
 	o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, cc.FX.Convert(cc.MaxAmount, cc.Currency, cc.FX.Display))
 
@@ -657,7 +655,7 @@ func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket strin
 func runCallerCap(o runner.Options) float64 {
 	c := callerCapUSD(o.ExtraArgs)
 	if o.CapUSD > 0 && (c <= 0 || o.CapUSD < c) {
-		return c
+		c = o.CapUSD
 	}
 	return c
 }
@@ -860,9 +858,9 @@ func (a *App) SeedBuiltinProviders(ctx context.Context) error {
 }
 
 // StopRun stops a run on the user's behalf (WebUI Stop, agentctl runs stop): a queued
-// one leaves the line and never starts, a running one is killed. It reports the
+// run leaves the line and never starts, a running one is killed. It reports the
 // status the run had ("queued" or "running"); an error means it isn't active here.
-func (a *App) StopRun(ctx context.Context, runID string) (st string, err error) {
+func (a *App) StopRun(ctx context.Context, runID string) (string, error) {
 	var st string
 	if err := a.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE id=?`, runID).Scan(&st); err != nil {
 		return "", ErrRunNotFound
@@ -876,11 +874,12 @@ func (a *App) StopRun(ctx context.Context, runID string) (st string, err error) 
 // ErrRunNotFound / ErrRunNotActive are StopRun's answers for unknown and finished runs.
 var (
 	ErrRunNotFound  = errors.New("run not found")
-	ErrRunNotActive = errors.New("run is not active here")
+	ErrRunNotActive = errors.New("run is not queued or running")
 )
 
 // startWait is how long a WebUI start waits for the new run's row, so it can answer with
-// the run id once it exists ("" if it is still queued).
+// the run id. The row is written before the run waits for a slot, so queued runs answer
+// with their id too; only a start held up before that (e.g. a busy database) has none.
 const startWait = 3 * time.Second
 
 // launch runs fn in the background and waits until the run row exists (its id is returned),
@@ -909,10 +908,10 @@ func launch(wait time.Duration, fn func(onStart func(string)) error, onErr func(
 	case err := <-done:
 		select {
 		case id := <-started: // ran (and maybe failed) quickly: the run page shows why
-			return id, err
+			return id, nil
 		default:
-			return "", err
 		}
+		return "", err
 	case <-t.C:
 		return "", nil
 	}
@@ -962,7 +961,7 @@ func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string
 	}
 	st, err := a.stageSkills(context.Background(), []tasksvc.SkillBinding{{SkillID: skillID, Mode: mode, VersionID: versionID}})
 	if err != nil {
-		return "", fmt.Errorf("stage skill: %w", err)
+		return "", fmt.Errorf("skill: %w", err)
 	}
 	ws := filepath.Join(st.Dir, "work")
 	if err := os.MkdirAll(ws, 0o700); err != nil {
