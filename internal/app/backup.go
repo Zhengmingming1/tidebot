@@ -14,8 +14,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"

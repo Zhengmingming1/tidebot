@@ -17,10 +17,10 @@ import (
 )
 
 type restoreFile struct {
-	target      string
-	staged      string
-	saved       string
-	movedOld    bool
+	target       string
+	staged       string
+	saved        string
+	movedOld     bool
 	installedNew bool
 }
 
@@ -69,6 +69,19 @@ func (j *restoreFileJournal) add(target string) (*restoreFile, error) {
 	j.entries = append(j.entries, e)
 	j.byPath[target] = e
 	return e, nil
+}
+
+// ensure reserves a destination that must be absent after replacement.
+func (j *restoreFileJournal) ensure(target string) error {
+	key := filepath.Clean(target)
+	if j.byPath[key] != nil {
+		return nil
+	}
+	e, err := j.add(key)
+	if err == nil {
+		e.staged = ""
+	}
+	return err
 }
 
 // replace moves every old file aside before installing its staged replacement.
@@ -225,21 +238,15 @@ func restoreBackup(file, home, passphrase string) (_ *BackupManifest, retErr err
 		default:
 			continue
 		}
+		if j.byPath[filepath.Clean(dst)] != nil {
+			return nil, fmt.Errorf("duplicate restore destination %s", dst)
+		}
 		e, err := j.add(dst)
 		if err != nil {
 			return nil, err
 		}
-		if e.staged == "" {
-			return nil, fmt.Errorf("duplicate restore destination %s", dst)
-		}
-		staged := e.staged
-		if err := extract(f, staged); err != nil {
+		if err := extract(f, e.staged); err != nil {
 			return nil, err
-		}
-		// add reserves a path; installation uses it and clears it only when the
-		// same archive entry maps to an already-reserved database/WAL path.
-		if staged != e.staged {
-			return nil, fmt.Errorf("invalid restore staging for %s", dst)
 		}
 	}
 	secretNames := make([]string, 0, len(blob))
@@ -250,7 +257,11 @@ func restoreBackup(file, home, passphrase string) (_ *BackupManifest, retErr err
 	}
 	sort.Strings(secretNames)
 	for _, n := range secretNames {
-		e, err := j.add(filepath.Join(home, n))
+		dst := filepath.Join(home, n)
+		if j.byPath[filepath.Clean(dst)] != nil {
+			return nil, fmt.Errorf("duplicate restore destination %s", dst)
+		}
+		e, err := j.add(dst)
 		if err != nil {
 			return nil, err
 		}
@@ -261,28 +272,7 @@ func restoreBackup(file, home, passphrase string) (_ *BackupManifest, retErr err
 	// These files are never taken from the backup: opening the restored DB may
 	// create fresh WAL/SHM files, and a successful restore keeps only the old DB.
 	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm", dbPath + ".pre-restore"} {
-		e, err := j.add(path)
-		if err != nil {
-			return nil, err
-		}
-		if path != dbPath || e.staged != "" && j.byPath[filepath.Clean(dbPath)] != e {
-			return nil, fmt.Errorf("invalid restore journal for %s", path)
-		}
-		if path != dbPath || files["data/tidebot.db"] == nil {
-			if path != dbPath || e.staged != "" {
-				// Reserved but absent entries perform deletions during replacement.
-			}
-		}
-	}
-	// Clear reservations for files that have no staged archive content. Entries
-	// created from archive files keep their paths; newly ensured entries do not.
-	for path, e := range j.byPath {
-		if e.staged == "" {
-			return nil, fmt.Errorf("empty staging path for %s", path)
-		}
-		if _, err := os.Lstat(e.staged); errors.Is(err, os.ErrNotExist) {
-			e.staged = ""
-		} else if err != nil {
+		if err := j.ensure(path); err != nil {
 			return nil, err
 		}
 	}
