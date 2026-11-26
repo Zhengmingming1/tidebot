@@ -260,7 +260,18 @@ func (s *Server) validateTaskForm(ctx context.Context, f *taskForm, taskID strin
 	return nil
 }
 
+// applyTaskExtras writes what the form sets besides the spec: budget, schedule, run
+// policy, tags and status. Turning a task off comes first and turning it on comes
+// last, so the scheduler never sees an active task on half-saved settings: a new
+// schedule cannot fire before the pause that goes with it, and when a later write
+// fails a task the form switches on stays off instead of running without its caps,
+// retry policy or tags.
 func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm) error {
+	if !f.Enabled {
+		if err := s.deps.Tasks.SetStatus(ctx, taskID, "paused", "webui"); err != nil {
+			return err
+		}
+	}
 	if s.deps.Cost != nil {
 		in := tasksvc.CostPolicyUpdate{DailyAmount: &f.BudgetUSD, SetDailyAmount: true, Actor: "webui"}
 		if p := f.CostControl; p != nil {
@@ -272,13 +283,6 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 	}
 
 	if err := s.deps.Tasks.SetSchedule(ctx, taskID, f.Cron); err != nil {
-		return err
-	}
-	st := "paused"
-	if f.Enabled {
-		st = "active"
-	}
-	if err := s.deps.Tasks.SetStatus(ctx, taskID, st, "webui"); err != nil {
 		return err
 	}
 	if f.Policy != nil && s.deps.DB != nil {
@@ -303,7 +307,9 @@ func (s *Server) applyTaskExtras(ctx context.Context, taskID string, f taskForm)
 			return err
 		}
 	}
-
+	if f.Enabled {
+		return s.deps.Tasks.SetStatus(ctx, taskID, "active", "webui")
+	}
 	return nil
 }
 
@@ -385,7 +391,10 @@ func (s *Server) createTaskLocked(w http.ResponseWriter, r *http.Request) {
 		ws = *f.Workspace
 	}
 	in := tasksvc.CreateInput{Name: f.Name, Prompt: f.Prompt, ProviderName: f.Provider, WorkspaceDir: ws,
-		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user"}
+		TimeoutMinutes: formTimeout(f.TimeoutMinutes), OverlapPolicy: "skip", Actor: "user",
+		// created off, as the user would have paused it; applyTaskExtras switches it on
+		// last if the form asks, after the budget, schedule, policy and tags are in
+		InitialStatus: "paused", PauseKind: tasksvc.PauseUser}
 	if f.Workflow != nil {
 		in.WorkflowID, in.WorkflowVersion = f.Workflow.ID, f.Workflow.Version
 	}
