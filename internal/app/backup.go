@@ -19,9 +19,7 @@ import (
 	"time"
 
 	"github.com/Zhengmingming1/tidebot/internal/buildinfo"
-	"github.com/Zhengmingming1/tidebot/internal/db"
 	"github.com/Zhengmingming1/tidebot/internal/id"
-	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
 
 // BackupFormat identifies .agentbak archives (zip).
@@ -55,6 +53,7 @@ func (a *App) backupDir() string { return filepath.Join(a.Cfg.HomeDir, "backups"
 
 // CreateBackup writes an .agentbak with a consistent DB snapshot (VACUUM INTO).
 func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error) {
+	backupID := id.New("bak")
 	if o.Kind == "" {
 		o.Kind = "manual"
 	}
@@ -62,7 +61,7 @@ func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error)
 		if err := os.MkdirAll(a.backupDir(), 0o700); err != nil {
 			return "", err
 		}
-		o.Out = filepath.Join(a.backupDir(), fmt.Sprintf("tidebot-%s-%s.agentbak", o.Kind, time.Now().Format("20060102-150405")))
+		o.Out = filepath.Join(a.backupDir(), fmt.Sprintf("tidebot-%s-%s-%s.agentbak", o.Kind, time.Now().Format("20060102-150405"), backupID))
 	}
 	tmp, err := os.MkdirTemp("", "tidebot-backup-")
 	if err != nil {
@@ -73,7 +72,7 @@ func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error)
 	if _, err := a.DB.ExecContext(ctx, `VACUUM INTO ?`, snap); err != nil {
 		return "", fmt.Errorf("snapshot: %w", err)
 	}
-	f, err := os.OpenFile(o.Out+".part", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(o.Out+".part", os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		return "", err
 	}
@@ -185,8 +184,14 @@ func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error)
 	if err != nil {
 		return "", err
 	}
-	_, _ = a.DB.ExecContext(ctx, `INSERT INTO backups(id, path, size_bytes, kind, created_at) VALUES(?,?,?,?,?)`,
-		id.New("bak"), o.Out, fi.Size(), o.Kind, time.Now().UTC().Format(time.RFC3339))
+	if _, err := a.DB.ExecContext(ctx, `INSERT INTO backups(id, path, size_bytes, kind, created_at) VALUES(?,?,?,?,?)`,
+		backupID, o.Out, fi.Size(), o.Kind, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		removeErr := os.Remove(o.Out)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return "", errors.Join(fmt.Errorf("record backup: %w", err), removeErr)
+	}
 	if o.Kind == "auto" {
 		a.pruneAutoBackups(ctx)
 	}
@@ -258,124 +263,7 @@ func (a *App) runAutoBackup(ctx context.Context) {
 // (agentd restore). Paths under the old home dir are rewritten to the new one; an
 // existing database is kept as tidebot.db.pre-restore.
 func RestoreBackup(file, home, passphrase string) (*BackupManifest, error) {
-	zr, err := zip.OpenReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer zr.Close()
-	var m BackupManifest
-	files := map[string]*zip.File{}
-	for _, f := range zr.File {
-		clean := filepath.ToSlash(filepath.Clean(f.Name))
-		if strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") || f.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("unsafe path %s", f.Name)
-		}
-		files[clean] = f
-	}
-	mf := files["manifest.json"]
-	if mf == nil {
-		return nil, errors.New("not a tidebot backup")
-	}
-	if err := readJSON(mf, &m); err != nil || m.Format != BackupFormat {
-		return nil, errors.New("not a tidebot backup")
-	}
-	if m.IncludesSecrets && passphrase == "" {
-		return nil, errors.New("this backup contains secrets; a passphrase is required")
-	}
-	// Authenticate and decode secrets before touching the existing installation.
-	// In particular, a wrong passphrase must not move the database aside first.
-	blob := map[string][]byte{}
-	if sf := files["secrets.sealed"]; sf != nil {
-		rc, err := sf.Open()
-		if err != nil {
-			return nil, err
-		}
-		enc, readErr := io.ReadAll(rc)
-		closeErr := rc.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		plain, err := openWithPassphrase(enc, passphrase)
-		if err != nil {
-			return nil, errors.New("wrong passphrase")
-		}
-		if err := json.Unmarshal(plain, &blob); err != nil {
-			return nil, fmt.Errorf("invalid secrets in backup: %w", err)
-		}
-	}
-	dataDir := filepath.Join(home, "data")
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return nil, err
-	}
-	dbPath := filepath.Join(dataDir, "tidebot.db")
-	if _, err := os.Stat(dbPath); err == nil {
-		if err := os.Rename(dbPath, dbPath+".pre-restore"); err != nil {
-			return nil, err
-		}
-		for _, s := range []string{"-wal", "-shm"} {
-			_ = os.Remove(dbPath + s)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	names := make([]string, 0, len(files))
-	for n := range files {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		f := files[n]
-		var dst string
-		switch {
-		case strings.HasPrefix(n, "data/"):
-			dst = filepath.Join(dataDir, filepath.FromSlash(strings.TrimPrefix(n, "data/")))
-		case strings.HasPrefix(n, "config/"):
-			dst = filepath.Join(home, filepath.Base(n))
-		default:
-			continue
-		}
-		if err := extract(f, dst); err != nil {
-			return nil, err
-		}
-	}
-	for n, b := range blob {
-		if n == "secrets.enc" || n == "secrets.key" {
-			if err := os.WriteFile(filepath.Join(home, n), b, 0o600); err != nil {
-				return nil, err
-			}
-		}
-	}
-	var moves []homeMove
-	if m.HomeDir != "" && m.HomeDir != home {
-		moves = append(moves, homeMove{m.HomeDir, home})
-	}
-	if m.DataDir != "" && m.DataDir != dataDir {
-		moves = append(moves, homeMove{m.DataDir, dataDir})
-	}
-	if _, err := os.Stat(dbPath); err == nil {
-		sqlDB, err := db.Open(dbPath)
-		if err != nil {
-			return nil, err
-		}
-		defer sqlDB.Close()
-		if len(moves) > 0 {
-			if err := remapRestoredPaths(context.Background(), sqlDB, moves); err != nil {
-				return nil, err
-			}
-		}
-		// User-selected folders live outside the install and are not rewritten
-		// (version content is immutable). Mark a one-time notice so the UI can
-		// list tasks and workflows whose folders are missing on this computer.
-		if err := webui.MarkMissingWorkspaceNotice(context.Background(), sqlDB); err != nil {
-			return nil, err
-		}
-	} else if len(moves) > 0 {
-		return nil, fmt.Errorf("restore database: %w", err)
-	}
-	return &m, nil
+	return restoreBackup(file, home, passphrase)
 }
 
 func readJSON(f *zip.File, v any) error {
