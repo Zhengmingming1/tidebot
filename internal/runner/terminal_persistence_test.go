@@ -32,7 +32,7 @@ func TestTerminalPersistenceRollsBackEveryRelatedWrite(t *testing.T) {
 				t.Fatalf("terminal persistence failure was hidden: %+v %v", result, err)
 			}
 			var status, text string
-			var cost sql.NullFloat64
+			var cost float64 // NOT NULL DEFAULT 0: a rolled-back terminal write leaves 0
 			if err := sqlDB.QueryRow(`SELECT status, result_text, cost_amount FROM runs WHERE id=?`, result.RunID).Scan(&status, &text, &cost); err != nil {
 				t.Fatal(err)
 			}
@@ -40,8 +40,8 @@ func TestTerminalPersistenceRollsBackEveryRelatedWrite(t *testing.T) {
 			if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM finish_probe`).Scan(&callbacks); err != nil {
 				t.Fatal(err)
 			}
-			if status != "running" || text != "" || cost.Valid || callbacks != 0 {
-				t.Fatalf("partial terminal commit: status=%s result=%q cost=%+v callbacks=%d", status, text, cost, callbacks)
+			if status != "running" || text != "" || cost != 0 || callbacks != 0 {
+				t.Fatalf("partial terminal commit: status=%s result=%q cost=%v callbacks=%d", status, text, cost, callbacks)
 			}
 		})
 	}
