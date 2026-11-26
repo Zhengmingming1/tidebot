@@ -22,6 +22,7 @@ type restoreFile struct {
 	saved        string
 	movedOld     bool
 	installedNew bool
+	replaced     bool
 }
 
 type restoreFileJournal struct {
@@ -105,6 +106,7 @@ func (j *restoreFileJournal) replace() error {
 		default:
 			return err
 		}
+		e.replaced = true
 		if e.staged != "" {
 			if err := os.Rename(e.staged, e.target); err != nil {
 				return err
@@ -119,7 +121,7 @@ func (j *restoreFileJournal) rollback() error {
 	var errs []error
 	for i := len(j.entries) - 1; i >= 0; i-- {
 		e := j.entries[i]
-		if e.installedNew {
+		if e.replaced {
 			if err := os.Remove(e.target); err != nil && !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, fmt.Errorf("remove new %s: %w", e.target, err))
 			}
