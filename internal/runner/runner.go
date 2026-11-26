@@ -503,28 +503,19 @@ func (r *Runner) RunOnce(ctx context.Context, opts Options) (outcome Result, run
 	if opts.TaskID != "" {
 		finish.TaskID = sql.NullString{String: opts.TaskID, Valid: true}
 	}
-	if dbErr := r.updateRunFinish(context.Background(), finish, opts); dbErr != nil {
+	resultText := ""
+	if txt := strings.TrimSpace(res.ResultText); txt != "" && res.ResultText != res.ErrorMessage {
+		resultText = provider.MaskSecret(txt, opts.APIKey)
+	}
+	var finalCost *pricing.Cost
+	if opts.Cost != nil {
+		finalCost = &res.Cost
+	}
+	if dbErr := r.updateRunFinish(context.Background(), finish, opts, resultText, finalCost); dbErr != nil {
 		r.metrics.persistenceErrors.Add(1)
 		log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
 		err = errors.Join(err, fmt.Errorf("persist run finish: %w", dbErr))
 	}
-	// The final answer, in full (the log line keeps 400 chars). An error result is already the
-	// run's error message, so it is not stored twice.
-	if txt := strings.TrimSpace(res.ResultText); txt != "" && res.ResultText != res.ErrorMessage {
-		if dbErr := r.store.SetRunResult(context.Background(), runID, provider.MaskSecret(txt, opts.APIKey)); dbErr != nil {
-			r.metrics.persistenceErrors.Add(1)
-			log.Error("persist run result failed", "error", dbErr, "run_id", runID)
-			err = errors.Join(err, fmt.Errorf("persist run result: %w", dbErr))
-		}
-	}
-	if opts.Cost != nil {
-		if dbErr := r.store.UpdateRunCost(context.Background(), runID, res.Cost); dbErr != nil {
-			r.metrics.persistenceErrors.Add(1)
-			log.Error("persist run cost failed", "error", dbErr, "run_id", runID)
-			err = errors.Join(err, fmt.Errorf("persist run cost: %w", dbErr))
-		}
-	}
-
 	if opts.Cost != nil {
 		fmt.Fprintf(logW, "[%s] run finished: %s (cost %.4f %s [%s], %d ms)\n[[end]]\n", time.Now().Format("15:04:05"), status, res.Cost.Amount, res.Cost.Currency, res.Cost.Source, res.DurationMS)
 	} else {
@@ -583,7 +574,9 @@ func (r *Runner) finishUnstarted(runID string, opts Options, logW io.Writer, why
 		Model:        sql.NullString{String: opts.Profile.Model, Valid: opts.Profile.Model != ""},
 	}
 	if dbErr := r.store.UpdateRunFinish(context.Background(), fin); dbErr != nil {
+		r.metrics.persistenceErrors.Add(1)
 		r.log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
+		err = errors.Join(err, fmt.Errorf("persist run finish: %w", dbErr))
 	}
 	fmt.Fprintf(logW, "[%s] run finished: canceled before it started (%s)\n[[end]]\n", time.Now().Format("15:04:05"), res.ErrorMessage)
 	return res, err
@@ -609,12 +602,15 @@ func (r *Runner) finishSkipped(runID string, opts Options, logW io.Writer, why e
 	if opts.TaskID != "" {
 		fin.TaskID = sql.NullString{String: opts.TaskID, Valid: true}
 	}
+	err := error(fmt.Errorf("%w: %w", ErrSkipped, why))
 	if dbErr := r.store.UpdateRunFinish(context.Background(), fin); dbErr != nil {
+		r.metrics.persistenceErrors.Add(1)
 		r.log.Error("persist run finish failed", "error", dbErr, "run_id", runID)
+		err = errors.Join(err, fmt.Errorf("persist run finish: %w", dbErr))
 	}
 	fmt.Fprintf(logW, "[%s] run finished: skipped before it started (%s)\n[[end]]\n", time.Now().Format("15:04:05"), why)
 	r.log.Info("run skipped at start", "run_id", runID, "task_id", opts.TaskID, "why", why.Error())
-	return res, fmt.Errorf("%w: %w", ErrSkipped, why)
+	return res, err
 }
 
 func displayBase(u string) string {
