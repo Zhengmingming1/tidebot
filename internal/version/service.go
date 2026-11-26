@@ -93,6 +93,25 @@ type CommitResult struct {
 // the pointer move and in.Then are one transaction: a failed commit leaves none
 // of them behind.
 func (s *Service) Commit(ctx context.Context, in CommitInput) (CommitResult, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	defer tx.Rollback()
+	res, err := s.CommitTx(ctx, tx, in)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CommitResult{}, err
+	}
+	return res, nil
+}
+
+// CommitTx performs Commit's work inside a caller-owned transaction. The caller
+// must commit or roll back tx; CommitTx never does. This lets related rows and
+// their immutable version change land together atomically.
+func (s *Service) CommitTx(ctx context.Context, tx *sql.Tx, in CommitInput) (CommitResult, error) {
 	if in.Actor == "" {
 		in.Actor = "user"
 	}
@@ -103,13 +122,8 @@ func (s *Service) Commit(ctx context.Context, in CommitInput) (CommitResult, err
 	if err != nil {
 		return CommitResult{}, err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return CommitResult{}, err
-	}
-	defer tx.Rollback()
 	// Take the write lock before reading: the version number and the current
-	// pointer read below stay valid until the commit.
+	// pointer read below stay valid until the caller commits.
 	if err := lockWrites(ctx, tx); err != nil {
 		return CommitResult{}, err
 	}
@@ -121,9 +135,6 @@ func (s *Service) Commit(ctx context.Context, in CommitInput) (CommitResult, err
 		if err := in.Then(ctx, tx, res); err != nil {
 			return CommitResult{}, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return CommitResult{}, err
 	}
 	return res, nil
 }
@@ -445,7 +456,7 @@ func scanVersion(row scannable) (*Version, error) {
 	var v Version
 	var archived int
 	if err := row.Scan(&v.ID, &v.UserID, &v.EntityType, &v.EntityID, &v.VersionNo, &v.ContentHash, &v.ParentVersionID,
-		&v.ContentJSON, &v.Source, &v.SourceRef, &v.Message, &archived, &v.CreatedAt); err != nil {
+		&v.ContentJSON, &v.Source, &v.SourceRef, &v.Message, &v.Archived, &v.CreatedAt); err != nil {
 		return nil, err
 	}
 	v.Archived = archived != 0

@@ -77,34 +77,44 @@ func (s *Service) Propose(ctx context.Context, taskID, utterance, actor string) 
 	if err != nil {
 		return nil, err
 	}
-	msgID := id.New("msg")
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO amendment_messages(id, task_id, utterance, created_at) VALUES(?,?,?,?)`,
-		msgID, taskID, utterance, nowUTC()); err != nil {
-		return nil, err
-	}
-	var out []Item
 	for _, p := range prop.Items {
 		if err := validateProposed(p); err != nil {
 			return nil, err
 		}
+	}
+	msgID := id.New("msg")
+	out := make([]Item, 0, len(prop.Items))
+	for _, p := range prop.Items {
 		status := "pending"
 		if len(p.ConflictWith) > 0 {
 			status = "needs_decision"
 		}
-		it := Item{
+		out = append(out, Item{
 			ID: id.New("req"), TaskID: taskID, Op: p.Op, Scope: p.Scope,
 			TargetSpecItem: p.TargetSpecItem, Content: p.Content, Status: status,
 			ConflictWith: p.ConflictWith, CreatedAt: nowUTC(), MessageID: msgID, Utterance: utterance,
-		}
-		cw, _ := json.Marshal(p.ConflictWith)
-		_, err := s.DB.ExecContext(ctx, `
+		})
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO amendment_messages(id, task_id, utterance, created_at) VALUES(?,?,?,?)`,
+		msgID, taskID, utterance, nowUTC()); err != nil {
+		return nil, err
+	}
+	for i, it := range out {
+		cw, _ := json.Marshal(prop.Items[i].ConflictWith)
+		if _, err := tx.ExecContext(ctx, `
 INSERT INTO requirement_items(id, task_id, message_id, op, scope, target_spec_item, content, status, conflict_with, created_at)
 VALUES(?,?,?,?,?,?,?,?,?,?)`,
-			it.ID, it.TaskID, msgID, it.Op, it.Scope, nullEmpty(it.TargetSpecItem), it.Content, it.Status, string(cw), it.CreatedAt)
-		if err != nil {
+			it.ID, it.TaskID, msgID, it.Op, it.Scope, nullEmpty(it.TargetSpecItem), it.Content, it.Status, string(cw), it.CreatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, it)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	_ = actor
 	if s.OnProposed != nil && len(out) > 0 {
@@ -300,14 +310,19 @@ func (s *Service) ConfirmItems(ctx context.Context, itemIDs []string, actor stri
 		}
 	}
 	var out BatchResult
+	var spec tasksvc.Spec
+	var expectedVersion string
 	if len(perm) > 0 {
 		view, err := s.Tasks.Get(ctx, items[0].TaskID)
 		if err != nil {
 			return BatchResult{}, err
 		}
-		spec := tasksvc.Spec{Prompt: view.Task.Prompt, Goal: view.Task.Prompt}
+		spec = tasksvc.Spec{Prompt: view.Task.Prompt, Goal: view.Task.Prompt}
 		if view.Spec != nil {
 			spec = *view.Spec
+		}
+		if view.CurrentVersion != nil {
+			expectedVersion = view.CurrentVersion.ID
 		}
 		ids := make([]string, 0, len(perm))
 		for _, i := range perm {
@@ -318,11 +333,7 @@ func (s *Service) ConfirmItems(ctx context.Context, itemIDs []string, actor stri
 			ids = append(ids, items[i].ID)
 		}
 		msg := "confirm amendment " + strings.Join(ids, ",")
-		tv, err := s.Tasks.UpdateSpec(ctx, items[0].TaskID, spec, actor, msg)
-		if err != nil {
-			return BatchResult{}, err
-		}
-		out.VersionID = tv.CurrentVersion.ID
+		_ = msg
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -331,16 +342,67 @@ func (s *Service) ConfirmItems(ctx context.Context, itemIDs []string, actor stri
 	defer tx.Rollback()
 	now := nowUTC()
 	exp := time.Now().UTC().Add(7 * 24 * time.Hour).Format(time.RFC3339)
+	// Claim every item while it is still pending. A concurrent confirmer gets
+	// zero affected rows instead of applying the same amendment a second time.
 	for i := range items {
+		var res sql.Result
 		if items[i].Scope == "next_run" {
-			_, err = tx.ExecContext(ctx, `UPDATE requirement_items SET status='scheduled', decided_at=?, expires_at=? WHERE id=?`, now, exp, items[i].ID)
+			res, err = tx.ExecContext(ctx, `UPDATE requirement_items SET status='scheduled', decided_at=?, expires_at=? WHERE id=? AND status='pending'`, now, exp, items[i].ID)
 			items[i].Status = "scheduled"
 		} else {
-			_, err = tx.ExecContext(ctx, `UPDATE requirement_items SET status='applied', decided_at=?, applied_version_id=? WHERE id=?`, now, out.VersionID, items[i].ID)
+			res, err = tx.ExecContext(ctx, `UPDATE requirement_items SET status='applied', decided_at=?, applied_version_id=NULL WHERE id=? AND status='pending'`, now, items[i].ID)
 			items[i].Status = "applied"
 		}
 		if err != nil {
 			return out, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return out, err
+		}
+		if n != 1 {
+			return out, fmt.Errorf("item %s status changed; cannot confirm", items[i].ID)
+		}
+	}
+	if len(perm) > 0 {
+		// The spec was built from this version. Once the write lock is held,
+		// verify that another edit has not moved current underneath us.
+		var current sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT version_id FROM pointers WHERE entity_type=? AND entity_id=? AND name=?`,
+			version.EntityTask, items[0].TaskID, version.PointerCurrent).Scan(&current)
+		if err != nil && err != sql.ErrNoRows {
+			return out, err
+		}
+		if current.String != expectedVersion {
+			return out, tasksvc.ErrConflict
+		}
+		ids := make([]string, 0, len(perm))
+		for _, i := range perm {
+			ids = append(ids, items[i].ID)
+		}
+		msg := "confirm amendment " + strings.Join(ids, ",")
+		res, err := s.Ver.CommitTx(ctx, tx, version.CommitInput{
+			EntityType: version.EntityTask, EntityID: items[0].TaskID,
+			Content: spec, Source: "user_edit", Actor: actor, Reason: msg,
+			Then: func(ctx context.Context, tx *sql.Tx, _ version.CommitResult) error {
+				workspace := spec.WorkspaceDir
+				if spec.WorkflowID != "" {
+					workspace = ""
+				}
+				_, err := tx.ExecContext(ctx, `
+UPDATE tasks SET prompt=?, workspace_dir=?, timeout_minutes=?, updated_at=? WHERE id=?`,
+					spec.Prompt, workspace, spec.TimeoutMinutes, now, items[0].TaskID)
+				return err
+			},
+		})
+		if err != nil {
+			return out, err
+		}
+		out.VersionID = res.Version.ID
+		for _, i := range perm {
+			if _, err := tx.ExecContext(ctx, `UPDATE requirement_items SET applied_version_id=? WHERE id=?`, out.VersionID, items[i].ID); err != nil {
+				return out, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {

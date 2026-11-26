@@ -59,7 +59,9 @@ func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error)
 		o.Kind = "manual"
 	}
 	if o.Out == "" {
-		_ = os.MkdirAll(a.backupDir(), 0o700)
+		if err := os.MkdirAll(a.backupDir(), 0o700); err != nil {
+			return "", err
+		}
 		o.Out = filepath.Join(a.backupDir(), fmt.Sprintf("tidebot-%s-%s.agentbak", o.Kind, time.Now().Format("20060102-150405")))
 	}
 	tmp, err := os.MkdirTemp("", "tidebot-backup-")
@@ -106,38 +108,70 @@ func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error)
 			if err := addFile("config/"+n, p); err != nil {
 				return fail(err)
 			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fail(err)
 		}
 	}
 	if o.IncludeArtifacts {
 		for _, sub := range []string{"runs", "artifacts"} {
 			root := filepath.Join(a.Cfg.DataDir, sub)
-			_ = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
-				if err != nil || !fi.Mode().IsRegular() {
+			err := filepath.Walk(root, func(p string, fi os.FileInfo, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if !fi.Mode().IsRegular() {
 					return nil
 				}
-				rel, _ := filepath.Rel(a.Cfg.DataDir, p)
+				rel, err := filepath.Rel(a.Cfg.DataDir, p)
+				if err != nil {
+					return err
+				}
 				return addFile("data/"+filepath.ToSlash(rel), p)
 			})
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fail(fmt.Errorf("backup %s: %w", sub, err))
+			}
 		}
 	}
 	if o.Passphrase != "" {
 		blob := map[string][]byte{}
 		for _, n := range []string{"secrets.enc", "secrets.key"} {
-			if b, err := os.ReadFile(filepath.Join(a.Cfg.HomeDir, n)); err == nil {
-				blob[n] = b
+			b, err := os.ReadFile(filepath.Join(a.Cfg.HomeDir, n))
+			if errors.Is(err, os.ErrNotExist) {
+				continue
 			}
+			if err != nil {
+				return fail(fmt.Errorf("read %s: %w", n, err))
+			}
+			blob[n] = b
 		}
-		plain, _ := json.Marshal(blob)
+		plain, err := json.Marshal(blob)
+		if err != nil {
+			return fail(err)
+		}
 		enc, err := sealWithPassphrase(plain, o.Passphrase)
 		if err != nil {
 			return fail(err)
 		}
-		w, _ := zw.Create("secrets.sealed")
-		_, _ = w.Write(enc)
+		w, err := zw.Create("secrets.sealed")
+		if err != nil {
+			return fail(err)
+		}
+		if _, err := w.Write(enc); err != nil {
+			return fail(err)
+		}
 	}
-	mj, _ := json.MarshalIndent(m, "", "  ")
-	w, _ := zw.Create("manifest.json")
-	_, _ = w.Write(mj)
+	mj, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fail(err)
+	}
+	w, err := zw.Create("manifest.json")
+	if err != nil {
+		return fail(err)
+	}
+	if _, err := w.Write(mj); err != nil {
+		return fail(err)
+	}
 	if err := zw.Close(); err != nil {
 		return fail(err)
 	}
@@ -147,7 +181,10 @@ func (a *App) CreateBackup(ctx context.Context, o BackupOptions) (string, error)
 	if err := os.Rename(o.Out+".part", o.Out); err != nil {
 		return "", err
 	}
-	fi, _ := os.Stat(o.Out)
+	fi, err := os.Stat(o.Out)
+	if err != nil {
+		return "", err
+	}
 	_, _ = a.DB.ExecContext(ctx, `INSERT INTO backups(id, path, size_bytes, kind, created_at) VALUES(?,?,?,?,?)`,
 		id.New("bak"), o.Out, fi.Size(), o.Kind, time.Now().UTC().Format(time.RFC3339))
 	if o.Kind == "auto" {
@@ -245,16 +282,44 @@ func RestoreBackup(file, home, passphrase string) (*BackupManifest, error) {
 	if m.IncludesSecrets && passphrase == "" {
 		return nil, errors.New("this backup contains secrets; a passphrase is required")
 	}
+	// Authenticate and decode secrets before touching the existing installation.
+	// In particular, a wrong passphrase must not move the database aside first.
+	blob := map[string][]byte{}
+	if sf := files["secrets.sealed"]; sf != nil {
+		rc, err := sf.Open()
+		if err != nil {
+			return nil, err
+		}
+		enc, readErr := io.ReadAll(rc)
+		closeErr := rc.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		plain, err := openWithPassphrase(enc, passphrase)
+		if err != nil {
+			return nil, errors.New("wrong passphrase")
+		}
+		if err := json.Unmarshal(plain, &blob); err != nil {
+			return nil, fmt.Errorf("invalid secrets in backup: %w", err)
+		}
+	}
 	dataDir := filepath.Join(home, "data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
 	dbPath := filepath.Join(dataDir, "tidebot.db")
 	if _, err := os.Stat(dbPath); err == nil {
-		_ = os.Rename(dbPath, dbPath+".pre-restore")
+		if err := os.Rename(dbPath, dbPath+".pre-restore"); err != nil {
+			return nil, err
+		}
 		for _, s := range []string{"-wal", "-shm"} {
 			_ = os.Remove(dbPath + s)
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 	names := make([]string, 0, len(files))
 	for n := range files {
@@ -276,21 +341,10 @@ func RestoreBackup(file, home, passphrase string) (*BackupManifest, error) {
 			return nil, err
 		}
 	}
-	if sf := files["secrets.sealed"]; sf != nil {
-		rc, _ := sf.Open()
-		enc, _ := io.ReadAll(rc)
-		rc.Close()
-		plain, err := openWithPassphrase(enc, passphrase)
-		if err != nil {
-			return nil, errors.New("wrong passphrase")
-		}
-		blob := map[string][]byte{}
-		_ = json.Unmarshal(plain, &blob)
-		for n, b := range blob {
-			if n == "secrets.enc" || n == "secrets.key" {
-				if err := os.WriteFile(filepath.Join(home, n), b, 0o600); err != nil {
-					return nil, err
-				}
+	for n, b := range blob {
+		if n == "secrets.enc" || n == "secrets.key" {
+			if err := os.WriteFile(filepath.Join(home, n), b, 0o600); err != nil {
+				return nil, err
 			}
 		}
 	}
