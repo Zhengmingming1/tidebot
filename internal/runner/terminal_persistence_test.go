@@ -14,6 +14,7 @@ func TestTerminalPersistenceRollsBackEveryRelatedWrite(t *testing.T) {
 	for _, column := range []string{"result_text", "cost_amount"} {
 		t.Run(column, func(t *testing.T) {
 			r, sqlDB, _ := drainRunner(t, 1)
+			r.UsageSaveEvery = -1
 			if _, err := sqlDB.Exec(`CREATE TABLE finish_probe(run_id TEXT PRIMARY KEY)`); err != nil {
 				t.Fatal(err)
 			}
