@@ -206,7 +206,7 @@ func Open(cfg config.Config) (*App, error) {
 			return st
 		},
 		SchedPause:    func(ctx context.Context) any { return a.SchedPauseBrief(ctx) },
-		QuietAt:       a.QuietAt,
+		QuietAt:       func() any { return a.QuietAt() },
 		PolicyWaits:   a.PolicyWaits,
 		QuickRunSkill: a.startQuickRunSkill, StartRun: a.startRun, UndoRunChanges: a.undoRunChanges, CheckRunUndo: a.checkRunUndo,
 		Providers: providerAdmin{a}, ChatSessions: a, Capabilities: a,
@@ -598,6 +598,7 @@ func (a *App) admitRun(ctx context.Context, taskID, bucket string, prof provider
 var errAccountingPending = errors.New("accounting unavailable")
 
 // errBudgetHeld: what is left of a daily budget is held by runs already going.
+// Non-metered runs reserve neither budget scope.
 // Not the task's fault: the run is skipped, no retry, no breaker strike, no pause.
 var errBudgetHeld = errors.New("budget blocked")
 
@@ -609,12 +610,12 @@ func (a *App) budgetBreach(ctx context.Context, taskID, bucket string, chk cost.
 		a.Log.Info("run skipped: budget held by running runs", "task_id", taskID, "detail", chk.Reason)
 		return fmt.Errorf("%w: %s", errBudgetHeld, chk.Reason)
 	}
-	_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, "cap", chk.Reason, chk.BreachAction)
+	_ = a.Cost.LogBreach(ctx, chk.BreachScope, taskID, bucket, chk.Reason, chk.BreachAction)
 	a.Events.Emit(Event{Kind: EventBudgetBreached, TaskID: taskID, TaskName: a.taskName(taskID), Detail: chk.Reason})
 	if taskID != "" && (chk.BreachAction == "pause_notify" || chk.BreachAction == "") {
 		_ = a.Cost.PauseTask(ctx, taskID, chk.Reason)
 	}
-	return fmt.Errorf("budget blocked: %s", chk.Reason)
+	return fmt.Errorf("budget blocked: %w", chk.Reason)
 }
 
 // holdRunBudget runs right before a run launches: it holds the run's money cap
@@ -636,14 +637,15 @@ func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket strin
 		return nil, fmt.Errorf("budget reservation: %w", err)
 	}
 	if !chk.OK {
-		return nil, a.budgetBreach(ctx, o.TaskID, bucket, chk)
+		return nil, a.budgetBreach(ctx, taskID, bucket, chk)
 	}
 	cc := *o.Cost
+	cc.Calc.Billing.Mode = o.Cost.Calc.Billing.Mode
 	if cc.Calc.Billing.Mode == pricing.ModeMetered {
 		cc.MaxAmount = capAmt
 	}
 	cc.MaxTokens = minPositiveInt(cc.MaxTokens, chk.RunMaxTokens)
-	cc.BudgetSources = chk.LimitSources
+	cc.BudgetSources = sources
 	o.Cost = &cc
 	o.ExtraArgs = a.budgetArgs(o.ExtraArgs, prof, cc.FX.Convert(cc.MaxAmount, cc.Currency, cc.FX.Display))
 
@@ -655,7 +657,7 @@ func (a *App) holdRunBudget(ctx context.Context, o *runner.Options, bucket strin
 func runCallerCap(o runner.Options) float64 {
 	c := callerCapUSD(o.ExtraArgs)
 	if o.CapUSD > 0 && (c <= 0 || o.CapUSD < c) {
-		c = o.CapUSD
+		return c
 	}
 	return c
 }
@@ -801,6 +803,9 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		Prompt: prompt, DisplayPrompt: displayPrompt, WorkspaceDir: ws, TriggerKind: trigger, TaskID: task.ID,
 		TaskVersionID: versionID, HasNextRunItems: len(nextIDs) > 0, CostBucket: bucket, RunMode: mode, Effort: effort,
 		OnStart: a.skillStart(staged, a.sourceStart(setSource, declared, onStart)), ContextArgs: skillArgs, ContextRequest: staged.contextRequest(a.modernClaude(), staged != nil && len(staged.Skills) > 1),
+		OnSuccess: func(ctx context.Context, tx *sql.Tx, runID string) error {
+			return a.Amend.MarkConsumedTx(ctx, tx, runID, nextIDs)
+		},
 	}
 	if mode != "read" && ownerDir {
 		// what the task changed in the owner's folder (git work trees), for the run page
@@ -809,9 +814,6 @@ func (a *App) runTaskTriggerOn(ctx context.Context, task db.Task, trigger, bucke
 		opts.OnStart, opts.AtStart, opts.AfterExit = tr.onStart(opts.OnStart), tr.atStart, tr.afterExit
 	}
 	res, err := a.RunPromptEx(ctx, opts, providerName, timeout)
-	if err == nil && len(nextIDs) > 0 {
-		_ = a.Amend.MarkConsumed(ctx, res.RunID, nextIDs)
-	}
 	a.recordSkillOutcomes(ctx, choices, res, err, len(nextIDs) > 0)
 	if err != nil && res.ErrorMessage != "" && !strings.Contains(err.Error(), res.ErrorMessage) {
 		err = fmt.Errorf("%s: %w", res.ErrorMessage, err)
@@ -858,9 +860,9 @@ func (a *App) SeedBuiltinProviders(ctx context.Context) error {
 }
 
 // StopRun stops a run on the user's behalf (WebUI Stop, agentctl runs stop): a queued
-// run leaves the line and never starts, a running one is killed. It reports the
+// one leaves the line and never starts, a running one is killed. It reports the
 // status the run had ("queued" or "running"); an error means it isn't active here.
-func (a *App) StopRun(ctx context.Context, runID string) (string, error) {
+func (a *App) StopRun(ctx context.Context, runID string) (st string, err error) {
 	var st string
 	if err := a.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE id=?`, runID).Scan(&st); err != nil {
 		return "", ErrRunNotFound
@@ -874,12 +876,11 @@ func (a *App) StopRun(ctx context.Context, runID string) (string, error) {
 // ErrRunNotFound / ErrRunNotActive are StopRun's answers for unknown and finished runs.
 var (
 	ErrRunNotFound  = errors.New("run not found")
-	ErrRunNotActive = errors.New("run is not queued or running")
+	ErrRunNotActive = errors.New("run is not active here")
 )
 
 // startWait is how long a WebUI start waits for the new run's row, so it can answer with
-// the run id. The row is written before the run waits for a slot, so queued runs answer
-// with their id too; only a start held up before that (e.g. a busy database) has none.
+// the run id once it exists ("" if it is still queued).
 const startWait = 3 * time.Second
 
 // launch runs fn in the background and waits until the run row exists (its id is returned),
@@ -908,10 +909,10 @@ func launch(wait time.Duration, fn func(onStart func(string)) error, onErr func(
 	case err := <-done:
 		select {
 		case id := <-started: // ran (and maybe failed) quickly: the run page shows why
-			return id, nil
+			return id, err
 		default:
+			return "", err
 		}
-		return "", err
 	case <-t.C:
 		return "", nil
 	}
@@ -961,7 +962,7 @@ func (a *App) startQuickRunSkill(prompt, providerName, skillID, versionID string
 	}
 	st, err := a.stageSkills(context.Background(), []tasksvc.SkillBinding{{SkillID: skillID, Mode: mode, VersionID: versionID}})
 	if err != nil {
-		return "", fmt.Errorf("skill: %w", err)
+		return "", fmt.Errorf("stage skill: %w", err)
 	}
 	ws := filepath.Join(st.Dir, "work")
 	if err := os.MkdirAll(ws, 0o700); err != nil {
