@@ -8105,3 +8105,28 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - `app.EnsureTask` 仍只建基本字段，但只在测试里用（依赖空串按「可修改」跑、不需要沙箱），保持不动。
 - `tasks.create` 还不能设标签、重试 / 补跑策略和费用控制，需要时可按表单的 `applyTaskExtras` 同样补上。
 - 宽屏检查器「当前任务」请求、会话能力提议随会话返回、草稿行按钮对齐仍待做。
+
+### 本轮（2026-11-28 07:45 Asia/Shanghai）：CI 里用真 Claude Code + 真 bubblewrap 端到端测命令沙箱，顺带直接实测 `dangerouslyDisableSandbox`
+
+接 backlog 里一直挂着的两条「CI 真 bwrap e2e」「`dangerouslyDisableSandbox` 直接实测（需要真模型 key）」。
+
+- **问题**：「可执行命令」运行的安全全靠 `guard.SandboxSettings` 生成的 `--settings` 交给 Claude Code 的系统沙箱，但测试只断言 JSON 长什么样；CI 里真 bwrap 只跑了一次 `bwrap … true` 的探测（`TestProbeBwrapReal`）。Claude Code 升级后如果改了键名或语义（比如 `allowUnsandboxedCommands`、`credentials.envVars`），我们不会知道。`dangerouslyDisableSandbox` 之前一直认为必须有真模型才能触发，所以从没测过。
+- **改法**：
+  - 新增 `internal/guard/sandbox_e2e_test.go` 的 `TestSandboxEndToEnd`：在 loopback 起一个假的 Messages API（`ANTHROPIC_BASE_URL` 指过去，流式 SSE 返回脚本化的 `tool_use`），让真 Claude Code 依次跑 9 条 Bash：在工作目录写文件（应成功）、写目录外、带 `dangerouslyDisableSandbox: true` 写目录外、读 `~/.ssh` 下的密钥、读 tidebot 自己的数据目录、带 `dangerouslyDisableSandbox` 读密钥、打印 `ANTHROPIC_API_KEY` 和 run 自己的密钥变量、在工作目录写 `.claude/settings.json` 和 `CLAUDE.md`、写 `~/.claude/settings.json`。参数与真实命令运行一致（`--bare`、`dontAsk`、`--allowedTools Bash`、固定危险命令拒绝规则、`SandboxSettings` 生成的设置文件）。断言看的是文件系统和工具结果：只有工作目录被写，密钥和数据库读不到，两个环境变量为空，代理配置没被写，`dangerouslyDisableSandbox` 不会让命令跑到沙箱外。
+  - 对照组：同样的前 4 步用 `{"sandbox":{"enabled":false}}` 再跑一遍，必须能写到目录外、读到密钥。这样「命令其实没跑到文件」的测试框架问题不会被当成通过。
+  - 用临时 HOME，绝不读写本机真实的 `~/.claude`（跑完用 `find ~/.claude -newermt` 确认未改动）。默认跳过，`TIDEBOT_SANDBOX_E2E=1` 时缺依赖直接失败而不是跳过。
+  - 新增 `scripts/e2e-sandbox.sh`：Linux x64 下从 npm registry 下载固定版本的 `@anthropic-ai/claude-code-linux-x64@2.1.301`（原生二进制，不需要 Node 22），校验 sha256 后解压使用；也可用 `TIDEBOT_E2E_CLAUDE` 指定本机的 claude。只在 `CI=true` 且 Ubuntu 24.04 的 AppArmor 限制打开时 `sudo sysctl` 放开（tidebot 本身从不改内核设置）。`full-matrix.yml` 的 Linux 1.26.x core 作业在 bwrap 探测后加一步运行它（6 分钟超时）。`docs/building.md` 补一节说明。
+  - 没有改任何产品代码，也没有引入任何限制。
+- **数字**：本机（Linux amd64，Claude Code 2.1.301）整个测试含对照组 1.5–2.1 s；脚本含下载约 4.4 s（120 MB tarball）。
+- **实测结论**：Claude Code 2.1.301 下，`dangerouslyDisableSandbox: true` 在 `allowUnsandboxedCommands: false` 时被忽略，命令照样在沙箱里（写目录外报 Read-only file system，读密钥报 No such file）。`~/.claude` 因为在 denyRead 里被挂成空目录，命令写进去「成功」但真实文件不变。工作目录里的 `CLAUDE.md` 是 Permission denied，`.claude/` 是 Read-only file system。
+- **测试**：`TIDEBOT_SANDBOX_E2E=1 go test -run TestSandboxEndToEnd ./internal/guard` 通过；不设变量时跳过。`go vet ./internal/guard`（含 GOOS=windows/darwin）、`gofmt -l .`、`bash -n scripts/e2e-sandbox.sh`、gitleaks（`internal/guard scripts .github`）通过。
+- **截图**：无（无界面改动）。
+
+**心得**：「要真模型才能测」不一定成立。Claude Code 认 `ANTHROPIC_BASE_URL`，一个几十行的假 Messages API 就能精确地让它调用哪个工具、带什么参数，连模型永远不会主动给的 `dangerouslyDisableSandbox` 都能测。安全类端到端测试一定要配一个关掉防护的对照组，否则「什么都没发生」也会被当成「拦住了」。
+
+**参考**：用脚本化的假模型返回固定工具调用，借鉴 LiteLLM 的 `mock_completion` / `mock_tool_calls`（BerriAI/litellm，`litellm/main.py`）；只借思路，不抄代码。
+
+**后续想法**：
+- 同一个假 API 可以给 macOS CI 跑一遍 Seatbelt（需要在 macOS runner 上取 darwin-arm64 包并固定校验和）。
+- 可以把整条 `App.StartRun` 的 exec 路径（`applyExecSandbox` 生成设置 + 运行结束后代理配置检查）也接到这个假 API 上，测到 tidebot 自己拼的参数，而不只是 guard 层。
+- 升级固定的 Claude Code 版本时，同时更新脚本里的版本号和 sha256。

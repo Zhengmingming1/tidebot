@@ -52,3 +52,17 @@ This builds an "official" 0.1.7 and a 0.1.8 tarball, signs a local feed with a t
 and checks three things: 0.1.7 updates in place and restarts as 0.1.8; a self-built 0.1.7 only
 announces the update and leaves its files alone; a dev build announces nothing to install.
 It never touches the real signing key.
+
+## Testing the command sandbox
+
+```bash
+scripts/e2e-sandbox.sh                                     # Linux x64: downloads a pinned, checksummed Claude Code
+TIDEBOT_E2E_CLAUDE=$(command -v claude) scripts/e2e-sandbox.sh  # or use your own build (Linux / macOS)
+```
+
+This starts real Claude Code with the sandbox settings a command run gets, against a fake
+Messages API on loopback that asks for Bash commands (no model key needed). It checks that
+commands can write only the working folder, can't read keys or tidebot's own data, don't see
+provider keys, can't write agent config, and that `dangerouslyDisableSandbox` doesn't take them
+out of the sandbox; a control run without the sandbox must escape. It uses a throwaway HOME, so
+your own Claude Code config is never read or changed. Needs bubblewrap and socat on Linux.

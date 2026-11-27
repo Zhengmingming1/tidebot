@@ -85,6 +85,10 @@ jobs:
         run: |
           bash scripts/ci-apt-install.sh --no-install-recommends bubblewrap socat
           go test -count=1 -v -run 'TestProbeBwrapReal' ./internal/guard
+      - name: command sandbox end to end (real Claude Code + bubblewrap, fake model API)
+        if: runner.os == 'Linux' && matrix.go == '1.26.x'
+        timeout-minutes: 6
+        run: bash scripts/e2e-sandbox.sh
 
   race:
     runs-on: ubuntu-latest
