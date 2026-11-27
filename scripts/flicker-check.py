@@ -3,15 +3,17 @@
 
 Needs a running demo agentd (scripts/demo-webui.sh) and Playwright:
   python3 scripts/flicker-check.py [base_url] [password]
-For every switch it records, frame by frame, whether #page showed a skeleton or
-nothing at all, plus the CLS (layout-shift) accumulated during the switch.
+API_DELAY_MS=150 adds that much latency to every request, to see what a remote WebUI shows.
+For every switch it records, frame by frame, whether #page showed a visible skeleton
+or nothing at all, plus the CLS (layout-shift) accumulated during the switch.
 Exit code 1 if any switch shows a blank/skeleton frame or CLS > 0.02.
 """
-import json, sys, time
+import json, os, sys, time
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:17421"
 PW = sys.argv[2] if len(sys.argv) > 2 else "demo-pass-99"
+DELAY = int(os.environ.get("API_DELAY_MS", "0"))
 
 PROBE = """
 window.__fl = {frames: [], cls: 0};
@@ -21,7 +23,8 @@ new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentI
   const pg = document.getElementById('page');
   let s = 'ok';
   if (!pg || !pg.firstElementChild) s = 'blank';
-  else if (pg.querySelector('.skel')) s = 'skeleton';
+  // a skeleton inside a hidden tab pane (e.g. a skill's unopened Files tab) is not on screen
+  else if ([...pg.querySelectorAll('.skel')].some(e => e.getClientRects().length)) s = 'skeleton';
   window.__fl.frames.push(s);
   requestAnimationFrame(tick);
 })();
@@ -29,16 +32,25 @@ new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentI
 
 def main():
     with sync_playwright() as p:
-        br = p.chromium.launch()
+        try:
+            br = p.chromium.launch(channel="chrome")  # system Chrome, like tip-check.py
+        except Exception:
+            br = p.chromium.launch()  # Playwright's own build (playwright install chromium)
         pg = br.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN").new_page()
+        if DELAY:  # Chromium's own throttling: requests stay parallel
+            cdp = pg.context.new_cdp_session(pg)
+            cdp.send("Network.enable")
+            cdp.send("Network.emulateNetworkConditions", {"offline": False, "latency": DELAY, "downloadThroughput": -1, "uploadThroughput": -1})
         pg.goto(BASE + "/")
         pg.wait_for_selector("#login-form")
         pg.fill("#lp", PW)
         pg.click("#login-form button[type=submit]")
-        pg.wait_for_selector(".qa")
+        pg.wait_for_selector("#shell:not(.hidden) #page", state="attached")
+        pg.wait_for_timeout(800)
         tasks = pg.evaluate("fetch('/api/tasks').then(r=>r.json())")
         tasks = tasks.get("tasks", tasks) if isinstance(tasks, dict) else tasks
         tid = tasks[0]["id"] if tasks else None
+        tid2 = tasks[1]["id"] if len(tasks) > 1 else None
         skills = pg.evaluate("fetch('/api/skills').then(r=>r.json())")
         skills = skills.get("skills", skills) if isinstance(skills, dict) else skills
         sid = skills[0]["id"] if skills else None
@@ -46,6 +58,8 @@ def main():
         steps += [("hash", "#/settings/" + s) for s in ["general", "providers", "budgets", "security", "notifications", "data", "about", "general"]]
         if tid:
             steps += [("hash", "#/tasks/" + tid)] + [("tab", t) for t in ["thread", "runs", "history", "overview"]]
+        if tid2:  # picking another task in the rail remounts the page but not the list
+            steps += [("hash", "#/tasks/" + tid2)]
         if sid:
             steps += [("hash", "#/skills/" + sid)]
         steps += [("hash", h) for h in ["#/tasks", "#/runs", "#/", "#/tasks", "#/runs", "#/"]]  # second visits

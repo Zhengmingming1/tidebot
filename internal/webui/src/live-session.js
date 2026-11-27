@@ -266,6 +266,8 @@
   function dropBoot() { var b = document.getElementById("boot"); if (b) b.remove(); }
   function showLogin(totp) {
     dropBoot();
+    // a lost session or the next sign-in must not paint data cached before it
+    taskRailView.tasks = null; swrClear();
     stopStream();
     evsStop();
     setDocTitle({ page: T("login.submit"), running: 0, alert: false });

@@ -35,7 +35,9 @@ function skeleton() { return "loading"; }
 function imeInput(el, ms, fn) { el.search = fn; }
 function taskFormModal() {}
 const TASK_FILTERS = [["", "all"], ["active", "active"], ["paused", "paused"]];
-var taskRailView = { q: "", status: "", open: null, off: null };
+var taskRailView = { q: "", status: "", open: null, off: null, tasks: null };
+const swr = { cache: {} }, SWR_MAX_MS = 300000;
+function swrPut(key, data) { swr.cache[key] = { s: JSON.stringify(data), t: Date.now() }; }
 function El() {
   this.attrs = {}; this.events = {}; this.innerHTML = ""; this.alive = true;
   this.classList = { toggle: (k, v) => { this.attrs[k] = v; } };
@@ -68,8 +70,9 @@ const tasks = [
 let requests=0, resolve;
 function api(path) { assert.equal(path, "/api/tasks"); requests++; return new Promise(r => { resolve=r; }); }
 const apiRaw=api;
-eval(grab("keepFocus") + "\n" + grab("taskRailTasks") + "\n" + grab("taskWorkspaceHtml") + "\n" + grab("wireTaskWorkspace"));
+eval(grab("keepFocus") + "\n" + grab("taskRailTasksCached") + "\n" + grab("taskRailTasks") + "\n" + grab("taskWorkspaceHtml") + "\n" + grab("wireTaskWorkspace"));
 (async function() {
+  assert.match(grab("showLogin"), /taskRailView\.tasks = null; swrClear\(\);/, "signing out drops cached lists");
   assert.deepEqual(taskRailTasks(tasks, "工作", "active").map(x=>x.id), ["t 1"]);
   assert.deepEqual(taskRailTasks(tasks, "REVIEW", "").map(x=>x.id), ["t 1"]);
   assert.deepEqual(taskRailTasks(tasks, "", "failing").map(x=>x.id), ["t2"]);
@@ -119,10 +122,49 @@ eval(grab("keepFocus") + "\n" + grab("taskRailTasks") + "\n" + grab("taskWorkspa
   taskRailView.q='"<draft>';
   assert.ok(taskWorkspaceHtml().includes('&quot;&lt;draft&gt;'));
   taskRailView.open=true;
+  taskRailView.q=""; list.innerHTML=""; // a remount builds a fresh, empty rail list
   wireTaskWorkspace("t2", "overview");
+  assert.ok(list.innerHTML.includes('#/tasks/t2/overview'), "a remount paints the last list at once");
+  assert.ok(!list.innerHTML.includes("loading"), "no skeleton when a list is cached");
+  assert.equal(requests,4,"the cached list is still revalidated");
   const before=list.innerHTML; box.alive=false;
   resolve(tasks); await Promise.resolve(); await Promise.resolve();
   assert.equal(list.innerHTML, before, "late response must not paint a detached workspace");
+  assert.notDeepEqual(taskRailView.tasks, tasks, "a detached workspace does not overwrite the cache");
+  // Remount (tab switch): cached list painted with no skeleton; an unchanged answer does not repaint.
+  box.alive=true; list.innerHTML="";
+  wireTaskWorkspace("t 1", "runs");
+  const painted=list.innerHTML;
+  assert.ok(painted.includes('#/tasks/t%201/runs') && painted.includes('aria-current="page"'));
+  assert.equal(requests,5);
+  let repaints=0; const desc=Object.getOwnPropertyDescriptor(El.prototype,"innerHTML");
+  Object.defineProperty(list,"innerHTML",{get:desc.get,set:function(h){repaints++;desc.set.call(this,h);},configurable:true});
+  resolve(JSON.parse(JSON.stringify(taskRailView.tasks))); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(repaints,0,"same data after revalidation: no repaint");
+  delete list.innerHTML;
+  // A changed answer repaints and updates both caches.
+  wireTaskWorkspace("t 1", "runs");
+  const fresh=[tasks[0],{id:"t9",name:"Fresh",status:"active",tags:[]}];
+  resolve(fresh); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.ok(list.innerHTML.includes("Fresh"));
+  assert.deepEqual(taskRailView.tasks, fresh);
+  assert.deepEqual(JSON.parse(swr.cache["/api/tasks"].s), fresh);
+  // No rail cache yet: the task list page's cached /api/tasks seeds the rail.
+  taskRailView.tasks=null; list.innerHTML="";
+  swrPut("/api/tasks", [{id:"t7",name:"From list page",status:"active",tags:[]}]);
+  wireTaskWorkspace("t7", "overview");
+  assert.ok(list.innerHTML.includes("From list page"), "seeded from the list page cache");
+  resolve(fresh); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  // An expired or failed list-page entry is not used: skeleton until the answer.
+  taskRailView.tasks=null; list.innerHTML="";
+  swr.cache["/api/tasks"].t=Date.now()-SWR_MAX_MS-1;
+  wireTaskWorkspace("t7", "overview");
+  assert.equal(list.innerHTML,"loading");
+  resolve(fresh); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  taskRailView.tasks=null; list.innerHTML=""; swr.cache["/api/tasks"]={err:{m:"x"},t:Date.now()};
+  wireTaskWorkspace("t7", "overview");
+  assert.equal(list.innerHTML,"loading");
+  resolve(fresh); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
   console.log("task workspace navigation checks passed");
 })().catch(e => { console.error(e); process.exitCode=1; });
 `

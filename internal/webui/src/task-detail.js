@@ -203,7 +203,16 @@
   var ovKeep = null;
   // The task rail changes only its own DOM. Collapsing or filtering it must never remount
   // a requirement review, clear checked amendments, or interrupt the composer.
-  var taskRailView = { q: "", status: "", open: null, off: null };
+  // tasks keeps the last list across remounts (tab switches, picking another task) so the
+  // rail repaints at once and revalidates in the background instead of flashing a skeleton.
+  var taskRailView = { q: "", status: "", open: null, off: null, tasks: null };
+  // The list to paint the rail with before /api/tasks answers: the rail's own last list, else
+  // what the task list page just loaded. Either is revalidated right after painting.
+  function taskRailTasksCached() {
+    if (taskRailView.tasks) return taskRailView.tasks;
+    var c = swr.cache["/api/tasks"];
+    return c && !c.err && Date.now() - c.t < SWR_MAX_MS ? JSON.parse(c.s) : null;
+  }
   function taskRailTasks(tasks, q, status) {
     q = q.trim().toLowerCase();
     return tasks.filter(function (t) {
@@ -217,7 +226,7 @@
   }
   function wireTaskWorkspace(id, tab) {
     var box = $(".task-workspace"), rail = $("#task-rail", box), toggle = $("#task-rail-toggle", box), search = $("#task-rail-search", box), list = $("#task-rail-list", box);
-    var media = window.matchMedia("(min-width: 1280px)"), tasks = null, loading = null, stale = false;
+    var media = window.matchMedia("(min-width: 1280px)"), tasks = taskRailTasksCached(), loading = null, stale = !!tasks;
     if (taskRailView.off) taskRailView.off();
     var paint = function () {
       if (!tasks || !document.contains(box)) return;
@@ -236,7 +245,9 @@
       if (!tasks) list.innerHTML = skeleton("list");
       loading = (force ? apiRaw : api)("/api/tasks").then(function (data) {
         var changed = JSON.stringify(tasks) !== JSON.stringify(data);
-        tasks = data; stale = false; if (changed) paint();
+        tasks = data; stale = false;
+        if (document.contains(box)) { taskRailView.tasks = data; swrPut("/api/tasks", data); }
+        if (changed || !list.innerHTML) paint();
       }).catch(function (e) {
         if (!document.contains(box)) return;
         stale = true;
@@ -254,7 +265,7 @@
       box.classList.toggle("rail-open", open); rail.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
       toggle.setAttribute("aria-label", T(open ? "tw.hide" : "tw.show"));
-      if (open) { load(stale).catch(function () {}); if (focus) search.focus(); }
+      if (open) { if (tasks && !list.innerHTML) paint(); load(stale).catch(function () {}); if (focus) search.focus(); }
     };
     toggle.addEventListener("click", function () { taskRailView.open = toggle.getAttribute("aria-expanded") !== "true"; show(true); });
     imeInput(search, 120, function (q) { taskRailView.q = q; paint(); });
