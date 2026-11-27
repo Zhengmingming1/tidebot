@@ -23,12 +23,27 @@ if [ -z "${TIDEBOT_E2E_CLAUDE:-}" ]; then
 fi
 "$TIDEBOT_E2E_CLAUDE" --version
 
-# Ubuntu 24.04 runners refuse unprivileged user namespaces to bwrap by default
-# (AppArmor). Only on CI: tidebot itself never changes kernel settings.
-aa=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
-if [ "${CI:-}" = true ] && [ -r "$aa" ] && [ "$(cat "$aa")" = 1 ]; then
-  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+# Claude Code's sandbox starts bwrap and, inside it, a second user namespace
+# (its seccomp helper), so check both levels.
+nested() { bwrap --unshare-user --unshare-net --dev-bind / / bwrap --unshare-user --unshare-net --dev-bind / / true; }
+
+# Ubuntu 24.04 runners refuse unprivileged user namespaces by default (AppArmor):
+# the sysctl for bwrap itself, and the bwrap-userns-restrict profile that takes
+# capabilities away inside bwrap (no nested namespace). Only on CI: tidebot
+# itself never changes kernel or AppArmor settings.
+if [ "${CI:-}" = true ]; then
+  aa=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+  if [ -r "$aa" ] && [ "$(cat "$aa")" = 1 ]; then
+    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+  fi
+  if ! nested; then
+    echo "nested user namespace refused inside bwrap; unloading AppArmor's bwrap profile (CI only)"
+    for f in /etc/apparmor.d/bwrap-userns-restrict /etc/apparmor.d/unpriv_bwrap; do
+      [ -f "$f" ] && sudo apparmor_parser -R "$f" || true
+    done
+  fi
 fi
+nested && echo "bwrap: nested user namespace OK"
 
 TIDEBOT_SANDBOX_E2E=1 TIDEBOT_E2E_CLAUDE="$TIDEBOT_E2E_CLAUDE" \
   go test -count=1 -v -run 'TestSandboxEndToEnd' ./internal/guard
