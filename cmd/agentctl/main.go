@@ -121,9 +121,21 @@ func main() {
 				"cron_expr":     flagOpt(rest, "--cron", ""),
 				"provider_name": flagOpt(rest, "--provider", cfg.DefaultProvider),
 				"workspace_dir": flagOpt(rest, "--workspace", ""),
+				"effort":        flagOpt(rest, "--effort", ""),
+				"skill_id":      flagOpt(rest, "--skill", ""),
 			}
-			var out any
+			// --mode read|edit|exec; left out, the daemon uses the new-task default (exec)
+			if m := flagOpt(rest, "--mode", ""); m != "" {
+				p["run_mode"] = m
+			}
+			if v := flagOpt(rest, "--skill-version", ""); v != "" {
+				p["skill_version_id"] = v
+			}
+			var out map[string]any
 			must(cli.Call("tasks.create", p, &out))
+			if w, _ := out["warning"].(string); w != "" {
+				fmt.Fprintln(os.Stderr, w)
+			}
 			printJSON(out)
 		case "pause":
 			must(cli.Call("tasks.pause", map[string]string{"id": needFlag(rest, "--id")}, nil))

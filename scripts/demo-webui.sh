@@ -33,7 +33,7 @@ for _ in $(seq 50); do [[ -S "$H/agentd.sock" ]] && break; sleep 0.1; done
 ctl() { "$BIN/agentctl" "$@"; }
 ctl auth set-password --password demo-pass-99 >/dev/null
 # One folder per task: runs that may edit files lock their folder, so a shared one would turn the demo runs away as busy.
-tid() { local d="$WS/$(echo "$1" | tr -cs 'A-Za-z0-9' '-' | tr 'A-Z' 'a-z')"; mkdir -p "$d"; ctl tasks create --name "$1" --prompt "$2" --cron "$3" --workspace "$d" | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["ID"])'; }
+tid() { local d="$WS/$(echo "$1" | tr -cs 'A-Za-z0-9' '-' | tr 'A-Z' 'a-z')"; mkdir -p "$d"; ctl tasks create --name "$1" --prompt "$2" --cron "$3" --workspace "$d" --mode edit | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["ID"])'; }
 T1=$(tid "Daily Report" "Generate today's summary of repository activity" "0 9 * * *")
 T2=$(tid "Sync Issues" "Pull the latest issues from trackers and update the board" "30 11 * * *")
 T3=$(tid "Clean Logs" "Archive log files older than 7 days" "0 18 * * *")

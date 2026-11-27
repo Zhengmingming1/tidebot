@@ -289,6 +289,7 @@ Skill import accepts `.zip`, `.skill`, `.tar.gz` / `.tgz` and folders. It recogn
 # a task that runs every day at 9
 agentctl tasks create --name "Daily report" --prompt "Summarize today's commits and issues" \
   --cron "0 9 * * *" --workspace ~/work/repo
+# runs commands in the system sandbox by default; --mode read|edit, --effort and --skill <id> [--skill-version <v>] match the WebUI form
 
 # change requirements in plain language, then confirm the whole batch (one version)
 agentctl amend propose --task <task_id> --text "add YoY numbers; put the table first"

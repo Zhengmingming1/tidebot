@@ -8082,3 +8082,26 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 草稿行目前右侧按钮宽度随「采用 vN」文案变化，多行时不完全对齐；可以考虑 CSS subgrid 让各行列宽一致（需确认 Linux WebKitGTK 版本支持）。
 - 技能很多时草稿栏会变高，可考虑超过 3 行时折叠为「N 份草稿」摘要。
 - `dangerouslyDisableSandbox` 直接实测仍未做（需要真模型 key）；`app.EnsureTask` / `tasks.create` RPC 仍只建基本字段。
+
+### 2026-11-28：`agentctl tasks create` / `tasks.create` 建出与 WebUI 表单同样完整的 v1（产品模型 / 一致性）
+
+这是 2026-11-28 03:52 Asia/Shanghai 的优化，接长期延后项「`app.EnsureTask` / `tasks.create` RPC 只建基本字段」。
+
+- **问题**：命令行 `agentctl tasks create`（走 IPC `tasks.create`）只能传名称、提示词、定时、服务商和文件夹；`CreateInput.Spec` 是 `json:"-"`，所以建出的任务权限级别是空串——这是「三档权限之前存下的旧任务」的标记，按「可修改」跑，与新建任务默认「可执行命令」的产品模型矛盾；推理强度、技能也没法设，只能事后到 WebUI 再改一次，多出一个用户没存过的 v2。服务商写错、名称过长也不拦，第一次运行才失败。
+- **改法**：
+  - `tasks.create` 接受 `run_mode`（read / edit / exec，省略 = exec，与表单默认一致；显式空串或未知值拒绝）、`effort`、`skill_id`（+ `skill_version_id` 固定版本）或完整的 `skill_bindings`，全部写进 v1，不产生 v2。技能和固定的版本在创建时就用 `ResolveBindings` 查一遍，不存在直接拒绝；工作流任务不能同时绑技能。
+  - 与表单同样的校验：名称 1–80 字、提示词非空且 ≤ 32 KB、服务商必须已知。`InitialStatus` / `PauseKind` 仍是内部字段，RPC 设不了。
+  - 应答仍是原来的任务视图（`task` 在顶层，脚本照常解析），可执行命令任务在本机沙箱缺失或起不来时多一个 `warning`，`agentctl` 打到 stderr，提示安装或改用 `--mode edit / read`。
+  - `agentctl tasks create` 新增 `--mode`、`--effort`、`--skill`、`--skill-version`；用法文本（中英）和 README 命令行示例补上。`scripts/demo-webui.sh` 显式 `--mode edit`，演示数据行为不变。
+  - 没有加任何限制：默认仍无单次花费上限、无超时，只手动或按用户给的定时运行。
+- **测试**：新增 `TestRPCTasksCreateFullSpec`（只给基本字段得到 exec、只有 v1、应答形状不变；read + high + 跟随技能；edit + 固定版本；空 / 未知级别、未知强度、不存在的技能或版本、只给版本、未知服务商、81 字名称、空提示词、工作流 + 技能都拒绝且不写库；内部字段传不进来）、`TestExecSandboxWarning`。另用临时 agentd + agentctl 实跑：不带 `--mode` 得到 exec，`--mode read --effort low` 生效，`--mode bogus` 退出码 1。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`check-i18n.py`、`bash -n scripts/demo-webui.sh` 通过。
+- **截图**：无（无界面改动）。
+
+**心得**：同一个对象有两个创建入口时，「默认值」最容易分叉：表单默认 exec，RPC 因为字段没暴露而落到旧任务的空串。把默认值写成一个常量、让入口显式填它，比依赖零值安全；警告放在应答里而不是拒绝，用户在沙箱装好之前也能先建任务。
+
+**参考**：无外部借鉴。
+
+**后续想法**：
+- `app.EnsureTask` 仍只建基本字段，但只在测试里用（依赖空串按「可修改」跑、不需要沙箱），保持不动。
+- `tasks.create` 还不能设标签、重试 / 补跑策略和费用控制，需要时可按表单的 `applyTaskExtras` 同样补上。
+- 宽屏检查器「当前任务」请求、会话能力提议随会话返回、草稿行按钮对齐仍待做。

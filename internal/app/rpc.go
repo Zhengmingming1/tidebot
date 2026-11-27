@@ -10,12 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"database/sql"
 
 	"github.com/Zhengmingming1/tidebot/internal/auth"
 	"github.com/Zhengmingming1/tidebot/internal/capability"
 	"github.com/Zhengmingming1/tidebot/internal/cost"
+	"github.com/Zhengmingming1/tidebot/internal/guard"
 	"github.com/Zhengmingming1/tidebot/internal/ipc"
 	"github.com/Zhengmingming1/tidebot/internal/skillstore"
 	"github.com/Zhengmingming1/tidebot/internal/tasksvc"
@@ -113,15 +115,121 @@ func (a *App) rpcTasksGet(ctx context.Context, params json.RawMessage) (any, err
 	return a.Tasks.Get(ctx, p.ID)
 }
 
-func (a *App) rpcTasksCreate(ctx context.Context, params json.RawMessage) (any, error) {
-	var p tasksvc.CreateInput
+// rpcTaskCreate is tasks.create's input: the basic fields plus the rest of v1 the
+// WebUI task form sets (permission level, effort, skills), so a task made from the
+// command line is the same task the form would make, not a legacy one without a level.
+type rpcTaskCreate struct {
+	tasksvc.CreateInput
+	// RunMode: read | edit | exec; omitted = exec, the new-task default (commands in the
+	// system sandbox, as in the WebUI form).
+	RunMode *string `json:"run_mode,omitempty"`
+	Effort  string  `json:"effort,omitempty"`
+	// SkillID (+ SkillVersionID to pin it) is the one-skill shorthand; SkillBindings
+	// is the full list and wins when both are given.
+	SkillID        string                 `json:"skill_id,omitempty"`
+	SkillVersionID string                 `json:"skill_version_id,omitempty"`
+	SkillBindings  []tasksvc.SkillBinding `json:"skill_bindings,omitempty"`
+}
+
+// rpcTaskCreated is tasks.create's answer: the task view as before, plus a warning
+// when the task can't run as saved here (command runs without a working sandbox).
+type rpcTaskCreated struct {
+	tasksvc.TaskView
+	Warning string `json:"warning,omitempty"`
+}
+
+// rpcCreateDefaultMode is the permission level of a task created without one.
+const rpcCreateDefaultMode = "exec"
+
+// taskCreateInput turns tasks.create params into the CreateInput the WebUI form would
+// build: same checks (name, prompt, provider, level, effort, skills), v1 complete.
+func (a *App) taskCreateInput(ctx context.Context, params json.RawMessage) (tasksvc.CreateInput, error) {
+	var p rpcTaskCreate
 	if err := json.Unmarshal(params, &p); err != nil {
+		return tasksvc.CreateInput{}, err
+	}
+	in := p.CreateInput
+	in.Name, in.Prompt = strings.TrimSpace(in.Name), strings.TrimSpace(in.Prompt)
+	in.CronExpr = strings.TrimSpace(in.CronExpr)
+	if in.Name == "" || utf8.RuneCountInString(in.Name) > 80 {
+		return in, errors.New("name is required (max 80 characters)")
+	}
+	if in.Prompt == "" && in.WorkflowID == "" || len(in.Prompt) > 32<<10 {
+		return in, errors.New("prompt is required (max 32 KB)")
+	}
+	if in.ProviderName != "" && a.Registry != nil {
+		if _, ok := a.Registry.Get(in.ProviderName); !ok {
+			return in, fmt.Errorf("unknown provider: %s", in.ProviderName)
+		}
+	}
+	if in.Actor == "" {
+		in.Actor = "user"
+	}
+	mode := rpcCreateDefaultMode
+	if p.RunMode != nil {
+		mode = strings.TrimSpace(*p.RunMode)
+	}
+	if mode == "" || !tasksvc.ValidRunMode(mode) {
+		return in, errors.New("run mode must be read, edit or exec")
+	}
+	if !tasksvc.ValidEffort(p.Effort) {
+		return in, errors.New("effort must be low, medium or high")
+	}
+	bindings := p.SkillBindings
+	if len(bindings) == 0 && strings.TrimSpace(p.SkillID) != "" {
+		b := tasksvc.SkillBinding{SkillID: strings.TrimSpace(p.SkillID), Mode: "follow", Role: "primary"}
+		if v := strings.TrimSpace(p.SkillVersionID); v != "" {
+			b.Mode, b.VersionID = "pinned", v
+		}
+		bindings = []tasksvc.SkillBinding{b}
+	} else if p.SkillVersionID != "" && len(bindings) == 0 {
+		return in, errors.New("skill version without a skill")
+	}
+	if in.WorkflowID != "" && len(bindings) > 0 {
+		return in, errors.New("a workflow task cannot also bind skills")
+	}
+	normalized, err := tasksvc.NormalizeBindings(bindings)
+	if err != nil {
+		return in, err
+	}
+	if len(normalized) > 0 {
+		if a.Skills == nil {
+			return in, errors.New("skills unavailable")
+		}
+		// the skill (and a pinned version) must exist now, not fail at the first run
+		if _, err := a.Skills.ResolveBindings(ctx, normalized); err != nil {
+			return in, err
+		}
+	}
+	in.Spec = &tasksvc.Spec{RunMode: mode, Effort: p.Effort, SkillBindings: normalized}
+	return in, nil
+}
+
+func (a *App) rpcTasksCreate(ctx context.Context, params json.RawMessage) (any, error) {
+	in, err := a.taskCreateInput(ctx, params)
+	if err != nil {
 		return nil, err
 	}
-	if p.Actor == "" {
-		p.Actor = "user"
+	tv, err := a.Tasks.Create(ctx, in)
+	if err != nil {
+		return nil, err
 	}
-	return a.Tasks.Create(ctx, p)
+	out := rpcTaskCreated{TaskView: tv}
+	if in.Spec.RunMode == "exec" && in.WorkflowID == "" {
+		out.Warning = execSandboxWarning(a.SandboxStatus())
+	}
+	return out, nil
+}
+
+// execSandboxWarning says why a command run can't start here ("" = it can).
+func execSandboxWarning(st guard.SandboxStatus) string {
+	switch st.Status {
+	case guard.SandboxMissing:
+		return fmt.Sprintf("command runs need the system sandbox, missing here: %s (install: %s); or create the task with --mode edit / read", strings.Join(st.Missing, ", "), st.Install)
+	case guard.SandboxBroken:
+		return "command runs need the system sandbox, which can't start here (see Settings › Security › Command sandbox); or create the task with --mode edit / read"
+	}
+	return ""
 }
 
 // tasks.pause {"id"} pauses by hand; with "for": "1h" | "4h" | "tomorrow" the task resumes

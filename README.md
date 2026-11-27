@@ -289,6 +289,7 @@ shutdown_grace: 5s           # 退出时等正在跑的任务收尾多久，超�
 # 建一个每天 9 点跑的任务
 agentctl tasks create --name "日报" --prompt "总结今天仓库里的提交和 issue" \
   --cron "0 9 * * *" --workspace ~/work/repo
+# 默认可执行命令（系统沙箱里）；--mode read|edit 改权限，--effort、--skill <技能ID> [--skill-version <版本>] 与 WebUI 表单一致
 
 # 用大白话改需求，然后整批确认（只生成一个版本）
 agentctl amend propose --task <task_id> --text "以后加上同比数据；表格放在最前面"
