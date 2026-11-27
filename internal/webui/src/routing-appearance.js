@@ -26,6 +26,8 @@
       case undefined: return [pfGet("/api/overview"), pfGet("/api/dashboard")];
       case "tasks": return id ? taskDetailPaths(id, parts[2] || "overview").map(pfGet) : [pfGet("/api/tasks")];
       case "runs": return id ? [pfGet("/api/runs/" + enc(id))] : [];
+      case "workflows": return (id ? workflowEditorPaths(id) : ["/api/workflows"]).filter(Boolean).map(pfGet);
+      case "workflow-runs": return id ? [pfGet("/api/workflow-runs/" + enc(id))] : [];
       case "skills": return id ? [pfGet("/api/skills"), pfGet(skillVersionsPath(id, null)), pfRpc("skills.optimize_settings", { skill_id: id }), pfRpc("skills.proposals", { skill_id: id })] : [pfGet("/api/skills")];
     }
     return [];

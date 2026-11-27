@@ -7989,3 +7989,41 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - `flicker-check.py` 可以记录骨架屏所在元素（本轮的 `skprobe` 做法），并加一个多版本技能的步骤；`demo-webui.sh` 里的技能只有一个版本。
 - 其他详情页（运行详情、工作流编辑器）也可以按「首屏请求数 ≤ 5」检查一遍。
 - 一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做；`app.EnsureTask` / `tasks.create` RPC 仍只建基本字段。
+
+### 2026-11-27（续 3）：工作流编辑器首屏请求一轮发完、悬停即预取；切换步骤不再重复请求技能组合和版本（性能 / 资源浪费）
+
+这是 2026-11-27 15:50 Asia/Shanghai 的优化，接上一轮后续想法「其他详情页（运行详情、工作流编辑器）也可以按首屏请求数检查一遍」。
+
+- **问题**：
+  - 工作流编辑器先等技能、技能组合、工作流、设置 4 个请求，画出页面后才请求「运行历史」，历史区总是比页面晚一个往返；这个请求还绕过了页面缓存（`swr.on` 已关），每次进入都重新请求。
+  - 意图预取（`prefetchReqs`）只覆盖首页、任务、运行、技能，工作流库、编辑器和工作流执行页悬停时什么都不预取。
+  - 每选中一个步骤，`skillBindingEditor` 都会重新建一次，再各发一次 `/api/skill-sets` 和每个技能的 `/versions`（页面早已拿到技能组合）；版本下拉先画成只有「最新」，应答回来再重画一次。
+- **改法**：
+  - 新增 `workflowEditorPaths(id)`：编辑器首屏的 5 个请求（新建时 3 个），渲染和预取共用，缓存 key 一致。运行历史和其余请求在同一刻、经页面缓存发出，页面画好后直接用同一个 Promise 填历史。
+  - `prefetchReqs` 加 `#/workflows`（列表）、`#/workflows/<id>`（编辑器 5 个，`new` 3 个，不超过 `PF_MAX` 6）、`#/workflow-runs/<id>`。
+  - `skillBindingEditor` 接受 `options.sets`（有就不再请求技能组合）和 `options.versions`（多个编辑器实例共用的版本表）；工作流编辑器传入已有的技能组合和一张页面级版本表。任务表单、运行对话框等其他调用不传，行为不变。
+  - 没有新增任何限制，没有界面布局改动。
+- **数字**（演示实例 + 一个两步工作流，1024×655，Chromium 网络模拟 150 ms 延迟，各跑 2 次）：
+
+| 指标 | 改前 | 改后 |
+| --- | ---: | ---: |
+| 直接打开编辑器：页面可见 | 237–246 ms | 213–214 ms |
+| 直接打开编辑器：运行历史可见 | 390–393 ms | 213–214 ms |
+| 悬停 250 ms 后点击：页面可见 | 218–223 ms | 70–79 ms |
+| 悬停 250 ms 后点击：运行历史可见 | 374–375 ms | 70–79 ms |
+| 打开编辑器的请求数（不含 `/api/events`） | 8 | 7 |
+| 在画布上切换步骤 4 次的请求数 | 8 | 0 |
+| 骨架屏 / 空白帧 | 0 / 0 | 0 / 0 |
+| app.js（gzip -9） | 768.1 KB / 213.90 KB | 768.6 KB / 214.06 KB |
+
+- **测试**：新增 `TestWorkflowEditorRequests`（编辑器经 `workflowEditorPaths` 一轮发出、历史不再画完后才请求；node 里跑 `workflowEditorPaths` 的已有 / 新建两种；独立的 `skillBindingEditor` 仍自己请求技能组合和版本；传入 `sets`/`versions` 时建 3 次只请求一次版本、不请求技能组合，且下拉里显示传入的组合和版本）。`TestIntentPrefetch` 加工作流库、编辑器、新建、执行页的预取 key，`#/workflow-runs` 不预取。`go test ./...`、`go vet`（含 GOOS=windows/darwin 的 `internal/webui`）、`gofmt -l`、`check-i18n.py`、`node --check` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-27-1550-workflow-editor-prefetch.png`（1024×655，zh-CN，切换步骤 4 次后技能组合与版本下拉完整、无脚本错误；en 下同样 0 请求、无错误）。
+
+**心得**：页面画好之后才发的请求最容易同时漏掉三件事：多一个往返、绕过页面缓存、预取够不着。能并行的请求就在渲染入口一起发出，哪怕结果要等页面画好才用。
+
+**参考**：TanStack/router `packages/router-core/src/load-client.ts` 的 `preloadClientRoute`（由 `router.ts` 的 `preloadRoute` 调用；`defaultPreload: 'intent'` 时悬停即把目标路由所有 loader 一起跑掉，预加载与真正进入共用同一份匹配缓存）；只借思路，不抄代码。
+
+**后续想法**：
+- 运行详情页可以同样检查一遍首屏请求（日志、成本、会话轮次是否串行）。
+- `skillBindingEditor` 在任务表单里仍是每次打开表单各请求一次技能组合，可以走页面缓存。
+- 一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做；`app.EnsureTask` 仍只建基本字段（只在测试里用）。

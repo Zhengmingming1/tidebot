@@ -48,6 +48,7 @@ func TestIntentPrefetch(t *testing.T) {
 	cache := cut(t, src, "  var swr = { on: false", "  function apiRaw(path, opts) {")
 	rpcs := cut(t, src, "  // Pure reads:", "  function renderPlugins() {")
 	tdp := cut(t, src, "  function taskDetailPaths(id, tab) {", "  function renderTaskDetail(id, tab) {")
+	wep := cut(t, src, "  function workflowEditorPaths(id) {", "  function renderWorkflowEditor(id) {")
 	pfb := cut(t, src, "  // ---------- intent prefetch ----------", "  (function () {\n    var clear = function ()")
 	script := `
 var bad = [], calls = [], reply = {}, held = [], rerenders = 0;
@@ -67,7 +68,7 @@ function apiRaw(path, opts) {
 }
 function err(status) { var e = new Error("no " + status); e.status = status; return e; }
 var setTimeout = function (f) { return 0; }, clearTimeout = function () {};
-` + cache + rpcs + tdp + pfb + `
+` + cache + rpcs + tdp + wep + pfb + `
 function keys(h) { return prefetchReqs(h).map(function (q) { return q.key; }).join(" | "); }
 function tick() { return new Promise(function (r) { global.setImmediate(r); }); }
 (async function () {
@@ -78,7 +79,12 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   if (keys(T + "/runs").indexOf("runs?limit=50") < 0) bad.push("task runs tab: " + keys(T + "/runs"));
   if (keys("#/runs/r1") !== "/api/runs/r1") bad.push("run: " + keys("#/runs/r1"));
   if (keys("#/skills/s1") !== '/api/skills | /api/skills/s1/versions?diff=1 | rpc:skills.optimize_settings:{"skill_id":"s1"} | rpc:skills.proposals:{"skill_id":"s1"}') bad.push("skill: " + keys("#/skills/s1"));
-  ["#/runs", "#/runs?status=failed", "#/tasks?f=failing", "#/settings/general", "#/tasks/%E0%A4", "#/spend"].forEach(function (h) { if (keys(h)) bad.push("should skip " + h + ": " + keys(h)); });
+  var W = "/api/skills | /api/skill-sets | ";
+  if (keys("#/workflows") !== "/api/workflows") bad.push("workflows: " + keys("#/workflows"));
+  if (keys("#/workflows/w1") !== W + "/api/workflows/w1 | /api/settings | /api/workflow-runs?workflow_id=w1") bad.push("workflow: " + keys("#/workflows/w1"));
+  if (keys("#/workflows/new") !== W + "/api/settings") bad.push("new workflow: " + keys("#/workflows/new"));
+  if (keys("#/workflow-runs/x1") !== "/api/workflow-runs/x1") bad.push("workflow run: " + keys("#/workflow-runs/x1"));
+  ["#/runs", "#/runs?status=failed", "#/tasks?f=failing", "#/settings/general", "#/tasks/%E0%A4", "#/spend", "#/workflow-runs"].forEach(function (h) { if (keys(h)) bad.push("should skip " + h + ": " + keys(h)); });
 
   // Guards.
   state.csrf = ""; if (prefetchRoute("#/runs/r1")) bad.push("prefetched signed out"); state.csrf = "tok";

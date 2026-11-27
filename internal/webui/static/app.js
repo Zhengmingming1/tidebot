@@ -3287,7 +3287,7 @@ return{href:"#/"+x[0],label:T(x[1]),active:active===x[0]};
 }
 function skillBindingEditor(box,skills,initial,onChange,options){
 options=options||{};var source=cleanSetSource(options.source);
-var uid="ss-role-"+(++skillEditorSeq),bindings=[],versions={},loading={},sets=[];
+var uid="ss-role-"+(++skillEditorSeq),bindings=[],versions=options.versions||{},loading={},sets=options.sets||[];
 function normalize(bs){
 var out=(bs||[]).map(function(b){return{skill_id:b.skill_id,skill_name:b.skill_name||"",role:b.role||"",mode:b.mode||(b.version_id?"pinned":"follow"),version_id:b.version_id||""};});
 if(out.length&&!out.some(function(b){return b.role==="primary";}))out[0].role="primary";
@@ -3323,7 +3323,7 @@ api("/api/skills/"+enc(b.skill_id)+"/versions").then(function(v){versions[b.skil
 });
 }
 bindings=normalize(initial);paint();
-api("/api/skill-sets").then(function(v){sets=v||[];if(document.contains(box))paint();}).catch(function(){});
+if(!options.sets)api("/api/skill-sets").then(function(v){sets=v||[];if(document.contains(box))paint();}).catch(function(){});
 return{value:value,source:function(){return cleanSetSource(source);},set:function(bs,src){bindings=normalize(bs);source=cleanSetSource(src);changed();}};
 }
 function cleanSetSource(source){
@@ -3568,11 +3568,18 @@ api('/api/workflows/'+enc(id)+'/run',{method:'POST',body:{input:f.input.value,pr
 });
 }).catch(fail);
 }
+function workflowEditorPaths(id){
+var p=['/api/skills','/api/skill-sets'];
+if(!id||id==='new')return p.concat(['','/api/settings','']);
+return p.concat(['/api/workflows/'+enc(id),'/api/settings','/api/workflow-runs?workflow_id='+enc(id)]);
+}
 function renderWorkflowEditor(id){
 var routeKey=location.hash,creating=!id||id==='new';
-return Promise.all([api('/api/skills'),api('/api/skill-sets'),creating?Promise.resolve(null):api('/api/workflows/'+enc(id)),api('/api/settings').catch(function(){return{};})]).then(function(r){
+var paths=workflowEditorPaths(id),hist=creating?null:api(paths[4]);
+if(hist)hist.catch(function(){});
+return Promise.all([api(paths[0]),api(paths[1]),creating?Promise.resolve(null):api(paths[2]),api(paths[3]).catch(function(){return{};})]).then(function(r){
 if(location.hash!==routeKey||workflowDraftGuard&&workflowDraftGuard.dirty())return;
-var skills=r[0],sets=r[1],saved=r[2],def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:0,run_mode:'exec',workspace_dir:'',nodes:[]},st=r[3]||{},cur=(st.fx||{}).display||state.currency||'USD';
+var skills=r[0],sets=r[1],saved=r[2],skillVersions={},def=saved?JSON.parse(JSON.stringify(saved.definition)):{name:'',description:'',max_parallel:2,timeout_minutes:0,run_mode:'exec',workspace_dir:'',nodes:[]},st=r[3]||{},cur=(st.fx||{}).display||state.currency||'USD';
 if(!def.run_mode)def.run_mode='read';if(!def.workspace_dir)def.workspace_dir='';if(!def.budget){def.budget=0;delete def.budget_currency;}
 if(def.nodes.some(function(n){return!n.position;}))wfArrange(def);
 var selected=def.nodes.length?def.nodes[0].id:'',zoom=0.85,drag=null,link=null,baseline=JSON.stringify(def);
@@ -3612,7 +3619,7 @@ $('#wf-context-enabled').onchange=function(){if(this.checked)n.context={mode:'fu
 if(n.context){$('#wf-context-budget').oninput=function(){n.context.budget=n.context.budget||{};n.context.budget.max_input_tokens=+this.value;};$('#wf-context-mode').onchange=function(){n.context.mode=this.value;};$('#wf-context-limit').oninput=function(){n.context.max_tokens=+this.value;};}
 $('#wf-retry-max').oninput=function(){n.retry_max=+this.value;};
 $('#wf-retry-backoff').oninput=function(){n.retry_backoff_ms=+this.value;};
-skillBindingEditor($('#wf-bindings'),skills,n.skill_bindings||[],function(bs,source){n.skill_bindings=bs;n.skill_set_source=source;},{source:n.skill_set_source});
+skillBindingEditor($('#wf-bindings'),skills,n.skill_bindings||[],function(bs,source){n.skill_bindings=bs;n.skill_set_source=source;},{source:n.skill_set_source,sets:sets,versions:skillVersions});
 var ta=$('#wf-node-prompt');ta.oninput=function(){n.prompt=ta.value;};
 $('#wf-insert-output').onchange=function(){if(!this.value)return;ta.setRangeText(this.value,ta.selectionStart,ta.selectionEnd,'end');n.prompt=ta.value;ta.focus();this.value='';};
 }else['source','operator','value'].forEach(function(k){$('#wf-condition-'+k).oninput=function(){n.condition[k]=this.value;};});
@@ -3646,7 +3653,7 @@ def.nodes=[step('prepare','wf.sample_prepare','{{input}}',[]),{id:'gate',name:T(
 $('#wf-check').onclick=function(){dependencyCheck({kind:'workflow_draft',definition:JSON.parse(JSON.stringify(read()))});};
 function save(e){if(e)e.preventDefault();if(!f.reportValidity())return;var b=$('#wf-save'),value=JSON.parse(JSON.stringify(read())),wasCreating=creating;b.disabled=true;error('');api(creating?'/api/workflows':'/api/workflows/'+enc(id),{method:creating?'POST':'PUT',body:creating?value:{expected_version:saved.version,definition:value}}).then(function(w){if(!document.contains(f))return;saved=w;baseline=JSON.stringify(value);toast(T('wf.saved'));if(wasCreating){creating=false;id=w.id;if(JSON.stringify(read())===baseline)location.hash='#/workflows/'+enc(w.id);else{history.replaceState(null,'','#/workflows/'+enc(w.id));lastHash=location.hash;}}else if(!$('#wf-run')&&JSON.stringify(read())===baseline){refresh();}}).catch(function(e){if(document.contains(f)){var pr=e.data&&e.data.problem;error(pr?T('rn.ws_'+pr+'_tip'):e.message);}}).finally(function(){b.disabled=false;});}
 f.onsubmit=save;$('#wf-save').onclick=save;
-if(!creating){$('#wf-sched').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first_sched'));return;}wfSchedule(saved);};$('#wf-run').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first'));return;}workflowRunModal(id);};$('#wf-delete').onclick=function(){confirmDialog({title:T('wf.delete_title'),body:T('wf.delete_hint'),ok:T('btn.delete'),danger:true}).then(function(yes){if(yes)api('/api/workflows/'+enc(id),{method:'DELETE'}).then(function(){location.hash='#/workflows';}).catch(fail);});};api('/api/workflow-runs?workflow_id='+enc(id)).then(function(rs){var h=document.contains(f)?$('#wf-history'):null;if(h)h.innerHTML=rs.length?'<ul class="wf-history">'+rs.map(function(x){return '<li><a href="#/workflow-runs/'+enc(x.id)+'">'+esc(fmtTime(x.created_at))+'</a><span class="tag">v'+esc(x.workflow_version)+'</span>'+wfRunTask(x)+wfStatus(x.status)+'</li>';}).join('')+'</ul>':'<p class="muted">'+esc(T('wf.no_runs'))+'</p>';}).catch(fail);}
+if(!creating){$('#wf-sched').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first_sched'));return;}wfSchedule(saved);};$('#wf-run').onclick=function(){if(JSON.stringify(read())!==baseline){error(T('wf.save_first'));return;}workflowRunModal(id);};$('#wf-delete').onclick=function(){confirmDialog({title:T('wf.delete_title'),body:T('wf.delete_hint'),ok:T('btn.delete'),danger:true}).then(function(yes){if(yes)api('/api/workflows/'+enc(id),{method:'DELETE'}).then(function(){location.hash='#/workflows';}).catch(fail);});};hist.then(function(rs){var h=document.contains(f)?$('#wf-history'):null;if(h)h.innerHTML=rs.length?'<ul class="wf-history">'+rs.map(function(x){return '<li><a href="#/workflow-runs/'+enc(x.id)+'">'+esc(fmtTime(x.created_at))+'</a><span class="tag">v'+esc(x.workflow_version)+'</span>'+wfRunTask(x)+wfStatus(x.status)+'</li>';}).join('')+'</ul>':'<p class="muted">'+esc(T('wf.no_runs'))+'</p>';}).catch(fail);}
 baseline=JSON.stringify(read());checkWs();
 workflowDraftGuard={dirty:function(){return document.contains(f)&&JSON.stringify(read())!==baseline;}};
 canvas();inspect();
@@ -9876,6 +9883,8 @@ switch(parts[0]){
 case undefined:return[pfGet("/api/overview"),pfGet("/api/dashboard")];
 case "tasks":return id?taskDetailPaths(id,parts[2]||"overview").map(pfGet):[pfGet("/api/tasks")];
 case "runs":return id?[pfGet("/api/runs/"+enc(id))]:[];
+case "workflows":return(id?workflowEditorPaths(id):["/api/workflows"]).filter(Boolean).map(pfGet);
+case "workflow-runs":return id?[pfGet("/api/workflow-runs/"+enc(id))]:[];
 case "skills":return id?[pfGet("/api/skills"),pfGet(skillVersionsPath(id,null)),pfRpc("skills.optimize_settings",{skill_id:id}),pfRpc("skills.proposals",{skill_id:id})]:[pfGet("/api/skills")];
 }
 return[];
