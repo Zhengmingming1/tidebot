@@ -77,7 +77,7 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   if (keys(T) !== [tid, tid + "/amendments", tid + "/versions", tid + "/runs?limit=6", tid + "/workflow-runs?limit=6"].join(" | ")) bad.push("task: " + keys(T));
   if (keys(T + "/runs").indexOf("runs?limit=50") < 0) bad.push("task runs tab: " + keys(T + "/runs"));
   if (keys("#/runs/r1") !== "/api/runs/r1") bad.push("run: " + keys("#/runs/r1"));
-  if (keys("#/skills/s1") !== '/api/skills | /api/skills/s1/versions | rpc:skills.optimize_settings:{"skill_id":"s1"} | rpc:skills.proposals:{"skill_id":"s1"} | rpc:skills.compare:{"skill_id":"s1"}') bad.push("skill: " + keys("#/skills/s1"));
+  if (keys("#/skills/s1") !== '/api/skills | /api/skills/s1/versions?diff=1 | rpc:skills.optimize_settings:{"skill_id":"s1"} | rpc:skills.proposals:{"skill_id":"s1"}') bad.push("skill: " + keys("#/skills/s1"));
   ["#/runs", "#/runs?status=failed", "#/tasks?f=failing", "#/settings/general", "#/tasks/%E0%A4", "#/spend"].forEach(function (h) { if (keys(h)) bad.push("should skip " + h + ": " + keys(h)); });
 
   // Guards.
@@ -104,10 +104,10 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   if (calls.join() !== "GET " + tid) bad.push("stale prefetch not revalidated: " + calls);
 
   // A 4xx is kept for a moment (no second ask); a 5xx is not.
-  reply["/api/rpc/skills.compare"] = err(400); reply["/api/runs/r5"] = err(500);
+  reply["/api/rpc/skills.proposals"] = err(400); reply["/api/runs/r5"] = err(500);
   prefetchRoute("#/skills/s1"); prefetchRoute("#/runs/r5"); await tick(); await tick();
   calls = []; swr.on = true;
-  var r1 = await rpc("skills.compare", { skill_id: "s1" }).then(function () { return "ok"; }, function (e) { return e.status; });
+  var r1 = await rpc("skills.proposals", { skill_id: "s1" }).then(function () { return "ok"; }, function (e) { return e.status; });
   var r2 = await api("/api/runs/r5").then(function () { return "ok"; }, function (e) { return e.status; });
   swr.on = false;
   if (r1 !== 400 || r2 !== 500) bad.push("refusal results " + r1 + " " + r2);

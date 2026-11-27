@@ -7,6 +7,14 @@
   function pfGet(path) { return { key: path, run: function () { return apiRaw(path, { quiet: true }); } }; }
   function pfRpc(method, params) { return { key: rpcKey(method, params), run: function () { return apiRaw("/api/rpc/" + method, { method: "POST", body: params || {}, quiet: true, read: true }); } }; }
   function pfDecode(x) { try { return decodeURIComponent(x); } catch (e) { return ""; } }
+  // skillVersionsPath: the skill page's version list (here so the prefetch asks for the same one); on the Changes tab it also carries the
+  // opening comparison (the pair the address names, else current against its parent).
+  function skillVersionsPath(id, params) {
+    var p = "/api/skills/" + enc(id) + "/versions";
+    if (params && params.get("tab") === "files") return p;
+    var a = params && params.get("a"), b = params && params.get("b");
+    return p + "?diff=1" + (a && b ? "&a=" + enc(a) + "&b=" + enc(b) : "");
+  }
   // Same requests the page's render starts with; routes with filters in the address are left out.
   function prefetchReqs(hash) {
     var h = String(hash || "").replace(/^#\/?/, ""), qi = h.indexOf("?");
@@ -18,7 +26,7 @@
       case undefined: return [pfGet("/api/overview"), pfGet("/api/dashboard")];
       case "tasks": return id ? taskDetailPaths(id, parts[2] || "overview").map(pfGet) : [pfGet("/api/tasks")];
       case "runs": return id ? [pfGet("/api/runs/" + enc(id))] : [];
-      case "skills": return id ? [pfGet("/api/skills"), pfGet("/api/skills/" + enc(id) + "/versions"), pfRpc("skills.optimize_settings", { skill_id: id }), pfRpc("skills.proposals", { skill_id: id }), pfRpc("skills.compare", { skill_id: id })] : [pfGet("/api/skills")];
+      case "skills": return id ? [pfGet("/api/skills"), pfGet(skillVersionsPath(id, null)), pfRpc("skills.optimize_settings", { skill_id: id }), pfRpc("skills.proposals", { skill_id: id })] : [pfGet("/api/skills")];
     }
     return [];
   }

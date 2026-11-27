@@ -90,7 +90,11 @@ func (s *Server) handleSkillSub(w http.ResponseWriter, r *http.Request) {
 		for _, v := range vers {
 			out = append(out, versionDTO{ID: v.ID, No: v.VersionNo, ParentID: v.ParentVersionID.String, Source: v.Source, Message: v.Message.String, CreatedAt: v.CreatedAt})
 		}
-		writeJSON(w, 200, map[string]any{"versions": out, "current": cur.String, "canary": can.String})
+		res := map[string]any{"versions": out, "current": cur.String, "canary": can.String}
+		if r.URL.Query().Get("diff") == "1" {
+			res["diff"] = s.openingSkillDiff(r, vers, cur.String)
+		}
+		writeJSON(w, 200, res)
 	case "diff":
 		s.handleSkillDiff(w, r, id)
 	case "files":

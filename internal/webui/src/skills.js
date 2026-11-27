@@ -28,6 +28,8 @@
     }).catch(function (e) { if (btn) btn.disabled = false; fail(e); });
   }
   // ---------- skill detail: version tree, diff, optimizer ----------
+  // diffHtml: one comparison as the diff pane shows it (a version against itself has nothing to show).
+  function diffHtml(d) { return d.a === d.b ? '<p class="muted pad">' + esc(T("diff.same_ver")) + "</p>" : diffView(d); }
   function diffView(d) {
     var files = (d.files || []).filter(function (f) { return f.status !== "same"; });
     if (!files.length) return '<p class="muted pad">' + esc(T("diff.identical")) + "</p>";
@@ -47,7 +49,13 @@
   }
   function renderSkillDetail(id, params) {
     var base = "/api/skills/" + enc(id);
-    return Promise.all([api("/api/skills"), api(base + "/versions"), rpcRead("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), rpc("skills.proposals", { skill_id: id }).catch(function () { return []; }), rpc("skills.compare", { skill_id: id }).catch(function () { return null; }), api(base + "/repository-source").catch(function () { return null; })]).then(function (r) {
+    var vp = api(skillVersionsPath(id, params)), pp = rpc("skills.proposals", { skill_id: id }).catch(function () { return []; });
+    // The canary comparison only exists while a canary runs: asking for it otherwise was a refused
+    // request on every visit, and one too many for the browser's 6 connections per host.
+    var cp = Promise.all([vp, pp]).then(function (x) {
+      return x[0].canary || (x[1] || []).some(function (p) { return p.status === "canary"; }) ? rpc("skills.compare", { skill_id: id }).catch(function () { return null; }) : null;
+    }, function () { return null; });
+    return Promise.all([api("/api/skills"), vp, rpcRead("skills.optimize_settings", { skill_id: id }).catch(function () { return null; }), pp, cp, api(base + "/repository-source").catch(function () { return null; })]).then(function (r) {
       var sk = (r[0] || []).filter(function (x) { return x.id === id; })[0];
       if (!sk) throw new Error(T("sk.not_found"));
       var vers = r[1], oset = r[2] || { mode: "off" }, props = r[3] || [], cmp = r[4];
@@ -58,6 +66,8 @@
       var a = params.get("a") && byId[params.get("a")] ? params.get("a") : ((byId[b] && byId[b].parent_id && byId[byId[b].parent_id]) ? byId[b].parent_id : (list[1] || cur).id);
       var tab = params.get("tab") === "files" ? "files" : "diff";
       var fv = params.get("v") && byId[params.get("v")] ? params.get("v") : cur.id, ff = params.get("f") || "";
+      // The opening comparison came with the version list (same pair as picked above).
+      var firstDiff = tab === "diff" && vers.diff && vers.diff.a === a && vers.diff.b === b ? vers.diff : null;
       var vopt = function (sel) { return list.map(function (v) { return opt(v.id, "v" + v.no + (v.id === vers.current ? " · " + T("ver.current") : v.id === vers.canary ? " · " + T("ver.canary") : ""), v.id === sel); }).join(""); };
       var tree = '<ul class="vlist">' + list.map(function (v) {
         var isCur = v.id === vers.current, isCan = v.id === vers.canary;
@@ -85,7 +95,7 @@
       mount('<div class="grid g-detail">' +
         '<section class="card"><div class="task-head"><div class="grow-col"><div class="td-title"><h1>' + esc(sk.name) + "</h1>" + idChip(T("sk.id"), sk.id) + "</div>" + (sk.description ? "<p>" + esc(sk.description) + "</p>" : "") + '<div class="chips"><span class="chip">' + ic("branch", "sm") + esc(T("ver.n_current", { n: sk.version_no })) + '</span><span class="chip">' + esc(plural(sk.used_by, "tasks.count_one", "tasks.count_many")) + '</span></div></div><div class="row-actions"><button class="btn sm primary" id="sk-chat" data-tip="' + esc(T("sk.chat_tip", { name: sk.name })) + '">' + ic("chat", "sm") + esc(T("sk.chat")) + '</button><button class="btn sm" id="sk-run">' + ic("play", "sm") + esc(T("btn.run")) + '</button><button class="btn sm" id="sk-manifest">' + esc(T("sm.title")) + '</button><button class="btn sm" id="sk-export" data-tip="' + esc(T("sk.export_tip", { n: sk.version_no })) + '">' + ic("download", "sm") + esc(T("sk.export")) + "</button></div></div>" +
         '<nav class="tabs sk-tabs" role="tablist" aria-label="' + esc(sk.name) + '">' + [["diff", T("sk.tab_diff")], ["files", T("sk.tab_files")]].map(function (x) { var on = x[0] === tab; return '<button type="button" role="tab" data-sktab="' + x[0] + '" class="' + (on ? "active" : "") + '" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' + esc(x[1]) + "</button>"; }).join("") + "</nav>" +
-        '<div id="pane-diff" class="sk-pane' + (tab === "diff" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + skeleton("list") + "</div></div>" +
+        '<div id="pane-diff" class="sk-pane' + (tab === "diff" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar"><label>' + esc(T("diff.from")) + ' <select id="d-a">' + vopt(a) + '</select></label><span aria-hidden="true">→</span><label>' + esc(T("diff.to")) + ' <select id="d-b">' + vopt(b) + '</select></label><button class="btn sm ghost" id="d-swap" title="' + esc(T("diff.swap")) + '">⇄</button><label class="check"><input type="checkbox" id="d-all"> ' + esc(T("diff.full")) + '</label></div><div id="diff" class="diff-host">' + (firstDiff ? diffHtml(firstDiff) : skeleton("list")) + "</div></div>" +
         '<div id="pane-files" class="sk-pane' + (tab === "files" ? "" : " hidden") + '" role="tabpanel"><div class="diff-bar fb-bar"><label>' + esc(T("fb.version")) + ' <select id="fb-v">' + vopt(fv) + '</select></label><small class="muted" id="fb-sum"></small></div><div class="fb"><div class="fb-tree" id="fb-tree" role="tree" aria-label="' + esc(T("fb.tree")) + '">' + skeleton("list") + '</div><div class="fb-view" id="fb-view"></div></div></div></section>' +
         '<div class="stack">' + repositorySourceHtml(r[5]) + '<section class="card"><div class="card-head"><span class="ico">' + ic("branch") + "</span><h3>" + esc(T("ver.tree")) + "</h3></div>" + tree + '<p class="hint mt">' + ic("info", "sm") + esc(T("ver.rb_pointer")) + "</p></section>" +
         '<section class="card sk-adv"><details id="sk-adv"' + (oset.mode !== "off" || props.some(function (p) { return p.status === "pending" || p.status === "canary"; }) ? " open" : "") + '><summary class="card-head"><span class="ico">' + ic("sparkle") + "</span><h3>" + esc(T("sk.advanced")) + '</h3><span class="muted sm">' + esc(T("opt.title") + " · " + (modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[1]) + '</span></summary><div class="seg" id="opt-mode" role="radiogroup">' + modes.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (oset.mode === m[0]) + '" data-mode="' + m[0] + '" class="' + (oset.mode === m[0] ? "active" : "") + '">' + esc(m[1]) + "</button>"; }).join("") + '</div><p class="hint" id="opt-sub">' + esc((modes.filter(function (m) { return m[0] === oset.mode; })[0] || modes[0])[2]) + '</p><p class="notice">' + ic("shield", "sm") + esc(T("opt.never_auto")) + "</p>" +
@@ -176,11 +186,17 @@
         openFile(p);
         if (node) node.scrollIntoView({ block: "nearest" });
       });
+      // dgen drops a comparison that arrives after a newer one was asked for; the previous diff
+      // stays on screen (dimmed) until the new one is in.
+      var dgen = 0;
       var load = function () {
-        var qa = $("#d-a").value, qb = $("#d-b").value;
+        var qa = $("#d-a").value, qb = $("#d-b").value, host = $("#diff"), g = ++dgen;
         diffLoaded = true; syncHash();
-        if (qa === qb) { $("#diff").innerHTML = '<p class="muted pad">' + esc(T("diff.same_ver")) + "</p>"; return; }
-        api(base + "/diff?a=" + enc(qa) + "&b=" + enc(qb) + ($("#d-all").checked ? "&ctx=all" : "")).then(function (d) { $("#diff").innerHTML = diffView(d); }).catch(function (e) { $("#diff").innerHTML = errorState(e.message); });
+        if (qa === qb) { host.classList.remove("busy"); host.innerHTML = diffHtml({ a: qa, b: qb }); return; }
+        if (!host.querySelector(".skel")) host.classList.add("busy");
+        api(base + "/diff?a=" + enc(qa) + "&b=" + enc(qb) + ($("#d-all").checked ? "&ctx=all" : "")).then(function (d) {
+          if (g === dgen) { host.classList.remove("busy"); host.innerHTML = diffHtml(d); }
+        }).catch(function (e) { if (g === dgen) { host.classList.remove("busy"); host.innerHTML = errorState(e.message); } });
       };
       ["#d-a", "#d-b", "#d-all"].forEach(function (s) { $(s).addEventListener("change", load); });
       $("#d-swap").addEventListener("click", function () { var x = $("#d-a").value; $("#d-a").value = $("#d-b").value; $("#d-b").value = x; load(); });
@@ -235,7 +251,7 @@
         if (d) toggleDir(d); else if (f && f.getAttribute("data-file") !== ff) openFile(f.getAttribute("data-file"));
       });
       ftree.addEventListener("keydown", function (e) { treeKeys(ftree, e); });
-      if (tab === "files") loadTree(); else load();
+      if (tab === "files") loadTree(); else if (firstDiff) { diffLoaded = true; syncHash(); } else load();
     });
   }
   // pickSkillFile: the file to show first — SKILL.md at the top, else the shallowest SKILL.md, else the first file.

@@ -80,15 +80,15 @@ async function timedRead(request) {
   swr.on = false;
 
   // Exercise real skill-prefetch RPCs, including the caller that used to omit read:true.
-  assert.equal(prefetchRoute("#/skills/s1"), 5);
+  assert.equal(prefetchRoute("#/skills/s1"), 4);
   var prefetched = Object.values(swr.pending);
-  assert.equal(pf.busy, 5); assert.equal(timers.size, 5);
+  assert.equal(pf.busy, 4); assert.equal(timers.size, 4);
   for (var timer of Array.from(timers.values())) { assert.equal(timer.ms, 30000); timer.fn(); }
   var results = await Promise.allSettled(prefetched);
   assert(results.every(r => r.status === "rejected" && r.reason.timeout));
   assert.equal(pf.busy, 0); assert.equal(Object.keys(swr.pending).length, 0);
   assert.equal(timers.size, 0); assert.equal(Object.keys(swr.cache).length, 0);
-  assert.equal(prefetchRoute("#/skills/s1"), 5, "retry can refill prefetch slots");
+  assert.equal(prefetchRoute("#/skills/s1"), 4, "retry can refill prefetch slots");
   prefetched = Object.values(swr.pending);
   for (var timer of Array.from(timers.values())) timer.fn();
   await Promise.allSettled(prefetched);

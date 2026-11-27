@@ -230,15 +230,26 @@ func (s *Server) handleSkillDiff(w http.ResponseWriter, r *http.Request, skillID
 	if q.Get("ctx") == "all" {
 		ctx = 1 << 30
 	}
-	fa, err := s.deps.Skills.Files(r.Context(), a)
+	d, err := s.skillDiff(r, a, b, ctx)
 	if err != nil {
 		writeErr(w, 500, "cannot read version files")
 		return
 	}
+	writeJSON(w, 200, d)
+}
+
+// skillDiff compares two versions already checked to belong to the skill.
+func (s *Server) skillDiff(r *http.Request, a, b string, ctx int) (map[string]any, error) {
+	if a == b { // nothing to read: the page says "same version"
+		return map[string]any{"a": a, "b": b, "files": []fileDiff{}, "added": 0, "removed": 0}, nil
+	}
+	fa, err := s.deps.Skills.Files(r.Context(), a)
+	if err != nil {
+		return nil, err
+	}
 	fb, err := s.deps.Skills.Files(r.Context(), b)
 	if err != nil {
-		writeErr(w, 500, "cannot read version files")
-		return
+		return nil, err
 	}
 	files := DiffFiles(fa, fb, ctx)
 	add, rem := 0, 0
@@ -246,7 +257,44 @@ func (s *Server) handleSkillDiff(w http.ResponseWriter, r *http.Request, skillID
 		add += f.Added
 		rem += f.Removed
 	}
-	writeJSON(w, 200, map[string]any{"a": a, "b": b, "files": files, "added": add, "removed": rem})
+	return map[string]any{"a": a, "b": b, "files": files, "added": add, "removed": rem}, nil
+}
+
+// openingSkillDiff is the comparison the skill page opens with, sent along with
+// /versions?diff=1 so the page needs no second round trip: the pair the link names
+// (a, b) when both are versions of the skill, else the current version against its
+// parent (or, without a known parent, the version before the newest). Same choice as
+// renderSkillDetail makes from the version list. nil when it cannot be built; the page
+// then asks /diff itself.
+func (s *Server) openingSkillDiff(r *http.Request, vers []version.Version, current string) map[string]any {
+	if len(vers) == 0 {
+		return nil
+	}
+	byID := make(map[string]version.Version, len(vers))
+	for _, v := range vers {
+		byID[v.ID] = v
+	}
+	q := r.URL.Query()
+	a, b := q.Get("a"), q.Get("b")
+	_, okA := byID[a]
+	_, okB := byID[b]
+	if !okA || !okB {
+		cur, ok := byID[current]
+		if !ok {
+			cur = vers[len(vers)-1] // ordered by version_no
+		}
+		b, a = cur.ID, cur.ID
+		if _, ok := byID[cur.ParentVersionID.String]; ok {
+			a = cur.ParentVersionID.String
+		} else if len(vers) > 1 {
+			a = vers[len(vers)-2].ID
+		}
+	}
+	d, err := s.skillDiff(r, a, b, 3)
+	if err != nil {
+		return nil
+	}
+	return d
 }
 
 // GET /api/skills/<id>/files?v=<version> lists paths and sizes (no content).

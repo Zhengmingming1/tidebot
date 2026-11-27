@@ -1684,7 +1684,7 @@ td>.pill+.pw-pill{margin-inline-start:8px;}
 .fb-node.active .i{color:var(--accent);}
 .fb-node.key:not(.active){color:var(--text);}
 .fb-view{display:flex;flex-direction:column;min-width:0;min-height:0;transition:opacity var(--dur,.15s);}
-.fb-view.busy{opacity:.55;}
+.fb-view.busy,.diff-host.busy{opacity:.55;}
 .fb-head{display:flex;align-items:center;gap:var(--s1);height:40px;padding:0 12px;border-bottom:1px solid var(--border);flex:none;}
 .fb-head>.i{color:var(--text-3);flex:none;}
 .fb-path{background:none;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
