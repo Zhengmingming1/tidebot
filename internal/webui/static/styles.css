@@ -3008,6 +3008,8 @@ button.pill.pl-sb{cursor:pointer;border:0;font:inherit;}
 .rc-tag.rc-effort select:disabled{cursor:default;}
 .cs-draft{display:flex;align-items:center;gap:8px;flex:none;min-width:0;padding:4px 4px 4px 12px;border:1px solid var(--border);border-radius:8px;background:var(--accent-50);}
 .cs-draft[hidden]{display:none;}
+.cs-drafts{display:flex;flex-direction:column;gap:4px;flex:none;min-width:0;}
+.cs-drafts[hidden]{display:none;}
 .cs-draft-lbl{display:inline-flex;align-items:center;gap:6px;min-width:0;font-size:13px;cursor:default;}
 .cs-draft-lbl>.i{color:var(--hue-violet);flex:none;}
 .cs-draft-lbl strong{min-width:0;max-width:220px;font-weight:600;}

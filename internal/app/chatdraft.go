@@ -22,43 +22,139 @@ import (
 	"github.com/Zhengmingming1/tidebot/internal/webui"
 )
 
-// A session's skill draft (P3, see webui/chat_drafts.go). The draft is a copy
+// A session's skill drafts (P3, see webui/chat_drafts.go). A draft is a copy
 // of one skill version's files in the session's own folder
-// (<data>/chat-sessions/<id>/draft), never in a skill's stored version or any
-// folder Claude Code reads on its own. While it exists every turn stages it in
-// place of the version it started from; in an edit or command session the
-// draft folder is an --add-dir, so the model can change it. Saving stores the
-// files as a new version (a "session" proposal: current is not moved);
-// adopting moves current to it and only ever happens on the owner's click.
-// The state (which skill, the version it started from, what was saved and
-// adopted) is a small JSON file next to the draft; deleting the session
-// removes both.
+// (<data>/chat-sessions/<id>/drafts/<skill>), never in a skill's stored
+// version or any folder Claude Code reads on its own. A session may tune
+// several of its skills at once, one draft per skill. While a draft exists
+// every turn stages it in place of the version it started from; in an edit or
+// command session each draft folder is an --add-dir, so the model can change
+// it. Saving stores the files as a new version (a "session" proposal: current
+// is not moved); adopting moves current to it and only ever happens on the
+// owner's click. The state (which skills, the versions they started from,
+// what was saved and adopted) is a small JSON file next to the drafts;
+// deleting the session removes both.
+
+// chatDraftEntry is one skill's draft.
+type chatDraftEntry struct {
+	SkillID        string `json:"skill_id"`
+	BaseVersionID  string `json:"base_version_id,omitempty"`
+	ProposalID     string `json:"proposal_id,omitempty"`
+	SavedVersionID string `json:"saved_version_id,omitempty"`
+	SavedHash      string `json:"saved_hash,omitempty"`
+	// Dir: the draft folder, relative to the session folder ("draft" for a
+	// draft started before a session could hold several).
+	Dir string `json:"dir"`
+}
 
 type chatDraftState struct {
+	// The single draft of an older draft.json (read only; see loadChatDraft).
 	SkillID        string `json:"skill_id,omitempty"`
 	BaseVersionID  string `json:"base_version_id,omitempty"`
 	ProposalID     string `json:"proposal_id,omitempty"`
 	SavedVersionID string `json:"saved_version_id,omitempty"`
 	SavedHash      string `json:"saved_hash,omitempty"`
+	// Drafts in the order they were started, at most one per skill.
+	Drafts []chatDraftEntry `json:"drafts,omitempty"`
 	// Adopted: skill id → the version adopted in this session.
 	Adopted map[string]string `json:"adopted,omitempty"`
+}
+
+// draft returns the index of skillID's draft, or -1.
+func (st *chatDraftState) draft(skillID string) int {
+	for i := range st.Drafts {
+		if st.Drafts[i].SkillID == skillID {
+			return i
+		}
+	}
+	return -1
+}
+
+// pick is the draft a save / adopt / discard is about: skillID's, or with
+// skillID "" the only one.
+func (st *chatDraftState) pick(skillID string) (int, error) {
+	if skillID == "" {
+		switch len(st.Drafts) {
+		case 0:
+			return -1, webui.ErrChatDraftNone
+		case 1:
+			return 0, nil
+		default:
+			return -1, webui.ErrChatDraftWhich
+		}
+	}
+	if i := st.draft(skillID); i >= 0 {
+		return i, nil
+	}
+	return -1, webui.ErrChatDraftNone
 }
 
 // chatDraftMu serializes draft changes (start, save, adopt, discard).
 var chatDraftMu sync.Mutex
 
-func (a *App) chatDraftDir(sid string) string {
-	return filepath.Join(a.chatSessionsDir(), safeChatID(sid), "draft")
+func (a *App) chatSessionDir(sid string) string {
+	return filepath.Join(a.chatSessionsDir(), safeChatID(sid))
+}
+
+// chatDraftsDir holds a session's drafts (one folder per skill).
+func (a *App) chatDraftsDir(sid string) string {
+	return filepath.Join(a.chatSessionDir(sid), "drafts")
+}
+
+// chatLegacyDraftDir is where the one draft of an older session lives.
+func (a *App) chatLegacyDraftDir(sid string) string {
+	return filepath.Join(a.chatSessionDir(sid), "draft")
+}
+
+// chatDraftDir is the folder of skillID's draft ("" when it has none).
+func (a *App) chatDraftDir(sid, skillID string) string {
+	st := a.loadChatDraft(sid)
+	if i := st.draft(skillID); i >= 0 {
+		return a.chatDraftEntryDir(sid, st.Drafts[i])
+	}
+	return ""
+}
+
+func (a *App) chatDraftEntryDir(sid string, e chatDraftEntry) string {
+	rel := filepath.FromSlash(e.Dir)
+	if rel == "" || !filepath.IsLocal(rel) {
+		rel = filepath.Join("drafts", safeChatID(e.SkillID))
+	}
+	return filepath.Join(a.chatSessionDir(sid), rel)
+}
+
+// newDraftDir picks a free folder name for skillID's draft (skill ids that
+// differ only in characters safeChatID replaces get a suffix).
+func newDraftDir(st chatDraftState, skillID string) string {
+	used := map[string]bool{}
+	for _, e := range st.Drafts {
+		used[e.Dir] = true
+	}
+	base := "drafts/" + safeChatID(skillID)
+	dir := base
+	for n := 2; used[dir]; n++ {
+		dir = fmt.Sprintf("%s-%d", base, n)
+	}
+	return dir
 }
 
 func (a *App) chatDraftStatePath(sid string) string {
-	return filepath.Join(a.chatSessionsDir(), safeChatID(sid), "draft.json")
+	return filepath.Join(a.chatSessionDir(sid), "draft.json")
 }
 
+// loadChatDraft reads draft.json; an older file's single draft (in the
+// "draft" folder) comes back as the first of Drafts.
 func (a *App) loadChatDraft(sid string) chatDraftState {
 	var st chatDraftState
 	if b, err := os.ReadFile(a.chatDraftStatePath(sid)); err == nil {
 		_ = json.Unmarshal(b, &st)
+	}
+	if st.SkillID != "" {
+		if st.draft(st.SkillID) < 0 {
+			st.Drafts = append([]chatDraftEntry{{SkillID: st.SkillID, BaseVersionID: st.BaseVersionID, ProposalID: st.ProposalID,
+				SavedVersionID: st.SavedVersionID, SavedHash: st.SavedHash, Dir: "draft"}}, st.Drafts...)
+		}
+		st.SkillID, st.BaseVersionID, st.ProposalID, st.SavedVersionID, st.SavedHash = "", "", "", "", ""
 	}
 	return st
 }
@@ -76,9 +172,9 @@ func (a *App) storeChatDraft(sid string, st chatDraftState) error {
 	return os.Rename(tmp, p)
 }
 
-// chatDraftFiles reads the draft folder (the same limits as a skill import).
-func (a *App) chatDraftFiles(sid string) (map[string][]byte, error) {
-	return skillstore.ReadTree(a.chatDraftDir(sid))
+// readDraftFiles reads a draft folder (the same limits as a skill import).
+func readDraftFiles(dir string) (map[string][]byte, error) {
+	return skillstore.ReadTree(dir)
 }
 
 // skillFilesHash fingerprints a skill's files (paths and contents).
@@ -96,10 +192,9 @@ func skillFilesHash(files map[string][]byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// writeChatDraft replaces the draft folder with files (paths checked like a
+// writeDraftFiles replaces a draft folder with files (paths checked like a
 // stage's; written through an os.Root so nothing lands outside it).
-func (a *App) writeChatDraft(sid string, files map[string][]byte) error {
-	dir := a.chatDraftDir(sid)
+func writeDraftFiles(dir string, files map[string][]byte) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
@@ -150,17 +245,18 @@ func (a *App) draftSessionIdle(ctx context.Context, sid string) (chatRow, error)
 	return c, nil
 }
 
-// ChatDraft is the session's draft as the page shows it.
+// ChatDraft is the session's drafts as the page shows them.
 func (a *App) ChatDraft(ctx context.Context, sid string) (webui.ChatDraft, error) {
 	c, err := a.chatSession(ctx, sid)
 	if err != nil {
 		return webui.ChatDraft{}, err
 	}
-	return a.chatDraftView(ctx, c, a.loadChatDraft(sid)), nil
+	return a.chatDraftView(ctx, c, a.loadChatDraft(sid), ""), nil
 }
 
-func (a *App) chatDraftView(ctx context.Context, c chatRow, st chatDraftState) webui.ChatDraft {
-	v := webui.ChatDraft{Editable: chatMode(c.PermissionMode) != "read", Adopted: []webui.ChatDraftVersion{}, Skills: []webui.ChatBinding{}}
+// chatDraftView: every draft, with focus's (else the first) also at the top.
+func (a *App) chatDraftView(ctx context.Context, c chatRow, st chatDraftState, focus string) webui.ChatDraft {
+	v := webui.ChatDraft{Editable: chatMode(c.PermissionMode) != "read", Drafts: []webui.ChatDraftItem{}, Adopted: []webui.ChatDraftVersion{}, Skills: []webui.ChatBinding{}}
 	for _, b := range a.chatSessionSkills(ctx, c) {
 		v.Skills = append(v.Skills, webui.ChatBinding{Kind: "skill", ID: b.SkillID, Name: a.skillName(b.SkillID)})
 	}
@@ -172,29 +268,37 @@ func (a *App) chatDraftView(ctx context.Context, c chatRow, st chatDraftState) w
 	for _, id := range ids {
 		v.Adopted = append(v.Adopted, webui.ChatDraftVersion{SkillID: id, SkillName: a.skillName(id), VersionID: st.Adopted[id], No: a.versionNo(ctx, st.Adopted[id]), Status: "promoted"})
 	}
-	if st.SkillID == "" {
-		return v
+	for _, e := range st.Drafts {
+		it := a.chatDraftItem(ctx, c.ID, e)
+		v.Drafts = append(v.Drafts, it)
+		if e.SkillID == focus || !v.Active {
+			v.ChatDraftItem = it
+		}
 	}
-	v.Active, v.SkillID, v.SkillName = true, st.SkillID, a.skillName(st.SkillID)
-	v.BaseVersionID, v.BaseNo = st.BaseVersionID, a.versionNo(ctx, st.BaseVersionID)
-	if cur, err := a.Ver.CurrentVersion(ctx, version.EntitySkill, st.SkillID); err == nil {
+	return v
+}
+
+func (a *App) chatDraftItem(ctx context.Context, sid string, e chatDraftEntry) webui.ChatDraftItem {
+	v := webui.ChatDraftItem{Active: true, SkillID: e.SkillID, SkillName: a.skillName(e.SkillID)}
+	v.BaseVersionID, v.BaseNo = e.BaseVersionID, a.versionNo(ctx, e.BaseVersionID)
+	if cur, err := a.Ver.CurrentVersion(ctx, version.EntitySkill, e.SkillID); err == nil {
 		v.CurrentNo, v.CurrentVersionID = cur.VersionNo, cur.ID
 	}
-	files, err := a.chatDraftFiles(c.ID)
+	files, err := readDraftFiles(a.chatDraftEntryDir(sid, e))
 	if err == nil {
 		v.Files = len(files)
 		hash := skillFilesHash(files)
-		if base, e := a.Skills.Files(ctx, st.BaseVersionID); e == nil {
+		if base, e2 := a.Skills.Files(ctx, e.BaseVersionID); e2 == nil {
 			v.Changed = hash != skillFilesHash(base)
 		}
-		v.Unsaved = v.Changed && hash != st.SavedHash
+		v.Unsaved = v.Changed && hash != e.SavedHash
 	}
-	if st.ProposalID != "" {
-		sv := webui.ChatDraftVersion{SkillID: st.SkillID, SkillName: v.SkillName, VersionID: st.SavedVersionID, No: a.versionNo(ctx, st.SavedVersionID), ProposalID: st.ProposalID}
-		_ = a.DB.QueryRowContext(ctx, `SELECT status FROM skill_proposals WHERE id=?`, st.ProposalID).Scan(&sv.Status)
+	if e.ProposalID != "" {
+		sv := webui.ChatDraftVersion{SkillID: e.SkillID, SkillName: v.SkillName, VersionID: e.SavedVersionID, No: a.versionNo(ctx, e.SavedVersionID), ProposalID: e.ProposalID}
+		_ = a.DB.QueryRowContext(ctx, `SELECT status FROM skill_proposals WHERE id=?`, e.ProposalID).Scan(&sv.Status)
 		v.Saved = &sv
 		if sv.Status == "pending" || sv.Status == "canary" {
-			v.Affects = a.skillTaskUse(ctx, st.SkillID)
+			v.Affects = a.skillTaskUse(ctx, e.SkillID)
 		}
 	}
 	return v
@@ -231,8 +335,9 @@ func (a *App) skillTaskUse(ctx context.Context, skillID string) *webui.ChatDraft
 }
 
 // StartChatDraft copies the version the session's turns use of skillID (the
-// run's pinned version, or the current one) into the draft folder. A draft
-// of another skill is replaced; what was adopted is kept.
+// run's pinned version, or the current one) into a draft folder of its own.
+// Drafts of the session's other skills are kept; a skill that already has a
+// draft keeps it as it is (start again after discarding to begin anew).
 func (a *App) StartChatDraft(ctx context.Context, sid, skillID string) (webui.ChatDraft, error) {
 	chatDraftMu.Lock()
 	defer chatDraftMu.Unlock()
@@ -250,6 +355,10 @@ func (a *App) StartChatDraft(ctx context.Context, sid, skillID string) (webui.Ch
 	if !found {
 		return webui.ChatDraft{}, fmt.Errorf("%w: bind the skill to the session first", webui.ErrChatInvalid)
 	}
+	st := a.loadChatDraft(sid)
+	if st.draft(skillID) >= 0 {
+		return a.chatDraftView(ctx, c, st, skillID), nil
+	}
 	if base == "" {
 		cur, err := a.Ver.CurrentVersion(ctx, version.EntitySkill, skillID)
 		if err != nil {
@@ -264,38 +373,47 @@ func (a *App) StartChatDraft(ctx context.Context, sid, skillID string) (webui.Ch
 	if len(files["SKILL.md"]) == 0 {
 		return webui.ChatDraft{}, fmt.Errorf("%w: the skill has no SKILL.md", webui.ErrChatInvalid)
 	}
-	if err := a.writeChatDraft(sid, files); err != nil {
+	e := chatDraftEntry{SkillID: skillID, BaseVersionID: base, Dir: newDraftDir(st, skillID)}
+	if err := writeDraftFiles(a.chatDraftEntryDir(sid, e), files); err != nil {
 		return webui.ChatDraft{}, err
 	}
-	st := a.loadChatDraft(sid)
-	st = chatDraftState{SkillID: skillID, BaseVersionID: base, Adopted: st.Adopted}
+	st.Drafts = append(st.Drafts, e)
 	if err := a.storeChatDraft(sid, st); err != nil {
 		return webui.ChatDraft{}, err
 	}
-	return a.chatDraftView(ctx, c, st), nil
+	return a.chatDraftView(ctx, c, st, skillID), nil
 }
 
-// DiscardChatDraft removes the draft (saved versions stay with the skill).
-func (a *App) DiscardChatDraft(ctx context.Context, sid string) (webui.ChatDraft, error) {
+// DiscardChatDraft removes one draft (saved versions stay with the skill;
+// the other drafts and what was adopted are kept).
+func (a *App) DiscardChatDraft(ctx context.Context, sid, skillID string) (webui.ChatDraft, error) {
 	chatDraftMu.Lock()
 	defer chatDraftMu.Unlock()
 	c, err := a.draftSessionIdle(ctx, sid)
 	if err != nil {
 		return webui.ChatDraft{}, err
 	}
-	if err := os.RemoveAll(a.chatDraftDir(sid)); err != nil {
+	st := a.loadChatDraft(sid)
+	i, err := st.pick(skillID)
+	if errors.Is(err, webui.ErrChatDraftNone) {
+		return a.chatDraftView(ctx, c, st, ""), nil // gone already
+	}
+	if err != nil {
 		return webui.ChatDraft{}, err
 	}
-	st := chatDraftState{Adopted: a.loadChatDraft(sid).Adopted}
+	if err := os.RemoveAll(a.chatDraftEntryDir(sid, st.Drafts[i])); err != nil {
+		return webui.ChatDraft{}, err
+	}
+	st.Drafts = append(st.Drafts[:i:i], st.Drafts[i+1:]...)
 	if err := a.storeChatDraft(sid, st); err != nil {
 		return webui.ChatDraft{}, err
 	}
-	return a.chatDraftView(ctx, c, st), nil
+	return a.chatDraftView(ctx, c, st, ""), nil
 }
 
-// SaveChatDraft stores the draft as a new version of the skill, waiting to be
+// SaveChatDraft stores a draft as a new version of its skill, waiting to be
 // adopted (current is not moved; no notice is sent: the owner is on the page).
-func (a *App) SaveChatDraft(ctx context.Context, sid, note string) (webui.ChatDraft, error) {
+func (a *App) SaveChatDraft(ctx context.Context, sid, skillID, note string) (webui.ChatDraft, error) {
 	chatDraftMu.Lock()
 	defer chatDraftMu.Unlock()
 	c, err := a.draftSessionIdle(ctx, sid)
@@ -303,10 +421,12 @@ func (a *App) SaveChatDraft(ctx context.Context, sid, note string) (webui.ChatDr
 		return webui.ChatDraft{}, err
 	}
 	st := a.loadChatDraft(sid)
-	if st.SkillID == "" {
-		return webui.ChatDraft{}, webui.ErrChatDraftNone
+	i, err := st.pick(skillID)
+	if err != nil {
+		return webui.ChatDraft{}, err
 	}
-	files, err := a.chatDraftFiles(sid)
+	e := &st.Drafts[i]
+	files, err := readDraftFiles(a.chatDraftEntryDir(sid, *e))
 	if err != nil {
 		return webui.ChatDraft{}, fmt.Errorf("%w: %v", webui.ErrChatInvalid, err)
 	}
@@ -314,16 +434,16 @@ func (a *App) SaveChatDraft(ctx context.Context, sid, note string) (webui.ChatDr
 		return webui.ChatDraft{}, fmt.Errorf("%w: the draft has no SKILL.md", webui.ErrChatInvalid)
 	}
 	hash := skillFilesHash(files)
-	if st.ProposalID != "" && st.SavedHash == hash {
+	if e.ProposalID != "" && e.SavedHash == hash {
 		var status string
-		if a.DB.QueryRowContext(ctx, `SELECT status FROM skill_proposals WHERE id=?`, st.ProposalID).Scan(&status) == nil && status == "pending" {
-			return a.chatDraftView(ctx, c, st), nil // saved already
+		if a.DB.QueryRowContext(ctx, `SELECT status FROM skill_proposals WHERE id=?`, e.ProposalID).Scan(&status) == nil && status == "pending" {
+			return a.chatDraftView(ctx, c, st, e.SkillID), nil // saved already
 		}
 	}
 	if note == "" {
 		note = "saved from session: " + c.Title
 	}
-	p, err := a.Optimize.Propose(ctx, st.SkillID, files, "session", "session", note)
+	p, err := a.Optimize.Propose(ctx, e.SkillID, files, "session", "session", note)
 	if err != nil {
 		if strings.Contains(err.Error(), "identical to the current version") {
 			return webui.ChatDraft{}, webui.ErrChatDraftUnchanged
@@ -339,20 +459,21 @@ func (a *App) SaveChatDraft(ctx context.Context, sid, note string) (webui.ChatDr
 		}
 		return webui.ChatDraft{}, fmt.Errorf("%w: %s", webui.ErrChatDraftChecks, strings.Join(failed, ", "))
 	}
-	st.ProposalID, st.SavedVersionID, st.SavedHash = p.ID, p.VersionID, hash
+	e.ProposalID, e.SavedVersionID, e.SavedHash = p.ID, p.VersionID, hash
 	if err := a.storeChatDraft(sid, st); err != nil {
 		return webui.ChatDraft{}, err
 	}
-	return a.chatDraftView(ctx, c, st), nil
+	return a.chatDraftView(ctx, c, st, e.SkillID), nil
 }
 
-// AdoptChatDraft makes the saved version the skill's current one. Only on the
-// owner's click: nothing in a turn or a save ever adopts. It replaces only the
-// version the draft started from, or expectCurrent: the current version the
-// page showed the owner (the confirmation says it gets replaced). Anything else
-// (adopted in another session, edited or switched on the skill page since) is
-// webui.ErrChatDraftStale and nothing changes, like the skill page's own edits.
-func (a *App) AdoptChatDraft(ctx context.Context, sid, expectCurrent string) (webui.ChatDraft, error) {
+// AdoptChatDraft makes a draft's saved version its skill's current one. Only
+// on the owner's click: nothing in a turn or a save ever adopts. It replaces
+// only the version the draft started from, or expectCurrent: the current
+// version the page showed the owner (the confirmation says it gets replaced).
+// Anything else (adopted in another session, edited or switched on the skill
+// page since) is webui.ErrChatDraftStale and nothing changes, like the skill
+// page's own edits.
+func (a *App) AdoptChatDraft(ctx context.Context, sid, skillID, expectCurrent string) (webui.ChatDraft, error) {
 	chatDraftMu.Lock()
 	defer chatDraftMu.Unlock()
 	c, err := a.draftSessionIdle(ctx, sid)
@@ -360,13 +481,15 @@ func (a *App) AdoptChatDraft(ctx context.Context, sid, expectCurrent string) (we
 		return webui.ChatDraft{}, err
 	}
 	st := a.loadChatDraft(sid)
-	if st.SkillID == "" {
-		return webui.ChatDraft{}, webui.ErrChatDraftNone
+	i, err := st.pick(skillID)
+	if err != nil {
+		return webui.ChatDraft{}, err
 	}
-	if st.ProposalID == "" {
+	e := &st.Drafts[i]
+	if e.ProposalID == "" {
 		return webui.ChatDraft{}, webui.ErrChatDraftNotSaved
 	}
-	if err := a.Optimize.PromoteOver(ctx, st.ProposalID, st.BaseVersionID, expectCurrent); err != nil {
+	if err := a.Optimize.PromoteOver(ctx, e.ProposalID, e.BaseVersionID, expectCurrent); err != nil {
 		if errors.Is(err, optimize.ErrStale) {
 			return webui.ChatDraft{}, webui.ErrChatDraftStale
 		}
@@ -375,13 +498,13 @@ func (a *App) AdoptChatDraft(ctx context.Context, sid, expectCurrent string) (we
 	if st.Adopted == nil {
 		st.Adopted = map[string]string{}
 	}
-	st.Adopted[st.SkillID] = st.SavedVersionID
-	st.BaseVersionID = st.SavedVersionID // the draft now starts from what is current
+	st.Adopted[e.SkillID] = e.SavedVersionID
+	e.BaseVersionID = e.SavedVersionID // the draft now starts from what is current
 	if err := a.storeChatDraft(sid, st); err != nil {
 		return webui.ChatDraft{}, err
 	}
-	a.Log.Info("session adopted skill version", "session", sid, "skill", st.SkillID, "version", st.SavedVersionID)
-	return a.chatDraftView(ctx, c, st), nil
+	a.Log.Info("session adopted skill version", "session", sid, "skill", e.SkillID, "version", e.SavedVersionID)
+	return a.chatDraftView(ctx, c, st, e.SkillID), nil
 }
 
 // ChatTaskPreset is "save as task" from a session (or, fromRun, from the run
@@ -445,21 +568,30 @@ func (a *App) chatSessionSkills(ctx context.Context, c chatRow) []tasksvc.SkillB
 	return all
 }
 
-// chatDraftStage: the draft's files and the binding that loads them, or nil.
-func (a *App) chatDraftStage(c chatRow) (chatDraftState, map[string][]byte) {
-	st := a.loadChatDraft(c.ID)
-	if st.SkillID == "" {
-		return st, nil
-	}
-	files, err := a.chatDraftFiles(c.ID)
-	if err != nil || len(files["SKILL.md"]) == 0 {
-		if err == nil {
-			err = errors.New("no SKILL.md")
+// chatDraftStaged is a draft a turn loads: its skill, the version it
+// started from, its folder and files.
+type chatDraftStaged struct {
+	SkillID, BaseVersionID, Dir string
+	Files                       map[string][]byte
+}
+
+// chatDraftStage: the drafts whose files can be loaded, in the order they
+// were started (one that can't be read is left out and logged).
+func (a *App) chatDraftStage(c chatRow) []chatDraftStaged {
+	var out []chatDraftStaged
+	for _, e := range a.loadChatDraft(c.ID).Drafts {
+		dir := a.chatDraftEntryDir(c.ID, e)
+		files, err := readDraftFiles(dir)
+		if err != nil || len(files["SKILL.md"]) == 0 {
+			if err == nil {
+				err = errors.New("no SKILL.md")
+			}
+			a.Log.Warn("session turn: skill draft not loaded", "session", c.ID, "skill", e.SkillID, "error", err)
+			continue
 		}
-		a.Log.Warn("session turn: skill draft not loaded", "session", c.ID, "error", err)
-		return st, nil
+		out = append(out, chatDraftStaged{SkillID: e.SkillID, BaseVersionID: e.BaseVersionID, Dir: dir, Files: files})
 	}
-	return st, files
+	return out
 }
 
 const chatDraftEditNote = "\nThe owner is tuning the skill %q in this session. Its draft is the folder %s: when asked to change the skill, edit the files there (SKILL.md and its other files) and nothing else of the skill. This turn loaded the draft as it was when the turn started; changes apply from the next turn. Saving the draft as a version and adopting it are the owner's buttons, not yours."

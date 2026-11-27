@@ -65,14 +65,14 @@ func TestChatSkillDraftLoop(t *testing.T) {
 	if _, err := a.SetChatBindings(ctx, ses.ID, webui.ChatBindingsInput{Skills: []string{sk}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.SaveChatDraft(ctx, ses.ID, ""); !errors.Is(err, webui.ErrChatDraftNone) {
+	if _, err := a.SaveChatDraft(ctx, ses.ID, "", ""); !errors.Is(err, webui.ErrChatDraftNone) {
 		t.Fatalf("save without draft: %v", err)
 	}
 	d, err := a.StartChatDraft(ctx, ses.ID, sk)
 	if err != nil || !d.Active || d.BaseNo != 1 || d.Changed || d.Files != 2 || !d.Editable {
 		t.Fatalf("start %v %+v", err, d)
 	}
-	dir := a.chatDraftDir(ses.ID)
+	dir := a.chatDraftDir(ses.ID, sk)
 	if !strings.HasPrefix(dir, a.Cfg.DataDir) {
 		t.Fatalf("draft outside the data dir: %s", dir)
 	}
@@ -105,7 +105,7 @@ func TestChatSkillDraftLoop(t *testing.T) {
 	}
 
 	// save: a new version, current unchanged, nothing adopted
-	d, err = a.SaveChatDraft(ctx, ses.ID, "shorter")
+	d, err = a.SaveChatDraft(ctx, ses.ID, "", "shorter")
 	if err != nil || d.Saved == nil || d.Saved.No != 2 || d.Saved.Status != "pending" || d.Unsaved || len(d.Adopted) != 0 {
 		t.Fatalf("save %v %+v", err, d)
 	}
@@ -116,7 +116,7 @@ func TestChatSkillDraftLoop(t *testing.T) {
 		t.Fatalf("affects %+v", d.Affects)
 	}
 	pid := d.Saved.ProposalID
-	if d2, err := a.SaveChatDraft(ctx, ses.ID, ""); err != nil || d2.Saved.ProposalID != pid {
+	if d2, err := a.SaveChatDraft(ctx, ses.ID, "", ""); err != nil || d2.Saved.ProposalID != pid {
 		t.Fatalf("saving again made another version %v %+v", err, d2)
 	}
 	var n int
@@ -126,14 +126,14 @@ func TestChatSkillDraftLoop(t *testing.T) {
 	}
 
 	// adopt only on request
-	d, err = a.AdoptChatDraft(ctx, ses.ID, "")
+	d, err = a.AdoptChatDraft(ctx, ses.ID, "", "")
 	if err != nil || len(d.Adopted) != 1 || d.Adopted[0].No != 2 || d.Changed {
 		t.Fatalf("adopt %v %+v", err, d)
 	}
 	if currentNo(t, a, sk) != 2 {
 		t.Fatal("adopt didn't move current")
 	}
-	if _, err := a.SaveChatDraft(ctx, ses.ID, ""); !errors.Is(err, webui.ErrChatDraftUnchanged) {
+	if _, err := a.SaveChatDraft(ctx, ses.ID, "", ""); !errors.Is(err, webui.ErrChatDraftUnchanged) {
 		t.Fatalf("unchanged save: %v", err)
 	}
 
@@ -158,7 +158,7 @@ func TestChatSkillDraftLoop(t *testing.T) {
 	}
 
 	// discard keeps what was adopted
-	if d, err = a.DiscardChatDraft(ctx, ses.ID); err != nil || d.Active || len(d.Adopted) != 1 {
+	if d, err = a.DiscardChatDraft(ctx, ses.ID, ""); err != nil || d.Active || len(d.Adopted) != 1 {
 		t.Fatalf("discard %v %+v", err, d)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -200,11 +200,11 @@ func TestChatTaskPresetFromRun(t *testing.T) {
 	if _, err := a.StartChatDraft(ctx, ses.ID, sk); err != nil {
 		t.Fatal(err)
 	}
-	dir := a.chatDraftDir(ses.ID)
+	dir := a.chatDraftDir(ses.ID, sk)
 	if err := os.Symlink(filepath.Join(ws), filepath.Join(dir, "link")); err != nil {
 		t.Skip("no symlinks here")
 	}
-	if _, err := a.SaveChatDraft(ctx, ses.ID, ""); !errors.Is(err, webui.ErrChatInvalid) {
+	if _, err := a.SaveChatDraft(ctx, ses.ID, "", ""); !errors.Is(err, webui.ErrChatInvalid) {
 		t.Fatalf("link accepted: %v", err)
 	}
 	_ = runner.Options{}

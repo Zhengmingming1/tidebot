@@ -78,15 +78,17 @@ func (a *App) emptyChatBindings(raw string) bool {
 	return len(b.Skills) == 0 && len(b.Capabilities) == 0
 }
 
-// chatDraftPresent is true when the session has a skill draft folder or
-// draft.json. An empty leftover folder still counts: the user may have just
-// started "改技能".
+// chatDraftPresent is true when the session has draft.json or a skill draft
+// folder (drafts/, or an older session's draft/). An empty leftover folder
+// still counts: the user may have just started "改技能".
 func (a *App) chatDraftPresent(sid string) bool {
 	if _, err := os.Lstat(a.chatDraftStatePath(sid)); err == nil {
 		return true
 	}
-	if fi, err := os.Lstat(a.chatDraftDir(sid)); err == nil && fi.IsDir() {
-		return true
+	for _, dir := range []string{a.chatDraftsDir(sid), a.chatLegacyDraftDir(sid)} {
+		if fi, err := os.Lstat(dir); err == nil && fi.IsDir() {
+			return true
+		}
 	}
 	return false
 }

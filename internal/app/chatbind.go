@@ -200,15 +200,18 @@ func (a *App) chatTurnSkills(ctx context.Context, c chatRow) []tasksvc.SkillBind
 
 // stageChatSkills stages a turn's skills. A pinned version of the origin run
 // that is gone since doesn't block the turn: the session's own skills are
-// staged without it, and failing that the turn runs without skills. A skill
+// staged without it, and failing that the turn runs without skills. Each skill
 // draft (chatdraft.go) is staged in place of the version it started from; the
-// skill it belongs to is returned ("" when no draft was staged).
-func (a *App) stageChatSkills(ctx context.Context, c chatRow) (*skillStage, string) {
+// drafts that were staged are returned.
+func (a *App) stageChatSkills(ctx context.Context, c chatRow) (*skillStage, []chatDraftStaged) {
 	all := a.chatSessionSkills(ctx, c)
-	dst, files := a.chatDraftStage(c)
+	dsts := a.chatDraftStage(c)
 	var drafts map[string]map[string][]byte
-	if files != nil {
-		drafts = map[string]map[string][]byte{dst.SkillID: files}
+	for _, dst := range dsts {
+		if drafts == nil {
+			drafts = map[string]map[string][]byte{}
+		}
+		drafts[dst.SkillID] = dst.Files
 		found := false
 		for i := range all {
 			if all[i].SkillID == dst.SkillID {
@@ -220,15 +223,22 @@ func (a *App) stageChatSkills(ctx context.Context, c chatRow) (*skillStage, stri
 		}
 	}
 	if len(all) == 0 {
-		return nil, ""
+		return nil, nil
 	}
-	staged := func(st *skillStage) (*skillStage, string) {
+	staged := func(st *skillStage) (*skillStage, []chatDraftStaged) {
+		in := map[string]bool{}
 		for _, sk := range st.Skills {
 			if sk.Draft {
-				return st, sk.SkillID
+				in[sk.SkillID] = true
 			}
 		}
-		return st, ""
+		var out []chatDraftStaged
+		for _, d := range dsts {
+			if in[d.SkillID] {
+				out = append(out, d)
+			}
+		}
+		return st, out
 	}
 	st, err := a.stageSkillsWith(ctx, all, drafts)
 	if err == nil {
@@ -246,7 +256,7 @@ func (a *App) stageChatSkills(ctx context.Context, c chatRow) (*skillStage, stri
 		}
 	}
 	a.Log.Warn("session turn: skills not staged", "session", c.ID, "error", err)
-	return nil, ""
+	return nil, nil
 }
 
 const chatSkillNote = "\nSkills are attached to this session for reference: read their instructions and files, but this session cannot run their commands. If a skill's procedure needs a command, say so: the owner can switch the session to 「可执行命令」 or run it as a task."
@@ -268,10 +278,10 @@ func chatToolsServer(roots []sessiontools.Root, env map[string]string) map[strin
 	return map[string]any{"command": plugin.BuiltinExe, "args": []string{sessiontools.Arg}, "env": e}
 }
 
-func chatRoots(ws string, st *skillStage, draft string) []sessiontools.Root {
+func chatRoots(ws string, st *skillStage, drafts []string) []sessiontools.Root {
 	roots := []sessiontools.Root{{Label: "work", Dir: ws}}
-	if draft != "" {
-		roots = append(roots, sessiontools.Root{Label: "skill-draft", Dir: draft})
+	for _, d := range drafts {
+		roots = append(roots, sessiontools.Root{Label: "skill-draft", Dir: d})
 	}
 	if st != nil && st.Dir != "" {
 		if fi, err := os.Stat(filepath.Join(st.Dir, "skills")); err == nil && fi.IsDir() {

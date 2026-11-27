@@ -24,23 +24,23 @@ type fakeDrafts struct {
 
 func (f *fakeDrafts) ChatDraft(context.Context, string) (ChatDraft, error) {
 	f.calls = append(f.calls, "get")
-	return ChatDraft{Active: true, SkillID: "skill_1", SkillName: "<b>x</b>", Adopted: []ChatDraftVersion{}, Skills: []ChatBinding{}}, f.derr
+	return ChatDraft{ChatDraftItem: ChatDraftItem{Active: true, SkillID: "skill_1", SkillName: "<b>x</b>"}, Adopted: []ChatDraftVersion{}, Skills: []ChatBinding{}}, f.derr
 }
 func (f *fakeDrafts) StartChatDraft(_ context.Context, _, skill string) (ChatDraft, error) {
 	f.calls, f.skill = append(f.calls, "start"), skill
-	return ChatDraft{Active: true, SkillID: skill}, f.derr
+	return ChatDraft{ChatDraftItem: ChatDraftItem{Active: true, SkillID: skill}}, f.derr
 }
-func (f *fakeDrafts) DiscardChatDraft(context.Context, string) (ChatDraft, error) {
-	f.calls = append(f.calls, "discard")
+func (f *fakeDrafts) DiscardChatDraft(_ context.Context, _, skill string) (ChatDraft, error) {
+	f.calls, f.skill = append(f.calls, "discard"), skill
 	return ChatDraft{}, f.derr
 }
-func (f *fakeDrafts) SaveChatDraft(_ context.Context, _, note string) (ChatDraft, error) {
-	f.calls, f.note = append(f.calls, "save"), note
-	return ChatDraft{Active: true, Saved: &ChatDraftVersion{No: 2, Status: "pending"}}, f.derr
+func (f *fakeDrafts) SaveChatDraft(_ context.Context, _, skill, note string) (ChatDraft, error) {
+	f.calls, f.skill, f.note = append(f.calls, "save"), skill, note
+	return ChatDraft{ChatDraftItem: ChatDraftItem{Active: true, Saved: &ChatDraftVersion{No: 2, Status: "pending"}}}, f.derr
 }
-func (f *fakeDrafts) AdoptChatDraft(_ context.Context, _, expect string) (ChatDraft, error) {
-	f.calls, f.expect = append(f.calls, "adopt"), expect
-	return ChatDraft{Active: true}, f.derr
+func (f *fakeDrafts) AdoptChatDraft(_ context.Context, _, skill, expect string) (ChatDraft, error) {
+	f.calls, f.skill, f.expect = append(f.calls, "adopt"), skill, expect
+	return ChatDraft{ChatDraftItem: ChatDraftItem{Active: true}}, f.derr
 }
 func (f *fakeDrafts) ChatTaskPreset(_ context.Context, _ string, fromRun bool) (ChatTaskPreset, error) {
 	f.calls, f.fromRun = append(f.calls, "preset"), fromRun
@@ -63,7 +63,7 @@ func TestChatDraftAPI(t *testing.T) {
 	if code, _ := c.json(http.MethodPost, base+"draft", map[string]any{"skill_id": "skill_9"}); code != 200 || f.skill != "skill_9" {
 		t.Fatalf("start %d", code)
 	}
-	if code, out := c.json(http.MethodPost, base+"draft/save", map[string]any{"note": " shorter "}); code != 200 || f.note != "shorter" {
+	if code, out := c.json(http.MethodPost, base+"draft/save", map[string]any{"note": " shorter "}); code != 200 || f.note != "shorter" || f.skill != "" {
 		t.Fatalf("save %d %v", code, out)
 	}
 	if code, _ := c.json(http.MethodPost, base+"draft/save", nil); code != 200 {
@@ -76,8 +76,21 @@ func TestChatDraftAPI(t *testing.T) {
 	if code, _ := c.json(http.MethodPost, base+"draft/adopt", map[string]any{"expect_current": " ver_5 "}); code != 200 || f.expect != "ver_5" {
 		t.Fatalf("adopt over %d %q", code, f.expect)
 	}
-	if code, _ := c.json(http.MethodDelete, base+"draft", nil); code != 200 {
+	if code, _ := c.json(http.MethodDelete, base+"draft", nil); code != 200 || f.skill != "" {
 		t.Fatalf("discard %d", code)
+	}
+	// with several drafts the request names the skill
+	if code, _ := c.json(http.MethodPost, base+"draft/save", map[string]any{"skill_id": " skill_2 "}); code != 200 || f.skill != "skill_2" {
+		t.Fatalf("save one of several %d %q", code, f.skill)
+	}
+	if code, _ := c.json(http.MethodPost, base+"draft/adopt", map[string]any{"skill_id": "skill_3"}); code != 200 || f.skill != "skill_3" {
+		t.Fatalf("adopt one of several %d %q", code, f.skill)
+	}
+	if code, _ := c.json(http.MethodDelete, base+"draft?skill_id=skill_4", nil); code != 200 || f.skill != "skill_4" {
+		t.Fatalf("discard one of several %d %q", code, f.skill)
+	}
+	if code, _ := c.json(http.MethodPost, base+"draft/save", map[string]any{"skill_id": strings.Repeat("x", 201)}); code != 400 {
+		t.Fatalf("long skill id %d", code)
 	}
 	if code, out := c.json(http.MethodGet, base+"task-preset?from=run", nil); code != 200 || !f.fromRun || out["run_mode"] != "exec" {
 		t.Fatalf("preset %d %v", code, out)
@@ -85,7 +98,7 @@ func TestChatDraftAPI(t *testing.T) {
 	if code, _ := c.json(http.MethodGet, base+"draft/adopt", nil); code != 405 {
 		t.Fatalf("GET adopt %d", code)
 	}
-	for err, want := range map[error]string{ErrChatDraftUnchanged: "draft_unchanged", ErrChatDraftChecks: "draft_checks", ErrChatDraftNone: "no_draft", ErrChatDraftNotSaved: "draft_not_saved", ErrChatDraftStale: "draft_stale", ErrChatSessionBusy: "busy"} {
+	for err, want := range map[error]string{ErrChatDraftUnchanged: "draft_unchanged", ErrChatDraftChecks: "draft_checks", ErrChatDraftNone: "no_draft", ErrChatDraftNotSaved: "draft_not_saved", ErrChatDraftStale: "draft_stale", ErrChatDraftWhich: "draft_which", ErrChatSessionBusy: "busy"} {
 		f.derr = err
 		if _, out := c.json(http.MethodPost, base+"draft/adopt", nil); out["code"] != want {
 			t.Fatalf("%v → %v", err, out)

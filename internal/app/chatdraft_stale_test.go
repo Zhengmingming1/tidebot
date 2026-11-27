@@ -32,10 +32,10 @@ func TestChatDraftAdoptRefusesNewerCurrent(t *testing.T) {
 		t.Fatalf("start %v %+v", err, d)
 	}
 	md := "---\nname: weekly-notes\ndescription: test skill\n---\nSummarize the week, from the session.\n"
-	if err := os.WriteFile(filepath.Join(a.chatDraftDir(ses.ID), "SKILL.md"), []byte(md), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(a.chatDraftDir(ses.ID, sk), "SKILL.md"), []byte(md), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	d, err = a.SaveChatDraft(ctx, ses.ID, "")
+	d, err = a.SaveChatDraft(ctx, ses.ID, "", "")
 	if err != nil || d.Saved == nil || d.Saved.No != 2 {
 		t.Fatalf("save %v %+v", err, d)
 	}
@@ -46,7 +46,7 @@ func TestChatDraftAdoptRefusesNewerCurrent(t *testing.T) {
 	if v3.VersionNo != 3 {
 		t.Fatalf("v%d", v3.VersionNo)
 	}
-	if _, err := a.AdoptChatDraft(ctx, ses.ID, ""); !errors.Is(err, webui.ErrChatDraftStale) {
+	if _, err := a.AdoptChatDraft(ctx, ses.ID, "", ""); !errors.Is(err, webui.ErrChatDraftStale) {
 		t.Fatalf("adopt over a newer current: %v", err)
 	}
 	if currentNo(t, a, sk) != 3 {
@@ -59,12 +59,12 @@ func TestChatDraftAdoptRefusesNewerCurrent(t *testing.T) {
 
 	// shown v3, but v4 lands before the click: still refused
 	importSkill(t, a, "weekly-notes", "Summarize the week, edited once more.")
-	if _, err := a.AdoptChatDraft(ctx, ses.ID, v3.ID); !errors.Is(err, webui.ErrChatDraftStale) {
+	if _, err := a.AdoptChatDraft(ctx, ses.ID, "", v3.ID); !errors.Is(err, webui.ErrChatDraftStale) {
 		t.Fatalf("adopt over the version after the one shown: %v", err)
 	}
 	// the owner saw v4 and agreed to replace it
 	v4, _ := a.Ver.CurrentVersion(ctx, version.EntitySkill, sk)
-	d, err = a.AdoptChatDraft(ctx, ses.ID, v4.ID)
+	d, err = a.AdoptChatDraft(ctx, ses.ID, "", v4.ID)
 	if err != nil || len(d.Adopted) != 1 || d.Adopted[0].No != 2 {
 		t.Fatalf("adopt %v %+v", err, d)
 	}

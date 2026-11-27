@@ -8298,7 +8298,7 @@ var side=hasHistory?'<aside class="cs-side" aria-label="'+esc(T("cs.list"))+'">'
 return '<h1 class="sr-only">'+esc(T("nav.chat"))+'</h1><div class="cs'+(!s?" cs-blank":"")+(!hasHistory?" cs-no-history":"")+'" id="cs">'+side+
 '<section class="cs-main" id="rc" aria-label="'+esc(csTitle(s))+'">'+csHeadHtml(s)+
 '<div class="rc-thread cs-thread" id="rc-thread" aria-live="polite" tabindex="-1">'+thread+"</div>"+
-(s?'<div class="cs-draft" id="cs-draft" role="region" aria-label="'+esc(T("sd.label"))+'" hidden></div>':"")+
+(s?'<div class="cs-drafts" id="cs-draft" role="region" aria-label="'+esc(T("sd.label"))+'" hidden></div>':"")+
 rcBoxHtml({ph:s?"cs.ph":"cs.ph_new",label:"cs.label",read_tip:"cs.read_tip",tags:csDirTag(s)+csCapsTag(s),mode:s?s.permission_mode:"exec",effort:s?s.effort:""})+"</section></div>";
 }
 function renderChat(id){
@@ -8365,6 +8365,28 @@ if(location.hash==="#/chat/"+enc(s.id)||location.hash==="#/chat/"+s.id)location.
 });
 });
 }
+function csDraftList(d){
+return d?(d.drafts||(d.active?[d]:[])):[];
+}
+function csDraftFree(d){
+var have={};
+csDraftList(d).forEach(function(x){have[x.skill_id]=true;});
+return((d&&d.skills)||[]).filter(function(k){return!have[k.id];});
+}
+function csDraftRowHtml(x,first,editable,off){
+var state=x.unsaved?T("sd.st_changed"):x.saved&&x.saved.status==="pending"?T("sd.st_saved",{v:x.saved.no}):x.changed?T("sd.st_saved_old"):T("sd.st_same");
+var tip=T("sd.tip",{s:x.skill_name,v:x.base_no,cur:x.current_no,n:x.files})+(editable?"":" "+T("sd.read_tip"));
+var pend=x.saved&&x.saved.status==="pending",stale=draftStale(x);
+return '<div class="cs-draft" data-skill="'+esc(x.skill_id)+'"><span class="cs-draft-lbl" tabindex="0" data-tip="'+esc(tip)+'">'+ic("skills","sm")+'<strong class="ell">'+esc(T("sd.title",{s:x.skill_name}))+"</strong>"+
+'<span class="cs-draft-v">v'+esc(String(x.base_no||"?"))+"</span>"+'<span class="cs-draft-st'+(x.unsaved?" on":"")+'">'+esc(state)+"</span>"+
+(editable?"":'<span class="cs-draft-ro" aria-hidden="true">'+ic("eye","sm")+"</span>")+"</span>"+
+(stale?'<span class="cs-draft-stale" tabindex="0" role="img" aria-label="'+esc(T("sd.stale_tip",{cur:x.current_no,v:x.base_no}))+'" data-tip="'+esc(T("sd.stale_tip",{cur:x.current_no,v:x.base_no}))+'">'+ic("info","sm")+"</span>":"")+
+'<span class="rc-sp"></span>'+
+(first?'<button type="button" class="btn sm" data-dr="try"'+off+' data-tip="'+esc(T("sd.try_tip"))+'">'+ic("play","sm")+esc(T("sd.try"))+"</button>":"")+
+'<button type="button" class="btn sm" data-dr="save"'+(x.unsaved&&!off?"":" disabled")+' data-tip="'+esc(T("sd.save_tip"))+'">'+ic("check","sm")+esc(T("sd.save"))+"</button>"+
+'<button type="button" class="btn sm primary" data-dr="adopt"'+(pend&&!off?"":" disabled")+' data-tip="'+esc(T(pend?"sd.adopt_tip":"sd.adopt_none_tip"))+'">'+esc(pend?T("sd.adopt_v",{v:x.saved.no}):T("sd.adopt"))+"</button>"+
+'<button type="button" class="icon-btn sm" data-dr="discard"'+off+' aria-label="'+esc(T("sd.discard_named",{s:x.skill_name}))+'" data-tip="'+esc(T("sd.discard_tip"))+'">'+ic("x","sm")+"</button></div>";
+}
 function csDraftBar(sec,ses){
 var box=$("#cs-draft",sec),tune=$("#cs-tune",sec),d=null,cur=ses,wasBusy=false,busyOp=false;
 if(!box||!tune)return null;
@@ -8372,20 +8394,11 @@ var base="/api/chat-sessions/"+enc(ses.id)+"/draft";
 var editable=function(){return(cur&&cur.permission_mode)!=="read";};
 var running=function(){return!!(cur&&cur.status==="running");};
 var paint=function(){
-tune.hidden=!!(d&&d.active);
-if(!d||!d.active){box.hidden=true;box.innerHTML="";return;}
-var state=d.unsaved?T("sd.st_changed"):d.saved&&d.saved.status==="pending"?T("sd.st_saved",{v:d.saved.no}):d.changed?T("sd.st_saved_old"):T("sd.st_same");
-var tip=T("sd.tip",{s:d.skill_name,v:d.base_no,cur:d.current_no,n:d.files})+(editable()?"":" "+T("sd.read_tip"));
-var pend=d.saved&&d.saved.status==="pending",off=running()||busyOp?" disabled":"",stale=draftStale(d);
-var html='<span class="cs-draft-lbl" tabindex="0" data-tip="'+esc(tip)+'">'+ic("skills","sm")+'<strong class="ell">'+esc(T("sd.title",{s:d.skill_name}))+"</strong>"+
-'<span class="cs-draft-v">v'+esc(String(d.base_no||"?"))+"</span>"+'<span class="cs-draft-st'+(d.unsaved?" on":"")+'">'+esc(state)+"</span>"+
-(editable()?"":'<span class="cs-draft-ro" aria-hidden="true">'+ic("eye","sm")+"</span>")+"</span>"+
-(stale?'<span class="cs-draft-stale" tabindex="0" role="img" aria-label="'+esc(T("sd.stale_tip",{cur:d.current_no,v:d.base_no}))+'" data-tip="'+esc(T("sd.stale_tip",{cur:d.current_no,v:d.base_no}))+'">'+ic("info","sm")+"</span>":"")+
-'<span class="rc-sp"></span>'+
-'<button type="button" class="btn sm" data-dr="try"'+off+' data-tip="'+esc(T("sd.try_tip"))+'">'+ic("play","sm")+esc(T("sd.try"))+"</button>"+
-'<button type="button" class="btn sm" data-dr="save"'+(d.unsaved&&!off?"":" disabled")+' data-tip="'+esc(T("sd.save_tip"))+'">'+ic("check","sm")+esc(T("sd.save"))+"</button>"+
-'<button type="button" class="btn sm primary" data-dr="adopt"'+(pend&&!off?"":" disabled")+' data-tip="'+esc(T(pend?"sd.adopt_tip":"sd.adopt_none_tip"))+'">'+esc(pend?T("sd.adopt_v",{v:d.saved.no}):T("sd.adopt"))+"</button>"+
-'<button type="button" class="icon-btn sm" data-dr="discard"'+off+' aria-label="'+esc(T("sd.discard"))+'" data-tip="'+esc(T("sd.discard_tip"))+'">'+ic("x","sm")+"</button>";
+var list=csDraftList(d);
+tune.hidden=!!(list.length&&!csDraftFree(d).length);
+if(!list.length){box.hidden=true;box.innerHTML="";box._h="";return;}
+var off=running()||busyOp?" disabled":"",ed=editable();
+var html=list.map(function(x,i){return csDraftRowHtml(x,i===0,ed,off);}).join("");
 if(box._h!==html){box.innerHTML=html;box._h=html;}
 box.hidden=false;
 };
@@ -8401,8 +8414,9 @@ return null;
 tune.addEventListener("click",function(){
 if(running()){toast(T("rc.err_busy"),true);return;}
 (d?Promise.resolve(d):load()).then(function(x){
-var sk=x.skills||[];
-if(!sk.length){toast(T("sd.no_skill"),true);return;}
+if(!(x.skills||[]).length){toast(T("sd.no_skill"),true);return;}
+var sk=csDraftFree(x);
+if(!sk.length){toast(T("sd.all_drafted"));return;}
 return(sk.length===1?Promise.resolve(sk[0].id):csPickSkill(sk)).then(function(id){
 if(!id)return;
 return act(api(base,{method:"POST",body:{skill_id:id}})).then(function(y){if(y)toast(T(editable()?"sd.started":"sd.started_ro",{s:y.skill_name}));});
@@ -8410,8 +8424,10 @@ return act(api(base,{method:"POST",body:{skill_id:id}})).then(function(y){if(y)t
 }).catch(fail);
 });
 box.addEventListener("click",function(e){
-var b=e.target.closest("[data-dr]");
-if(!b||b.disabled||!d)return;
+var b=e.target.closest("[data-dr]"),row=b&&b.closest("[data-skill]");
+if(!b||b.disabled||!d||!row)return;
+var sid=row.getAttribute("data-skill"),x=csDraftList(d).filter(function(y){return y.skill_id===sid;})[0];
+if(!x)return;
 var what=b.getAttribute("data-dr");
 if(what==="try"){
 var first=csFirstRequest(cur),ta=$("#rc-in",sec),form=$("#rc-form",sec);
@@ -8420,18 +8436,18 @@ ta.value=first?T("sd.try_msg",{p:first}):T("sd.try_msg_none");
 ta.dispatchEvent(new Event("input",{bubbles:true}));
 form.requestSubmit();
 }else if(what==="save"){
-act(api(base+"/save",{method:"POST",body:{}})).then(function(x){if(x&&x.saved)toast(T("sd.saved",{v:x.saved.no}));});
+act(api(base+"/save",{method:"POST",body:{skill_id:sid}})).then(function(y){if(y&&y.saved)toast(T("sd.saved",{v:y.saved.no}));});
 }else if(what==="adopt"){
-var a=d.affects||{follow:[],pinned:0},f=a.follow||[],over=draftStale(d)?d.current_version_id:"";
-confirmDialog({icon:"skills",title:T("sd.adopt_title",{s:d.skill_name,v:d.saved.no}),danger:!!over,
-body:T("sd.adopt_body")+(over?"\n"+T("sd.adopt_stale",{cur:d.current_no,v:d.base_no}):"")+"\n"+(f.length?T("sd.adopt_follow",{n:f.length,l:f.slice(0,8).join("、")+(f.length>8?"…":"")}):T("sd.adopt_follow_none"))+(a.pinned?"\n"+T("sd.adopt_pinned",{n:a.pinned}):""),
-ok:T("sd.adopt_v",{v:d.saved.no})}).then(function(y){
+var a=x.affects||{follow:[],pinned:0},f=a.follow||[],over=draftStale(x)?x.current_version_id:"";
+confirmDialog({icon:"skills",title:T("sd.adopt_title",{s:x.skill_name,v:x.saved.no}),danger:!!over,
+body:T("sd.adopt_body")+(over?"\n"+T("sd.adopt_stale",{cur:x.current_no,v:x.base_no}):"")+"\n"+(f.length?T("sd.adopt_follow",{n:f.length,l:f.slice(0,8).join("、")+(f.length>8?"…":"")}):T("sd.adopt_follow_none"))+(a.pinned?"\n"+T("sd.adopt_pinned",{n:a.pinned}):""),
+ok:T("sd.adopt_v",{v:x.saved.no})}).then(function(y){
 if(!y)return;
-return act(api(base+"/adopt",{method:"POST",body:over?{expect_current:over}:{}})).then(function(x){if(x)toast(T("sd.adopted",{s:x.skill_name}));});
+return act(api(base+"/adopt",{method:"POST",body:over?{skill_id:sid,expect_current:over}:{skill_id:sid}})).then(function(z){if(z)toast(T("sd.adopted",{s:x.skill_name}));});
 });
 }else if(what==="discard"){
-(d.unsaved?confirmDialog({title:T("sd.discard_title"),body:T("sd.discard_body"),ok:T("sd.discard"),danger:true}):Promise.resolve(true)).then(function(y){
-if(y)act(api(base,{method:"DELETE"}));
+(x.unsaved?confirmDialog({title:T("sd.discard_title"),body:T("sd.discard_body_named",{s:x.skill_name}),ok:T("sd.discard"),danger:true}):Promise.resolve(true)).then(function(y){
+if(y)act(api(base+"?skill_id="+enc(sid),{method:"DELETE"}));
 });
 }
 });
@@ -8439,7 +8455,7 @@ load().catch(function(){});
 return{
 session:function(x){
 var was=wasBusy;cur=x||cur;wasBusy=running();
-if(was&&!wasBusy&&d&&d.active)load().catch(function(){});else paint();
+if(was&&!wasBusy&&csDraftList(d).length)load().catch(function(){});else paint();
 }
 };
 }

@@ -89,7 +89,7 @@ func TestEmptyChatSessionRetention(t *testing.T) {
 		}
 	})
 	insertEmptyChat(t, a, "chat_draft", "chat", "", "idle", old, func() {
-		if err := os.MkdirAll(a.chatDraftDir("chat_draft"), 0o700); err != nil {
+		if err := os.MkdirAll(a.chatDraftsDir("chat_draft"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	})
