@@ -174,6 +174,48 @@ func (s *Server) runChatRef(ctx context.Context, runID string) *runChatRef {
 	return &c
 }
 
+// chatSessionDetail: the body of GET /api/chat-sessions/{id} (turn list never null, error
+// codes attached); sig is the fingerprint taken before the read, "" when unknown.
+func chatSessionDetail(ctx context.Context, api ChatSessionAPI, id, sig string) (ChatSessionDetail, error) {
+	d, err := api.GetChatSession(ctx, id)
+	if err != nil {
+		return d, err
+	}
+	if d.TurnList == nil {
+		d.TurnList = []ChatTurn{}
+	}
+	attachTurnErrInfo(d.TurnList)
+	d.Sig = sig
+	return d, nil
+}
+
+// runChatEmbed: for GET /api/runs/{id}?chat=1, the session a finished run starts (its
+// turn 0), as GET /api/chat-sessions/{id} would answer, so the run page draws the thread
+// with the run instead of one round trip later. nil when there is none or it can't be read
+// (the page then asks for it itself, as before).
+func (s *Server) runChatEmbed(ctx context.Context, ref *runChatRef, status string) *ChatSessionDetail {
+	api := s.deps.ChatSessions
+	if api == nil || ref == nil || ref.Turn != 0 {
+		return nil
+	}
+	switch status {
+	case "succeeded", "failed", "timeout", "canceled":
+	default:
+		return nil
+	}
+	sig := ""
+	if sg, ok := api.(chatSessionSigner); ok {
+		if v, err := sg.ChatSessionSig(ctx, ref.ID); err == nil {
+			sig = v
+		}
+	}
+	d, err := chatSessionDetail(ctx, api, ref.ID, sig)
+	if err != nil {
+		return nil
+	}
+	return &d
+}
+
 // ChatMessageMax caps one turn's message (bytes).
 const ChatMessageMax = 16 << 10
 
@@ -285,16 +327,11 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]any{"unchanged": true, "sig": sig})
 			return
 		}
-		d, err := api.GetChatSession(r.Context(), id)
+		d, err := chatSessionDetail(r.Context(), api, id, sig)
 		if err != nil {
 			chatErr(w, err)
 			return
 		}
-		if d.TurnList == nil {
-			d.TurnList = []ChatTurn{}
-		}
-		attachTurnErrInfo(d.TurnList)
-		d.Sig = sig
 		writeJSON(w, 200, d)
 	case sub == "" && r.Method == http.MethodDelete:
 		if err := api.DeleteChatSession(r.Context(), id); err != nil {

@@ -309,6 +309,7 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			ChangesUndoneAt     string                   `json:"changes_undone_at,omitempty"`
 			ChangesUndoneFiles  []string                 `json:"changes_undone_files,omitempty"`
 			ChatSession         *runChatRef              `json:"chat_session,omitempty"`
+			Chat                *ChatSessionDetail       `json:"chat,omitempty"`
 		}{runDTO: runs[0], Currency: s.fx().Display, Result: result, ResultTruncated: cut != 0, ChangesUndoneAt: undoneAt}
 		var policyJSON string
 		if s.deps.DB.QueryRowContext(r.Context(), `SELECT effective_cost_policy_json FROM runs WHERE id=?`, id).Scan(&policyJSON) == nil && policyJSON != "{}" && json.Valid([]byte(policyJSON)) {
@@ -355,6 +356,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			out.CostDetail = json.RawMessage(detail)
 		}
 		out.ChatSession = s.runChatRef(r.Context(), id)
+		// chat=1 (the run page): the session this finished run starts, in the same answer
+		if r.URL.Query().Get("chat") == "1" {
+			out.Chat = s.runChatEmbed(r.Context(), out.ChatSession, runs[0].Status)
+		}
 		writeJSON(w, 200, out)
 		return
 	}

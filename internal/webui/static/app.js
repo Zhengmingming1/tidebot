@@ -6868,8 +6868,12 @@ media.addEventListener("change",resize);
 runWorkspaceResizeOff=function(){media.removeEventListener("change",resize);};
 inspect(media.matches);
 }
+function runDetailPath(id){return "/api/runs/"+enc(id)+"?chat=1";}
+function runBindingsPath(id){return "/api/capabilities/run-bindings?run_id="+enc(id);}
 function renderRunDetail(id){
-return api("/api/runs/"+enc(id)).then(runChatPreload).then(function(r){
+var binds=api(runBindingsPath(id),{fresh:true});
+binds.catch(function(){});
+return api(runDetailPath(id)).then(runChatPreload).then(function(r){
 var live=r.status==="running"||r.status==="queued",queued=r.status==="queued";
 var turn=r.trigger==="session"||!!(r.chat_session&&r.chat_session.turn>0);
 mount('<div class="run-workspace" id="run-workspace"><header class="rw-head"><div class="rw-title"><h1>'+esc(runTitle(r))+'</h1><div>'+statusPill(r.status,r.queue_pos,r.error)+'<span class="muted">'+esc(when(r.started_at||r.created_at))+'</span>'+runChatOfHtml(r)+'</div></div><div class="rw-actions">'+
@@ -6910,7 +6914,7 @@ stopRun(id,r.status).then(function(y){if(y)refresh();else b.disabled=false;}).ca
 if($("#rd-ans"))bindRunAnswer($("#rd-ans"),r);
 if($("#rd-chg"))bindRunChanges($("#rd-chg"),r);
 bindRunWorkspace(r,live);
-capLoadRunBindings(id,$("#rd-inspector"));
+capLoadRunBindings(id,$("#rd-inspector"),binds);
 if(state.chgJump===id&&$("#rd-chg"))$("#rd-chg").scrollIntoView({block:"start"});
 state.chgJump=null;
 bindRunPrompt(r);
@@ -7360,6 +7364,7 @@ return '<a class="pill plain sm rc-of" href="#/runs/'+enc(cs.origin_run_id)+'" d
 function runChatPreload(r){
 var cs=r.chat_session;
 if(!cs||cs.turn!==0||!rcDone(r.status))return r;
+if(r.chat&&r.chat.id===cs.id){r._chat=r.chat;delete r.chat;return r;}
 return api("/api/chat-sessions/"+enc(cs.id),{fresh:true}).then(function(s){r._chat=s;return r;},function(){return r;});
 }
 function rcTurns(s){return((s&&s.turn_list)||[]).filter(function(t){return t.index>0;});}
@@ -8176,10 +8181,10 @@ var bySkill={};caps.forEach(function(c){(capLock(c).components||[]).forEach(func
 $$("[data-cap-skill]",root).forEach(function(el){var c=bySkill[el.getAttribute("data-cap-skill")];if(!c)return;var b=document.createElement("button");b.type="button";b.className="btn sm ghost";b.textContent=T("cap.from")+" "+(c.title||c.id);b.addEventListener("click",function(e){e.stopPropagation();capManageDialog(c.id).catch(fail);});el.appendChild(b);});
 }).catch(function(){});
 }
-function capLoadRunBindings(id,root){
+function capLoadRunBindings(id,root,got){
 if(!root)return;
-api("/api/capabilities/run-bindings?run_id="+enc(id),{fresh:true}).then(function(rows){
-if(!document.contains(root)||!rows.length)return;
+(got||api(runBindingsPath(id),{fresh:true})).then(function(rows){
+if(!document.contains(root)||!rows||!rows.length)return;
 var section=document.createElement("section");
 section.innerHTML='<h3>'+esc(T("cap.run_versions"))+'</h3><ul class="cap-findings">'+rows.map(function(row){return '<li>'+esc(row.title||row.id)+'<br><small>'+esc(row.version_id)+' · '+esc(row.source_version||'')+'</small></li>';}).join('')+'</ul>';
 root.appendChild(section);
@@ -9882,7 +9887,7 @@ var id=parts[1];
 switch(parts[0]){
 case undefined:return[pfGet("/api/overview"),pfGet("/api/dashboard")];
 case "tasks":return id?taskDetailPaths(id,parts[2]||"overview").map(pfGet):[pfGet("/api/tasks")];
-case "runs":return id?[pfGet("/api/runs/"+enc(id))]:[];
+case "runs":return id?[pfGet(runDetailPath(id))]:[];
 case "workflows":return(id?workflowEditorPaths(id):["/api/workflows"]).filter(Boolean).map(pfGet);
 case "workflow-runs":return id?[pfGet("/api/workflow-runs/"+enc(id))]:[];
 case "skills":return id?[pfGet("/api/skills"),pfGet(skillVersionsPath(id,null)),pfRpc("skills.optimize_settings",{skill_id:id}),pfRpc("skills.proposals",{skill_id:id})]:[pfGet("/api/skills")];

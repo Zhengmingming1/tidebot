@@ -226,8 +226,16 @@
     runWorkspaceResizeOff = function () { media.removeEventListener("change", resize); };
     inspect(media.matches);
   }
+  // runDetailPath: the run page's first request (the prefetch asks for the same one). chat=1:
+  // a finished run that starts a session brings the session along, so the thread under the
+  // answer is drawn with the page instead of one round trip later.
+  function runDetailPath(id) { return "/api/runs/" + enc(id) + "?chat=1"; }
+  function runBindingsPath(id) { return "/api/capabilities/run-bindings?run_id=" + enc(id); }
   function renderRunDetail(id) {
-    return api("/api/runs/" + enc(id)).then(runChatPreload).then(function (r) {
+    // asked for together with the run, not after the page is drawn
+    var binds = api(runBindingsPath(id), { fresh: true });
+    binds.catch(function () {});
+    return api(runDetailPath(id)).then(runChatPreload).then(function (r) {
       var live = r.status === "running" || r.status === "queued", queued = r.status === "queued";
       // a session's later turn: rerun / edit / save as task make no sense without the session
       var turn = r.trigger === "session" || !!(r.chat_session && r.chat_session.turn > 0);
@@ -269,7 +277,7 @@
       if ($("#rd-ans")) bindRunAnswer($("#rd-ans"), r);
       if ($("#rd-chg")) bindRunChanges($("#rd-chg"), r);
       bindRunWorkspace(r, live);
-      capLoadRunBindings(id, $("#rd-inspector"));
+      capLoadRunBindings(id, $("#rd-inspector"), binds);
       // opened from a list row's change badge: bring the card into view
       if (state.chgJump === id && $("#rd-chg")) $("#rd-chg").scrollIntoView({ block: "start" });
       state.chgJump = null;

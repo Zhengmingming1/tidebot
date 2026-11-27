@@ -443,10 +443,11 @@
     }).catch(function(){});
   }
 
-  function capLoadRunBindings(id, root) {
+  // got: the request already on its way (the run page starts it with the run itself)
+  function capLoadRunBindings(id, root, got) {
     if (!root) return;
-    api("/api/capabilities/run-bindings?run_id="+enc(id),{fresh:true}).then(function(rows){
-      if (!document.contains(root) || !rows.length) return;
+    (got||api(runBindingsPath(id),{fresh:true})).then(function(rows){
+      if (!document.contains(root) || !rows || !rows.length) return;
       var section=document.createElement("section");
       section.innerHTML='<h3>'+esc(T("cap.run_versions"))+'</h3><ul class="cap-findings">'+rows.map(function(row){return '<li>'+esc(row.title||row.id)+'<br><small>'+esc(row.version_id)+' · '+esc(row.source_version||'')+'</small></li>';}).join('')+'</ul>';
       root.appendChild(section);

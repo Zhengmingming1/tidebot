@@ -252,3 +252,136 @@ func TestRunChatTurnTipsNotClipped(t *testing.T) {
 		}
 	}
 }
+
+// TestRunDetailEmbedsChat: GET /api/runs/{id}?chat=1 brings the session a finished run
+// starts (as GET /api/chat-sessions/{id} answers it), so the run page draws the thread
+// without a second round trip; later turns, unfinished runs, runs outside a session, a
+// failed read and requests without chat=1 carry none.
+func TestRunDetailEmbedsChat(t *testing.T) {
+	c := login(t)
+	fc := &fakeChats{}
+	c.s.deps.ChatSessions = fc
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, q := range []string{
+		`INSERT INTO runs(id,status,prompt,created_at) VALUES('run_o','succeeded','p',?)`,
+		`INSERT INTO runs(id,status,prompt,created_at) VALUES('run_t','succeeded','next?',?)`,
+		`INSERT INTO runs(id,status,prompt,created_at) VALUES('run_x','succeeded','other',?)`,
+	} {
+		if _, err := c.s.deps.DB.Exec(q, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.s.deps.DB.Exec(`INSERT INTO chat_sessions(id,origin_run_id,created_at,updated_at) VALUES('chat_1','run_o',?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	for i, rid := range []string{"run_o", "run_t"} {
+		if _, err := c.s.deps.DB.Exec(`INSERT INTO chat_session_turns(session_id,turn_index,run_id,created_at) VALUES('chat_1',?,?,?)`, i, rid, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chat := func(path string) map[string]any {
+		t.Helper()
+		code, out := c.json(http.MethodGet, path, nil)
+		if code != 200 {
+			t.Fatalf("%s: %d %v", path, code, out)
+		}
+		if _, ok := out["chat"]; !ok {
+			return nil
+		}
+		m, _ := out["chat"].(map[string]any)
+		if m == nil {
+			t.Fatalf("%s: chat %v", path, out["chat"])
+		}
+		return m
+	}
+	// same body as the session endpoint
+	_, direct := c.json(http.MethodGet, "/api/chat-sessions/chat_1", nil)
+	got := chat("/api/runs/run_o?chat=1")
+	if got == nil || got["id"] != "chat_1" {
+		t.Fatalf("origin run: %v", got)
+	}
+	a, _ := json.Marshal(got)
+	b, _ := json.Marshal(direct)
+	if string(a) != string(b) {
+		t.Fatalf("embedded session differs:\n%s\n%s", a, b)
+	}
+	if tl, _ := got["turn_list"].([]any); len(tl) != 1 {
+		t.Fatalf("turn_list %v", got["turn_list"])
+	}
+	for _, p := range []string{"/api/runs/run_o", "/api/runs/run_o?chat=0", "/api/runs/run_t?chat=1", "/api/runs/run_x?chat=1"} {
+		if m := chat(p); m != nil {
+			t.Errorf("%s carries chat %v", p, m)
+		}
+	}
+	for _, st := range []string{"running", "queued"} {
+		if _, err := c.s.deps.DB.Exec(`UPDATE runs SET status=? WHERE id='run_o'`, st); err != nil {
+			t.Fatal(err)
+		}
+		if m := chat("/api/runs/run_o?chat=1"); m != nil {
+			t.Errorf("%s run carries chat %v", st, m)
+		}
+	}
+	if _, err := c.s.deps.DB.Exec(`UPDATE runs SET status='failed' WHERE id='run_o'`); err != nil {
+		t.Fatal(err)
+	}
+	if m := chat("/api/runs/run_o?chat=1"); m == nil {
+		t.Error("failed run: no chat")
+	}
+	fc.err = ErrChatSessionNotFound // the page then asks for it itself
+	if m := chat("/api/runs/run_o?chat=1"); m != nil {
+		t.Errorf("failed read carries chat %v", m)
+	}
+	fc.err = nil
+	c.s.deps.ChatSessions = nil
+	if m := chat("/api/runs/run_o?chat=1"); m != nil {
+		t.Errorf("unwired carries chat %v", m)
+	}
+
+	// The page: the session that came with the run is used as is (no request); a run without
+	// it (older server, failed read) still asks; later turns and live runs never do.
+	src := appJS(t)
+	for _, want := range []string{
+		`var binds = api(runBindingsPath(id), { fresh: true });`,
+		`return api(runDetailPath(id)).then(runChatPreload).then(function (r) {`,
+		`capLoadRunBindings(id, $("#rd-inspector"), binds);`,
+		`case "runs": return id ? [pfGet(runDetailPath(id))] : [];`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
+	}
+	rs, err := os.ReadFile("src/run-chat.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := strings.ReplaceAll(string(rs), "\r\n", "\n")
+	pre := cut(t, rc, "  function rcDone(st) {", "  function rcBusy(st) {") + cut(t, rc, "  function runChatPreload(r) {", "  function rcTurns(s) {")
+	lv, err := os.ReadFile("src/log-view.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := cut(t, strings.ReplaceAll(string(lv), "\r\n", "\n"), "  function runDetailPath(id) {", "  function renderRunDetail(id) {")
+	runNode(t, `
+var calls = [], bad = [];
+function enc(s) { return encodeURIComponent(s); }
+function api(p, o) { calls.push(p + (o && o.fresh ? " fresh" : "")); return Promise.resolve({ id: "c1", turn_list: [{ index: 1 }] }); }
+`+pre+paths+`
+(async function () {
+  if (runDetailPath("r 1") !== "/api/runs/r%201?chat=1") bad.push("path " + runDetailPath("r 1"));
+  if (runBindingsPath("r 1") !== "/api/capabilities/run-bindings?run_id=r%201") bad.push("bindings path");
+  var r = await runChatPreload({ status: "succeeded", chat_session: { id: "c1", turn: 0 }, chat: { id: "c1", turn_list: [] } });
+  if (calls.length || !r._chat || r._chat.id !== "c1" || "chat" in r) bad.push("embedded: " + calls + " " + JSON.stringify(r));
+  r = await runChatPreload({ status: "failed", chat_session: { id: "c1", turn: 0 } });
+  if (calls.join() !== "/api/chat-sessions/c1 fresh" || !r._chat) bad.push("fallback: " + calls);
+  calls = [];
+  r = await runChatPreload({ status: "succeeded", chat_session: { id: "c1", turn: 0 }, chat: { id: "other" } });
+  if (calls.join() !== "/api/chat-sessions/c1 fresh") bad.push("mismatched id used: " + calls);
+  calls = [];
+  await runChatPreload({ status: "succeeded", chat_session: { id: "c1", turn: 2 } });
+  await runChatPreload({ status: "running", chat_session: { id: "c1", turn: 0 } });
+  await runChatPreload({ status: "succeeded" });
+  if (calls.length) bad.push("asked when it shouldn't: " + calls);
+  if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
+})();
+`, nil)
+}

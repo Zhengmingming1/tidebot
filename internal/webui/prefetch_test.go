@@ -49,6 +49,7 @@ func TestIntentPrefetch(t *testing.T) {
 	rpcs := cut(t, src, "  // Pure reads:", "  function renderPlugins() {")
 	tdp := cut(t, src, "  function taskDetailPaths(id, tab) {", "  function renderTaskDetail(id, tab) {")
 	wep := cut(t, src, "  function workflowEditorPaths(id) {", "  function renderWorkflowEditor(id) {")
+	rdp := cut(t, src, "  function runDetailPath(id) {", "  function runBindingsPath(id) {")
 	pfb := cut(t, src, "  // ---------- intent prefetch ----------", "  (function () {\n    var clear = function ()")
 	script := `
 var bad = [], calls = [], reply = {}, held = [], rerenders = 0;
@@ -68,7 +69,7 @@ function apiRaw(path, opts) {
 }
 function err(status) { var e = new Error("no " + status); e.status = status; return e; }
 var setTimeout = function (f) { return 0; }, clearTimeout = function () {};
-` + cache + rpcs + tdp + wep + pfb + `
+` + cache + rpcs + tdp + wep + rdp + pfb + `
 function keys(h) { return prefetchReqs(h).map(function (q) { return q.key; }).join(" | "); }
 function tick() { return new Promise(function (r) { global.setImmediate(r); }); }
 (async function () {
@@ -77,7 +78,7 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   if (keys("#/tasks") !== "/api/tasks") bad.push("tasks: " + keys("#/tasks"));
   if (keys(T) !== [tid, tid + "/amendments", tid + "/versions", tid + "/runs?limit=6", tid + "/workflow-runs?limit=6"].join(" | ")) bad.push("task: " + keys(T));
   if (keys(T + "/runs").indexOf("runs?limit=50") < 0) bad.push("task runs tab: " + keys(T + "/runs"));
-  if (keys("#/runs/r1") !== "/api/runs/r1") bad.push("run: " + keys("#/runs/r1"));
+  if (keys("#/runs/r1") !== "/api/runs/r1?chat=1") bad.push("run: " + keys("#/runs/r1"));
   if (keys("#/skills/s1") !== '/api/skills | /api/skills/s1/versions?diff=1 | rpc:skills.optimize_settings:{"skill_id":"s1"} | rpc:skills.proposals:{"skill_id":"s1"}') bad.push("skill: " + keys("#/skills/s1"));
   var W = "/api/skills | /api/skill-sets | ";
   if (keys("#/workflows") !== "/api/workflows") bad.push("workflows: " + keys("#/workflows"));
@@ -110,20 +111,20 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   if (calls.join() !== "GET " + tid) bad.push("stale prefetch not revalidated: " + calls);
 
   // A 4xx is kept for a moment (no second ask); a 5xx is not.
-  reply["/api/rpc/skills.proposals"] = err(400); reply["/api/runs/r5"] = err(500);
+  reply["/api/rpc/skills.proposals"] = err(400); reply["/api/runs/r5?chat=1"] = err(500);
   prefetchRoute("#/skills/s1"); prefetchRoute("#/runs/r5"); await tick(); await tick();
   calls = []; swr.on = true;
   var r1 = await rpc("skills.proposals", { skill_id: "s1" }).then(function () { return "ok"; }, function (e) { return e.status; });
-  var r2 = await api("/api/runs/r5").then(function () { return "ok"; }, function (e) { return e.status; });
+  var r2 = await api("/api/runs/r5?chat=1").then(function () { return "ok"; }, function (e) { return e.status; });
   swr.on = false;
   if (r1 !== 400 || r2 !== 500) bad.push("refusal results " + r1 + " " + r2);
-  if (calls.join() !== "GET /api/runs/r5") bad.push("refusal caching calls: " + calls);
+  if (calls.join() !== "GET /api/runs/r5?chat=1") bad.push("refusal caching calls: " + calls);
 
   // A write while a prefetch is in flight: its answer is not kept.
-  reply["/api/runs/r9"] = "hold"; prefetchRoute("#/runs/r9");
+  reply["/api/runs/r9?chat=1"] = "hold"; prefetchRoute("#/runs/r9");
   await api("/api/tasks/x/pause", { method: "POST", body: {} });
   held.shift()(); await tick(); await tick();
-  if (swr.cache["/api/runs/r9"]) bad.push("kept a prefetch that raced a write");
+  if (swr.cache["/api/runs/r9?chat=1"]) bad.push("kept a prefetch that raced a write");
 
   // Read-only RPCs share the cache and keep it; writes drop it.
   swr.cache["/api/tasks"] = { s: "[]", t: Date.now() };
@@ -135,7 +136,7 @@ function tick() { return new Promise(function (r) { global.setImmediate(r); }); 
   if (swr.cache["/api/tasks"]) bad.push("a write RPC kept the page cache");
 
   // At most PF_MAX in flight.
-  for (var i = 0; i < 9; i++) reply["/api/runs/h" + i] = "hold";
+  for (var i = 0; i < 9; i++) reply["/api/runs/h" + i + "?chat=1"] = "hold";
   var n = 0; for (i = 0; i < 9; i++) n += prefetchRoute("#/runs/h" + i);
   if (n !== PF_MAX || pf.busy !== PF_MAX) bad.push("in-flight cap: " + n + " busy " + pf.busy);
   while (held.length) held.shift()();

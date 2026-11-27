@@ -31,6 +31,8 @@
   function runChatPreload(r) {
     var cs = r.chat_session;
     if (!cs || cs.turn !== 0 || !rcDone(r.status)) return r;
+    // came with the run (GET /api/runs/{id}?chat=1); older servers or a failed read: ask
+    if (r.chat && r.chat.id === cs.id) { r._chat = r.chat; delete r.chat; return r; }
     return api("/api/chat-sessions/" + enc(cs.id), { fresh: true }).then(function (s) { r._chat = s; return r; }, function () { return r; });
   }
   function rcTurns(s) { return ((s && s.turn_list) || []).filter(function (t) { return t.index > 0; }); }

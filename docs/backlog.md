@@ -8027,3 +8027,35 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 运行详情页可以同样检查一遍首屏请求（日志、成本、会话轮次是否串行）。
 - `skillBindingEditor` 在任务表单里仍是每次打开表单各请求一次技能组合，可以走页面缓存。
 - 一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做；`app.EnsureTask` 仍只建基本字段（只在测试里用）。
+
+### 2026-11-27（续 4）：运行详情页把「继续对话」随运行一起取回，运行绑定与运行同时请求（性能 / 闪烁）
+
+这是 2026-11-27 19:47 Asia/Shanghai 的优化，接上一轮后续想法「运行详情页可以同样检查一遍首屏请求」。
+
+- **问题**：新写的 `rd_open.py`（不入库）在 150 ms 延迟下实测运行详情页：一条已结束、下面接着会话（turn 0）的运行，页面要先等 `GET /api/runs/{id}`，再串行等 `GET /api/chat-sessions/{id}`（`runChatPreload`，fresh），然后才画出，比普通运行多一整个往返，还会先闪 6 帧整页骨架屏；悬停预取也只能预取运行本身，会话那一轮仍要等。`/api/capabilities/run-bindings` 则要等页面画好后才发。
+- **改法**：
+  - `GET /api/runs/{id}?chat=1` 在运行已结束（succeeded / failed / timeout / canceled）且是某个会话的 turn 0 时多带一个 `chat`，内容与 `GET /api/chat-sessions/{id}` 完全一致（抽出 `chatSessionDetail` 共用，含 `sig`、空 `turn_list` 为 `[]`、错误码）。不带 `chat=1`、后续轮次、未结束的运行、会话读取失败、未接会话服务时都不带，响应与原来相同。
+  - 前端新增 `runDetailPath(id)`，渲染和意图预取共用同一个 key；`runChatPreload` 优先用随运行回来、id 一致的 `chat`，否则（旧服务端、读取失败）照旧单独请求。运行绑定改为与运行同时发出，`capLoadRunBindings` 接受已发出的 Promise。
+  - 没有新增任何限制，没有界面布局改动。
+- **数字**（演示实例，1024×655，Chromium 网络模拟 150 ms 延迟，从设置页进入，各跑 2 次）：
+
+| 指标 | 改前 | 改后 |
+| --- | ---: | ---: |
+| 带会话的运行，直接打开：页面 + 对话可见 | 384–388 ms | 231–237 ms |
+| 带会话的运行，悬停 250 ms 后点击 | 228–232 ms | 75–76 ms |
+| 带会话的运行，整页骨架屏帧 | 6 | 0 |
+| 首屏串行轮数（不含 `/events`、会话能力提议） | 3（运行 → 会话 → 绑定） | 1 |
+| 普通运行（无会话），直接 / 悬停 | 约 248 / 98 ms | 211 / 72 ms（持平） |
+| app.js | 768.6 KB / gzip 214.06 KB | 768.9 KB / gzip 214.20 KB |
+
+- **测试**：新增 `TestRunDetailEmbedsChat`（`chat=1` 带出与会话接口逐字节相同的内容；无参数、`chat=0`、后续轮次、无会话、running / queued、读取失败、未接服务都不带，failed 运行带；node 下 `runChatPreload` 用随运行来的会话不发请求，缺失或 id 不一致时照旧 fresh 请求，后续轮次 / 运行中 / 无会话不请求；`runDetailPath`、`runBindingsPath` 编码）。`TestIntentPrefetch` 改为 `#/runs/<id>` 预取 `?chat=1`。`go test ./internal/webui`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`check-i18n.py`、`node --check` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-27-1947-run-detail-chat-embed.png`（1024×655，zh-CN，运行页下方的继续对话直接画出，无脚本错误）。
+
+**心得**：「拿到 A 才知道要请求 B」的串行链，悬停预取也救不了（预取只知道链接本身）；在服务端顺手把 B 带回来才是一轮。用查询参数开关，其他调用方（实时轮询、刷新）的响应不变。
+
+**参考**：TanStack/query `docs/framework/react/guides/request-waterfalls.md` 的「Single Component Waterfalls / Serial Queries」一节（依赖查询改由 API 一次返回，把瀑布拉平）；只借思路，不抄代码。
+
+**后续想法**：
+- 宽屏（≥1101 px）检查器里「当前任务」的三个请求仍等页面画好才发，150 ms 下有约 10 帧小区域骨架屏；可以在运行返回后、挂载前就发出，或在 `?chat=1` 同类参数里带上。
+- 会话能力提议 `/api/capabilities/proposals?session_id=` 仍在挂载后才请求，可同样随会话一起返回。
+- 一个会话仍只能有一份草稿；`dangerouslyDisableSandbox` 直接实测仍未做；`app.EnsureTask` / `tasks.create` RPC 仍只建基本字段。
