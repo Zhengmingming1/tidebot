@@ -168,14 +168,19 @@ if (bad.length) { console.error(bad.join("\n")); process.exitCode = 1; }
 	if err != nil {
 		t.Fatal(err)
 	}
-	// the bundled stylesheet, with the minifier's line breaks and last semicolons dropped
-	css := strings.NewReplacer("\n", "", ";}", "}", "@supports (", "@supports(").Replace(string(b))
+	// the bundled stylesheet, with the minifier's line breaks (CRLF in a Windows
+	// checkout) and last semicolons dropped
+	css := strings.NewReplacer("\r", "", "\n", "", ";}", "}", "@supports (", "@supports(").Replace(string(b))
 	i := strings.Index(css, "@supports(grid-template-columns:subgrid)")
 	if i < 0 {
 		t.Fatal("no subgrid block for the draft rows")
 	}
 	block := css[i:]
-	block = block[:strings.Index(block, "}}")+2]
+	end := strings.Index(block, "}}")
+	if end < 0 {
+		t.Fatalf("subgrid block not closed: %.200s", block)
+	}
+	block = block[:end+2]
 	for _, want := range []string{
 		`.cs-drafts{display:grid;grid-template-columns:minmax(0,1fr) repeat(4,auto)`,
 		`.cs-draft{grid-column:1/-1;display:grid;grid-template-columns:subgrid`,

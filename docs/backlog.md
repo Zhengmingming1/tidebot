@@ -8279,7 +8279,7 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - **测试**：`TestChatDraftRowsAligned` 在 node 里解析行 HTML，断言第一行直接子元素为「标签格、试跑、保存、采用、丢弃」，其他行没有试跑、过期提示在标签格里、只有第一行带 `has-try`、不再有 `rc-sp`；并检查打包后的样式里 subgrid 块的列定义与各按钮的列号、`[hidden]` 规则仍在。`go test ./...`、`go vet ./internal/webui`、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py` 通过。
 - **截图**：`/workspace/tidebot-shots/2026-11-29-0400-draft-rows-align-zh-CN.png`、`-en.png`（1024×655，石墨）。
 
-**心得**：几行「同一组按钮」要对齐，靠给按钮定宽会在另一种语言里破；让各行共享父级的列轨道（subgrid）才是根治，且能用 `@supports` 干净地退回原来的 flex。CSP 不允许内联样式，测回退时要用元素的 `style.setProperty` 而不是注入 `<style>`。
+**心得**：几行「同一组按钮」要对齐，靠给按钮定宽会在另一种语言里破；让各行共享父级的列轨道（subgrid）才是根治，且能用 `@supports` 干净地退回原来的 flex。CSP 不允许内联样式，测回退时要用元素的 `style.setProperty` 而不是注入 `<style>`。另：首次推送时 Windows CI 失败——Windows 检出的 `static/styles.css` 是 CRLF，测试只去掉了 `\n`，`}\r}` 找不到块尾；已在后续提交里同时去掉 `\r` 并在找不到块尾时明确报错（本地把样式改成 CRLF 复现并验证）。
 
 **参考**：mdn/content `files/en-us/web/css/guides/grid_layout/subgrid/index.md` 的「Subgrid for columns」（子网格沿用父网格的列轨道和间距）；只借思路，不抄代码。
 
