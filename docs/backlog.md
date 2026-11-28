@@ -8191,3 +8191,34 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 1024×655 下点「检查器」仍要一个往返；可在悬停 / 聚焦检查器按钮时预取那三个请求（复用意图预取的缓存）。
 - 会话能力提议 `/api/capabilities/proposals?session_id=` 仍在挂载后才请求，可同样随会话一起返回。
 - `allowAllUnixSockets` 显式开关（默认关）、macOS CI 跑 Seatbelt 端到端、`App.StartRun` exec 路径接假 API、草稿行按钮对齐仍待做。
+
+### 2026-11-28（续）：会话的扩展提议随会话一起取回，回答中的轮询从每次两个请求变成一个（性能 / 资源浪费 / 一轮往返）
+
+这是 2026-11-28 20:00 Asia/Shanghai 的优化，接上一轮后续想法「会话能力提议 `/api/capabilities/proposals?session_id=` 仍在挂载后才请求，可同样随会话一起返回」。
+
+- **问题**：会话页每画一次会话就紧跟着请求一次 `GET /api/capabilities/proposals?session_id=`。打开会话时提议卡片要等会话回来后再一轮往返才出现；回答进行中每 1.5 s 的会话轮询后面都跟着一个提议请求（即使带 `since` 拿到的是 `{unchanged}`），请求数翻倍。
+- **改法**：
+  - `GET /api/chat-sessions/{id}?caps=1[&cap_since=<sig>]` 多带一个 `cap_proposals`，内容与 `GET /api/capabilities/proposals?session_id=<id>&since=<sig>` 逐字相同（`{proposals, sig}` 或 `{unchanged, sig}`），完整应答和会话没变的 `{unchanged}` 短应答都带。不带 `caps=1`、没有扩展模块、读取失败时不带，页面照旧自己请求。`GET /api/runs/{id}?chat=1` 嵌入的会话也带上（运行页同样显示提议卡）。登录 + CSRF 不变，没有新路由。
+  - 前端：会话页打开、运行页回退读取和轮询都加 `caps=1`；轮询带上当前卡片的 `cap_since`（框加载失败时不带，取整份）。`capRefreshSession` 新增 `embedded` 参数：整份列表直接画（只换变化的卡片，沿用原有逻辑），`{unchanged}` 且 sig 与手上一致时什么都不做；sig 对不上、自己的请求还在途中、强制刷新（确认 / 取消后）时照旧请求。用过的 `cap_proposals` 从会话对象上删掉，后续重画不会拿旧数据。
+  - 不加任何限制，行为不变，只少请求。
+- **数字**（本机，当前 main 构建 vs 本次，headless Chrome，1024×655，演示数据，同一会话测 3 次）：
+
+| 指标 | 改前 | 改后 |
+| --- | ---: | ---: |
+| 150 ms 延迟下打开会话：提议区就绪 | 335–378 ms | 168–176 ms（与对话同一帧） |
+| 打开会话的 API 请求（不含 events / 通知） | 4 | 3 |
+| 一轮回答（约 3.4 s）期间的提议请求 | 3 | 0（会话请求 4 次，不变） |
+| 回答中卡片在后台被取消 | 下一次提议请求后更新 | 下一次会话轮询即更新（实测 2.5 s 内显示「已取消」，0 个提议请求） |
+| app.js | 770.2 KB / gzip 214.58 KB | 771.0 KB / gzip 214.78 KB |
+
+- **测试**：新增 `TestChatSessionEmbedsProposals`（不带 `caps=1` 不问扩展模块；完整应答与提议接口逐字相同；会话和提议都没变时整段应答为两个 `{unchanged}`；会话没变、提议变了时带整份列表且不读轮次；扩展模块报错或未接入时不带字段；不存在的会话 404 且不问）、`TestRunDetailChatEmbedsProposals`、`TestSessionProposalsEmbeddedUI`（node 下：嵌入列表直接画、无请求；`{unchanged}` 不请求不重画并计入节流；新列表只加新卡；对不上的 `{unchanged}`、强制刷新照旧请求；自己的请求在途时不用嵌入数据；加载失败后查询不带 `cap_since`，嵌入列表能恢复）。`TestRunDetailEmbedsChat`、`TestCapabilityUI` 的字符串断言跟着更新。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-28-2000-session-proposals-embed-zh-CN-graphite.png`（1024×655，石墨，zh-CN，打开会话时提议卡与对话同时画出；无脚本错误）。
+
+**心得**：轮询里「主请求 + 跟随请求」最容易悄悄翻倍；把跟随数据的 `since` 指纹一起交给主请求，服务端两个指纹各自判断，短应答依然很短。客户端用嵌入数据时要守住两条：自己的请求在途时让位给它，用过的数据从对象上拿掉，避免旧数据被再次套用。
+
+**参考**：TanStack/query `docs/framework/react/guides/prefetching.md` 的「Dependent Queries & Code Splitting」（能改 API 就让上游请求顺带返回下游数据）；只借思路，不抄代码。
+
+**后续想法**：
+- 会话页打开时 `/api/chat-sessions/{id}/draft` 仍晚一轮往返（150 ms 延迟下约多 160 ms），可同样用 `drafts=1` 随会话返回。
+- 会话列表 `/api/chat-sessions?limit=200` 每次打开会话都整份取回，可加 `since` 指纹或改由事件流增量更新。
+- `allowAllUnixSockets` 显式开关、macOS CI 跑 Seatbelt 端到端、草稿行按钮对齐仍待做。

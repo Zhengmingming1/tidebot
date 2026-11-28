@@ -33,7 +33,7 @@
     if (!cs || cs.turn !== 0 || !rcDone(r.status)) return r;
     // came with the run (GET /api/runs/{id}?chat=1); older servers or a failed read: ask
     if (r.chat && r.chat.id === cs.id) { r._chat = r.chat; delete r.chat; return r; }
-    return api("/api/chat-sessions/" + enc(cs.id), { fresh: true }).then(function (s) { r._chat = s; return r; }, function () { return r; });
+    return api("/api/chat-sessions/" + enc(cs.id) + "?caps=1", { fresh: true }).then(function (s) { r._chat = s; return r; }, function () { return r; });
   }
   function rcTurns(s) { return ((s && s.turn_list) || []).filter(function (t) { return t.index > 0; }); }
   // The section under a finished run (not under a session's later turns: their thread is on
@@ -362,7 +362,9 @@
       var sep = $("#rc-sep", sec);
       if (sep) sep.hidden = !turns.length;
       if (o.onPaint) o.onPaint(s);
-      if (typeof capRefreshSession === "function") capRefreshSession(sec, s.id);
+      // proposals that came with this read are used once (st.ses is painted again later)
+      var cp = s.cap_proposals; delete s.cap_proposals;
+      if (typeof capRefreshSession === "function") capRefreshSession(sec, s.id, false, cp);
       rcElapsed();
       sync();
       if (busy()) livePoll(load, RC_POLL_MS); else if (st.polling) stopPoll();
@@ -374,11 +376,14 @@
     // (each repaint used to turn every answer's markdown into HTML again to compare it).
     var load = function () {
       if (!st.id) return Promise.resolve();
-      var id = st.id, since = st.ses && st.sig && st.sigId === id ? "?since=" + enc(st.sig) : "";
-      return api("/api/chat-sessions/" + enc(id) + since, { fresh: true }).then(function (s) {
+      var id = st.id, since = st.ses && st.sig && st.sigId === id ? "since=" + enc(st.sig) : "";
+      // the session's extension proposals ride along (one request per poll, not two)
+      var caps = typeof capSessionQuery === "function" ? capSessionQuery(sec) : "";
+      var q = [since, caps].filter(Boolean).join("&");
+      return api("/api/chat-sessions/" + enc(id) + (q ? "?" + q : ""), { fresh: true }).then(function (s) {
         if (!document.contains(sec) || id !== st.id) return;
         if (s && s.unchanged) {
-          if (s.sig === st.sig) { if (typeof capRefreshSession === "function") capRefreshSession(sec, id); return; }
+          if (s.sig === st.sig) { if (typeof capRefreshSession === "function") capRefreshSession(sec, id, false, s.cap_proposals); return; }
           st.sig = ""; return load();
         }
         st.sig = (s && s.sig) || ""; st.sigId = id;

@@ -372,10 +372,10 @@ function api(p, o) { calls.push(p + (o && o.fresh ? " fresh" : "")); return Prom
   var r = await runChatPreload({ status: "succeeded", chat_session: { id: "c1", turn: 0 }, chat: { id: "c1", turn_list: [] } });
   if (calls.length || !r._chat || r._chat.id !== "c1" || "chat" in r) bad.push("embedded: " + calls + " " + JSON.stringify(r));
   r = await runChatPreload({ status: "failed", chat_session: { id: "c1", turn: 0 } });
-  if (calls.join() !== "/api/chat-sessions/c1 fresh" || !r._chat) bad.push("fallback: " + calls);
+  if (calls.join() !== "/api/chat-sessions/c1?caps=1 fresh" || !r._chat) bad.push("fallback: " + calls);
   calls = [];
   r = await runChatPreload({ status: "succeeded", chat_session: { id: "c1", turn: 0 }, chat: { id: "other" } });
-  if (calls.join() !== "/api/chat-sessions/c1 fresh") bad.push("mismatched id used: " + calls);
+  if (calls.join() !== "/api/chat-sessions/c1?caps=1 fresh") bad.push("mismatched id used: " + calls);
   calls = [];
   await runChatPreload({ status: "succeeded", chat_session: { id: "c1", turn: 2 } });
   await runChatPreload({ status: "running", chat_session: { id: "c1", turn: 0 } });

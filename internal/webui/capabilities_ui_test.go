@@ -18,7 +18,7 @@ func TestCapabilityUI(t *testing.T) {
 		}
 	}
 	app := appJS(t)
-	for _, want := range []string{`case "plugins": p = renderExtensions(parts[1], parts[2]); break;`, `capRefreshSession(sec, s.id)`, `secondary_confirm:`, `session_id: p.session_id`, `textContent = v.text`, `capAutoTest(v.id)`, `/api/capabilities/storage/gc`, `/credentials_clear`, `reviewed: true`, `default_enabled:value`, `capLoadSkillBadges(page())`, `T("cap.smoke_prompt")`, `(r.cli_auth || [])`, `local_choices:localChoices`, `data-cap-local-choice`, `/api/capabilities/sources`, `/api/capabilities/dependency-preferences`, `providers=skills.sh,github`, `capLoadLegacyInventory(results)`} {
+	for _, want := range []string{`case "plugins": p = renderExtensions(parts[1], parts[2]); break;`, `capRefreshSession(sec, s.id, false, cp)`, `secondary_confirm:`, `session_id: p.session_id`, `textContent = v.text`, `capAutoTest(v.id)`, `/api/capabilities/storage/gc`, `/credentials_clear`, `reviewed: true`, `default_enabled:value`, `capLoadSkillBadges(page())`, `T("cap.smoke_prompt")`, `(r.cli_auth || [])`, `local_choices:localChoices`, `data-cap-local-choice`, `/api/capabilities/sources`, `/api/capabilities/dependency-preferences`, `providers=skills.sh,github`, `capLoadLegacyInventory(results)`} {
 		if !strings.Contains(app, want) {
 			t.Errorf("missing capability UI integration %s", want)
 		}

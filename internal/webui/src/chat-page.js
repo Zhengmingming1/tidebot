@@ -86,7 +86,7 @@
   }
   function renderChat(id) {
     if (id && !CS_ID.test(id)) id = "";
-    return Promise.all([api("/api/chat-sessions?limit=200", { fresh: true }), id ? api("/api/chat-sessions/" + enc(id), { fresh: true }) : null]).then(function (r) {
+    return Promise.all([api("/api/chat-sessions?limit=200", { fresh: true }), id ? api("/api/chat-sessions/" + enc(id) + "?caps=1", { fresh: true }) : null]).then(function (r) {
       var list = (r[0] && r[0].sessions) || [], s = r[1];
       mount(csPageHtml(list, s), "chat", s ? [[T("nav.chat"), "#/chat"], [csTitle(s)]] : [[T("nav.chat")]]);
       var sec = $("#rc"), thread = $("#rc-thread", sec), stick = true;

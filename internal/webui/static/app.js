@@ -7369,7 +7369,7 @@ function runChatPreload(r){
 var cs=r.chat_session;
 if(!cs||cs.turn!==0||!rcDone(r.status))return r;
 if(r.chat&&r.chat.id===cs.id){r._chat=r.chat;delete r.chat;return r;}
-return api("/api/chat-sessions/"+enc(cs.id),{fresh:true}).then(function(s){r._chat=s;return r;},function(){return r;});
+return api("/api/chat-sessions/"+enc(cs.id)+"?caps=1",{fresh:true}).then(function(s){r._chat=s;return r;},function(){return r;});
 }
 function rcTurns(s){return((s&&s.turn_list)||[]).filter(function(t){return t.index>0;});}
 function runChatHtml(r){
@@ -7653,7 +7653,8 @@ if($(".rc-el[data-since]",thread)&&!rcTick){rcTick=setInterval(rcElapsed,1000);}
 var sep=$("#rc-sep",sec);
 if(sep)sep.hidden=!turns.length;
 if(o.onPaint)o.onPaint(s);
-if(typeof capRefreshSession==="function")capRefreshSession(sec,s.id);
+var cp=s.cap_proposals;delete s.cap_proposals;
+if(typeof capRefreshSession==="function")capRefreshSession(sec,s.id,false,cp);
 rcElapsed();
 sync();
 if(busy())livePoll(load,RC_POLL_MS);else if(st.polling)stopPoll();
@@ -7661,11 +7662,13 @@ st.polling=busy();
 };
 var load=function(){
 if(!st.id)return Promise.resolve();
-var id=st.id,since=st.ses&&st.sig&&st.sigId===id?"?since="+enc(st.sig):"";
-return api("/api/chat-sessions/"+enc(id)+since,{fresh:true}).then(function(s){
+var id=st.id,since=st.ses&&st.sig&&st.sigId===id?"since="+enc(st.sig):"";
+var caps=typeof capSessionQuery==="function"?capSessionQuery(sec):"";
+var q=[since,caps].filter(Boolean).join("&");
+return api("/api/chat-sessions/"+enc(id)+(q?"?"+q:""),{fresh:true}).then(function(s){
 if(!document.contains(sec)||id!==st.id)return;
 if(s&&s.unchanged){
-if(s.sig===st.sig){if(typeof capRefreshSession==="function")capRefreshSession(sec,id);return;}
+if(s.sig===st.sig){if(typeof capRefreshSession==="function")capRefreshSession(sec,id,false,s.cap_proposals);return;}
 st.sig="";return load();
 }
 st.sig=(s&&s.sig)||"";st.sigId=id;
@@ -7845,9 +7848,24 @@ $$("[data-cap-proposal]",box).forEach(function(x){if(!keep[x.getAttribute("data-
 clearTimeout(box._expT);
 if(next)box._expT=setTimeout(function(){if(document.contains(box))capPaintProposals(box,sec,sid);},Math.min(next-now+50,2147483000));
 }
-function capRefreshSession(sec,sid,force){
+function capSessionQuery(sec){
+var box=sec&&$(".cap-session-proposals",sec);
+return "caps=1"+(box&&box._sig&&!box._failed?"&cap_since="+enc(box._sig):"");
+}
+function capRefreshSession(sec,sid,force,embedded){
 var box=$(".cap-session-proposals",sec);
 if(!box){box=document.createElement("div");box.className="cap-session-proposals";var form=$("#rc-form",sec);sec.insertBefore(box,form);}
+if(embedded&&typeof embedded.sig==="string"&&!box._busy&&!force){
+if(embedded.unchanged){if(embedded.sig===box._sig&&!box._failed){box._last=Date.now();return;}}
+else if(Array.isArray(embedded.proposals)){
+box._last=Date.now();
+if(box._failed){box.textContent="";box._failed=false;}
+if(embedded.sig===box._sig&&box._ps)return;
+box._ps=embedded.proposals;box._sig=embedded.sig;
+capPaintProposals(box,sec,sid);
+return;
+}
+}
 if(box._busy){if(force)box._force=true;return;}
 if(!force&&Date.now()-(box._last||0)<1200)return;
 box._busy=true;box._last=Date.now();
@@ -8307,7 +8325,7 @@ rcBoxHtml({ph:s?"cs.ph":"cs.ph_new",label:"cs.label",read_tip:"cs.read_tip",tags
 }
 function renderChat(id){
 if(id&&!CS_ID.test(id))id="";
-return Promise.all([api("/api/chat-sessions?limit=200",{fresh:true}),id?api("/api/chat-sessions/"+enc(id),{fresh:true}):null]).then(function(r){
+return Promise.all([api("/api/chat-sessions?limit=200",{fresh:true}),id?api("/api/chat-sessions/"+enc(id)+"?caps=1",{fresh:true}):null]).then(function(r){
 var list=(r[0]&&r[0].sessions)||[],s=r[1];
 mount(csPageHtml(list,s),"chat",s?[[T("nav.chat"),"#/chat"],[csTitle(s)]]:[[T("nav.chat")]]);
 var sec=$("#rc"),thread=$("#rc-thread",sec),stick=true;

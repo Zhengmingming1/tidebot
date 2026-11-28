@@ -94,9 +94,30 @@
     clearTimeout(box._expT);
     if (next) box._expT = setTimeout(function () { if (document.contains(box)) capPaintProposals(box, sec, sid); }, Math.min(next - now + 50, 2147483000));
   }
-  function capRefreshSession(sec, sid, force) {
+  // The session read can carry the proposals (GET /api/chat-sessions/{id}?caps=1): the
+  // query to add, with the list this page already has so an unchanged one comes back as
+  // {unchanged}. A box that failed to load asks for the whole list again.
+  function capSessionQuery(sec) {
+    var box = sec && $(".cap-session-proposals", sec);
+    return "caps=1" + (box && box._sig && !box._failed ? "&cap_since=" + enc(box._sig) : "");
+  }
+  // embedded: the cap_proposals that came with the session ({proposals, sig} or {unchanged,
+  // sig}); used instead of asking. Ignored while a request of our own is out (its answer
+  // follows) or when it is for a list we don't have (asked with an older cap_since).
+  function capRefreshSession(sec, sid, force, embedded) {
     var box = $(".cap-session-proposals", sec);
     if (!box) { box = document.createElement("div"); box.className = "cap-session-proposals"; var form = $("#rc-form", sec); sec.insertBefore(box, form); }
+    if (embedded && typeof embedded.sig === "string" && !box._busy && !force) {
+      if (embedded.unchanged) { if (embedded.sig === box._sig && !box._failed) { box._last = Date.now(); return; } }
+      else if (Array.isArray(embedded.proposals)) {
+        box._last = Date.now();
+        if (box._failed) { box.textContent = ""; box._failed = false; }
+        if (embedded.sig === box._sig && box._ps) return;
+        box._ps = embedded.proposals; box._sig = embedded.sig;
+        capPaintProposals(box, sec, sid);
+        return;
+      }
+    }
     if (box._busy) { if (force) box._force = true; return; }
     if (!force && Date.now() - (box._last || 0) < 1200) return;
     box._busy = true; box._last = Date.now();

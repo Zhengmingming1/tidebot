@@ -95,6 +95,9 @@ type ChatSessionDetail struct {
 	// Sig fingerprints this answer; GET …?since=<sig> answers {"unchanged":true}
 	// while it still matches (see chatSessionSigner).
 	Sig string `json:"sig,omitempty"`
+	// CapProposals: with ?caps=1, the session's extension proposals as
+	// GET /api/capabilities/proposals?session_id= would answer (see capProposalsEmbed).
+	CapProposals any `json:"cap_proposals,omitempty"`
 }
 
 // chatModeSetter is optional: an app that lets the owner change a session's
@@ -213,7 +216,35 @@ func (s *Server) runChatEmbed(ctx context.Context, ref *runChatRef, status strin
 	if err != nil {
 		return nil
 	}
+	// the run page shows the session's proposal cards too: they come along
+	d.CapProposals = s.capProposalsFor(ctx, ref.ID, "")
 	return &d
+}
+
+// capProposalsEmbed: for GET /api/chat-sessions/{id}?caps=1[&cap_since=<sig>], the
+// session's extension proposals, answered exactly as GET
+// /api/capabilities/proposals?session_id=<id>&since=<sig> would ({proposals, sig} or
+// {unchanged, sig}). The session page polls the session every 1.5 s while a turn is
+// answered and used to ask for the proposals right after each poll; carried here, one
+// request does both and the cards draw with the thread instead of a round trip later.
+// nil (the page asks itself, as before) when not asked for, not available, or failed.
+func (s *Server) capProposalsEmbed(r *http.Request, id string) any {
+	q := r.URL.Query()
+	if q.Get("caps") != "1" {
+		return nil
+	}
+	return s.capProposalsFor(r.Context(), id, q.Get("cap_since"))
+}
+
+func (s *Server) capProposalsFor(ctx context.Context, id, since string) any {
+	if s.deps.Capabilities == nil {
+		return nil
+	}
+	v, err := s.deps.Capabilities.CapabilityRequest(ctx, "proposals", CapabilityRequest{SessionID: id, Since: since})
+	if err != nil || v == nil {
+		return nil
+	}
+	return v
 }
 
 // ChatMessageMax caps one turn's message (bytes).
@@ -323,8 +354,12 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if since := r.URL.Query().Get("since"); sig != "" && since == sig {
+			out := map[string]any{"unchanged": true, "sig": sig}
+			if cp := s.capProposalsEmbed(r, id); cp != nil {
+				out["cap_proposals"] = cp
+			}
 			w.Header().Set("Cache-Control", "no-store")
-			writeJSON(w, 200, map[string]any{"unchanged": true, "sig": sig})
+			writeJSON(w, 200, out)
 			return
 		}
 		d, err := chatSessionDetail(r.Context(), api, id, sig)
@@ -332,6 +367,7 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			chatErr(w, err)
 			return
 		}
+		d.CapProposals = s.capProposalsEmbed(r, id)
 		writeJSON(w, 200, d)
 	case sub == "" && r.Method == http.MethodDelete:
 		if err := api.DeleteChatSession(r.Context(), id); err != nil {
