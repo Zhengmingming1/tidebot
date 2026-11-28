@@ -8255,3 +8255,35 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 会话列表 `/api/chat-sessions?limit=200` 每次打开会话都整份取回，可加 `since` 指纹或由事件流增量更新（现在是打开会话剩下的唯一额外请求）。
 - 运行页的续聊会话（`/api/runs/{id}?chat=1`）没有草稿栏，不需要；若以后运行页也显示草稿，可沿用 `chatDraftEmbed`。
 - `allowAllUnixSockets` 显式开关、macOS CI 跑 Seatbelt 端到端、草稿行按钮对齐仍待做。
+
+### 2026-11-29：会话草稿栏多行时按钮逐行对齐（UI 一致性）
+
+这是 2026-11-29 03:48 Asia/Shanghai 的优化，接 2026-11-27（续 5）起一直挂着的「草稿行按钮对齐」。
+
+- **问题**：一个会话同时改多个技能时草稿栏每个技能一行，按钮是 flex 行里靠右排的。「采用」与「采用 v2」宽度不同、「用草稿试跑」只在第一行，于是各行的「保存为版本」「采用」左缘错开，看上去像没排好。
+- **改法**：
+  - 每行改成「标签格（技能名、起始版本、状态、过期提示都在里面）+ 每个按钮一格」，去掉 `rc-sp` 占位；第一行带 `has-try`。
+  - `@supports (grid-template-columns: subgrid)` 时 `.cs-drafts` 是 `minmax(0,1fr) + 4×auto` 的网格，每行 `grid-template-columns: subgrid`，试跑 / 保存 / 采用 / 丢弃固定在第 2–5 列；没有试跑的行把第 2 列让给标签（`grid-column: 1 / 3`），长技能名不会因为对齐而多截断。
+  - 不支持 subgrid 的旧 WebKitGTK 照旧是 flex 行（标签格 `flex: 1` 把按钮推到右侧），与改前一样能用，只是不对齐。macOS WKWebView（Safari 16+）、Windows WebView2、浏览器 WebUI 都走 subgrid。
+  - 只改布局；文案、按钮行为、提示浮层不变，`[hidden]` 仍优先于网格的 `display`。
+- **数字**（1024×655，三份草稿、其中一份已存为 v2；`tb-measure/cs_draft_align.py` 量各行按钮左缘的最大差）：
+
+| | 保存为版本 | 采用 | 丢弃 |
+|---|---|---|---|
+| 改前 zh-CN | 16 px | 16 px | 0 |
+| 改后 zh-CN | 0 | 0 | 0 |
+| 改前 en | 16 px | 15 px | 0 |
+| 改后 en | 0 | 0 | 0 |
+
+  无横向滚动、无脚本错误；关掉 subgrid 模拟旧引擎时回到改前的 16 px，布局不坏。
+- **测试**：`TestChatDraftRowsAligned` 在 node 里解析行 HTML，断言第一行直接子元素为「标签格、试跑、保存、采用、丢弃」，其他行没有试跑、过期提示在标签格里、只有第一行带 `has-try`、不再有 `rc-sp`；并检查打包后的样式里 subgrid 块的列定义与各按钮的列号、`[hidden]` 规则仍在。`go test ./...`、`go vet ./internal/webui`、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-29-0400-draft-rows-align-zh-CN.png`、`-en.png`（1024×655，石墨）。
+
+**心得**：几行「同一组按钮」要对齐，靠给按钮定宽会在另一种语言里破；让各行共享父级的列轨道（subgrid）才是根治，且能用 `@supports` 干净地退回原来的 flex。CSP 不允许内联样式，测回退时要用元素的 `style.setProperty` 而不是注入 `<style>`。
+
+**参考**：mdn/content `files/en-us/web/css/guides/grid_layout/subgrid/index.md` 的「Subgrid for columns」（子网格沿用父网格的列轨道和间距）；只借思路，不抄代码。
+
+**后续想法**：
+- 技能很多时草稿栏会变高，可考虑超过 3 行时折叠为「N 份草稿」摘要（仍待做）。
+- 同样的「多行同一组按钮」还出现在扩展提议区，可检查是否也需要 subgrid。
+- 会话列表 `/api/chat-sessions?limit=200` 增量更新、`allowAllUnixSockets` 显式开关、macOS CI 跑 Seatbelt 端到端仍待做。

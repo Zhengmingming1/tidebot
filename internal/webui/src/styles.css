@@ -3992,8 +3992,27 @@ button.pill.pl-sb { cursor: pointer; border: 0; font: inherit; }
 /* P3: two more header buttons; the title gives way before anything wraps */
 .cs-head h2 { flex: 1 1 80px; }
 .cs-head > .btn, .cs-head > .icon-btn { flex: none; white-space: nowrap; }
-.cs-draft-lbl { flex: 1 1 auto; white-space: nowrap; }
+.cs-draft-lbl { flex: 0 1 auto; white-space: nowrap; }
 .cs-draft-lbl strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* label + stale mark: takes the free width, so the buttons sit on the right */
+.cs-draft-main { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+/* several drafts: the rows share one set of columns (subgrid), so 保存 / 采用 vN / ✕
+   line up from row to row; without
+   subgrid (older WebKitGTK) the flex rows above still work, just unaligned.
+   Idea: the "subgrid for aligned card rows" pattern in MDN's CSS grid guide
+   (mdn/content files/en-us/web/css/guides/grid_layout/subgrid/index.md,
+   "Subgrid for columns"). */
+@supports (grid-template-columns: subgrid) {
+  .cs-drafts { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); column-gap: 8px; }
+  .cs-draft { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+  /* a row without 试跑 lends that column to its label, so long names aren't cut */
+  .cs-draft > .cs-draft-main { grid-column: 1 / 3; }
+  .cs-draft.has-try > .cs-draft-main { grid-column: 1; }
+  .cs-draft > [data-dr="try"] { grid-column: 2; }
+  .cs-draft > [data-dr="save"] { grid-column: 3; }
+  .cs-draft > [data-dr="adopt"] { grid-column: 4; }
+  .cs-draft > [data-dr="discard"] { grid-column: 5; }
+}
 
 /* P5: skill → chat main line, opt-in advanced optimizer, import risk notice */
 .sk-chat .i, #sk-chat .i, .home-chat .i { color: var(--hue-cyan); }

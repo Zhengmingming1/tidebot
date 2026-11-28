@@ -125,3 +125,75 @@ ok("read-only eye", csDraftRowHtml(d.drafts[0], true, false, "").indexOf("cs-dra
 if (bad.length) { console.error(bad.join("\n")); process.exitCode = 1; }
 `, map[string]string{"FN": src})
 }
+
+// Several draft rows line up: each row is one label cell (stale mark inside it)
+// plus one direct child per button, and with CSS subgrid every row places
+// 试跑 / 保存 / 采用 / ✕ in the same column, so a longer 采用 vN or a row
+// without 试跑 no longer shifts the buttons (measured at 1024×655: 16 px → 0).
+func TestChatDraftRowsAligned(t *testing.T) {
+	js := appJS(t)
+	src := fnSrc(t, js, "csDraftRowHtml") + fnSrc(t, js, "draftStale")
+	runNode(t, `function T(k, v) { return k + (v ? JSON.stringify(v) : ""); }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function ic() { return '<svg class="i"></svg>'; }
+eval(FN);
+var bad = [];
+function ok(name, c) { if (!c) bad.push(name); }
+// the direct children of the row's outer div, as "tag.class" / "button[data-dr]"
+function kids(html) {
+  var re = /<(\/?)(div|span|button|strong|svg)\b([^>]*)>/g, m, depth = 0, out = [];
+  while ((m = re.exec(html))) {
+    if (m[1]) { depth--; continue; }
+    if (depth === 1) {
+      var dr = /data-dr="(\w+)"/.exec(m[3]), cl = /class="([^"]*)"/.exec(m[3]);
+      out.push(dr ? dr[1] : (cl ? cl[1] : m[2]));
+    }
+    depth++;
+  }
+  ok("balanced " + html.slice(0, 40), depth === 0);
+  return out.join(",");
+}
+var stale = { skill_id: "s1", skill_name: "one", base_no: 1, current_no: 3, base_version_id: "v1", current_version_id: "v3" };
+var pend = { skill_id: "s2", skill_name: "two", base_no: 3, saved: { no: 4, status: "pending" } };
+var r1 = csDraftRowHtml(stale, true, true, ""), r2 = csDraftRowHtml(pend, false, false, "");
+ok("first row cells: " + kids(r1), kids(r1) === "cs-draft-main,try,save,adopt,discard");
+ok("other row cells: " + kids(r2), kids(r2) === "cs-draft-main,save,adopt,discard");
+ok("stale mark inside the label cell", r1.indexOf("cs-draft-stale") > r1.indexOf("cs-draft-main") && r1.indexOf("cs-draft-stale") < r1.indexOf('data-dr="try"'));
+ok("has-try only on the row with 试跑", /^<div class="cs-draft has-try"/.test(r1) && /^<div class="cs-draft"/.test(r2));
+ok("no flex spacer left", r1.indexOf("rc-sp") < 0);
+if (bad.length) { console.error(bad.join("\n")); process.exitCode = 1; }
+`, map[string]string{"FN": src})
+
+	b, err := Static.ReadFile("static/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the bundled stylesheet, with the minifier's line breaks and last semicolons dropped
+	css := strings.NewReplacer("\n", "", ";}", "}", "@supports (", "@supports(").Replace(string(b))
+	i := strings.Index(css, "@supports(grid-template-columns:subgrid)")
+	if i < 0 {
+		t.Fatal("no subgrid block for the draft rows")
+	}
+	block := css[i:]
+	block = block[:strings.Index(block, "}}")+2]
+	for _, want := range []string{
+		`.cs-drafts{display:grid;grid-template-columns:minmax(0,1fr) repeat(4,auto)`,
+		`.cs-draft{grid-column:1/-1;display:grid;grid-template-columns:subgrid`,
+		`.cs-draft>.cs-draft-main{grid-column:1/3`,
+		`.cs-draft.has-try>.cs-draft-main{grid-column:1}`,
+		`.cs-draft>[data-dr="try"]{grid-column:2}`,
+		`.cs-draft>[data-dr="save"]{grid-column:3}`,
+		`.cs-draft>[data-dr="adopt"]{grid-column:4}`,
+		`.cs-draft>[data-dr="discard"]{grid-column:5}`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("subgrid block lacks %s:\n%s", want, block)
+		}
+	}
+	// hidden still wins over the grid display (attribute selector is more specific)
+	for _, want := range []string{`.cs-drafts[hidden]{display:none}`, `.cs-draft[hidden]{display:none}`} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+}

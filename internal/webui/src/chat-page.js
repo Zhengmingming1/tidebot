@@ -173,11 +173,13 @@
     var state = x.unsaved ? T("sd.st_changed") : x.saved && x.saved.status === "pending" ? T("sd.st_saved", { v: x.saved.no }) : x.changed ? T("sd.st_saved_old") : T("sd.st_same");
     var tip = T("sd.tip", { s: x.skill_name, v: x.base_no, cur: x.current_no, n: x.files }) + (editable ? "" : " " + T("sd.read_tip"));
     var pend = x.saved && x.saved.status === "pending", stale = draftStale(x);
-    return '<div class="cs-draft" data-skill="' + esc(x.skill_id) + '"><span class="cs-draft-lbl" tabindex="0" data-tip="' + esc(tip) + '">' + ic("skills", "sm") + '<strong class="ell">' + esc(T("sd.title", { s: x.skill_name })) + "</strong>" +
+    // label + stale mark in one cell, then one cell per button: with CSS subgrid the
+    // rows share their columns, so 保存 / 采用 / ✕ line up whatever 采用 vN says and
+    // whether the row has 试跑 (see .cs-drafts in styles.css)
+    return '<div class="cs-draft' + (first ? " has-try" : "") + '" data-skill="' + esc(x.skill_id) + '"><span class="cs-draft-main"><span class="cs-draft-lbl" tabindex="0" data-tip="' + esc(tip) + '">' + ic("skills", "sm") + '<strong class="ell">' + esc(T("sd.title", { s: x.skill_name })) + "</strong>" +
       '<span class="cs-draft-v">v' + esc(String(x.base_no || "?")) + "</span>" + '<span class="cs-draft-st' + (x.unsaved ? " on" : "") + '">' + esc(state) + "</span>" +
       (editable ? "" : '<span class="cs-draft-ro" aria-hidden="true">' + ic("eye", "sm") + "</span>") + "</span>" +
-      (stale ? '<span class="cs-draft-stale" tabindex="0" role="img" aria-label="' + esc(T("sd.stale_tip", { cur: x.current_no, v: x.base_no })) + '" data-tip="' + esc(T("sd.stale_tip", { cur: x.current_no, v: x.base_no })) + '">' + ic("info", "sm") + "</span>" : "") +
-      '<span class="rc-sp"></span>' +
+      (stale ? '<span class="cs-draft-stale" tabindex="0" role="img" aria-label="' + esc(T("sd.stale_tip", { cur: x.current_no, v: x.base_no })) + '" data-tip="' + esc(T("sd.stale_tip", { cur: x.current_no, v: x.base_no })) + '">' + ic("info", "sm") + "</span>" : "") + "</span>" +
       // one turn loads every draft: one 试跑 for all of them, on the first row
       (first ? '<button type="button" class="btn sm" data-dr="try"' + off + ' data-tip="' + esc(T("sd.try_tip")) + '">' + ic("play", "sm") + esc(T("sd.try")) + "</button>" : "") +
       '<button type="button" class="btn sm" data-dr="save"' + (x.unsaved && !off ? "" : " disabled") + ' data-tip="' + esc(T("sd.save_tip")) + '">' + ic("check", "sm") + esc(T("sd.save")) + "</button>" +
