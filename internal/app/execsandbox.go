@@ -50,7 +50,9 @@ var sandboxLook = exec.LookPath
 var sandboxProbe = cachedBwrapProbe(guard.ProbeBwrap, time.Now)
 
 // sandboxDiag says why bubblewrap was refused (a var for tests; guard.DiagnoseBwrap).
-var sandboxDiag = func() (string, string) { return guard.DiagnoseBwrap(os.ReadFile, os.Getenv) }
+var sandboxDiag = func(probeErr string) (string, string) {
+	return guard.DiagnoseBwrap(probeErr, os.ReadFile, os.Getenv)
+}
 
 // Probe results are kept so the Settings page, every dependency check and every
 // command run don't each start bubblewrap: a start is kept 10 minutes, a refusal
@@ -88,7 +90,7 @@ func cachedBwrapProbe(probe func(string) string, now func() time.Time) func(stri
 func (a *App) SandboxStatus() guard.SandboxStatus {
 	st := guard.DetectSandboxProbe(runtime.GOOS, sandboxLook, sandboxProbe)
 	if st.Status == guard.SandboxBroken {
-		st.Cause, st.Fix = sandboxDiag()
+		st.Cause, st.Fix = sandboxDiag(st.Error)
 	}
 	return st
 }

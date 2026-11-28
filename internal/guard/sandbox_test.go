@@ -223,12 +223,28 @@ func TestProbeBwrap(t *testing.T) {
 		return p
 	}
 	args := filepath.Join(dir, "args")
-	ok := script("ok", `echo "$@" > "`+args+`"; exit 0`)
+	ok := script("ok", `echo "$@" >> "`+args+`"; exit 0`)
 	if msg := ProbeBwrap(ok); msg != "" {
 		t.Fatalf("ok: %q", msg)
 	}
-	if b, _ := os.ReadFile(args); strings.TrimSpace(string(b)) != "--unshare-user --unshare-net --dev-bind / / true" {
+	// bwrap alone, then a second bwrap (own user namespace) inside the first
+	want := "--unshare-user --unshare-net --dev-bind / / true\n--unshare-user --unshare-net --dev-bind / / " + ok + " --unshare-user --dev-bind / / true"
+	if b, _ := os.ReadFile(args); strings.TrimSpace(string(b)) != want {
 		t.Fatalf("args %q", b)
+	}
+	// the first start works, the nested one is refused (Ubuntu's bwrap profile)
+	nested := script("nested", `[ "$6" = "true" ] && exit 0; echo "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces." >&2; exit 1`)
+	if msg := ProbeBwrap(nested); msg != BwrapNestedPrefix+"bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces." {
+		t.Fatalf("nested: %q", msg)
+	}
+	// a refusal of bwrap itself is reported as is, without trying the nested start
+	_ = os.Remove(args)
+	first := script("first", `echo "$@" >> "`+args+`"; echo "bwrap: setting up uid map: Permission denied" >&2; exit 1`)
+	if msg := ProbeBwrap(first); msg != "bwrap: setting up uid map: Permission denied" {
+		t.Fatalf("first: %q", msg)
+	}
+	if b, _ := os.ReadFile(args); strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("nested start tried after a refusal: %q", b)
 	}
 	refused := script("refused", `printf '\n  bwrap: setting up uid map: Permission denied  \nsecond line\n' >&2; exit 1`)
 	if msg := ProbeBwrap(refused); msg != "bwrap: setting up uid map: Permission denied" {
@@ -267,9 +283,28 @@ func TestProbeBwrapReal(t *testing.T) {
 		t.Skip("bwrap not installed")
 	}
 	msg := ProbeBwrap(p)
-	direct := exec.Command(p, "--unshare-user", "--unshare-net", "--dev-bind", "/", "/", "true").Run()
+	outer := []string{"--unshare-user", "--unshare-net", "--dev-bind", "/", "/"}
+	direct := exec.Command(p, append(outer, "true")...).Run()
+	if direct == nil {
+		direct = exec.Command(p, append(outer, p, "--unshare-user", "--dev-bind", "/", "/", "true")...).Run()
+	}
 	if (msg == "") != (direct == nil) {
 		t.Fatalf("probe %q, direct start %v", msg, direct)
+	}
+	// TIDEBOT_EXPECT_BWRAP=nested: CI with Ubuntu's bwrap AppArmor profile still
+	// loaded, where bwrap starts but Claude Code's sandbox can't (2026-11-28)
+	switch os.Getenv("TIDEBOT_EXPECT_BWRAP") {
+	case "ok":
+		if msg != "" {
+			t.Fatalf("expected a working sandbox, probe %q", msg)
+		}
+	case "nested":
+		if !strings.HasPrefix(msg, BwrapNestedPrefix) {
+			t.Fatalf("expected the nested start refused, probe %q", msg)
+		}
+		if cause, fix := DiagnoseBwrap(msg, os.ReadFile, os.Getenv); cause != SandboxCauseAppArmorBwrap || !strings.Contains(fix, "apparmor_parser -R") {
+			t.Fatalf("diagnosis %q %q", cause, fix)
+		}
 	}
 	t.Logf("bwrap %s: probe %q", p, msg)
 }
@@ -291,21 +326,32 @@ func TestDiagnoseBwrap(t *testing.T) {
 		aa    = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
 		clone = "/proc/sys/kernel/unprivileged_userns_clone"
 		max   = "/proc/sys/user/max_user_namespaces"
+		prof  = "/etc/apparmor.d/bwrap-userns-restrict"
 	)
+	nestedErr := BwrapNestedPrefix + "bwrap: No permissions to create a new namespace"
 	for _, c := range []struct {
 		name       string
 		files      map[string]string
 		env        string
 		cause, fix string
+		probe      string
 	}{
-		{"ubuntu apparmor", map[string]string{aa: "1\n", clone: "1\n", max: "63432\n"}, "", SandboxCauseAppArmor, "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"},
-		{"apparmor off", map[string]string{aa: "0\n", max: "63432\n"}, "", "", ""},
-		{"debian clone off", map[string]string{clone: "0\n", aa: "1\n"}, "", SandboxCauseUsernsOff, "sudo sysctl -w kernel.unprivileged_userns_clone=1"},
-		{"max zero", map[string]string{max: " 0\n", clone: "0\n"}, "", SandboxCauseUsernsOff, "sudo sysctl -w user.max_user_namespaces=10000"},
-		{"docker", map[string]string{"/.dockerenv": "", aa: "1\n"}, "", SandboxCauseContainer, ""},
-		{"podman", map[string]string{"/run/.containerenv": "engine=podman\n", max: "0"}, "", SandboxCauseContainer, ""},
-		{"container env", map[string]string{aa: "1"}, "lxc", SandboxCauseContainer, ""},
-		{"nothing readable", map[string]string{}, "", "", ""},
+		{"ubuntu apparmor", map[string]string{aa: "1\n", clone: "1\n", max: "63432\n"}, "", SandboxCauseAppArmor, "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0", ""},
+		{"apparmor off", map[string]string{aa: "0\n", max: "63432\n"}, "", "", "", ""},
+		{"debian clone off", map[string]string{clone: "0\n", aa: "1\n"}, "", SandboxCauseUsernsOff, "sudo sysctl -w kernel.unprivileged_userns_clone=1", ""},
+		{"max zero", map[string]string{max: " 0\n", clone: "0\n"}, "", SandboxCauseUsernsOff, "sudo sysctl -w user.max_user_namespaces=10000", ""},
+		{"docker", map[string]string{"/.dockerenv": "", aa: "1\n"}, "", SandboxCauseContainer, "", ""},
+		{"podman", map[string]string{"/run/.containerenv": "engine=podman\n", max: "0"}, "", SandboxCauseContainer, "", ""},
+		{"container env", map[string]string{aa: "1"}, "lxc", SandboxCauseContainer, "", ""},
+		{"nothing readable", map[string]string{}, "", "", "", ""},
+		// bwrap started, a user namespace inside it didn't: Ubuntu's bwrap profile
+		{"bwrap profile", map[string]string{prof: "", aa: "1\n"}, "", SandboxCauseAppArmorBwrap, "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 && sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict", nestedErr},
+		{"bwrap profile, sysctl off", map[string]string{prof: "", aa: "0\n"}, "", SandboxCauseAppArmorBwrap, "sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict", nestedErr},
+		{"bwrap profile disabled", map[string]string{prof: "", "/etc/apparmor.d/disable/bwrap-userns-restrict": "", aa: "1\n"}, "", SandboxCauseNested, "", nestedErr},
+		{"nested, no profile", map[string]string{clone: "1\n"}, "", SandboxCauseNested, "", nestedErr},
+		{"nested in a container", map[string]string{prof: "", "/.dockerenv": ""}, "", SandboxCauseContainer, "", nestedErr},
+		// the profile alone says nothing when bwrap itself is refused
+		{"first start refused", map[string]string{prof: "", aa: "1\n"}, "", SandboxCauseAppArmor, "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0", "bwrap: setting up uid map: Permission denied"},
 	} {
 		env := noEnv
 		if c.env != "" {
@@ -317,7 +363,7 @@ func TestDiagnoseBwrap(t *testing.T) {
 				return ""
 			}
 		}
-		cause, fix := DiagnoseBwrap(fs(c.files), env)
+		cause, fix := DiagnoseBwrap(c.probe, fs(c.files), env)
 		if cause != c.cause || fix != c.fix {
 			t.Errorf("%s: %q %q, want %q %q", c.name, cause, fix, c.cause, c.fix)
 		}

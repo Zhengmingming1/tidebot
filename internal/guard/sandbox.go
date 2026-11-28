@@ -44,13 +44,27 @@ const (
 	SandboxCauseContainer = "container"  // inside a container: its seccomp / AppArmor profile decides
 	SandboxCauseAppArmor  = "apparmor"   // Ubuntu 24.04+: kernel.apparmor_restrict_unprivileged_userns=1
 	SandboxCauseUsernsOff = "userns_off" // unprivileged user namespaces switched off (sysctl)
+	// bwrap starts, but a user namespace inside it is refused (Claude Code's seccomp
+	// helper needs one): Ubuntu's bwrap-userns-restrict AppArmor profile takes
+	// capabilities away from bwrap's children.
+	SandboxCauseAppArmorBwrap = "apparmor_bwrap"
+	SandboxCauseNested        = "nested" // as above, reason unknown (old bubblewrap, a host policy)
 )
 
-// DiagnoseBwrap says why bubblewrap is refused here and, when a kernel setting is
-// the reason, the command that changes it (read is os.ReadFile, getenv
-// os.Getenv). A container comes first: its /proc/sys is the host's and can't be
-// changed from inside, so it gets no command. Only reads files; changes nothing.
-func DiagnoseBwrap(read func(string) ([]byte, error), getenv func(string) string) (cause, fix string) {
+// BwrapNestedPrefix starts a ProbeBwrap result when bwrap itself started but a
+// second user namespace inside it was refused.
+const BwrapNestedPrefix = "inside bwrap: "
+
+// bwrapRestrictProfile is the AppArmor profile Ubuntu 24.04+ ships for bwrap
+// (its children run as unpriv_bwrap, without capabilities).
+const bwrapRestrictProfile = "/etc/apparmor.d/bwrap-userns-restrict"
+
+// DiagnoseBwrap says why bubblewrap is refused here (probeErr is ProbeBwrap's
+// message) and, when a kernel setting is the reason, the command that changes it
+// (read is os.ReadFile, getenv os.Getenv). A container comes first: its
+// /proc/sys is the host's and can't be changed from inside, so it gets no
+// command. Only reads files; changes nothing.
+func DiagnoseBwrap(probeErr string, read func(string) ([]byte, error), getenv func(string) string) (cause, fix string) {
 	val := func(p string) string {
 		b, err := read(p)
 		if err != nil {
@@ -61,6 +75,19 @@ func DiagnoseBwrap(read func(string) ([]byte, error), getenv func(string) string
 	exists := func(p string) bool { _, err := read(p); return err == nil }
 	if getenv("container") != "" || exists("/.dockerenv") || exists("/run/.containerenv") {
 		return SandboxCauseContainer, ""
+	}
+	if strings.HasPrefix(probeErr, BwrapNestedPrefix) {
+		// bwrap itself started, so the sysctls below allow it; Ubuntu's profile
+		// for bwrap is what strips its children. Unloading it lasts until reboot;
+		// with the profile gone bwrap also needs the AppArmor sysctl off.
+		if exists(bwrapRestrictProfile) && !exists("/etc/apparmor.d/disable/bwrap-userns-restrict") {
+			fix = "sudo apparmor_parser -R " + bwrapRestrictProfile
+			if val("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") == "1" {
+				fix = "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 && " + fix
+			}
+			return SandboxCauseAppArmorBwrap, fix
+		}
+		return SandboxCauseNested, ""
 	}
 	if val("/proc/sys/user/max_user_namespaces") == "0" {
 		return SandboxCauseUsernsOff, "sudo sysctl -w user.max_user_namespaces=10000"
@@ -117,14 +144,31 @@ func DetectSandboxProbe(goos string, look func(string) (string, error), probe fu
 var BwrapProbeTimeout = 5 * time.Second
 
 // ProbeBwrap starts bubblewrap with what Claude Code's Linux sandbox always asks
-// for (its own user and network namespace) and runs true. "" means it started,
-// or the probe couldn't tell (bwrap couldn't be launched, it timed out): only a
-// refusal from bubblewrap itself blocks command runs. Otherwise the result is
-// bubblewrap's first stderr line (at most 200 bytes), or its exit status.
+// for (its own user and network namespace) and runs true, then does it again
+// with a second bubblewrap inside the first: Claude Code's seccomp helper
+// creates a user namespace inside bwrap, which Ubuntu 24.04's
+// bwrap-userns-restrict AppArmor profile refuses even where bwrap itself starts
+// (docs/backlog.md 2026-11-28). "" means both started, or the probe couldn't
+// tell (bwrap couldn't be launched, it timed out): only a refusal from
+// bubblewrap itself blocks command runs. Otherwise the result is bubblewrap's
+// first stderr line (at most 200 bytes), or its exit status; for the inner one
+// it starts with BwrapNestedPrefix.
 func ProbeBwrap(bwrap string) string {
+	outer := []string{"--unshare-user", "--unshare-net", "--dev-bind", "/", "/"}
+	if msg := runBwrapProbe(bwrap, append(outer, "true")...); msg != "" {
+		return msg
+	}
+	inner := append(append(outer, bwrap, "--unshare-user", "--dev-bind", "/", "/"), "true")
+	if msg := runBwrapProbe(bwrap, inner...); msg != "" {
+		return BwrapNestedPrefix + msg
+	}
+	return ""
+}
+
+func runBwrapProbe(bwrap string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), BwrapProbeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bwrap, "--unshare-user", "--unshare-net", "--dev-bind", "/", "/", "true")
+	cmd := exec.CommandContext(ctx, bwrap, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = time.Second // don't wait on a child that kept stderr open

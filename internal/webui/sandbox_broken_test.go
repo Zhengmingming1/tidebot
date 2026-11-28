@@ -26,7 +26,7 @@ func TestSettingsSandboxBroken(t *testing.T) {
 		t.Fatalf("evidence %+v", info)
 	}
 	for cause, want := range map[string]string{
-		"apparmor": DepSuggestSandboxAppArmor, "userns_off": DepSuggestSandboxUsernsOff, "container": DepSuggestSandboxContainer, "": DepSuggestSandboxUserns, "other": DepSuggestSandboxUserns,
+		"apparmor": DepSuggestSandboxAppArmor, "userns_off": DepSuggestSandboxUsernsOff, "container": DepSuggestSandboxContainer, "apparmor_bwrap": DepSuggestSandboxAppArmorBwrap, "nested": DepSuggestSandboxNested, "": DepSuggestSandboxUserns, "other": DepSuggestSandboxUserns,
 	} {
 		if got := DepSandboxBrokenSuggestion(cause); got != want {
 			t.Fatalf("%q: %q", cause, got)
@@ -37,7 +37,8 @@ func TestSettingsSandboxBroken(t *testing.T) {
 		}
 	}
 	for code, text := range map[string]string{"dep_reason_sandbox_broken": DepReasonSandboxBroken, "dep_suggest_sandbox_userns": DepSuggestSandboxUserns, "dep_suggest_sandbox_container": DepSuggestSandboxContainer,
-		"dep_suggest_sandbox_apparmor": DepSuggestSandboxAppArmor, "dep_suggest_sandbox_userns_off": DepSuggestSandboxUsernsOff} {
+		"dep_suggest_sandbox_apparmor": DepSuggestSandboxAppArmor, "dep_suggest_sandbox_userns_off": DepSuggestSandboxUsernsOff,
+		"dep_suggest_sandbox_apparmor_bwrap": DepSuggestSandboxAppArmorBwrap, "dep_suggest_sandbox_nested": DepSuggestSandboxNested} {
 		if info := explainDepText(text); info == nil || info.Code != code {
 			t.Fatalf("%s: %+v", code, info)
 		}
@@ -54,8 +55,10 @@ func TestSandboxBrokenUI(t *testing.T) {
 		`'<div class="sb-cmd"><code class="mono">' + esc(sb.error) + "</code></div>"`,
 		`else if (m === "exec" && sb.status === "broken") { txt = T("rn.hint_exec_broken"); warn = true; }`,
 		// the cause picks the explanation; only a kernel setting gets a copyable command
-		`var SB_CAUSE_BODY = { apparmor: "pl.sb_broken_body_apparmor", userns_off: "pl.sb_broken_body_userns_off", container: "pl.sb_broken_body_container" };`,
-		`var fix = sb.cause === "apparmor" || sb.cause === "userns_off" ? sb.fix || "" : "";`,
+		`var SB_CAUSE_BODY = { apparmor: "pl.sb_broken_body_apparmor", userns_off: "pl.sb_broken_body_userns_off", container: "pl.sb_broken_body_container", apparmor_bwrap: "pl.sb_broken_body_apparmor_bwrap", nested: "pl.sb_broken_body_nested" };`,
+		`var fix = sb.cause === "apparmor" || sb.cause === "userns_off" || sb.cause === "apparmor_bwrap" ? sb.fix || "" : "";`,
+		// unloading the bwrap profile is undone differently from a sysctl
+		`esc(T(!fix ? "pl.sb_broken_after" : sb.cause === "apparmor_bwrap" ? "pl.sb_fix_after_bwrap" : "pl.sb_fix_after"))`,
 		`(fix ? '<p class="confirm-body">' + esc(T("pl.sb_fix_label")) + "</p>" + sbCmdHTML(fix) : "")`,
 	} {
 		if !strings.Contains(js, want) {

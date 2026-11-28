@@ -8131,3 +8131,27 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 可以把整条 `App.StartRun` 的 exec 路径（`applyExecSandbox` 生成设置 + 运行结束后代理配置检查）也接到这个假 API 上，测到 tidebot 自己拼的参数，而不只是 guard 层。
 - 升级固定的 Claude Code 版本时，同时更新脚本里的版本号和 sha256。
 - **P1 新发现（产品）**：CI 第一次跑（`908472d`，ubuntu-latest）时，只把 `apparmor_restrict_unprivileged_userns` 设为 0 后 `ProbeBwrap` 说能启动，可是 9 条命令全部失败：`apply-seccomp: write /proc/self/setgroups (nested userns is capability-restricted; caller must provide CAP_SYS_ADMIN)`。Claude Code 在 bwrap 里还要再建一层用户命名空间（seccomp 辅助程序），而我们的探测只试了一层；在 bwrap 里再起一次 bwrap 就会报 `No permissions to create a new namespace`。也就是说在这类 Ubuntu 24.04 主机上，设置页会显示「沙箱可用」，但每次可执行命令运行都会失败。CI 里的脚本已改为先检查两层，失败时卸掉 AppArmor 的 bwrap 限制配置（仅 CI，`7178b0d`），之后通过。产品侧下一步：`ProbeBwrap` 也检查两层（例如 `bwrap … bwrap --unshare-user … true`），失败时显示为 broken，并给出原因和修复说明；需要在这种主机上实测（可以用 CI 卸载配置前的状态）。
+
+### 本轮（2026-11-28 12:30 Asia/Shanghai）：沙箱探测也检查 bwrap 里的第二层用户命名空间，Ubuntu 24.04 上不再「显示可用、实际每次失败」（严重缺陷 / 不可用）
+
+接上一轮的 **P1 新发现**。
+
+- **问题**：`guard.ProbeBwrap` 只试一层 `bwrap --unshare-user … true`。Ubuntu 24.04 起自带的 AppArmor 配置 `bwrap-userns-restrict` 允许 bwrap 本身建用户命名空间，但让它的子进程以 `unpriv_bwrap` 运行、拿不到任何权限；Claude Code 沙箱的 seccomp 辅助程序（apply-seccomp）要在 bwrap 里再建一层用户命名空间，于是每条命令都报 `apply-seccomp: write /proc/self/setgroups … caller must provide CAP_SYS_ADMIN`。结果设置页显示「沙箱可用」、新建任务默认「可执行命令」，但每次运行都失败——用户看不出原因，也没有修复提示。
+- **改法**：
+  - `ProbeBwrap` 第一层能启动后，再在 bwrap 里起一个 `bwrap --unshare-user … true`；内层被拒时结果以 `inside bwrap: ` 开头（`BwrapNestedPrefix`），状态显示为 broken，执行命令的运行照旧提前拒绝并给出原因。第一层被拒时不再试第二层；起不来或超时仍按「判断不了」处理，不拦运行。
+  - `DiagnoseBwrap` 多一个参数（探测的报错）：内层被拒且 `/etc/apparmor.d/bwrap-userns-restrict` 存在、没有放进 `disable/` 时，原因为 `apparmor_bwrap`，给出 `sudo apparmor_parser -R …`（AppArmor 那个 sysctl 还开着时前面加上把它设为 0，否则卸掉配置后 bwrap 本身又起不来）；没有这个配置时原因为 `nested`，不给命令（旧版 bubblewrap、主机策略等）。容器仍然最先判断。
+  - 设置 › 安全 › 命令沙箱的说明弹窗（应用内弹窗）为两种新原因各加一段说明（中英），`apparmor_bwrap` 显示可复制的命令，下方说明「重启后恢复，想长期生效用 `ln -s … /etc/apparmor.d/disable/`」；依赖检查的建议文案同样分开。
+  - CI：Linux 1.26.x 作业在只放开 sysctl、AppArmor 的 bwrap 配置还在时，用 `TIDEBOT_EXPECT_BWRAP=nested` 跑 `TestProbeBwrapReal`，要求真机探测报出内层被拒并诊断为 `apparmor_bwrap`；`scripts/e2e-sandbox.sh` 卸掉配置后再用 `TIDEBOT_EXPECT_BWRAP=ok` 跑一次。
+  - 没有加任何限制：只是把「本来就会失败」提前、如实地显示出来。tidebot 仍然不运行 sudo、不改内核或 AppArmor 设置。
+- **数字**：本机（Linux amd64，bubblewrap 0.12）一层探测平均 2.8 ms，第二层 3.8 ms，合计 6.6 ms；结果照旧缓存（能启动 10 分钟、被拒 15 秒），对页面和运行没有可感知影响。
+- **测试**：`TestProbeBwrap` 断言两次调用的参数、内层被拒带前缀、第一层被拒不试第二层；`TestDiagnoseBwrap` 新增 6 例（配置 + sysctl 开 / 关、配置已禁用、无配置、容器内、第一层被拒时配置不影响判断）；`TestProbeBwrapReal` 同时比对两层手动启动，并支持 `TIDEBOT_EXPECT_BWRAP`；`TestSandboxBrokenRefusesCommandRuns` 确认诊断拿到探测报错、两种新原因对应新建议；`TestSettingsSandboxBroken` / `TestSandboxBrokenUI` 覆盖新文案码和弹窗分支。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py`、`bash -n scripts/e2e-sandbox.sh` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-28-1230-sandbox-nested-zh-CN-graphite.png`、`-en-graphite.png`（1024×655，模拟 `apparmor_bwrap` 状态打开说明弹窗；无横向滚动、无脚本错误）。
+
+**心得**：探测要测「真正会用到的那条路径」，而不是它的第一步。bwrap 能启动 ≠ Claude Code 的沙箱能启动；Ubuntu 的配置恰好让第一步成功、第二步失败，是最具迷惑性的情况。上游 issue 里大多数人也把原因归到 sysctl 上，实际要看的是 bwrap 子进程的 AppArmor 配置。
+
+**参考**：anthropic-experimental/sandbox-runtime 的 `vendor/seccomp-src/apply-seccomp.c`（注释说明 CAP_SYS_ADMIN 的两条路径及嵌套用户命名空间在 LSM 限制下失败）与其 issue #429（`bwrap-userns-restrict` 的 `unpriv_bwrap` 子配置）；只借诊断思路，不抄代码。
+
+**后续想法**：
+- 上游提到另一条路：设置 `sandbox.network.allowAllUnixSockets` 可跳过 apply-seccomp，文件和网络隔离仍在，但失去 Unix 套接字过滤。可以考虑在 `apparmor_bwrap` 时提供一个「放宽 Unix 套接字过滤后运行」的显式开关（需权衡安全，默认不开）。
+- Ubuntu 24.04 自带的 bubblewrap 0.9.0 会清空子进程的能力边界集（sandbox-runtime issue #428），同样会让第二层失败，目前归为 `nested`；可在说明里点名「升级 bubblewrap 到 0.10+」。
+- macOS CI 跑 Seatbelt 端到端、`App.StartRun` exec 路径接假 API、宽屏检查器「当前任务」请求、草稿行按钮对齐仍待做。

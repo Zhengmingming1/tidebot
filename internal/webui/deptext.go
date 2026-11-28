@@ -68,6 +68,8 @@ const (
 	DepSuggestSandboxUserns        = "Allow unprivileged user namespaces for bwrap (Ubuntu 24.04+: an AppArmor profile for bwrap; containers: a seccomp profile that permits them), or switch to read-only / editable"
 	DepSuggestSandboxAppArmor      = "Ubuntu's AppArmor restriction on unprivileged user namespaces blocks it: Settings › Security › Command sandbox shows the setting to change, or switch to read-only / editable"
 	DepSuggestSandboxUsernsOff     = "Unprivileged user namespaces are switched off on this system: Settings › Security › Command sandbox shows the setting to change, or switch to read-only / editable"
+	DepSuggestSandboxAppArmorBwrap = "bubblewrap starts, but Ubuntu's AppArmor profile for bwrap blocks the second user namespace Claude Code's sandbox needs inside it: Settings › Security › Command sandbox shows the command, or switch to read-only / editable"
+	DepSuggestSandboxNested        = "bubblewrap starts, but this system refuses the second user namespace Claude Code's sandbox needs inside it (a host security policy or an old bubblewrap): update bubblewrap or relax the policy, or switch to read-only / editable"
 	DepSuggestSandboxContainer     = "tidebot runs in a container whose profile blocks user namespaces: start the container with seccomp and AppArmor profiles that allow them, or switch to read-only / editable"
 	DepSuggestNone                 = "No action needed"
 	DepReasonTaskPolicyUnread      = "The task's saved tool policy could not be verified"
@@ -151,6 +153,10 @@ func DepSandboxBrokenSuggestion(cause string) string {
 		return DepSuggestSandboxUsernsOff
 	case "container":
 		return DepSuggestSandboxContainer
+	case "apparmor_bwrap":
+		return DepSuggestSandboxAppArmorBwrap
+	case "nested":
+		return DepSuggestSandboxNested
 	}
 	return DepSuggestSandboxUserns
 }
@@ -302,6 +308,8 @@ var depExactPatterns = func() []depTextPattern {
 		{"dep_suggest_sandbox_userns", DepSuggestSandboxUserns, "允许 bwrap 使用非特权用户命名空间（Ubuntu 24.04 及以上：为 bwrap 添加 AppArmor 配置；容器：使用允许它的 seccomp 配置），或改用只读 / 可修改"},
 		{"dep_suggest_sandbox_apparmor", DepSuggestSandboxAppArmor, "Ubuntu 用 AppArmor 限制了非特权用户命名空间：在设置 › 安全 › 命令沙箱查看要改的设置，或改用只读 / 可修改"},
 		{"dep_suggest_sandbox_userns_off", DepSuggestSandboxUsernsOff, "这台电脑关闭了非特权用户命名空间：在设置 › 安全 › 命令沙箱查看要改的设置，或改用只读 / 可修改"},
+		{"dep_suggest_sandbox_apparmor_bwrap", DepSuggestSandboxAppArmorBwrap, "bubblewrap 能启动，但 Ubuntu 给 bwrap 的 AppArmor 配置不允许在它里面再建 Claude Code 沙箱需要的第二层用户命名空间：在设置 › 安全 › 命令沙箱查看要运行的命令，或改用只读 / 可修改"},
+		{"dep_suggest_sandbox_nested", DepSuggestSandboxNested, "bubblewrap 能启动，但这台电脑不允许在它里面再建 Claude Code 沙箱需要的第二层用户命名空间（系统安全策略或 bubblewrap 版本过旧）：升级 bubblewrap 或放宽策略，或改用只读 / 可修改"},
 		{"dep_suggest_sandbox_container", DepSuggestSandboxContainer, "tidebot 运行在不允许用户命名空间的容器里：用允许它的 seccomp 和 AppArmor 配置启动容器，或改用只读 / 可修改"},
 		{"dep_suggest_none", DepSuggestNone, "无需处理"},
 		{"dep_reason_task_policy_unread", DepReasonTaskPolicyUnread, "无法核对该任务已保存的工具策略"},

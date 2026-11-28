@@ -44,6 +44,8 @@ if [ "${CI:-}" = true ]; then
   fi
 fi
 nested && echo "bwrap: nested user namespace OK"
+# tidebot's own probe agrees once both levels start
+TIDEBOT_EXPECT_BWRAP=ok go test -count=1 -v -run 'TestProbeBwrapReal' ./internal/guard
 
 TIDEBOT_SANDBOX_E2E=1 TIDEBOT_E2E_CLAUDE="$TIDEBOT_E2E_CLAUDE" \
   go test -count=1 -v -run 'TestSandboxEndToEnd' ./internal/guard

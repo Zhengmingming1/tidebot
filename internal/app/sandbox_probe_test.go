@@ -48,19 +48,32 @@ func TestSandboxBrokenRefusesCommandRuns(t *testing.T) {
 	}
 	// when the cause is known: the run's error and the finding give the setting to change
 	fix := "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
-	sandboxDiag = func() (string, string) { return guard.SandboxCauseAppArmor, fix }
+	sandboxDiag = func(string) (string, string) { return guard.SandboxCauseAppArmor, fix }
 	if st := a.SandboxStatus(); st.Cause != guard.SandboxCauseAppArmor || st.Fix != fix {
 		t.Fatalf("diagnosed status %+v", st)
 	}
 	if _, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "x", WorkspaceDir: t.TempDir(), RunMode: "exec"}, "", 0); !errors.Is(err, ErrSandboxUnavailable) || !strings.Contains(err.Error(), fix) {
 		t.Fatalf("err %v", err)
 	}
-	for cause, want := range map[string]string{guard.SandboxCauseAppArmor: webui.DepSuggestSandboxAppArmor, guard.SandboxCauseContainer: webui.DepSuggestSandboxContainer} {
+	// the diagnosis gets bubblewrap's message (a refused nested start reads differently)
+	nested := guard.BwrapNestedPrefix + "bwrap: No permissions to create a new namespace"
+	sandboxProbe = func(string) string { return nested }
+	var gotErr string
+	sandboxDiag = func(e string) (string, string) {
+		gotErr = e
+		return guard.SandboxCauseAppArmorBwrap, "sudo apparmor_parser -R x"
+	}
+	if st := a.SandboxStatus(); st.Status != guard.SandboxBroken || gotErr != nested || st.Cause != guard.SandboxCauseAppArmorBwrap {
+		t.Fatalf("nested status %+v (diagnosed %q)", st, gotErr)
+	}
+	sandboxProbe = func(string) string { return userns }
+	for cause, want := range map[string]string{guard.SandboxCauseAppArmor: webui.DepSuggestSandboxAppArmor, guard.SandboxCauseContainer: webui.DepSuggestSandboxContainer,
+		guard.SandboxCauseAppArmorBwrap: webui.DepSuggestSandboxAppArmorBwrap, guard.SandboxCauseNested: webui.DepSuggestSandboxNested} {
 		c, f := cause, fix
 		if c == guard.SandboxCauseContainer {
 			f = ""
 		}
-		sandboxDiag = func() (string, string) { return c, f }
+		sandboxDiag = func(string) (string, string) { return c, f }
 		rep, err := a.dependencyPreflight(context.Background(), webui.DependencyCheckRequest{Kind: "draft", Prompt: "hi", Mode: "exec"})
 		if err != nil {
 			t.Fatal(err)
@@ -77,7 +90,7 @@ func TestSandboxBrokenRefusesCommandRuns(t *testing.T) {
 	}
 	// the diagnosis is only read when bubblewrap was refused
 	diagCalls := 0
-	sandboxDiag = func() (string, string) { diagCalls++; return "", "" }
+	sandboxDiag = func(string) (string, string) { diagCalls++; return "", "" }
 	// read-only runs don't need the sandbox and still start
 	if _, err := a.RunPromptEx(context.Background(), runner.Options{Prompt: "x", WorkspaceDir: t.TempDir(), RunMode: "read"}, "", 0); err != nil {
 		t.Fatalf("read-only run: %v", err)
