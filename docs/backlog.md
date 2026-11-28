@@ -8222,3 +8222,36 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 会话页打开时 `/api/chat-sessions/{id}/draft` 仍晚一轮往返（150 ms 延迟下约多 160 ms），可同样用 `drafts=1` 随会话返回。
 - 会话列表 `/api/chat-sessions?limit=200` 每次打开会话都整份取回，可加 `since` 指纹或改由事件流增量更新。
 - `allowAllUnixSockets` 显式开关、macOS CI 跑 Seatbelt 端到端、草稿行按钮对齐仍待做。
+
+### 2026-11-28（续）：会话的技能草稿随会话一起取回，打开会话时草稿栏与对话同一帧画出，一轮回答后不再单独请求草稿（性能 / 一轮往返）
+
+这是 2026-11-28 23:45 Asia/Shanghai 的优化，接上一轮后续想法「会话页打开时 `/api/chat-sessions/{id}/draft` 仍晚一轮往返，可同样随会话返回」。
+
+- **问题**：会话页先取会话，画完后 `csDraftBar` 再请求 `GET …/draft`，草稿栏（「用草稿试跑 / 保存为版本 / 采用」）比对话晚一轮往返出现；每轮回答结束（会话从 running 变回 idle）还要再请求一次草稿，才能看到模型这一轮改过的草稿状态。
+- **改法**：
+  - `GET /api/chat-sessions/{id}?drafts=1` 多带一个 `draft`，内容与 `GET …/draft` 逐字相同。只在完整应答、且会话不在回答中时带：回答中草稿按钮本来就是禁用的，1.5 s 轮询（以及所有 `{unchanged}` 短应答）不读草稿，保持和以前一样轻；显示「这一轮结束」的那次完整应答正好带上这一轮留下的草稿。不带 `drafts=1`、应用没有草稿功能、读取失败时不带，页面照旧自己请求。登录 + CSRF 不变，没有新路由。
+  - 前端：会话页打开时请求 `?caps=1&drafts=1`；`bindChat` 新增 `o.query()` 钩子，会话页的轮询带上 `drafts=1`。`csDraftBar` 用随会话来的 `draft`（用一次就从会话对象上删掉；自己的保存 / 采用 / 丢弃请求在途时不用，以它的应答为准）；没带（旧服务端、会话在回答中打开）时照旧请求。顺带让 `wasBusy` 从打开时的状态开始。
+  - 不加任何限制，行为不变，只少请求。
+- **数字**（本机，HEAD 构建 vs 本次，headless Chrome，1024×655，演示数据，同一会话打开 3 次 × 2 组）：
+
+| 指标 | 改前 | 改后 |
+| --- | ---: | ---: |
+| 150 ms 延迟下打开会话：草稿栏就绪 | 323–332 ms | 169–201 ms（与对话同一帧） |
+| 打开会话的 API 请求（不含 events / 通知） | 3 | 2 |
+| 一轮回答（约 3.6 s）的草稿请求 | 1 | 0（会话轮询 4 次，不变） |
+| 服务端：会话 + 草稿（本机，无网络延迟，200 次平均） | 1.01 + 0.62 ms 两个请求 | 1.19 ms 一个请求 |
+| app.js | 771.0 KB / gzip 214.78 KB | 771.3 KB / gzip 214.88 KB |
+
+- **测试**：新增 `TestChatSessionEmbedsDrafts`（不带 `drafts=1` 不读草稿；完整应答与 `…/draft` 逐字相同、JSON 已转义；`{unchanged}` 和回答中都不读草稿；回答结束的那次应答带上；草稿读取失败或应用不支持时不带字段、会话照常返回；不存在的会话 404 且不读）、`TestSessionDraftsEmbeddedUI`（node 下跑 `csDraftBar`：打开带草稿直接画、无请求、用后即删；回答中禁用按钮；结束应答带草稿时不请求、换成新行；没带时照旧请求一次；回答中打开后第一次空闲应答直接用；无变化重画不动 DOM）。`TestSessionProposalsEmbeddedUI` 的字符串断言跟着更新。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-28-2345-session-drafts-embed-zh-CN-graphite.png`（1024×655，石墨，zh-CN，打开会话时草稿栏与对话同时画出；无脚本错误）。
+
+**顺带核实（只读，不改仓库设置）**：上轮 push 时远端打印的 `remote: - Cannot update this protected ref.` 来自规则集「main: only the owner pushes」（`update` 规则，仓库管理员角色 `bypass_mode: always`）。所有者推送是「绕过规则」而不是被拒，GitHub 仍会把被绕过的规则列出来，所以 main 照常更新；另一条「main: no force-push or delete」对所有人生效、无人可绕过。无需处理。
+
+**心得**：嵌入「跟随数据」时要按它何时可能变化来决定带不带：草稿只会在一轮回答里被改，所以只在空闲的完整应答里带，轮询的成本完全不变，又刚好覆盖「回答结束」这一次需要刷新的时机。
+
+**参考**：TanStack/query `docs/framework/react/guides/prefetching.md`「Dependent Queries & Code Splitting」（让上游请求顺带返回下游数据，按需决定是否带上）；只借思路，不抄代码。
+
+**后续想法**：
+- 会话列表 `/api/chat-sessions?limit=200` 每次打开会话都整份取回，可加 `since` 指纹或由事件流增量更新（现在是打开会话剩下的唯一额外请求）。
+- 运行页的续聊会话（`/api/runs/{id}?chat=1`）没有草稿栏，不需要；若以后运行页也显示草稿，可沿用 `chatDraftEmbed`。
+- `allowAllUnixSockets` 显式开关、macOS CI 跑 Seatbelt 端到端、草稿行按钮对齐仍待做。

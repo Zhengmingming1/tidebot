@@ -86,7 +86,7 @@
   }
   function renderChat(id) {
     if (id && !CS_ID.test(id)) id = "";
-    return Promise.all([api("/api/chat-sessions?limit=200", { fresh: true }), id ? api("/api/chat-sessions/" + enc(id) + "?caps=1", { fresh: true }) : null]).then(function (r) {
+    return Promise.all([api("/api/chat-sessions?limit=200", { fresh: true }), id ? api("/api/chat-sessions/" + enc(id) + "?caps=1&drafts=1", { fresh: true }) : null]).then(function (r) {
       var list = (r[0] && r[0].sessions) || [], s = r[1];
       mount(csPageHtml(list, s), "chat", s ? [[T("nav.chat"), "#/chat"], [csTitle(s)]] : [[T("nav.chat")]]);
       var sec = $("#rc"), thread = $("#rc-thread", sec), stick = true;
@@ -103,6 +103,8 @@
       }
       bindChat(sec, {
         id: s.id, key: "cs_" + s.id, ph: "cs.ph", send_tip: "cs.send_tip", pre: s, turns: csAll,
+        // the skill drafts come with the session (when no turn is being answered)
+        query: function () { return "drafts=1"; },
         // the list row follows the session (busy dot, turns, title) without redrawing the list
         onPaint: function (x) {
           if (drafts) drafts.session(x);
@@ -249,12 +251,22 @@
         });
       }
     });
-    load().catch(function () {});
+    // the drafts that came with the session read (GET …?drafts=1) are used once, instead
+    // of asking; none came (an older server, a failed read): ask as before. Ignored while
+    // an action of ours is out (its answer is newer).
+    var take = function (x) {
+      var e = x && x.draft;
+      if (x) delete x.draft;
+      if (!e || typeof e !== "object" || busyOp) return false;
+      d = e; return true;
+    };
+    wasBusy = running();
+    if (take(ses)) paint(); else load().catch(function () {});
     return {
       // the session repainted: a finished turn may have changed the drafts
       session: function (x) {
-        var was = wasBusy; cur = x || cur; wasBusy = running();
-        if (was && !wasBusy && csDraftList(d).length) load().catch(function () {}); else paint();
+        var was = wasBusy, got = take(x); cur = x || cur; wasBusy = running();
+        if (was && !wasBusy && !got && csDraftList(d).length) load().catch(function () {}); else paint();
       }
     };
   }

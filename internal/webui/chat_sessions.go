@@ -98,6 +98,9 @@ type ChatSessionDetail struct {
 	// CapProposals: with ?caps=1, the session's extension proposals as
 	// GET /api/capabilities/proposals?session_id= would answer (see capProposalsEmbed).
 	CapProposals any `json:"cap_proposals,omitempty"`
+	// Draft: with ?drafts=1, the session's skill drafts as GET …/draft would answer,
+	// only while no turn is being answered (see chatDraftEmbed).
+	Draft *ChatDraft `json:"draft,omitempty"`
 }
 
 // chatModeSetter is optional: an app that lets the owner change a session's
@@ -247,6 +250,29 @@ func (s *Server) capProposalsFor(ctx context.Context, id, since string) any {
 	return v
 }
 
+// chatDraftEmbed: for GET /api/chat-sessions/{id}?drafts=1, the session's skill drafts,
+// exactly as GET /api/chat-sessions/{id}/draft would answer. The session page used to ask
+// for them one round trip after the session (and again after every turn), so the draft
+// bar drew late. Only on a full answer for a session that is not answering: a turn can
+// change the drafts, and while it runs the page has nothing to do with them (its buttons
+// are off), so the 1.5 s poll stays as light as before and the answer that shows the turn
+// finished brings the drafts that turn left. nil (the page asks itself, as before) when
+// not asked for, not available, or failed.
+func (s *Server) chatDraftEmbed(r *http.Request, d *ChatSessionDetail) *ChatDraft {
+	if r.URL.Query().Get("drafts") != "1" || d.Status == "running" {
+		return nil
+	}
+	dr, ok := s.deps.ChatSessions.(chatDrafter)
+	if !ok {
+		return nil
+	}
+	v, err := dr.ChatDraft(r.Context(), d.ID)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
 // ChatMessageMax caps one turn's message (bytes).
 const ChatMessageMax = 16 << 10
 
@@ -368,6 +394,7 @@ func (s *Server) handleChatSessionSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.CapProposals = s.capProposalsEmbed(r, id)
+		d.Draft = s.chatDraftEmbed(r, &d)
 		writeJSON(w, 200, d)
 	case sub == "" && r.Method == http.MethodDelete:
 		if err := api.DeleteChatSession(r.Context(), id); err != nil {

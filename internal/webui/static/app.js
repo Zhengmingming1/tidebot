@@ -7664,7 +7664,7 @@ var load=function(){
 if(!st.id)return Promise.resolve();
 var id=st.id,since=st.ses&&st.sig&&st.sigId===id?"since="+enc(st.sig):"";
 var caps=typeof capSessionQuery==="function"?capSessionQuery(sec):"";
-var q=[since,caps].filter(Boolean).join("&");
+var q=[since,caps,o.query?o.query():""].filter(Boolean).join("&");
 return api("/api/chat-sessions/"+enc(id)+(q?"?"+q:""),{fresh:true}).then(function(s){
 if(!document.contains(sec)||id!==st.id)return;
 if(s&&s.unchanged){
@@ -8325,7 +8325,7 @@ rcBoxHtml({ph:s?"cs.ph":"cs.ph_new",label:"cs.label",read_tip:"cs.read_tip",tags
 }
 function renderChat(id){
 if(id&&!CS_ID.test(id))id="";
-return Promise.all([api("/api/chat-sessions?limit=200",{fresh:true}),id?api("/api/chat-sessions/"+enc(id)+"?caps=1",{fresh:true}):null]).then(function(r){
+return Promise.all([api("/api/chat-sessions?limit=200",{fresh:true}),id?api("/api/chat-sessions/"+enc(id)+"?caps=1&drafts=1",{fresh:true}):null]).then(function(r){
 var list=(r[0]&&r[0].sessions)||[],s=r[1];
 mount(csPageHtml(list,s),"chat",s?[[T("nav.chat"),"#/chat"],[csTitle(s)]]:[[T("nav.chat")]]);
 var sec=$("#rc"),thread=$("#rc-thread",sec),stick=true;
@@ -8342,6 +8342,7 @@ return;
 }
 bindChat(sec,{
 id:s.id,key:"cs_"+s.id,ph:"cs.ph",send_tip:"cs.send_tip",pre:s,turns:csAll,
+query:function(){return "drafts=1";},
 onPaint:function(x){
 if(drafts)drafts.session(x);
 var dir=$(".rc-dir",sec);
@@ -8473,11 +8474,18 @@ if(y)act(api(base+"?skill_id="+enc(sid),{method:"DELETE"}));
 });
 }
 });
-load().catch(function(){});
+var take=function(x){
+var e=x&&x.draft;
+if(x)delete x.draft;
+if(!e||typeof e!=="object"||busyOp)return false;
+d=e;return true;
+};
+wasBusy=running();
+if(take(ses))paint();else load().catch(function(){});
 return{
 session:function(x){
-var was=wasBusy;cur=x||cur;wasBusy=running();
-if(was&&!wasBusy&&csDraftList(d).length)load().catch(function(){});else paint();
+var was=wasBusy,got=take(x);cur=x||cur;wasBusy=running();
+if(was&&!wasBusy&&!got&&csDraftList(d).length)load().catch(function(){});else paint();
 }
 };
 }

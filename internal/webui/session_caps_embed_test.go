@@ -113,7 +113,7 @@ func TestSessionProposalsEmbeddedUI(t *testing.T) {
 		t.Fatal("session proposal functions not found")
 	}
 	for _, want := range []string{
-		`api("/api/chat-sessions/" + enc(id) + "?caps=1", { fresh: true })`,
+		`api("/api/chat-sessions/" + enc(id) + "?caps=1&drafts=1", { fresh: true })`,
 		`api("/api/chat-sessions/" + enc(cs.id) + "?caps=1", { fresh: true })`,
 		`capSessionQuery(sec)`,
 		`capRefreshSession(sec, id, false, s.cap_proposals)`,

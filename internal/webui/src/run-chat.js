@@ -295,7 +295,7 @@
   // bindChat wires a thread + message box (#rc-thread, #rc-form… inside sec) to one session.
   // o.id: the session (or "" until o.create() makes one on the first send); o.key: draft key;
   // o.pre: the session already fetched; o.turns(s): the turns to show; o.onPaint(s), o.onGone(),
-  // o.onSent(s): page hooks.
+  // o.onSent(s): page hooks; o.query(): more of the session read's query ("drafts=1").
   function bindChat(sec, o) {
     var thread = $("#rc-thread", sec), form = $("#rc-form", sec), ta = $("#rc-in", sec), send = $("#rc-send", sec), meta = $("#rc-meta", sec), err = $("#rc-err", sec);
     var st = { id: o.id || "", ses: null, sending: false, painted: {} }, turnsOf = o.turns || rcTurns;
@@ -379,7 +379,8 @@
       var id = st.id, since = st.ses && st.sig && st.sigId === id ? "since=" + enc(st.sig) : "";
       // the session's extension proposals ride along (one request per poll, not two)
       var caps = typeof capSessionQuery === "function" ? capSessionQuery(sec) : "";
-      var q = [since, caps].filter(Boolean).join("&");
+      // and whatever else the page wants with the session (o.query: the chat page's drafts)
+      var q = [since, caps, o.query ? o.query() : ""].filter(Boolean).join("&");
       return api("/api/chat-sessions/" + enc(id) + (q ? "?" + q : ""), { fresh: true }).then(function (s) {
         if (!document.contains(sec) || id !== st.id) return;
         if (s && s.unchanged) {
