@@ -8155,3 +8155,39 @@ Claude Code 2.1.301，Debian 13（bubblewrap 0.12.0、socat 1.8.0.3），和 tid
 - 上游提到另一条路：设置 `sandbox.network.allowAllUnixSockets` 可跳过 apply-seccomp，文件和网络隔离仍在，但失去 Unix 套接字过滤。可以考虑在 `apparmor_bwrap` 时提供一个「放宽 Unix 套接字过滤后运行」的显式开关（需权衡安全，默认不开）。
 - Ubuntu 24.04 自带的 bubblewrap 0.9.0 会清空子进程的能力边界集（sandbox-runtime issue #428），同样会让第二层失败，目前归为 `nested`；可在说明里点名「升级 bubblewrap 到 0.10+」。
 - macOS CI 跑 Seatbelt 端到端、`App.StartRun` exec 路径接假 API、宽屏检查器「当前任务」请求、草稿行按钮对齐仍待做。
+
+### 本轮（2026-11-28 15:47 Asia/Shanghai）：运行详情页在宽屏下把「任务当前配置」随运行一起取回（性能 / 闪烁）
+
+接 2026-11-27（续 4）的后续想法「宽屏检查器里『当前任务』的三个请求仍等页面画好才发」。
+
+- **问题**：窗口 ≥1101 px 时运行详情页的检查器随页面一起打开，但「任务当前配置」要等运行返回、页面画好后才发 `GET /api/tasks/{id}`、`/amendments`、`/form` 三个请求，比页面晚一整个往返，期间检查器里闪约 10 帧骨架屏；悬停预取也只预取到运行本身。
+- **改法**：
+  - `GET /api/runs/{id}?task=1` 在运行属于某个任务时多带 `current_task: {task, amendments, form}`：`task` 与 `GET /api/tasks/{id}` 相同（抽出 `taskDetail` 共用，含工作目录问题、工作流目录、标签、策略等待），`amendments` 与 `/amendments` 相同（空列表为 `[]`，读不出为 `null`，页面据此显示「无法读取」），`form` 是 `/form` 里的 `form`（读不出为 `null`）。不带参数、`task=0`、没有任务的运行、任务已不存在时都不带，响应与原来相同。
+  - 前端 `runDetailPath` 只在 `(min-width: 1101px)`（与 `bindRunWorkspace` 和 styles.css 的断点一致）时加 `&task=1`；悬停预取共用同一个 key。检查器打开时优先用随运行来的数据（用一次即清掉，之后再打开照旧请求），在页面第一次绘制前就画好。1024×655 下检查器默认关着，请求和以前一样，不多花服务端时间。
+  - 没有新增任何限制，没有界面布局改动。
+- **数字**（演示实例，Chromium 网络模拟 150 ms 延迟，从设置页进入一条属于任务的已完成运行，各跑 2 次；1280×655）：
+
+| 指标 | 改前 | 改后 |
+| --- | ---: | ---: |
+| 直接打开：「任务当前配置」可见 | 389–402 ms | 228–240 ms |
+| 悬停 250 ms 后点击：「任务当前配置」可见 | 243 ms | 76–81 ms |
+| 检查器骨架屏帧 | 10–11 | 0 |
+| 首屏 API 请求数（含 `/events`） | 6 | 3 |
+| 1024×655 打开（检查器关着） | 3 个请求 | 3 个请求（不变，223 / 75 ms） |
+| 服务端：运行详情中位耗时（无延迟，40 次） | 1.7 ms | 2.1–2.2 ms（仅宽屏带 `task=1`） |
+| 运行详情响应体（未压缩） | 2197 B | 3551 B（仅宽屏） |
+| app.js | 769.9 KB / gzip 214.49 KB | 770.2 KB / gzip 214.58 KB |
+
+- **测试**：新增 `TestRunDetailEmbedsTask`（`task=1` 带出的 `task` / `amendments` / `form` 与三个接口逐项相同，有无修改提议两种；空提议为 `[]`；不带参数、`chat=1` 单独、`task=0`、无任务运行、任务已不存在都不带）、`TestRunInspectorTaskEmbedUI`（node 下无 `window`、窄屏、宽屏三种路径，宽屏询问的媒体查询与检查器一致；检查器用嵌入数据的分支；styles.css 断点未变）。原有 `TestRunDetailEmbedsChat`、`TestIntentPrefetch`、`TestRunChat*` 通过。`go test ./...`、`go vet`（含 GOOS=windows/darwin）、`gofmt -l`、`build-webui.py`、`node --check`、`check-i18n.py` 通过。
+- **截图**：`/workspace/tidebot-shots/2026-11-28-1600-run-inspector-task-embed-zh-CN-graphite.png`（1024×655，石墨，zh-CN，手动打开检查器走原请求路径，「任务当前配置」正常显示；无横向滚动、无脚本错误）。
+
+**心得**：「依赖查询」的数据是否随主请求带回，要看下游组件出现的概率：宽屏下检查器必然打开，值得带；窄屏下多数人不打开，带了就是白算。用客户端已知的条件（媒体查询）决定查询参数，比服务端猜更准。
+
+**参考**：TanStack/query `docs/framework/react/guides/prefetching.md` 的「Dependent Queries & Code Splitting」一节（能改 API 就让上游请求在需要时顺带返回下游数据；是否带上取决于下游出现的可能性）；只借思路，不抄代码。
+
+**顺带核实（不改代码）**：上一轮后续想法提到「Ubuntu 24.04 的 bubblewrap 0.9.0 会清空能力边界集、让第二层失败，可提示升级到 0.10+」（sandbox-runtime issue #428）。本机从源码编译 bubblewrap 0.9.0 与系统 0.12.0 对照：两者在沙箱内 `CapBnd` 都是 0，但都能再建用户命名空间、`unshare --user --map-root-user` 能写 `setgroups` / `uid_map`（apply-seccomp 走的同一条路径）。即边界集清零在两个版本行为一致，不是 0.9.0 特有，也不会单独导致失败；该 issue 的环境里同时装着 AppArmor 的 bwrap 配置，更可能是我们已诊断的 `apparmor_bwrap`。因此**不加**「升级 bubblewrap」的提示，避免给出无效修复。另：GitHub 的 `ubuntu-latest` 现已是 bubblewrap 0.11.1。
+
+**后续想法**：
+- 1024×655 下点「检查器」仍要一个往返；可在悬停 / 聚焦检查器按钮时预取那三个请求（复用意图预取的缓存）。
+- 会话能力提议 `/api/capabilities/proposals?session_id=` 仍在挂载后才请求，可同样随会话一起返回。
+- `allowAllUnixSockets` 显式开关（默认关）、macOS CI 跑 Seatbelt 端到端、`App.StartRun` exec 路径接假 API、草稿行按钮对齐仍待做。

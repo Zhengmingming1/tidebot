@@ -125,27 +125,11 @@ func (s *Server) handleTaskSub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 1 {
-		v, err := s.deps.Tasks.Get(ctx, id)
+		d, err := s.taskDetail(ctx, id)
 		if err != nil {
 			writeErr(w, 404, "task not found")
 			return
 		}
-		d := toTaskDTO(v)
-		home, _ := os.UserHomeDir()
-		// the workflow version is read once for the problem and the folder
-		seen := map[string]taskWfFolder{}
-		s.applyTaskWorkspaceProblem(ctx, &d, home, seen, func() bool { return s.taskHasRun(ctx, id) }) // on the saved folder, before "" becomes the default one
-		if d.Workflow != nil {
-			// a workflow run works in the workflow's folder, not the task's own
-			d.Workspace, d.WorkspaceWorkflow = s.taskWorkflowFolder(ctx, d.Workflow.ID, d.Workflow.Version, seen).dir, true
-			d.Workflow = s.taskWorkflowRef(ctx, d.Workflow.ID, d.Workflow.Version)
-		} else {
-			d.Workspace, d.WorkspaceDefault = s.taskWorkspace(d.ID, d.Workspace)
-		}
-		if m, err := s.taskTags(ctx, id); err == nil && m[id] != nil {
-			d.Tags = m[id]
-		}
-		s.applyPolicyWait(&d)
 		writeJSON(w, 200, d)
 		return
 	}
@@ -399,4 +383,29 @@ func (s *Server) applyPolicyWaits(out []taskDTO) {
 			out[i].PolicyWait = r
 		}
 	}
+}
+
+// taskDetail: the body of GET /api/tasks/{id} (also embedded in the run page's answer).
+func (s *Server) taskDetail(ctx context.Context, id string) (taskDTO, error) {
+	v, err := s.deps.Tasks.Get(ctx, id)
+	if err != nil {
+		return taskDTO{}, err
+	}
+	d := toTaskDTO(v)
+	home, _ := os.UserHomeDir()
+	// the workflow version is read once for the problem and the folder
+	seen := map[string]taskWfFolder{}
+	s.applyTaskWorkspaceProblem(ctx, &d, home, seen, func() bool { return s.taskHasRun(ctx, id) }) // on the saved folder, before "" becomes the default one
+	if d.Workflow != nil {
+		// a workflow run works in the workflow's folder, not the task's own
+		d.Workspace, d.WorkspaceWorkflow = s.taskWorkflowFolder(ctx, d.Workflow.ID, d.Workflow.Version, seen).dir, true
+		d.Workflow = s.taskWorkflowRef(ctx, d.Workflow.ID, d.Workflow.Version)
+	} else {
+		d.Workspace, d.WorkspaceDefault = s.taskWorkspace(d.ID, d.Workspace)
+	}
+	if m, err := s.taskTags(ctx, id); err == nil && m[id] != nil {
+		d.Tags = m[id]
+	}
+	s.applyPolicyWait(&d)
+	return d, nil
 }

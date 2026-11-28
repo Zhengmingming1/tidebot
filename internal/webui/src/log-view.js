@@ -212,7 +212,9 @@
       aside.hidden = !open; layout.classList.toggle("inspector-open", open); toggle.setAttribute("aria-expanded", String(open)); toggle.classList.toggle("active", open);
       if (!open || !r.task_id || loaded) return;
       loaded = true;
-      var host = $("#rw-current-task"), base = "/api/tasks/" + enc(r.task_id);
+      var host = $("#rw-current-task"), base = "/api/tasks/" + enc(r.task_id), ct = r.current_task;
+      // brought along with the run (task=1): drawn now, before the page is first painted
+      if (ct && ct.task && ct.task.id === r.task_id) { r.current_task = null; host.innerHTML = runTaskInspectorHtml(ct.task, ct.amendments, ct.form); return; }
       Promise.all([api(base), api(base + "/amendments").then(function (items) { return items || []; }).catch(function () { return null; }), api(base + "/form").catch(function () { return null; })]).then(function (d) {
         if (document.contains(host)) host.innerHTML = runTaskInspectorHtml(d[0], d[1], d[2] && d[2].form);
       }).catch(function (e) { if (document.contains(host)) { host.innerHTML = '<h3>' + esc(T("rw.current_task")) + '</h3>' + errorState(e.message); loaded = false; } });
@@ -228,8 +230,12 @@
   }
   // runDetailPath: the run page's first request (the prefetch asks for the same one). chat=1:
   // a finished run that starts a session brings the session along, so the thread under the
-  // answer is drawn with the page instead of one round trip later.
-  function runDetailPath(id) { return "/api/runs/" + enc(id) + "?chat=1"; }
+  // answer is drawn with the page instead of one round trip later. task=1 only on a window
+  // wide enough for the inspector to open with the page: its 当前任务 comes along too.
+  function runDetailPath(id) {
+    var wide = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(min-width: 1101px)").matches; // = bindRunWorkspace, styles.css
+    return "/api/runs/" + enc(id) + "?chat=1" + (wide ? "&task=1" : "");
+  }
   function runBindingsPath(id) { return "/api/capabilities/run-bindings?run_id=" + enc(id); }
   function renderRunDetail(id) {
     // asked for together with the run, not after the page is drawn

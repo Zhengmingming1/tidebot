@@ -310,6 +310,7 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 			ChangesUndoneFiles  []string                 `json:"changes_undone_files,omitempty"`
 			ChatSession         *runChatRef              `json:"chat_session,omitempty"`
 			Chat                *ChatSessionDetail       `json:"chat,omitempty"`
+			CurrentTask         *runTaskEmbed            `json:"current_task,omitempty"`
 		}{runDTO: runs[0], Currency: s.fx().Display, Result: result, ResultTruncated: cut != 0, ChangesUndoneAt: undoneAt}
 		var policyJSON string
 		if s.deps.DB.QueryRowContext(r.Context(), `SELECT effective_cost_policy_json FROM runs WHERE id=?`, id).Scan(&policyJSON) == nil && policyJSON != "{}" && json.Valid([]byte(policyJSON)) {
@@ -360,6 +361,10 @@ func (s *Server) handleRunSub(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("chat") == "1" {
 			out.Chat = s.runChatEmbed(r.Context(), out.ChatSession, runs[0].Status)
 		}
+		// task=1 (the run page with its inspector open): the run's task as it is now
+		if r.URL.Query().Get("task") == "1" {
+			out.CurrentTask = s.runTaskEmbed(r.Context(), runs[0].TaskID)
+		}
 		writeJSON(w, 200, out)
 		return
 	}
@@ -400,4 +405,38 @@ func isTerminal(st string) bool {
 		return true
 	}
 	return false
+}
+
+// runTaskEmbed: what the run page's inspector shows under 当前任务, the same three
+// answers it otherwise asks for once the page is drawn: GET /api/tasks/{id}, its
+// /amendments (null when they can't be read) and the form of /form (null likewise).
+// nil for a run without a task or whose task is gone; the page then asks as before.
+type runTaskEmbed struct {
+	Task       taskDTO `json:"task"`
+	Amendments any     `json:"amendments"`
+	Form       any     `json:"form"`
+}
+
+func (s *Server) runTaskEmbed(ctx context.Context, taskID string) *runTaskEmbed {
+	if taskID == "" || s.deps.Tasks == nil {
+		return nil
+	}
+	d, err := s.taskDetail(ctx, taskID)
+	if err != nil {
+		return nil
+	}
+	out := &runTaskEmbed{Task: d}
+	if s.deps.Amend != nil {
+		if list, err := s.deps.Amend.List(ctx, taskID, ""); err == nil {
+			if list == nil {
+				out.Amendments = []any{}
+			} else {
+				out.Amendments = list
+			}
+		}
+	}
+	if f, err := s.taskFormOf(ctx, taskID); err == nil {
+		out.Form = f["form"]
+	}
+	return out
 }
